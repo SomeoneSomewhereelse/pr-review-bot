@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     github_webhook_secret: str = ""
 
     llm_provider: str = "gemini"
-    llm_model: str = "gemini-flash-latest"
+    llm_model: str = "gemini-3-flash"
 
     google_cloud_project: str = ""
     google_cloud_location: str = "us-central1"

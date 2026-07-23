@@ -1,9 +1,11 @@
 # cost.md — Operating Cost
 
 > All rates are **representative** and pinned in `app/providers/pricing.py`; verify
-> against current provider pricing at build time. `gemini-flash-latest` = Gemini 3.5
-> Flash. Cost is graded as this documented calculation, not as actual spend — the
-> demo runs at **$0** on free tiers + the $300 GCP trial credit.
+> against current provider pricing at build time. Model is pinned to
+> `gemini-3-flash` (Gemini 3 Flash) rather than the `-latest` alias, whose
+> free-tier rate caps are more restrictive. Cost is graded as this documented
+> calculation, not as actual spend — the demo runs at **$0** on free tiers +
+> the $300 GCP trial credit.
 
 ## 1. Deploy-approach comparison
 
