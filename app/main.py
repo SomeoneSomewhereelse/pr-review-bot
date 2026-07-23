@@ -1,14 +1,11 @@
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
+
+from app.webhook import router as webhook_router
 
 app = FastAPI(title="pr-review-engine")
+app.include_router(webhook_router)
 
 
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
-
-
-@app.post("/webhook")
-async def webhook(request: Request):
-    await request.body()
-    return Response(status_code=202)
