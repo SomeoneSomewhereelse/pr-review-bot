@@ -27,21 +27,33 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   path via `GITHUB_APP_PRIVATE_KEY_PATH` in `.env` (chosen over base64-encoding
   the key inline).
 
-## 2. LLM provider — Gemini (AI-Studio), not Vertex
+## 2. LLM provider — Groq (live), not Vertex, Gemini currently blocked
 
-- **Deviation from the original plan:** GCP/Vertex AI requires a billing account
-  (card) to enable the Vertex AI API. The user declined to add one, so no GCP
-  project was created and Vertex is **not configured**.
-- Instead, `LLM_PROVIDER=gemini` in `.env`, using a free AI-Studio API key
-  (`GEMINI_API_KEY`, https://aistudio.google.com/app/apikey — no card, ~1,500
-  req/day free tier). Per SPEC.md §4, the Gemini adapter is logic-identical to
-  Vertex (same `google-genai` SDK, different client init) — no functional loss.
-- The `vertex` provider code path will still be implemented per SPEC.md's
-  architecture for completeness/portability, but it is untested in this
-  environment. If GCP billing is added later, set `GOOGLE_CLOUD_PROJECT` +
-  `LLM_PROVIDER=vertex` — no code changes needed.
-- `GROQ_API_KEY` is left blank in `.env` for now — to be filled in at build
-  step 7 (provider swap demo).
+- **Deviation from the original plan (GCP/Vertex):** Vertex AI requires a
+  billing account (card) to enable. The user declined to add one, so no GCP
+  project was created and Vertex is **not configured** (code path exists per
+  SPEC.md's architecture, covered by mocked tests only, untested live).
+- **Deviation from the original plan (Gemini):** initially set up with a free
+  AI-Studio key (`GEMINI_API_KEY`) and `LLM_PROVIDER=gemini`, implemented at
+  build step 4. Live verification then failed: the key's underlying GCP
+  project returns `403 PERMISSION_DENIED — Your project has been denied
+  access` on newer flash models and `429` quota-exhausted on older ones,
+  confirmed across multiple model names — an **account-level restriction**,
+  not a model-naming or code issue. Unresolved as of 2026-07-23; revisit later
+  (check https://aistudio.google.com/app/apikey and the linked GCP project's
+  status, or generate a key under a different Google account).
+- **Current live provider: Groq** (`LLM_PROVIDER=groq`), pulled forward from
+  build step 7 to have a working live path. Free tier, no card
+  (https://console.groq.com/keys). Model: `llama-3.3-70b-versatile` (`GROQ_MODEL`
+  env var — kept separate from `LLM_MODEL`, which stays scoped to the
+  google-genai family/vertex-gemini, since one shared var stopped making sense
+  across two unrelated provider families). Structured output uses
+  `json_object` mode + a schema-instructing system prompt (this model doesn't
+  support Groq's `json_schema` constrained decoding — verified live).
+- The model-choice question for Gemini/Vertex (which flash generation, given
+  free-tier rate caps) is explicitly deferred — `LLM_MODEL` stays at
+  `gemini-flash-latest` for now, to be revisited once the account access issue
+  is resolved.
 
 ## 3. Cloudflare Tunnel — quick tunnel, not named
 
