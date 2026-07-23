@@ -56,3 +56,28 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 Documented production total ≈ **$8–10/mo** at brief scale (20 PRs/day). The demo
 runs at **$0** on free tiers + the $300 GCP trial credit. Cost is graded as a
 documented calculation, not as actual spend — see `cost.md`.
+
+## LLM API testing hygiene (avoid Trust & Safety flags)
+
+Gemini AI-Studio access got **account-level blocked** (`403 PERMISSION_DENIED:
+Your project has been denied access`) during this build, confirmed across
+multiple models, multiple projects, and multiple separate Google accounts —
+per Google's own AI Developer Forum, this is an automated Trust & Safety flag,
+and one documented trigger is **hitting repeated 429s / testing many models
+back-to-back without backoff**, which is exactly what happened during
+troubleshooting here. The only documented fix is attaching GCP billing, which
+this project's setup deliberately avoids (see SETUP.md) — so once flagged, a
+provider is effectively lost for the rest of the demo. **Rules to avoid
+repeating this:**
+
+- **Never loop/burst live calls across many models or keys** to "see what
+  sticks." One deliberate, single live call per real verification need.
+- **Prefer mocked/cassette tests for exploration.** Reserve real network calls
+  for the one live-verification step a build step actually requires (per
+  SPEC.md section 8's testing strategy) — not for debugging or model-shopping.
+- **If a provider starts returning 403/429, stop calling it immediately** and
+  investigate via docs/support channels rather than retrying with different
+  models/keys in quick succession — retrying does not help and each attempt
+  is one more data point that can reinforce an abuse-pattern flag.
+- This applies to **any** LLM provider's free tier, not just Gemini — Groq and
+  future alternatives should get the same restraint.

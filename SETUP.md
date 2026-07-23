@@ -35,13 +35,22 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   SPEC.md's architecture, covered by mocked tests only, untested live).
 - **Deviation from the original plan (Gemini):** initially set up with a free
   AI-Studio key (`GEMINI_API_KEY`) and `LLM_PROVIDER=gemini`, implemented at
-  build step 4. Live verification then failed: the key's underlying GCP
-  project returns `403 PERMISSION_DENIED — Your project has been denied
-  access` on newer flash models and `429` quota-exhausted on older ones,
-  confirmed across multiple model names — an **account-level restriction**,
-  not a model-naming or code issue. Unresolved as of 2026-07-23; revisit later
-  (check https://aistudio.google.com/app/apikey and the linked GCP project's
-  status, or generate a key under a different Google account).
+  build step 4. Live verification then failed: `403 PERMISSION_DENIED — Your
+  project has been denied access` on newer flash models, persistent `429` on
+  older ones. Per Google's own AI Developer Forum, this is an **automated
+  Trust & Safety account flag** (Google staff confirmed "a flag has been
+  placed on your account" in one thread) — not a model-naming, project, or
+  code issue. One documented trigger: hitting repeated 429s / testing many
+  models back-to-back without backoff, which is exactly what happened here
+  during troubleshooting (see CLAUDE.md's "LLM API testing hygiene" section,
+  added as a direct result).
+  **Confirmed exhausted, as of 2026-07-23:** tried a second API key under a
+  different Google project — same 403. Tried keys under multiple genuinely
+  different Google accounts — all blocked too. Per the forum, the only
+  documented fix is attaching GCP billing (which this project deliberately
+  avoids). **Gemini is not expected to become usable without that trade-off**;
+  cross-vendor provider-agnosticism is demonstrated via Groq instead, and
+  other AI providers may be evaluated later to strengthen that story.
 - **Current live provider: Groq** (`LLM_PROVIDER=groq`), pulled forward from
   build step 7 to have a working live path. Free tier, no card
   (https://console.groq.com/keys). Model: `llama-3.3-70b-versatile` (`GROQ_MODEL`
