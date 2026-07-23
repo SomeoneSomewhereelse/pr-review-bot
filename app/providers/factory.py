@@ -9,6 +9,7 @@ from __future__ import annotations
 from app.config import settings
 from app.providers.base import LLMProvider
 from app.providers.google_genai import GeminiProvider, VertexProvider
+from app.providers.groq import GroqProvider
 
 
 def get_provider() -> LLMProvider:
@@ -19,9 +20,6 @@ def get_provider() -> LLMProvider:
     if provider == "gemini":
         return GeminiProvider()
     if provider == "groq":
-        raise NotImplementedError(
-            "LLM_PROVIDER=groq is not implemented yet (a later build step, "
-            "app/providers/groq.py). Set LLM_PROVIDER to 'vertex' or 'gemini'."
-        )
+        return GroqProvider()
 
     raise ValueError(f"Unknown LLM_PROVIDER: {provider!r} (expected 'vertex', 'gemini', or 'groq')")

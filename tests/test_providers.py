@@ -137,10 +137,11 @@ def test_factory_selects_vertex(monkeypatch):
     assert isinstance(get_provider(), VertexProvider)
 
 
-def test_factory_raises_not_implemented_for_groq(monkeypatch):
+def test_factory_selects_groq(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "groq")
-    with pytest.raises(NotImplementedError):
-        get_provider()
+    from app.providers.groq import GroqProvider
+
+    assert isinstance(get_provider(), GroqProvider)
 
 
 def test_factory_raises_for_unknown_provider(monkeypatch):
@@ -241,6 +242,12 @@ def test_estimate_cost_usd_unknown_model_raises():
         pricing.estimate_cost_usd("gemini", "no-such-model", tokens_in=1, tokens_out=1)
 
 
-def test_estimate_cost_usd_groq_placeholder_raises():
-    with pytest.raises(NotImplementedError):
-        pricing.estimate_cost_usd("groq", "llama-whatever", tokens_in=1, tokens_out=1)
+def test_estimate_cost_usd_groq_llama():
+    cost = pricing.estimate_cost_usd("groq", "llama-3.3-70b-versatile", tokens_in=4_000, tokens_out=500)
+    # 4000/1e6 * 0.59 + 500/1e6 * 0.79
+    assert cost == pytest.approx(0.00236 + 0.000395)
+
+
+def test_estimate_cost_usd_groq_unknown_model_raises():
+    with pytest.raises(KeyError):
+        pricing.estimate_cost_usd("groq", "no-such-model", tokens_in=1, tokens_out=1)
