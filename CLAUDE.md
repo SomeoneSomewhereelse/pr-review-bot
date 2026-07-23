@@ -47,9 +47,9 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 
 - **`google-genai`** instead of the legacy `vertexai.generative_models` SDK —
   same Vertex backend, and it is what makes the one-env-var provider swap trivial.
-- **`gemini-3-flash`** instead of `gemini-2.5-flash` — the brief's model is
-  deprecated/removed. Pinned directly rather than via the `-latest` alias,
-  whose free-tier rate caps are more restrictive.
+- **`gemini-flash-latest`** instead of `gemini-2.5-flash` — the brief's model is
+  deprecated/removed. The alias is pinnable to a dated version via env for demo
+  reproducibility.
 
 ## Cost
 

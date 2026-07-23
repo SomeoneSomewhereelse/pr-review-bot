@@ -13,7 +13,7 @@ Runs in production (public URL via Cloudflare Tunnel), not localhost.
 |---|---|
 | Prod deploy | Docker container + **Cloudflare Tunnel** (portable to CF Container) |
 | LLM providers | **Vertex (default) + free-Gemini + Groq** via `google-genai` |
-| Model | **`gemini-3-flash`** (brief's `gemini-2.5-flash` is deprecated; pinned rather than the `-latest` alias, whose free-tier rate caps are more restrictive) |
+| Model | **`gemini-flash-latest`** (brief's `gemini-2.5-flash` is deprecated; pinnable via env) |
 | Structured output | Per-provider native schema + **shared Pydantic validate-repair** |
 | PR triggers | **`opened` + `reopened` + `synchronize`** (edit comment in place) |
 | GitHub auth | **GitHub App** (JWT → short-lived installation token) |
@@ -151,7 +151,7 @@ class LLMProvider(Protocol):
 ```
 
 - **`vertex`** (default): `genai.Client(vertexai=True, project=..., location=...)`,
-  model `gemini-3-flash` (pinned via env, not the `-latest` alias),
+  model `gemini-flash-latest` (pinnable via env),
   `config={"response_schema": schema, "response_mime_type": "application/json"}`.
   Free on the $300 GCP trial credit.
 - **`gemini`**: `genai.Client(api_key=GEMINI_API_KEY)` — otherwise **identical call**.
@@ -168,9 +168,8 @@ output" case centrally.
 **SDK substitution:** the brief names the legacy `vertexai.generative_models` SDK;
 we use the current unified `google-genai` (same Vertex backend) because it is what
 makes the one-env-var swap between Vertex and AI-Studio trivial. The brief's
-`gemini-2.5-flash` is deprecated/removed, so the default model is pinned to
-`gemini-3-flash` — not the `-latest` alias, whose free-tier rate caps proved
-too restrictive for the demo.
+`gemini-2.5-flash` is deprecated/removed, so the default model is the alias
+`gemini-flash-latest` (currently Gemini 3.5 Flash), pinnable to a dated version.
 
 ## 5. Orchestrator + specialists
 
@@ -193,7 +192,7 @@ hidden marker). Failed specialists render a **visible** row — never silently d
 ```markdown
 <!-- ai-code-review-bot -->
 ## 🤖 Automated Code Review — PR #42
-_3 specialists · gemini-3-flash (vertex) · 11.4s · ~$0.0021_
+_3 specialists · gemini-flash-latest (vertex) · 11.4s · ~$0.0021_
 
 ### 🔒 Security — 2 findings
 | Severity | Line | Issue | Suggested fix |
