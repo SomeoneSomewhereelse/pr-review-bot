@@ -51,6 +51,22 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   avoids). **Gemini is not expected to become usable without that trade-off**;
   cross-vendor provider-agnosticism is demonstrated via Groq instead, and
   other AI providers may be evaluated later to strengthen that story.
+- **Build step 7 (provider-swap demo, `scripts/demo_provider_swap.py`):**
+  since Gemini genuinely fails live, the swap demo turned this into a real
+  (not simulated) proof of two things at once: (1) `LLM_PROVIDER` is a true
+  runtime seam — swapping it changes provider behavior with no server
+  restart; (2) the resilience guarantee holds even under **total** failure —
+  every specialist's own never-raise contract catches the real Gemini error
+  and the orchestrator still posts a coherent comment with 3 visible failed
+  rows, no crash. One oddity noted during this: an isolated direct call to
+  `GeminiProvider` consistently reproduces the documented `403`, but running
+  through the full `orchestrator.run_review()` pipeline (real PR diff content
+  as the prompt) once produced a `401 ACCESS_TOKEN_TYPE_UNSUPPORTED` instead —
+  not reproduced after several isolated retries (concurrency, sequencing
+  after Groq, matching model/config all ruled out). Likely just another
+  inconsistent error shape from the same flagged-account block depending on
+  request specifics, not chased further to avoid more burst-testing against
+  the blocked provider (see CLAUDE.md's testing-hygiene section).
 - **Current live provider: Groq** (`LLM_PROVIDER=groq`), pulled forward from
   build step 7 to have a working live path. Free tier, no card
   (https://console.groq.com/keys). Model: `llama-3.3-70b-versatile` (`GROQ_MODEL`
