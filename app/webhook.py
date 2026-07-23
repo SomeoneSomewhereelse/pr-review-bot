@@ -8,8 +8,14 @@ from fastapi import APIRouter, BackgroundTasks, Request, Response
 
 from app.config import settings
 from app.hmac_verify import verify_signature
+from app.orchestrator import run_review as _orchestrator_run_review
 
 logger = logging.getLogger(__name__)
+
+# PR actions we react to. GitHub sends the `pull_request` event for many
+# actions (closed, labeled, assigned, ...) — per SPEC.md's confirmed
+# decision, only these three trigger a review; everything else is a no-op.
+_REVIEW_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
 
 router = APIRouter()
 
@@ -35,7 +41,27 @@ def _is_duplicate_delivery(delivery_id: str) -> bool:
 
 
 async def run_review(payload: dict) -> None:
-    """Stub for the review pipeline — filled in during later build steps."""
+    """Background-task entry point: filter irrelevant PR actions, then review.
+
+    GitHub sends the ``pull_request`` webhook event for many actions
+    (closed, labeled, assigned, ...); only ``opened``/``reopened``/
+    ``synchronize`` trigger an actual review (SPEC.md's confirmed decision).
+    Everything else is a silent no-op — no orchestrator call, no comment.
+    """
+    action = payload.get("action")
+    if action not in _REVIEW_TRIGGER_ACTIONS:
+        return
+
+    pull_request = payload.get("pull_request") or {}
+    repository = payload.get("repository") or {}
+    repo_full_name = repository.get("full_name")
+    pr_number = pull_request.get("number")
+
+    if not repo_full_name or pr_number is None:
+        logger.warning("pull_request webhook missing repo/pr number; skipping review")
+        return
+
+    await _orchestrator_run_review(repo_full_name, pr_number)
 
 
 @router.post("/webhook")
