@@ -1,17 +1,20 @@
 """Fetch diff -> run specialists -> merge into ReviewResult -> post PR comment.
 
-This step (build order step 5) runs the Security specialist solo — no
-``asyncio.gather`` fan-out yet (that's step 6, once Performance + Code
-Quality exist behind the same interface). The loop below is written so
-adding more specialists is a small diff: replace the single ``await``
-with ``asyncio.gather(sec.run(...), perf.run(...), qual.run(...),
-return_exceptions=True)`` and extend the merge step to wrap any raised
-``Exception`` into a failed ``SpecialistResult`` (matching what
-``specialists/base.py`` already does internally for a single specialist).
+Runs Security, Performance, and Code Quality concurrently via
+``asyncio.gather(..., return_exceptions=True)``. Each specialist's own
+``run_specialist()`` (specialists/base.py) already never raises — a bad LLM
+response becomes a ``status="failed"`` ``SpecialistResult``, not an
+exception. The ``return_exceptions=True`` + merge step below is a second,
+belt-and-suspenders layer of the same guarantee: even if a specialist
+function raised for a reason outside that contract (a genuine bug, a
+cancellation, ...), one specialist's exception can never blank the comment
+or drop the other two specialists' results (SPEC.md's core resilience
+requirement — "partial failure is always visible").
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from app import github_app
@@ -19,8 +22,12 @@ from app.config import settings
 from app.diff_utils import annotate_and_cap
 from app.formatting import format_comment
 from app.providers.pricing import estimate_cost_usd
-from app.specialists.schemas import ReviewResult
+from app.specialists.performance import run_performance_specialist
+from app.specialists.quality import run_quality_specialist
+from app.specialists.schemas import ReviewResult, SpecialistResult
 from app.specialists.security import run_security_specialist
+
+_SPECIALIST_NAMES = ("Security", "Performance", "Code Quality")
 
 
 def _active_model() -> str:
@@ -46,8 +53,22 @@ async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
     raw_diff = github_app.fetch_pr_diff(repo_full_name, pr_number)
     annotated = annotate_and_cap(raw_diff)
 
-    security_result = await run_security_specialist(annotated.text)
-    results = [security_result]
+    # Referencing these as bare module-level names (not a precomputed tuple
+    # of function objects) means they resolve at call time, so tests can
+    # monkeypatch `orchestrator.run_security_specialist` etc. per-call.
+    raw_results = await asyncio.gather(
+        run_security_specialist(annotated.text),
+        run_performance_specialist(annotated.text),
+        run_quality_specialist(annotated.text),
+        return_exceptions=True,
+    )
+
+    results = [
+        outcome
+        if isinstance(outcome, SpecialistResult)
+        else SpecialistResult(name=name, status="failed", findings=[], error=str(outcome), elapsed_ms=0)
+        for name, outcome in zip(_SPECIALIST_NAMES, raw_results)
+    ]
 
     total_tokens_in = sum(r.tokens_in for r in results)
     total_tokens_out = sum(r.tokens_out for r in results)

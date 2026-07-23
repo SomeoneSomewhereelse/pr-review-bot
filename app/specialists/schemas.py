@@ -3,11 +3,9 @@
 Per SPEC.md section 3 — field names match the brief exactly, plus a ``file``
 field so the comment can render ``file:line`` without a second round trip.
 
-Only ``SecurityFinding`` has specialist logic wired up in this step (see
-``specialists/security.py``). ``PerformanceFinding``/``QualityFinding`` are
-schemas-only for now — their specialists arrive in the next build step — but
-are defined here so ``SpecialistResult.name``'s Literal already covers all
-three and no later step needs to touch this file's shape.
+All three specialists (``specialists/security.py``, ``performance.py``,
+``quality.py``) are wired up and run concurrently via
+``orchestrator.py``'s ``asyncio.gather``.
 """
 
 from __future__ import annotations
