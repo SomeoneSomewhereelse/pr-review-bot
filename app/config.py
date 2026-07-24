@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    github_models_token: str = ""
+    github_models_model: str = "openai/gpt-4o-mini"
 
 
 settings = Settings()

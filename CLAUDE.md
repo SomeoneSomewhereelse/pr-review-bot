@@ -14,8 +14,10 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 
 - **Backend**: FastAPI (async), managed with `uv`.
 - **GitHub**: PyGitHub with **GitHub App** auth (JWT → short-lived installation token).
-- **AI**: `google-genai` SDK behind an `LLMProvider` seam — `vertex` (default),
-  `gemini` (AI-Studio), `groq` (cross-vendor). Selected via `LLM_PROVIDER` env var.
+- **AI**: `LLMProvider` seam with four adapters — `vertex`/`gemini`
+  (`google-genai` SDK), `groq` (OpenAI-compatible, live primary), `github_models`
+  (OpenAI-compatible via the user's GitHub account, live cross-vendor demo).
+  Selected via `LLM_PROVIDER` env var.
 - **Concurrency**: `asyncio.gather(..., return_exceptions=True)`.
 - **Validation**: Pydantic v2 with a shared validate-and-repair layer.
 - **Tests**: `pytest`, `pytest-asyncio`, `httpx.AsyncClient`, `respx`.

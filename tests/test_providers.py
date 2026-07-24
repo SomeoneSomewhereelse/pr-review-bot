@@ -144,6 +144,13 @@ def test_factory_selects_groq(monkeypatch):
     assert isinstance(get_provider(), GroqProvider)
 
 
+def test_factory_selects_github_models(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "github_models")
+    from app.providers.github_models import GitHubModelsProvider
+
+    assert isinstance(get_provider(), GitHubModelsProvider)
+
+
 def test_factory_raises_for_unknown_provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "bogus")
     with pytest.raises(ValueError):
@@ -251,3 +258,8 @@ def test_estimate_cost_usd_groq_llama():
 def test_estimate_cost_usd_groq_unknown_model_raises():
     with pytest.raises(KeyError):
         pricing.estimate_cost_usd("groq", "no-such-model", tokens_in=1, tokens_out=1)
+
+
+def test_estimate_cost_usd_github_models_is_free():
+    cost = pricing.estimate_cost_usd("github_models", "openai/gpt-4o-mini", tokens_in=4_000, tokens_out=500)
+    assert cost == 0.0

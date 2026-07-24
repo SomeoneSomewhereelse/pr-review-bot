@@ -34,11 +34,14 @@ def _active_model() -> str:
     """Return the model name for whichever provider is actually active.
 
     ``settings.llm_model`` only applies to the google-genai family
-    (vertex/gemini); groq uses its own ``settings.groq_model`` (see
-    config.py's comment on why a single shared var became ambiguous).
+    (vertex/gemini); groq and github_models each have their own model var
+    (see config.py's comment on why a single shared var became ambiguous
+    once more than one provider family entered the picture).
     """
     if settings.llm_provider == "groq":
         return settings.groq_model
+    if settings.llm_provider == "github_models":
+        return settings.github_models_model
     return settings.llm_model
 
 

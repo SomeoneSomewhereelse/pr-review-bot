@@ -128,3 +128,8 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_model", "gemini-flash-latest")
     result = await orchestrator.run_review("owner/repo", 1)
     assert result.model == "gemini-flash-latest"
+
+    monkeypatch.setattr(settings, "llm_provider", "github_models")
+    monkeypatch.setattr(settings, "github_models_model", "openai/gpt-4o-mini")
+    result = await orchestrator.run_review("owner/repo", 1)
+    assert result.model == "openai/gpt-4o-mini"

@@ -80,6 +80,58 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   `gemini-flash-latest` for now, to be revisited once the account access issue
   is resolved.
 
+## 2b. Third provider — GitHub Models (added post-step-8, real cross-vendor demo)
+
+The user wanted a second genuinely-live cross-vendor provider (beyond Groq)
+to demonstrate at showcase time, since Gemini isn't expected to come back.
+Researched free-tier options with a hard constraint: RPM low enough to risk
+the 15s target given 3 concurrent specialist calls per review, or a card
+requirement, both disqualify a candidate.
+
+- **Cerebras — tried, ruled out.** Despite older blog posts describing a
+  perpetual free RPM quota, the account's actual current policy (confirmed
+  live) is a "$5 free credit" that still requires billing info attached —
+  every available model (`gpt-oss-120b`, `zai-glm-4.7`, `gemma-4-31b`)
+  returned `402 Payment Required`. Same dealbreaker as Vertex.
+- **Mistral — not attempted.** Reported free-tier RPM as low as 1 request/min
+  (unconfirmed exact number — Mistral stopped publishing free-tier limits
+  publicly), which would seriously risk the 15s target given our 3-concurrent-
+  calls-per-review pattern. Cohere was also considered (20 RPM, no card) but
+  needs a new separate account/signup, explicitly trial-only.
+- **GitHub Models — chosen.** Rides the user's existing GitHub account (a
+  fine-grained PAT with the "Models: read" permission, created at
+  github.com/settings/personal-access-tokens/new) — no new account/signup,
+  no new account-flagging risk. OpenAI-compatible API
+  (`https://models.github.ai/inference`), real OpenAI models
+  (`openai/gpt-4o-mini` — `GITHUB_MODELS_MODEL` env var). Genuinely different
+  vendor AND model family from both Gemini (Google) and Groq (Llama) — the
+  strongest cross-vendor story among providers actually usable here.
+  **Known caveat (flagged by the user, not yet addressed):** free-tier rate
+  limits are modest (single-digit RPM / ~150 requests per day on low-access
+  models) — fine for a demo, a real constraint at any sustained volume or
+  possibly for automated grading that fires many reviews quickly. Revisit if
+  that becomes a problem.
+- **Real bug caught by live testing** (`app/providers/github_models.py`):
+  OpenAI's strict `json_schema` mode requires `"additionalProperties": false`
+  explicitly present on **every** object schema, including nested `$defs`
+  entries — Pydantic's `model_json_schema()` doesn't set this anywhere by
+  default. A flat test schema surfaced the top-level case first (live `400`);
+  the real nested container schemas we actually use (e.g. `SecurityFindings`
+  wrapping `SecurityFinding` via `$defs`) surfaced that a top-level-only fix
+  wasn't enough (another live `400`, different nested path). Fixed with a
+  generic recursive walker (`_add_additional_properties_false`) rather than
+  special-casing `$defs`, so any nesting shape Pydantic produces is covered.
+  Both cases are locked in by tests, not just fixed ad hoc.
+- Live-verified end-to-end: single-schema call via
+  `scripts/manual_verify_github_models.py`, then the real nested
+  `SecurityFindings` schema directly, then a full 3-specialist
+  `orchestrator.run_review()` run against PR #3 — **7.5 seconds**, all three
+  specialists succeeded with real findings, comment posted and independently
+  confirmed via `gh api`.
+- Added `openai` (for the OpenAI-compatible client) and cleaned up
+  `cerebras-cloud-sdk` from `pyproject.toml`/`uv.lock` once Cerebras was
+  ruled out — don't leave unused deps behind after an abandoned attempt.
+
 ## 2a. Docker
 
 Installed via `winget install Docker.DockerDesktop` (build step 8, deferred

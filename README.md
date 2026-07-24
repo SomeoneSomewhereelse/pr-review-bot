@@ -73,8 +73,8 @@ uv run ruff check .
 uv run pytest -v
 ```
 
-66 deterministic tests, no real network calls — mocks GitHub's REST API (at
-the `requests` transport layer PyGithub uses), both LLM providers' SDK
+73 deterministic tests, no real network calls — mocks GitHub's REST API (at
+the `requests` transport layer PyGithub uses), all LLM providers' SDK
 clients, and the webhook HTTP layer. CI (`.github/workflows/project-d-ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
 every push/PR touching this project.
@@ -89,6 +89,7 @@ CI. Each is self-contained and prints what it's proving:
 | `scripts/manual_verify_step3.py` | GitHub App auth, diff fetch, comment upsert (edit-in-place) against a real PR |
 | `scripts/manual_verify_step4.py` | Gemini provider through the validate-repair layer (⚠️ currently fails — see below) |
 | `scripts/manual_verify_groq.py` | Groq provider through the validate-repair layer |
+| `scripts/manual_verify_github_models.py` | GitHub Models provider through the validate-repair layer |
 | `scripts/seed_demo_pr.py` | Opens a real PR with planted issues (`fixtures/bad_code/`) on the test repo |
 | `scripts/demo_provider_swap.py` | `LLM_PROVIDER` is a genuine runtime seam: Groq succeeds, Gemini fails gracefully, comment renders either way |
 
@@ -122,11 +123,18 @@ the full history of runs and timings.
   fixable only by attaching billing. Tried fresh keys under multiple
   different Google accounts; all blocked. **Gemini is not expected to work
   live in this environment without that trade-off.**
-- **Groq is the actual live provider** (`LLM_PROVIDER=groq`,
+- **Groq is the primary live provider** (`LLM_PROVIDER=groq`,
   `llama-3.3-70b-versatile`) — pulled forward from a later build step
-  specifically to have a working live path. It satisfies the "cross-vendor,
-  provider-agnostic" requirement on its own (different vendor, different
-  model family, same `LLMProvider` interface).
+  specifically to have a working live path.
+- **GitHub Models is a second, genuinely live cross-vendor provider**
+  (`LLM_PROVIDER=github_models`, `openai/gpt-4o-mini`) — rides the user's
+  existing GitHub account (a fine-grained PAT with the "Models" permission),
+  no separate signup/account-flagging risk. Real OpenAI models, a different
+  vendor and model family from both Gemini (Google) and Groq (Llama) —
+  live-verified end-to-end (all three specialists, real PR comment, 7.5s).
+  Free tier caps are modest (single-digit RPM, ~150 requests/day on the
+  low-access-tier models) — fine for demonstration, a real constraint at any
+  meaningful sustained volume.
 - **Cloudflare quick tunnel**, not a named tunnel — no domain was available
   to register as a Cloudflare zone. The webhook URL must be updated on every
   tunnel restart (see above); a named tunnel would remove this step but

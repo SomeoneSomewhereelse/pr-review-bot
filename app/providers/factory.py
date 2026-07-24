@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from app.config import settings
 from app.providers.base import LLMProvider
+from app.providers.github_models import GitHubModelsProvider
 from app.providers.google_genai import GeminiProvider, VertexProvider
 from app.providers.groq import GroqProvider
 
@@ -21,5 +22,10 @@ def get_provider() -> LLMProvider:
         return GeminiProvider()
     if provider == "groq":
         return GroqProvider()
+    if provider == "github_models":
+        return GitHubModelsProvider()
 
-    raise ValueError(f"Unknown LLM_PROVIDER: {provider!r} (expected 'vertex', 'gemini', or 'groq')")
+    raise ValueError(
+        f"Unknown LLM_PROVIDER: {provider!r} "
+        "(expected 'vertex', 'gemini', 'groq', or 'github_models')"
+    )
