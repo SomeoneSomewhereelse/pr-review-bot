@@ -80,6 +80,19 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   `gemini-flash-latest` for now, to be revisited once the account access issue
   is resolved.
 
+## 2a. Docker
+
+Installed via `winget install Docker.DockerDesktop` (build step 8, deferred
+from step 1 since it wasn't installed initially). Docker Desktop's daemon
+started cleanly with no interactive setup needed on this machine (WSL2
+backend already available). `docker build .` succeeds; the container boots
+with `/healthz` → 200 and an unsigned `/webhook` → 401, confirmed. **Fixed a
+real bug found during verification**: the Dockerfile's `CMD` used `uv run
+uvicorn ...` without `--no-dev`, so every container start silently re-synced
+and reinstalled dev dependencies (ruff, etc.) at runtime — the build-time
+`uv sync --frozen --no-dev` didn't carry over to `uv run`'s own implicit sync.
+Fixed by adding `--no-dev` to the `CMD`'s `uv run` invocation too.
+
 ## 3. Cloudflare Tunnel — quick tunnel, not named
 
 - **Deviation from the original plan:** a *named* tunnel requires a domain
