@@ -39,8 +39,13 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
 
 ## 4. Free-tier headroom (why the demo is $0)
 
-- **Vertex** on the **$300 GCP trial credit** (90 days) covers all LLM calls for the course.
-- **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0 fallback.
-- **Groq** free tier: ~30 RPM / up to 14.4K req/day — independent $0 fallback.
+- **Vertex** on the **$300 GCP trial credit** (90 days) covers all LLM calls
+  when enabled (not configured in this environment — see `SETUP.md`).
+- **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0
+  fallback in principle (account-blocked in this environment, see `SETUP.md`).
+- **Groq** free tier: ~30 RPM / up to 14.4K req/day — the actual live
+  provider, independent $0 path.
+- **GitHub Models** free tier: rides the user's GitHub account, no card —
+  a second genuinely live $0 cross-vendor path (modest RPM/RPD, see `SETUP.md`).
 - **Host**: local/free host + **free Cloudflare Tunnel** → $0 public URL.
 - **CI**: GitHub Actions — $0 on the free tier for this workload.
