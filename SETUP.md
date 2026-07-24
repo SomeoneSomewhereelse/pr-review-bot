@@ -121,6 +121,20 @@ Fixed by adding `--no-dev` to the `CMD`'s `uv run` invocation too.
 - All work happens on branch `feat/project-d-code-review-engine` — `master`
   untouched.
 
+## Live rehearsal history (build step 8, final E2E)
+
+| PR | Path exercised | Result |
+|---|---|---|
+| #2 | Direct `orchestrator.run_review()` call (step 5/6 milestone) | 8s, all 3 specialists ok, comment correct |
+| #2 | `demo_provider_swap.py` (step 7) | groq ok → gemini fails gracefully (real error) → groq restored |
+| **#3** | **Real GitHub webhook delivery** (quick tunnel + `PATCH /app/hook/config` JWT-updated URL + `seed_demo_pr.py`) | **8s** PR-created → comment-appeared, all 3 specialists found real issues |
+
+PR #3 is the definitive rehearsal for step 8/11's verification — it's the
+first run of the *actual* webhook path end-to-end (GitHub → tunnel → HMAC
+verify → dedup → background task → orchestrator → comment), not a direct
+function call or synthetic payload. Comment appeared well under the 15s
+target.
+
 ## Redo-from-scratch notes
 
 If any of this needs to be redone (e.g. rotating the webhook secret, a new PEM):
