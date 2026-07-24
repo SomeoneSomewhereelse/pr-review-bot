@@ -23,7 +23,7 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   Cloudflare quick tunnel is running and the local server is up (step 1 of the
   build) — see the Tunnel section below for why this happens on every restart.
 - Private key: downloaded as part of the manifest exchange, saved to
-  `study/final_project/github-app-private-key.pem` (gitignored). Referenced by
+  `github-app-private-key.pem` at the repo root (gitignored). Referenced by
   path via `GITHUB_APP_PRIVATE_KEY_PATH` in `.env` (chosen over base64-encoding
   the key inline).
 
@@ -167,11 +167,17 @@ Fixed by adding `--no-dev` to the `CMD`'s `uv run` invocation too.
 ## 4. Secrets hygiene
 
 - Root `.gitignore` updated (before any secret file existed) to ignore
-  `study/final_project/.env`, `*.pem`, `.venv/`, `__pycache__/`.
+  `.env`, `*.pem`, `.venv/`, `__pycache__/`.
 - `.env.example` committed with placeholders for every var; `.env` itself and
   `github-app-private-key.pem` are real values, gitignored, never committed.
-- All work happens on branch `feat/project-d-code-review-engine` — `master`
-  untouched.
+
+## Repo history note
+
+This repo was extracted from a course repository (Tov-learn), where it lived
+at `study/final_project/` on branch `feat/project-d-code-review-engine`, via
+`git subtree split` — full commit history preserved, paths rewritten relative
+to this repo's root. The course repo's copy (and that branch) still exist
+independently; this is now the standalone home going forward.
 
 ## Live rehearsal history (build step 8, final E2E)
 

@@ -123,7 +123,11 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
 
 
 def test_factory_selects_gemini(monkeypatch):
+    # google-genai's Client raises immediately on an empty api_key, so a
+    # fresh checkout with no real .env (e.g. CI) needs a dummy non-empty
+    # value here — this test must not depend on real credentials existing.
     monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "dummy-key-for-construction-only")
     assert isinstance(get_provider(), GeminiProvider)
 
 
@@ -145,7 +149,10 @@ def test_factory_selects_groq(monkeypatch):
 
 
 def test_factory_selects_github_models(monkeypatch):
+    # AsyncOpenAI raises immediately on a missing/empty api_key, so a fresh
+    # checkout with no real .env (e.g. CI) needs a dummy non-empty value.
     monkeypatch.setattr(settings, "llm_provider", "github_models")
+    monkeypatch.setattr(settings, "github_models_token", "dummy-token-for-construction-only")
     from app.providers.github_models import GitHubModelsProvider
 
     assert isinstance(get_provider(), GitHubModelsProvider)

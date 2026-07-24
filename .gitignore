@@ -1,0 +1,16 @@
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+
+# Secrets
+.env
+*.pem
+.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Local session state (machine-specific, not shared)
+memory.md
+auth-link.txt
