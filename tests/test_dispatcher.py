@@ -99,6 +99,63 @@ async def test_blocked_provider_defers_without_calling_attempt(monkeypatch):
     assert posted and "rate limit" in posted[0][1].lower()
 
 
+async def test_non_rate_limited_exception_marks_ticket_failed_not_stuck_running(monkeypatch):
+    _stub_comments(monkeypatch)
+    tid = _enqueue(pr=5)
+
+    async def boom(repo, pr):
+        raise RuntimeError("github api exploded")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "failed"
+    assert result.ticket_id == tid
+    t = store.get_ticket(tid)
+    assert t.status == "failed"  # not stuck at 'running'
+
+
+async def test_failed_ticket_re_armed_to_pending_by_a_fresh_push(monkeypatch):
+    _stub_comments(monkeypatch)
+    tid = _enqueue(pr=6)
+
+    async def boom(repo, pr):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+    await dispatcher.process_next_due(NOW)
+    assert store.get_ticket(tid).status == "failed"
+
+    tid2 = _enqueue(pr=6, now=NOW + timedelta(seconds=1))
+    assert tid2 == tid
+    assert store.get_ticket(tid).status == "pending"
+
+
+async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_provider(monkeypatch):
+    """The ticket was enqueued under provider 'groq' (see _enqueue), but the
+    _blocked_until gate must key off settings.llm_provider (the CURRENT
+    provider actually used by attempt_review), which here we set to a
+    different name to simulate LLM_PROVIDER having changed with a ticket
+    still in flight."""
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "llm_provider", "github_models")
+    _enqueue(pr=7)  # ticket.provider == "groq" (stale, from _enqueue helper)
+    dispatcher._blocked_until["github_models"] = NOW + timedelta(seconds=120)
+
+    called = []
+
+    async def fake_attempt(repo, pr):
+        called.append(pr)
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"
+    assert called == []  # gated on the current provider's block, not the stale one
+    assert posted and "rate limit" in posted[0][1].lower()
+
+
 async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=4)

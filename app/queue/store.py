@@ -144,6 +144,22 @@ def mark_done(ticket_id: int, now: str, comment_id: int | None = None) -> None:
         )
 
 
+def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
+    """Mark a ticket as failed after a non-rate-limit exception from attempt_review.
+
+    Unlike a stuck 'running' ticket, 'failed' is NOT special-cased by
+    ``enqueue_or_update``'s CASE logic (which only protects 'running'), so a
+    fresh push to a failed PR re-arms it to 'pending' normally. ``error`` is
+    accepted for future use (e.g. logging/inspection) but is not persisted in
+    a column today — the schema has no error column.
+    """
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tickets SET status = 'failed', updated_at = ? WHERE id = ?",
+            (now, ticket_id),
+        )
+
+
 def recover_on_startup(now: str) -> None:
     """Reset any ticket interrupted mid-review (crash) back to pending."""
     with _connect() as conn:

@@ -34,12 +34,14 @@ def reset_blocked_until() -> None:
 
 @dataclass
 class StepResult:
-    action: str  # "idle" | "ran" | "deferred"
+    action: str  # "idle" | "ran" | "deferred" | "failed"
     ticket_id: int | None = None
 
 
-def _post_placeholder(repo: str, pr: int, retry_after: float, now: datetime) -> None:
-    github_app.upsert_comment(repo, pr, format_placeholder(pr, retry_after, now))
+async def _post_placeholder(repo: str, pr: int, retry_after: float, now: datetime) -> None:
+    await asyncio.to_thread(
+        github_app.upsert_comment, repo, pr, format_placeholder(pr, retry_after, now)
+    )
 
 
 async def process_next_due(now: datetime) -> StepResult:
@@ -48,21 +50,29 @@ async def process_next_due(now: datetime) -> StepResult:
     if ticket is None:
         return StepResult(action="idle")
 
-    provider = ticket.provider
+    # Gate on the CURRENT provider (settings.llm_provider), not the provider
+    # recorded on the ticket at enqueue time — attempt_review always runs
+    # against whatever provider is active now, so that's what can be blocked.
+    provider = settings.llm_provider
     blocked = _blocked_until.get(provider)
     if blocked is not None and now < blocked:
         remaining = (blocked - now).total_seconds()
         store.defer(ticket.id, not_before=blocked.isoformat(), now=now.isoformat())
-        _post_placeholder(ticket.repo_full_name, ticket.pr_number, remaining, now)
+        await _post_placeholder(ticket.repo_full_name, ticket.pr_number, remaining, now)
         return StepResult(action="deferred", ticket_id=ticket.id)
 
-    outcome = await attempt_review(ticket.repo_full_name, ticket.pr_number)
+    try:
+        outcome = await attempt_review(ticket.repo_full_name, ticket.pr_number)
+    except Exception as exc:  # noqa: BLE001 - any non-RateLimited failure must not strand the ticket
+        logger.exception("review attempt failed for ticket %s", ticket.id)
+        store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
+        return StepResult(action="failed", ticket_id=ticket.id)
 
     if isinstance(outcome, ReviewRateLimited):
         until = now + timedelta(seconds=outcome.retry_after)
         _blocked_until[provider] = until
         store.defer(ticket.id, not_before=until.isoformat(), now=now.isoformat())
-        _post_placeholder(ticket.repo_full_name, ticket.pr_number, outcome.retry_after, now)
+        await _post_placeholder(ticket.repo_full_name, ticket.pr_number, outcome.retry_after, now)
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     store.mark_done(ticket.id, now=now.isoformat())
@@ -71,14 +81,21 @@ async def process_next_due(now: datetime) -> StepResult:
 
 async def run_forever() -> None:
     """Production loop: drain the queue, idling when empty. Thin wrapper over
-    process_next_due (which holds the tested logic)."""
+    process_next_due (which holds the tested logic).
+
+    Sleeps ``dispatcher_idle_sleep_seconds`` after EVERY iteration, not only
+    "idle" ones. A "deferred"/"failed" step can otherwise fire again with
+    zero delay (e.g. a ``Retry-After: 0`` or already-past HTTP-date response),
+    hammering the same doomed call in a tight loop — the exact 429-hammering
+    pattern that has already gotten a provider account-level blocked on this
+    project (see CLAUDE.md). This floor is a blunt but robust backstop that
+    also defends any future fast-loop path.
+    """
     while True:
         try:
-            result = await process_next_due(datetime.now(timezone.utc))
+            await process_next_due(datetime.now(timezone.utc))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the dispatcher must never die on one ticket
             logger.exception("dispatcher step failed")
-            result = StepResult(action="idle")
-        if result.action == "idle":
-            await asyncio.sleep(settings.dispatcher_idle_sleep_seconds)
+        await asyncio.sleep(settings.dispatcher_idle_sleep_seconds)

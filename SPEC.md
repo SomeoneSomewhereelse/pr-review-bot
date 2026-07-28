@@ -340,7 +340,11 @@ construction.
 `(repo_full_name, pr_number)` (`UNIQUE` constraint): a fresh push to a PR that
 already has a `pending`/`deferred` ticket updates `head_sha` and re-arms it to
 `pending` instead of stacking a duplicate; a `running` ticket is left to
-finish, with the newer `head_sha` recorded for the next claim. `claim_next_due`
+finish — its in-flight review completes and finalizes normally against the
+commit it started with, and the newer `head_sha` is only updated on the row
+for record-keeping, not re-reviewed as part of that ticket. A separate push
+after the ticket reaches `done`/`failed` (i.e. once it is no longer
+`running`) enqueues a fresh review as usual. `claim_next_due`
 claims the oldest due ticket (`pending`, or `deferred` whose `not_before` has
 passed) with an atomic `UPDATE ... WHERE status IN ('pending', 'deferred')`,
 so a claimed ticket cannot be re-claimed.

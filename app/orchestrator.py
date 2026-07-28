@@ -70,7 +70,7 @@ async def attempt_review(
     """
     started = time.monotonic()
 
-    raw_diff = github_app.fetch_pr_diff(repo_full_name, pr_number)
+    raw_diff = await asyncio.to_thread(github_app.fetch_pr_diff, repo_full_name, pr_number)
     annotated = annotate_and_cap(raw_diff)
 
     # Referencing these as bare module-level names (not a precomputed tuple
@@ -114,7 +114,7 @@ async def attempt_review(
     )
 
     body = format_comment(review_result)
-    github_app.upsert_comment(repo_full_name, pr_number, body)
+    await asyncio.to_thread(github_app.upsert_comment, repo_full_name, pr_number, body)
     return ReviewCompleted(review=review_result)
 
 

@@ -93,3 +93,28 @@ def test_defer_increments_attempts():
     store.claim_next_due(now=T0)
     store.defer(tid, not_before=FUTURE, now=T0)
     assert store.get_ticket(tid).attempts == 1
+
+
+def test_mark_failed_sets_status_failed():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.mark_failed(tid, now=T1, error="boom")
+    t = store.get_ticket(tid)
+    assert t.status == "failed"
+    assert t.updated_at == T1
+
+
+def test_mark_failed_ticket_is_re_armed_to_pending_by_a_fresh_push():
+    """A 'failed' ticket is NOT special-cased by enqueue_or_update's CASE
+    logic (which only protects 'running'), so a subsequent push to that PR
+    re-arms it to pending, unlike a stuck 'running' ticket would."""
+    tid = _enqueue(sha="sha1")
+    store.claim_next_due(now=T0)
+    store.mark_failed(tid, now=T0, error="boom")
+    assert store.get_ticket(tid).status == "failed"
+
+    tid2 = _enqueue(sha="sha2", now=T1)
+    assert tid2 == tid
+    t = store.get_ticket(tid)
+    assert t.status == "pending"
+    assert t.head_sha == "sha2"
