@@ -26,6 +26,7 @@ import time
 
 from pydantic import BaseModel
 
+from app.providers.base import RateLimited
 from app.providers.factory import get_provider
 from app.providers.validate import validate_and_repair
 from app.specialists.schemas import SpecialistResult
@@ -79,6 +80,8 @@ async def run_specialist(
             tokens_in=tokens_in,
             tokens_out=tokens_out,
         )
+    except RateLimited:
+        raise  # must reach the orchestrator so it can defer, not render a failed row
     except Exception as exc:  # noqa: BLE001 - a specialist must never crash the orchestrator
         return SpecialistResult(
             name=name,

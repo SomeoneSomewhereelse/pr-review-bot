@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass
 
 from app import github_app
 from app.config import settings
 from app.diff_utils import annotate_and_cap
 from app.formatting import format_comment
+from app.providers.base import RateLimited
 from app.providers.pricing import estimate_cost_usd
 from app.specialists.performance import run_performance_specialist
 from app.specialists.quality import run_quality_specialist
@@ -45,11 +47,26 @@ def _active_model() -> str:
     return settings.llm_model
 
 
-async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
-    """Run the full review pipeline for one PR and post the comment.
+@dataclass
+class ReviewCompleted:
+    review: ReviewResult
 
-    Returns the ``ReviewResult`` (useful for tests/logging) in addition to
-    posting it as a Markdown comment via ``github_app.upsert_comment``.
+
+@dataclass
+class ReviewRateLimited:
+    retry_after: float
+
+
+async def attempt_review(
+    repo_full_name: str, pr_number: int
+) -> ReviewCompleted | ReviewRateLimited:
+    """Run the full review pipeline once for one PR.
+
+    On completion, posts the Markdown comment via ``github_app.upsert_comment``
+    and returns ``ReviewCompleted``. If any specialist call is rate-limited,
+    the whole review is atomic: no comment is posted, and the max
+    ``retry_after`` across the rate-limited calls is returned via
+    ``ReviewRateLimited`` so a caller (e.g. the durable queue) can retry later.
     """
     started = time.monotonic()
 
@@ -65,6 +82,10 @@ async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
         run_quality_specialist(annotated.text),
         return_exceptions=True,
     )
+
+    rate_limits = [r.retry_after for r in raw_results if isinstance(r, RateLimited)]
+    if rate_limits:
+        return ReviewRateLimited(retry_after=max(rate_limits))
 
     results = [
         outcome
@@ -94,5 +115,14 @@ async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
 
     body = format_comment(review_result)
     github_app.upsert_comment(repo_full_name, pr_number, body)
+    return ReviewCompleted(review=review_result)
 
-    return review_result
+
+async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
+    """Back-compat entry point for scripts/tests: returns the ``ReviewResult``
+    on completion, raises ``RateLimited`` if the review was rate-limited.
+    """
+    outcome = await attempt_review(repo_full_name, pr_number)
+    if isinstance(outcome, ReviewRateLimited):
+        raise RateLimited(outcome.retry_after)
+    return outcome.review
