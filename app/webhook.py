@@ -1,14 +1,15 @@
-"""GitHub PR webhook route: HMAC verification, delivery dedup, background review."""
+"""GitHub PR webhook route: HMAC verification, delivery dedup, durable enqueue."""
 
 import json
 import logging
 from collections import OrderedDict
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Request, Response
+from fastapi import APIRouter, Request, Response
 
 from app.config import settings
 from app.hmac_verify import verify_signature
-from app.orchestrator import run_review as _orchestrator_run_review
+from app.queue import store
 
 logger = logging.getLogger(__name__)
 
@@ -40,32 +41,29 @@ def _is_duplicate_delivery(delivery_id: str) -> bool:
     return False
 
 
-async def run_review(payload: dict) -> None:
-    """Background-task entry point: filter irrelevant PR actions, then review.
-
-    GitHub sends the ``pull_request`` webhook event for many actions
-    (closed, labeled, assigned, ...); only ``opened``/``reopened``/
-    ``synchronize`` trigger an actual review (SPEC.md's confirmed decision).
-    Everything else is a silent no-op — no orchestrator call, no comment.
-    """
-    action = payload.get("action")
-    if action not in _REVIEW_TRIGGER_ACTIONS:
+def _enqueue_from_payload(payload: dict) -> None:
+    """Enqueue a durable review ticket for a triggering PR action (no-op otherwise)."""
+    if payload.get("action") not in _REVIEW_TRIGGER_ACTIONS:
         return
-
     pull_request = payload.get("pull_request") or {}
     repository = payload.get("repository") or {}
     repo_full_name = repository.get("full_name")
     pr_number = pull_request.get("number")
-
     if not repo_full_name or pr_number is None:
-        logger.warning("pull_request webhook missing repo/pr number; skipping review")
+        logger.warning("pull_request webhook missing repo/pr number; skipping enqueue")
         return
-
-    await _orchestrator_run_review(repo_full_name, pr_number)
+    head_sha = (pull_request.get("head") or {}).get("sha")
+    store.enqueue_or_update(
+        repo_full_name=repo_full_name,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        provider=settings.llm_provider,
+        now=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @router.post("/webhook")
-async def webhook(request: Request, background_tasks: BackgroundTasks) -> Response:
+async def webhook(request: Request) -> Response:
     raw_body = await request.body()
     signature_header = request.headers.get("X-Hub-Signature-256")
     delivery_id = request.headers.get("X-GitHub-Delivery")
@@ -78,5 +76,5 @@ async def webhook(request: Request, background_tasks: BackgroundTasks) -> Respon
         return Response(status_code=200, content="already processed")
 
     payload = json.loads(raw_body)
-    background_tasks.add_task(run_review, payload)
+    _enqueue_from_payload(payload)
     return Response(status_code=202)

@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from app.config import settings
 from app.main import app
 from app import webhook
+from app.queue import store
 
 TEST_SECRET = "test-webhook-secret"
 
@@ -18,8 +19,11 @@ def _sign(body: bytes, secret: str = TEST_SECRET) -> str:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_dedup_cache(monkeypatch):
+def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "github_webhook_secret", TEST_SECRET)
+    monkeypatch.setattr(settings, "queue_db_path", str(tmp_path / "queue.db"))
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    store.init_db()
     webhook.reset_dedup_cache()
     yield
     webhook.reset_dedup_cache()
@@ -61,13 +65,6 @@ async def test_missing_signature_header_returns_401():
 
 
 async def test_replayed_delivery_id_is_noop(monkeypatch):
-    calls = []
-
-    async def fake_run_review(payload):
-        calls.append(payload)
-
-    monkeypatch.setattr(webhook, "run_review", fake_run_review)
-
     body = b'{"action": "opened"}'
     headers = {
         "X-Hub-Signature-256": _sign(body),
@@ -79,21 +76,13 @@ async def test_replayed_delivery_id_is_noop(monkeypatch):
 
     assert first.status_code == 202
     assert second.status_code == 200
-    assert len(calls) == 1
 
 
-async def test_opened_action_triggers_orchestrator(monkeypatch):
-    calls = []
-
-    async def fake_orchestrator_run_review(repo_full_name, pr_number):
-        calls.append((repo_full_name, pr_number))
-
-    monkeypatch.setattr(webhook, "_orchestrator_run_review", fake_orchestrator_run_review)
-
+async def test_opened_action_enqueues_ticket():
     payload = {
         "action": "opened",
         "repository": {"full_name": "owner/repo"},
-        "pull_request": {"number": 7},
+        "pull_request": {"number": 7, "head": {"sha": "abc123"}},
     }
     body = json.dumps(payload).encode()
     headers = {
@@ -104,21 +93,18 @@ async def test_opened_action_triggers_orchestrator(monkeypatch):
         response = await c.post("/webhook", content=body, headers=headers)
 
     assert response.status_code == 202
-    assert calls == [("owner/repo", 7)]
+    ticket = store.claim_next_due(now="2026-01-01T12:00:00+00:00")
+    assert ticket is not None
+    assert ticket.repo_full_name == "owner/repo"
+    assert ticket.pr_number == 7
+    assert ticket.head_sha == "abc123"
 
 
-async def test_ignored_action_does_not_trigger_orchestrator(monkeypatch):
-    calls = []
-
-    async def fake_orchestrator_run_review(repo_full_name, pr_number):
-        calls.append((repo_full_name, pr_number))
-
-    monkeypatch.setattr(webhook, "_orchestrator_run_review", fake_orchestrator_run_review)
-
+async def test_ignored_action_does_not_enqueue():
     payload = {
         "action": "closed",
         "repository": {"full_name": "owner/repo"},
-        "pull_request": {"number": 7},
+        "pull_request": {"number": 7, "head": {"sha": "abc123"}},
     }
     body = json.dumps(payload).encode()
     headers = {
@@ -129,4 +115,4 @@ async def test_ignored_action_does_not_trigger_orchestrator(monkeypatch):
         response = await c.post("/webhook", content=body, headers=headers)
 
     assert response.status_code == 202
-    assert calls == []
+    assert store.claim_next_due(now="2026-01-01T12:00:00+00:00") is None
