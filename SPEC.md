@@ -47,6 +47,12 @@ timeout; a slow synchronous handler causes GitHub to mark the delivery failed an
 **redeliver**, triggering a duplicate review. The 15s target is measured to
 *comment-appears*, not to HTTP response.
 
+**Updated in section 12:** step (4) above (`BackgroundTask: run_review()`) is
+now a durable SQLite ticket enqueue; a single serial dispatcher — not the
+webhook request — is the one caller of the review pipeline. This absorbs
+per-minute/daily rate limits from the live providers without changing the
+steps *inside* a review (diff prep → fan-out → merge → comment).
+
 ## 2. Module layout
 
 ```
@@ -66,12 +72,19 @@ app/
     performance.py     system prompt + PerformanceFinding schema
     quality.py         system prompt + QualityFinding schema
   providers/
-    base.py            LLMProvider protocol: async complete(system, user, schema) -> BaseModel
+    base.py            LLMProvider protocol: async complete(system, user, schema) -> BaseModel;
+                       RateLimited(retry_after) — raised on a 429 (section 12)
     google_genai.py    Vertex (vertexai=True) + Gemini (api_key) — one SDK, two clients
     groq.py            OpenAI-compatible client, constrained-decoding structured output
+    github_models.py   OpenAI-compatible client via the user's GitHub PAT
     factory.py         select provider by LLM_PROVIDER env
     validate.py        validate-and-repair (one repair retry → typed empty-with-error)
     pricing.py         per-provider/model rate table → est_cost_usd
+  queue/
+    store.py           durable SQLite ticket store: enqueue_or_update, claim_next_due,
+                       defer, mark_done, recover_on_startup, get_ticket (section 12)
+    dispatcher.py      single serial consumer: process_next_due, run_forever,
+                       in-memory blocked_until gate (section 12)
 tests/                 (section 8)
 fixtures/
   bad_code/            planted issues: hardcoded credential, N+1 query, magic number
@@ -302,3 +315,108 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
   planted issues; the bot comment appears within 15s naming the hardcoded credential,
   the N+1 query, and the magic number; footer shows runtime + cost; provider swap
   (`LLM_PROVIDER=groq`) still produces a valid comment.
+
+## 12. Review queue (RPM + daily-quota handling)
+
+Full design rationale (problem statement, alternatives considered, accepted
+costs): `docs/superpowers/specs/2026-07-27-queue-features-design.md`. This
+section documents what was actually built.
+
+**Problem.** The live providers' free tiers have real caps — Groq ≈ 30 RPM /
+14.4K per day, GitHub Models ≈ single-digit RPM / ~150 requests per day — and
+the original design fired 3 concurrent LLM calls per review straight from a
+per-request `BackgroundTask` with zero coordination across PRs.
+
+**Producer/consumer split.** `webhook.py` no longer runs any LLM work: it
+verifies HMAC, dedups the delivery, and calls
+`store.enqueue_or_update(...)` to upsert a durable ticket, then returns `202`
+immediately. A single serial dispatcher (`app/queue/dispatcher.py`,
+`run_forever`) is started as an `asyncio` task from the app lifespan
+(`app/main.py`) and is the **only** caller of the review pipeline — this
+serializes every pacing/quota decision, and serial dispatch is anti-burst by
+construction.
+
+**Durable SQLite ticket, one per PR.** `app/queue/store.py` keeps one row per
+`(repo_full_name, pr_number)` (`UNIQUE` constraint): a fresh push to a PR that
+already has a `pending`/`deferred` ticket updates `head_sha` and re-arms it to
+`pending` instead of stacking a duplicate; a `running` ticket is left to
+finish, with the newer `head_sha` recorded for the next claim. `claim_next_due`
+claims the oldest due ticket (`pending`, or `deferred` whose `not_before` has
+passed) with an atomic `UPDATE ... WHERE status IN ('pending', 'deferred')`,
+so a claimed ticket cannot be re-claimed.
+
+**Reactive detection, no caps.** Adapters (`app/providers/base.py` +
+`google_genai.py`/`groq.py`/`github_models.py`) raise `RateLimited(retry_after)`
+only on an actual `429`, parsing `Retry-After` (seconds or HTTP-date) via
+`parse_retry_after`, falling back to `DEFAULT_RETRY_AFTER_SECONDS` (default
+`60`) when the header is missing or unparseable. No per-provider RPM/RPD
+number is hardcoded anywhere — a short `retry_after` behaves like a
+per-minute limit, a long one like a daily wall; the code does not
+distinguish them.
+
+**Atomic reviews.** `orchestrator.attempt_review()` returns
+`ReviewCompleted(review)` or `ReviewRateLimited(retry_after)`: if any of the
+three specialist calls raises `RateLimited`, all partial results are
+discarded and no comment is posted — the max `retry_after` across the
+rate-limited calls is returned. `run_review()` remains as a
+backward-compatible wrapper (raises `RateLimited` on the rate-limited case)
+so existing scripts/tests are unaffected.
+
+**Placeholder → result, edited in place.** A ticket that can't run now (soft
+`blocked_until` gate, or a fresh `RateLimited`) gets a placeholder comment —
+`formatting.format_placeholder()` — posted through the same marker-based
+`upsert_comment` used for real results. The real comment later overwrites the
+placeholder in place, found via the existing bot marker (no separate
+tracking needed for this). Wording varies by wait magnitude: short waits say
+a rate limit was hit and the review will appear shortly; waits at or above
+`PLACEHOLDER_DAILY_THRESHOLD_SECONDS` (300s) name a daily quota and show an
+ETA computed from `now + retry_after`.
+
+**In-memory `blocked_until` gate.** The dispatcher keeps a per-provider
+`blocked_until` timestamp, learned only from the most recent
+`RateLimited.retry_after`, so it doesn't fire calls it already knows will
+fail. It is a soft optimization only — it is not persisted, and after a
+restart it starts empty. What actually prevents an early run, restart or
+not, is each deferred ticket's own durable `not_before`.
+
+**Restart recovery.** At lifespan startup (`app/main.py`), before the
+dispatcher starts: `store.recover_on_startup()` resets any `running` ticket
+(interrupted mid-review by a crash) back to `pending`; `deferred` tickets are
+left as-is, gated by their persisted `not_before`. The dispatcher then simply
+drains whatever is due.
+
+**Config** (`app/config.py`; none are per-provider caps): `QUEUE_DB_PATH`
+(default `./queue.db`, gitignored along with its `-wal`/`-shm` sidecars),
+`DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
+(default `1`).
+
+**Deliberate simplification vs. the design doc.** The design doc's §6.1/§9
+describe storing the posted comment's `comment_id` on the ticket so a future
+feature could reference "the review comment" directly. The `tickets` table
+does have a `comment_id` column, and `store.mark_done()` accepts an optional
+`comment_id` argument — but nothing in the current dispatcher/orchestrator
+path populates it (`mark_done` is always called with no `comment_id`), so it
+is presently unused. Placeholder→result replacement works purely off the
+existing comment marker, not off a stored `comment_id`. The column is kept
+available for the design doc's §13 "ping comment" future feature, which
+remains out of scope.
+
+**Out of scope** (unchanged from the design doc, all deliberate): provider
+failover on a daily wall, proactive quota accounting (no `x-ratelimit-*`
+tracking, no hardcoded caps), a priority scheme (FIFO is sufficient), and
+horizontal scaling (single process, single dispatcher; the atomic ticket
+claim would make multi-instance possible later but it is neither built for
+nor tested).
+
+**Testing.** Extends section 8's deterministic-first strategy with new
+layers, all using an injected clock (no real sleeps): ticket store
+(`tests/test_queue_store.py`), provider `RateLimited` parsing
+(`tests/test_provider_rate_limited.py`), atomic rate-limit propagation
+(`tests/test_orchestrator_rate_limited.py`), placeholder rendering
+(`tests/test_placeholder_formatting.py`), the dispatcher's burst/daily-wall/
+restart-recovery behavior (`tests/test_dispatcher.py`), and the webhook's
+enqueue path (`tests/test_webhook.py`). One live-verification item remains
+per `CLAUDE.md`'s hygiene rules: confirming GitHub Models actually sends a
+usable `Retry-After` header on a `429` (one deliberate call) — not yet
+performed; until it is, the `DEFAULT_RETRY_AFTER_SECONDS` fallback is what
+governs that provider's backoff.

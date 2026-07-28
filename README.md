@@ -18,15 +18,29 @@ GitHub PR (opened / reopened / synchronize)
   └─▶ POST /webhook
         (1) read RAW body → verify HMAC-SHA256 (constant-time) → 401 if bad
         (2) dedup on X-GitHub-Delivery → 200 no-op if already seen
-        (3) return 202 immediately
-        (4) BackgroundTask: run_review()
+        (3) enqueue/update a durable SQLite ticket for this PR → 202
+              immediately (no LLM work in the request path)
+
+A single background dispatcher (started in the app lifespan) is the only
+caller of the review pipeline, and drains the queue serially:
+        repeat: claim the next due ticket (FIFO, honors a deferred
+                ticket's not_before)
               ├─ GitHub App auth → installation token → fetch PR diff
               ├─ annotate diff with file:line, cap to a token budget
               ├─ asyncio.gather(security, performance, quality,
               │                 return_exceptions=True)
-              ├─ merge results (successes AND failures) + timing + cost
-              └─ find-or-edit the bot's marked PR comment
+              ├─ rate-limited (429)? → post/keep a placeholder comment,
+              │   defer the ticket — retried automatically once the
+              │   provider allows it, durable across a restart
+              └─ otherwise: merge results (successes AND failures) +
+                 timing + cost → find-or-edit the bot's marked PR
+                 comment (replacing any placeholder) → mark ticket done
 ```
+
+This durable review queue absorbs the live providers' real per-minute and
+daily rate limits — see [`SPEC.md` §12](SPEC.md#12-review-queue-rpm--daily-quota-handling)
+for the full design (ticket store, the in-memory `blocked_until` gate,
+restart recovery).
 
 ## Tech stack
 
@@ -73,7 +87,7 @@ uv run ruff check .
 uv run pytest -v
 ```
 
-73 deterministic tests, no real network calls — mocks GitHub's REST API (at
+99 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
 clients, and the webhook HTTP layer. CI (`.github/workflows/project-d-ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
@@ -141,6 +155,23 @@ the full history of runs and timings.
   needs a domain.
 - **Docker**: fully verified (`docker build` + container boot + endpoint
   checks) — installed partway through development, not from the start.
+- **Durable review queue is single-process** (see `SPEC.md` §12) — one
+  dispatcher, no horizontal scaling. The atomic ticket claim would make a
+  multi-instance deployment possible later, but it is neither built for nor
+  tested.
+- **`blocked_until` is in-memory, not durable.** It's re-learned from the
+  first honest `429` after a restart; only a deferred ticket's own persisted
+  `not_before` is what actually prevents an early run.
+- **"Never partial" wastes a little quota at the daily boundary.** If the
+  real remaining daily budget is 1-2 calls, the atomic review still fires 3;
+  the 1-2 that succeed are discarded and the whole review defers to reset.
+  Accepted cost of a simple, atomic review pipeline.
+- **`DEFAULT_RETRY_AFTER_SECONDS` (default 60) is a backoff fallback**, used
+  only when a `429` omits a usable `Retry-After` header — not a per-provider
+  cap. Groq is documented to send `retry-after`; **GitHub Models sending a
+  usable `Retry-After` is still an open assumption**, to be confirmed with a
+  single live call per `CLAUDE.md`'s hygiene rules (not yet performed as of
+  this writing) — until then, that provider's backoff runs on the fallback.
 
 See `SETUP.md` for the full narrative of each deviation, including what was
 tried and why.

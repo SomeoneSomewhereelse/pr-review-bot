@@ -49,3 +49,11 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
   a second genuinely live $0 cross-vendor path (modest RPM/RPD, see `SETUP.md`).
 - **Host**: local/free host + **free Cloudflare Tunnel** → $0 public URL.
 - **CI**: GitHub Actions — $0 on the free tier for this workload.
+
+## 5. Durable review queue — no cost impact
+
+The durable review queue (`SPEC.md` §12) changes **when** LLM calls happen
+(serialized through one dispatcher, deferred/retried on a `429`), not **how
+many** are made per review — the per-review token math in section 2 is
+unchanged. SQLite ticket persistence is embedded (stdlib `sqlite3`, a local
+file), so it adds **$0** infra cost.
