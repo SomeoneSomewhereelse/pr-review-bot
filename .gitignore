@@ -14,3 +14,8 @@ __pycache__/
 # Local session state (machine-specific, not shared)
 memory.md
 auth-link.txt
+
+# Durable queue database
+queue.db
+queue.db-wal
+queue.db-shm
