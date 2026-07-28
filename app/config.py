@@ -25,5 +25,7 @@ class Settings(BaseSettings):
     github_models_token: str = ""
     github_models_model: str = "openai/gpt-4o-mini"
 
+    default_retry_after_seconds: float = 60.0
+
 
 settings = Settings()

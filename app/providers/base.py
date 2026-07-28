@@ -24,6 +24,8 @@ Later steps depend on this shape:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -46,3 +48,52 @@ class LLMResponse:
 
 class LLMProvider(Protocol):
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse: ...
+
+
+class RateLimited(Exception):
+    """Raised by an adapter when the provider returns HTTP 429.
+
+    ``retry_after`` is seconds until a retry is allowed, taken from the
+    provider's ``Retry-After`` header (or ``DEFAULT_RETRY_AFTER_SECONDS`` when
+    the header is absent/unparseable). It is the SINGLE quota signal the
+    dispatcher understands — a short value means a per-minute limit, a long
+    value means a daily limit; the code does not distinguish them.
+    """
+
+    def __init__(self, retry_after: float):
+        super().__init__(f"rate limited; retry after {retry_after}s")
+        self.retry_after = retry_after
+
+
+def parse_retry_after(value: str | None, now: datetime, default: float) -> float:
+    """Parse a ``Retry-After`` header value (delta-seconds or HTTP-date)."""
+    if value is None:
+        return default
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return max(0.0, (dt - now).total_seconds())
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
+def rate_limited_or_none(exc: Exception, now: datetime, default: float) -> "RateLimited | None":
+    """Return a ``RateLimited`` if ``exc`` is a 429 transport error, else None.
+
+    SDK-agnostic: OpenAI/Groq errors expose ``.status_code``; google-genai's
+    ``APIError`` exposes ``.code``. Headers (if any) live on ``.response.headers``.
+    """
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status != 429:
+        return None
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None) or {}
+    retry_after = parse_retry_after(headers.get("retry-after"), now, default)
+    return RateLimited(retry_after)

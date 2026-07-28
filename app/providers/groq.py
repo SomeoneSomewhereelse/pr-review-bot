@@ -20,12 +20,13 @@ provider-agnostic notion of "validation failed".
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from groq import AsyncGroq
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.providers.base import LLMResponse
+from app.providers.base import LLMResponse, rate_limited_or_none
 
 
 def _parse(raw_text: str, schema: type[BaseModel]) -> BaseModel | None:
@@ -62,14 +63,22 @@ class GroqProvider:
         self._model = settings.groq_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": _schema_system_prompt(system, schema)},
-                {"role": "user", "content": user},
-            ],
-            response_format={"type": "json_object"},
-        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": _schema_system_prompt(system, schema)},
+                    {"role": "user", "content": user},
+                ],
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:  # noqa: BLE001 - re-raised unless it's a 429
+            rl = rate_limited_or_none(
+                exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds
+            )
+            if rl is not None:
+                raise rl from exc
+            raise
 
         raw_text = response.choices[0].message.content or ""
         usage = response.usage

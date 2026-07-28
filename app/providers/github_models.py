@@ -16,12 +16,13 @@ other provider's never-raise contract.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.providers.base import LLMResponse
+from app.providers.base import LLMResponse, rate_limited_or_none
 
 _BASE_URL = "https://models.github.ai/inference"
 
@@ -80,14 +81,22 @@ class GitHubModelsProvider:
         self._model = settings.github_models_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            response_format=_response_format(schema),
-        )
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                response_format=_response_format(schema),
+            )
+        except Exception as exc:  # noqa: BLE001 - re-raised unless it's a 429
+            rl = rate_limited_or_none(
+                exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds
+            )
+            if rl is not None:
+                raise rl from exc
+            raise
 
         raw_text = response.choices[0].message.content or ""
         usage = response.usage

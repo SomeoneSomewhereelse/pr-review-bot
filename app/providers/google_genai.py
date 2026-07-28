@@ -19,13 +19,14 @@ actually-live provider, verified for real in
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
 from app.config import settings
-from app.providers.base import LLMResponse
+from app.providers.base import LLMResponse, rate_limited_or_none
 
 
 def _parse(raw_text: str, schema: type[BaseModel]) -> BaseModel | None:
@@ -48,7 +49,15 @@ async def _complete(
         response_mime_type="application/json",
         response_schema=schema,
     )
-    response = await client.aio.models.generate_content(model=model, contents=user, config=config)
+    try:
+        response = await client.aio.models.generate_content(model=model, contents=user, config=config)
+    except Exception as exc:  # noqa: BLE001 - re-raised unless it's a 429
+        rl = rate_limited_or_none(
+            exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds
+        )
+        if rl is not None:
+            raise rl from exc
+        raise
 
     raw_text = response.text or ""
     usage = response.usage_metadata
