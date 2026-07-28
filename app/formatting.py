@@ -14,10 +14,14 @@ this file's control flow, only the ``_SECTION_CONFIG`` table.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from app.github_app import COMMENT_MARKER
 from app.specialists.schemas import ReviewResult, SpecialistResult
 
 _SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
+
+PLACEHOLDER_DAILY_THRESHOLD_SECONDS = 300
 
 # Per-specialist section rendering config: emoji/title + table columns.
 # Each column is (dict-key-in-finding, header-label, optional formatter).
@@ -109,3 +113,22 @@ def format_comment(result: ReviewResult) -> str:
 
     body = f"{header}\n{sections}{footer}"
     return f"{COMMENT_MARKER}\n{body}"
+
+
+def format_placeholder(pr_number: int, retry_after: float, now: datetime) -> str:
+    """Marker-prefixed placeholder comment shown while a review is delayed.
+
+    The real result later edits this same comment in place (found via the
+    marker). Wording is chosen by wait magnitude: short = per-minute rate
+    limit; long = daily quota, with an ETA computed from ``now + retry_after``.
+    """
+    header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
+    if retry_after < PLACEHOLDER_DAILY_THRESHOLD_SECONDS:
+        note = "⏳ Queued behind rate limit — review will appear shortly."
+    else:
+        eta = (now + timedelta(seconds=retry_after)).strftime("%H:%M UTC")
+        note = (
+            "⏳ Daily model quota reached — review queued, will post "
+            f"automatically after the provider's limit resets (~{eta})."
+        )
+    return f"{COMMENT_MARKER}\n{header}\n_{note}_\n"
