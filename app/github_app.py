@@ -10,6 +10,7 @@ those belong to ``orchestrator.py`` / ``diff_utils.py``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from github import Auth, Github
@@ -20,6 +21,13 @@ from app.config import settings
 # Hidden marker used to find the bot's own comment across re-reviews so a
 # `synchronize` event edits it in place instead of spamming a new one.
 COMMENT_MARKER = "<!-- ai-code-review-bot -->"
+
+# Sub-marker delimiting an optional failure footnote appended below a preserved
+# good review. Idempotent: a new footnote replaces any prior block, and a later
+# successful review's full-body overwrite (via upsert_comment) removes it.
+FAIL_NOTE_START = "<!-- ai-review-fail-note -->"
+FAIL_NOTE_END = "<!-- /ai-review-fail-note -->"
+_FAIL_NOTE_RE = re.compile(re.escape(FAIL_NOTE_START) + r".*?" + re.escape(FAIL_NOTE_END), re.DOTALL)
 
 
 def _read_private_key() -> str:
@@ -88,3 +96,23 @@ def upsert_comment(repo_full_name: str, pr_number: int, body: str) -> IssueComme
             return comment
 
     return pr.create_issue_comment(marked_body)
+
+
+def append_review_footnote(repo_full_name: str, pr_number: int, footnote: str) -> IssueComment:
+    """Append a failure footnote below the bot's marker comment, preserving the review.
+
+    Strips any existing FAIL_NOTE_* block first, so repeated failures replace the
+    footnote in place rather than stacking. If no marker comment exists (e.g. it was
+    manually deleted), creates one carrying COMMENT_MARKER so future upserts find it.
+    """
+    gh = get_installation_client()
+    repo = gh.get_repo(repo_full_name)
+    pr = repo.get_pull(pr_number)
+
+    for comment in pr.get_issue_comments():
+        if COMMENT_MARKER in comment.body:
+            base = _FAIL_NOTE_RE.sub("", comment.body).rstrip()
+            comment.edit(f"{base}\n\n{footnote}")
+            return comment
+
+    return pr.create_issue_comment(f"{COMMENT_MARKER}\n{footnote}")

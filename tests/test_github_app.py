@@ -211,3 +211,66 @@ def test_upsert_comment_edits_existing_marker_comment_in_place(fake_transport, m
     assert "new findings" in edited["body"]
     assert "old findings" not in edited["body"]
     assert result.id == 333
+
+
+def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(fake_transport, monkeypatch):
+    edited = {}
+    existing_body = (
+        f"{github_app.COMMENT_MARKER}\n## Review\ngood findings\n\n"
+        f"{github_app.FAIL_NOTE_START}\n> old failure note\n{github_app.FAIL_NOTE_END}"
+    )
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        [{"id": 333, "body": existing_body, "user": {"login": "bot"},
+          "url": f"{REPO_API_URL}/issues/comments/333"}],
+    )
+
+    def send_with_patch_capture(request, **kwargs):
+        if request.method == "PATCH" and "/issues/comments/333" in request.url:
+            body = json.loads(request.body)
+            edited["body"] = body["body"]
+            return fake_transport._build_response(
+                request, {"id": 333, "body": body["body"], "user": {"login": "bot"}}, 200
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+
+    footnote = f"{github_app.FAIL_NOTE_START}\n> new failure note\n{github_app.FAIL_NOTE_END}"
+    github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
+
+    assert "good findings" in edited["body"]                 # review preserved
+    assert "new failure note" in edited["body"]
+    assert "old failure note" not in edited["body"]          # prior footnote replaced
+    assert edited["body"].count(github_app.FAIL_NOTE_START) == 1  # no stacking
+
+
+def test_append_review_footnote_creates_marker_comment_when_none_exists(fake_transport, monkeypatch):
+    created = {}
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        [{"id": 111, "body": "human comment, no marker", "user": {"login": "someone"}}],
+    )
+
+    def send_with_create_capture(request, **kwargs):
+        if request.method == "POST" and request.url.endswith(f"/issues/{PR_NUMBER}/comments"):
+            body = json.loads(request.body)
+            created["body"] = body["body"]
+            return fake_transport._build_response(
+                request, {"id": 222, "body": body["body"], "user": {"login": "bot"}}, 201
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_create_capture))
+
+    footnote = f"{github_app.FAIL_NOTE_START}\n> failure note\n{github_app.FAIL_NOTE_END}"
+    github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
+
+    assert github_app.COMMENT_MARKER in created["body"]
+    assert "failure note" in created["body"]
