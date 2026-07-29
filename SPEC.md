@@ -358,7 +358,26 @@ the PR while a re-review waits it out, so there is nothing to notify.
 `claim_next_due` claims the oldest due ticket (`pending`, or `deferred`
 whose `not_before` has passed) with an atomic
 `UPDATE ... WHERE status IN ('pending', 'deferred')`, so a claimed ticket
-cannot be re-claimed.
+cannot be re-claimed. `enqueue_or_update`'s own SELECT → branch → INSERT/
+UPDATE runs inside an explicit `BEGIN IMMEDIATE` transaction (manual
+begin/commit/rollback, connection closed in a `finally`) on its single
+connection, so the whole read-branch-write is atomic against
+`claim_next_due`/`finalize_review`/`defer_*` even if a future change moves
+the call off the event loop (e.g. `asyncio.to_thread`) — not merely safe by
+virtue of today's synchronous, no-`await`-in-between execution. This is
+deadlock-free: one lockable resource (`queue.db`) and one connection per
+transaction rules out a circular wait, the transaction body opens no
+second connection and calls no other `store` function (`_due_after_cooldown`
+is pure Python), and no lock is ever held across an `await` (dispatcher
+store calls are synchronous; the only `await`s in the review path — network
+I/O in `attempt_review` — touch no DB). `BEGIN IMMEDIATE` also removes the
+classic SQLite footgun it replaces (two connections each holding a SHARED
+read lock, then both trying to upgrade to write, deadlocking each other):
+it takes the write lock up front, so a losing concurrent writer blocks
+before touching anything, waits up to the default 5s busy-timeout, and
+raises `OperationalError("database is locked")` on contention rather than
+deadlocking — and these transactions are sub-millisecond, so real
+contention is negligible.
 
 **Reactive detection, no caps.** Adapters (`app/providers/base.py` +
 `google_genai.py`/`groq.py`/`github_models.py`) raise `RateLimited(retry_after)`
@@ -408,15 +427,45 @@ mid-run push coalesces into an immediate re-review, and a fresh push to a
 `done`/`failed` ticket handled by `enqueue_or_update`'s terminal-state
 branch.
 
+**Never downgrade a good visible review.** A ticket's own
+`last_reviewed_at` (set only by `finalize_review` on a genuinely successful
+completion) is the signal that a real review is currently on the PR — a
+tiny guard, `dispatcher._has_visible_review(ticket)`, checks
+`last_reviewed_at is not None`. Two places used to overwrite that good
+review unconditionally with something strictly worse; both now check the
+guard first. At the terminal hard-stop (once `attempts` reaches
+`DISPATCHER_MAX_FAILURE_ATTEMPTS`): if no good review is present, the
+dispatcher overwrites the marker comment with
+`formatting.format_failure(pr_number, attempts)` as before; if a good
+review **is** present, it instead calls `github_app.append_review_footnote`
+to append a sub-marker-delimited (`FAIL_NOTE_START`/`FAIL_NOTE_END`)
+footnote below the preserved review, via
+`formatting.format_failure_footnote(attempts)` — a repeated terminal
+failure replaces the prior footnote in place (no stacking), and the next
+successful review's `upsert_comment` overwrites the whole comment body, so
+the footnote disappears on its own with no separate cleanup. This also
+closes a silent-double-failure gap: the notice (overwrite or footnote) is
+now posted **before** `store.mark_failed`, and if posting itself raises,
+the ticket is **not** stranded as terminal — it goes through
+`store.defer_failed` with the usual `compute_backoff` instead, so it keeps
+retrying (and reattempts the notice) until visibility is actually restored.
+Both `format_failure` and `format_failure_footnote` pluralize correctly
+("1 attempt" / "N attempts").
+
 **Placeholder → result, edited in place.** A ticket that can't run now (soft
 `blocked_until` gate, or a fresh `RateLimited`) gets a placeholder comment —
 `formatting.format_placeholder()` — posted through the same marker-based
-`upsert_comment` used for real results. The real comment later overwrites the
-placeholder in place, found via the existing bot marker (no separate
-tracking needed for this). Wording varies by wait magnitude: short waits say
-a rate limit was hit and the review will appear shortly; waits at or above
-`PLACEHOLDER_DAILY_THRESHOLD_SECONDS` (300s) name a daily quota and show an
-ETA computed from `now + retry_after`.
+`upsert_comment` used for real results, **unless** a good review is already
+present (`_has_visible_review`), in which case the placeholder is
+suppressed and the ticket still defers silently — the existing good review
+stays up untouched until a later successful re-review overwrites it in
+place. (A first-ever review, with `last_reviewed_at` still `None`, always
+gets the placeholder — it is the only signal available at that point.) The
+real comment later overwrites the placeholder in place, found via the
+existing bot marker (no separate tracking needed for this). Wording varies
+by wait magnitude: short waits say a rate limit was hit and the review will
+appear shortly; waits at or above `PLACEHOLDER_DAILY_THRESHOLD_SECONDS`
+(300s) name a daily quota and show an ETA computed from `now + retry_after`.
 
 **In-memory `blocked_until` gate.** The dispatcher keeps a per-provider
 `blocked_until` timestamp, learned only from the most recent
