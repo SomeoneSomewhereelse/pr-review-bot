@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from app import github_app
 from app.config import settings
-from app.formatting import format_failure, format_placeholder
+from app.formatting import format_failure, format_failure_footnote, format_placeholder
 from app.orchestrator import ReviewRateLimited, attempt_review
 from app.queue import store
 
@@ -104,13 +104,33 @@ async def process_next_due(now: datetime) -> StepResult:
         logger.exception("review attempt failed for ticket %s", ticket.id)
         next_attempt = ticket.attempts + 1
         if next_attempt >= settings.dispatcher_max_failure_attempts:
+            try:
+                if _has_visible_review(ticket):
+                    # Preserve the good review; append a self-cleaning footnote.
+                    await asyncio.to_thread(
+                        github_app.append_review_footnote,
+                        ticket.repo_full_name,
+                        ticket.pr_number,
+                        format_failure_footnote(next_attempt),
+                    )
+                else:
+                    # No good review to preserve — the notice takes the marker comment.
+                    await asyncio.to_thread(
+                        github_app.upsert_comment,
+                        ticket.repo_full_name,
+                        ticket.pr_number,
+                        format_failure(ticket.pr_number, next_attempt),
+                    )
+            except Exception:  # noqa: BLE001 - couldn't post the notice; don't strand as terminal
+                logger.exception("failed to post terminal failure notice for ticket %s", ticket.id)
+                backoff = compute_backoff(next_attempt, _jitter())
+                store.defer_failed(
+                    ticket.id,
+                    not_before=(now + timedelta(seconds=backoff)).isoformat(),
+                    now=now.isoformat(),
+                )
+                return StepResult(action="deferred", ticket_id=ticket.id)
             store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
-            await asyncio.to_thread(
-                github_app.upsert_comment,
-                ticket.repo_full_name,
-                ticket.pr_number,
-                format_failure(ticket.pr_number, next_attempt),
-            )
             return StepResult(action="failed", ticket_id=ticket.id)
         backoff = compute_backoff(next_attempt, _jitter())
         until = now + timedelta(seconds=backoff)

@@ -299,6 +299,74 @@ async def test_rate_limited_outcome_does_not_overwrite_good_review(monkeypatch):
     assert posted == []  # no placeholder over the good review
 
 
+def _stub_footnotes(monkeypatch):
+    appended = []
+    monkeypatch.setattr(dispatcher.github_app, "append_review_footnote",
+                        lambda repo, pr, footnote: appended.append((pr, footnote)))
+    return appended
+
+
+async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeypatch):
+    posted = _stub_comments(monkeypatch)
+    appended = _stub_footnotes(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
+    tid = _reviewed_then_pushed(22, monkeypatch)
+
+    async def boom(repo, pr):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "failed"
+    assert store.get_ticket(tid).status == "failed"
+    assert appended and appended[0][0] == 22   # footnote appended
+    assert posted == []                         # good review NOT overwritten
+
+
+async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch):
+    posted = _stub_comments(monkeypatch)
+    appended = _stub_footnotes(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
+    tid = _enqueue(pr=24)  # fresh: last_reviewed_at is None
+
+    async def boom(repo, pr):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "failed"
+    assert store.get_ticket(tid).status == "failed"
+    assert posted and posted[0][0] == 24        # overwrite via upsert_comment
+    assert "could not be completed" in posted[0][1].lower()
+    assert appended == []                        # no footnote when nothing to preserve
+
+
+async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
+    monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    tid = _enqueue(pr=25)  # fresh -> overwrite path
+
+    def boom_post(repo, pr, body):
+        raise RuntimeError("github down")
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", boom_post)
+
+    async def boom(repo, pr):
+        raise RuntimeError("review outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"           # NOT failed (visibility guaranteed first)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.attempts == 1
+    assert t.not_before == (NOW + timedelta(seconds=2)).isoformat()
+
+
 async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=4)
