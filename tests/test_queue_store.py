@@ -74,7 +74,7 @@ def test_claim_is_fifo_by_enqueued_at():
 def test_deferred_ticket_not_claimed_before_not_before():
     tid = _enqueue()
     store.claim_next_due(now=T0)          # -> running
-    store.defer(tid, not_before=FUTURE, now=T0)
+    store.defer_rate_limited(tid, not_before=FUTURE, now=T0)
     assert store.claim_next_due(now=T1) is None            # not yet due
     assert store.claim_next_due(now=FUTURE).id == tid       # due now
 
@@ -95,11 +95,22 @@ def test_recover_on_startup_resets_running_to_pending():
     assert store.get_ticket(tid).status == "pending"
 
 
-def test_defer_increments_attempts():
+def test_defer_rate_limited_does_not_increment_attempts():
     tid = _enqueue()
     store.claim_next_due(now=T0)
-    store.defer(tid, not_before=FUTURE, now=T0)
-    assert store.get_ticket(tid).attempts == 1
+    store.defer_rate_limited(tid, not_before=FUTURE, now=T0)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.attempts == 0
+
+
+def test_defer_failed_increments_attempts():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.defer_failed(tid, not_before=FUTURE, now=T0)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.attempts == 1
 
 
 def test_mark_failed_sets_status_failed():

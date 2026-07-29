@@ -152,6 +152,25 @@ def defer(ticket_id: int, not_before: str, now: str) -> None:
         )
 
 
+def defer_rate_limited(ticket_id: int, not_before: str, now: str) -> None:
+    """Per-provider rate-limit deferral. Does NOT count toward the hard stop."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tickets SET status = 'deferred', not_before = ?, updated_at = ? WHERE id = ?",
+            (not_before, now, ticket_id),
+        )
+
+
+def defer_failed(ticket_id: int, not_before: str, now: str) -> None:
+    """Per-ticket hard-failure deferral. Increments attempts (drives backoff + hard stop)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tickets SET status = 'deferred', not_before = ?, "
+            "attempts = attempts + 1, updated_at = ? WHERE id = ?",
+            (not_before, now, ticket_id),
+        )
+
+
 def mark_done(ticket_id: int, now: str, comment_id: int | None = None) -> None:
     with _connect() as conn:
         conn.execute(
