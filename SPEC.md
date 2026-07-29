@@ -399,9 +399,14 @@ code change). Once a ticket's hard-failure count reaches
 `store.mark_failed` instead of deferring again and posts a marker-prefixed
 `formatting.format_failure(pr_number, attempts)` comment naming the attempt
 count — no raw exception text, per this project's secrets-hygiene rule —
-satisfying "partial failure is always visible" for the terminal case. A
-subsequent successful review (or a fresh push re-arming the ticket) resets
-`attempts` to 0.
+satisfying "partial failure is always visible" for the terminal case. A plain
+successful completion (no mid-run push) leaves `attempts` unchanged on the
+now-`done` row — harmless, since that count is never read again unless the
+ticket re-arms. `attempts` is explicitly reset to 0 in the two cases that
+actually re-arm a ticket: `finalize_review`'s dirty-flag branch, when a
+mid-run push coalesces into an immediate re-review, and a fresh push to a
+`done`/`failed` ticket handled by `enqueue_or_update`'s terminal-state
+branch.
 
 **Placeholder → result, edited in place.** A ticket that can't run now (soft
 `blocked_until` gate, or a fresh `RateLimited`) gets a placeholder comment —
