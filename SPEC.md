@@ -337,17 +337,28 @@ serializes every pacing/quota decision, and serial dispatch is anti-burst by
 construction.
 
 **Durable SQLite ticket, one per PR.** `app/queue/store.py` keeps one row per
-`(repo_full_name, pr_number)` (`UNIQUE` constraint): a fresh push to a PR that
-already has a `pending`/`deferred` ticket updates `head_sha` and re-arms it to
-`pending` instead of stacking a duplicate; a `running` ticket is left to
-finish — its in-flight review completes and finalizes normally against the
-commit it started with, and the newer `head_sha` is only updated on the row
-for record-keeping, not re-reviewed as part of that ticket. A separate push
-after the ticket reaches `done`/`failed` (i.e. once it is no longer
-`running`) enqueues a fresh review as usual. `claim_next_due`
-claims the oldest due ticket (`pending`, or `deferred` whose `not_before` has
-passed) with an atomic `UPDATE ... WHERE status IN ('pending', 'deferred')`,
-so a claimed ticket cannot be re-claimed.
+`(repo_full_name, pr_number)` (`UNIQUE` constraint). `enqueue_or_update`
+applies a single per-state re-review policy (full design rationale:
+`docs/superpowers/specs/2026-07-28-dispatcher-followups-design.md` §6):
+a push to a **`pending`** ticket updates `head_sha` and stays `pending`
+(unreviewed, so no cooldown applies); a push to a **`deferred`** ticket
+**rides out** — `head_sha` is updated but `status`/`not_before` are left
+untouched, so a push can never shorten a provider's rate-limit wait or an
+in-progress cooldown; a push to a **`running`** ticket updates `head_sha`
+and sets a `rereview_requested` dirty flag (no task cancellation), so
+`store.finalize_review` re-arms that ticket for exactly one coalesced
+follow-up review of the latest commit once the in-flight run completes; a
+push to a **`done`/`failed`** ticket re-arms via the `_due_after_cooldown`
+helper — `attempts` resets to 0, and the ticket lands on `pending`
+immediately or `deferred` until the per-PR cooldown
+(`DISPATCHER_REREVIEW_COOLDOWN_SECONDS`, default 300s, keyed on
+`last_reviewed_at`, the timestamp of the last *completed* review) elapses.
+The cooldown is silent by design — the previous review's comment stays on
+the PR while a re-review waits it out, so there is nothing to notify.
+`claim_next_due` claims the oldest due ticket (`pending`, or `deferred`
+whose `not_before` has passed) with an atomic
+`UPDATE ... WHERE status IN ('pending', 'deferred')`, so a claimed ticket
+cannot be re-claimed.
 
 **Reactive detection, no caps.** Adapters (`app/providers/base.py` +
 `google_genai.py`/`groq.py`/`github_models.py`) raise `RateLimited(retry_after)`
@@ -365,6 +376,32 @@ discarded and no comment is posted — the max `retry_after` across the
 rate-limited calls is returned. `run_review()` remains as a
 backward-compatible wrapper (raises `RateLimited` on the rate-limited case)
 so existing scripts/tests are unaffected.
+
+**Failure backoff + hard stop.** Two waits are kept separate end-to-end so a
+provider-wide throttle and a single poisoned ticket never share a clock. A
+`RateLimited` outcome (or the pre-flight `blocked_until` gate firing) defers
+the ticket via `store.defer_rate_limited` — per-provider, floored at
+`DISPATCHER_MIN_RETRY_AFTER_SECONDS` (default 1.0s) so a degenerate
+`Retry-After: 0` or already-past HTTP-date can't tight-loop — and does
+**not** count toward the hard stop, since a provider eventually frees up on
+its own. Any other exception from `attempt_review` is a hard failure:
+`store.defer_failed` increments the ticket's per-ticket `attempts` and the
+dispatcher computes the next wait with the pure, unit-tested
+`compute_backoff(attempts, jitter) = min(BASE * 2**(attempts-1), CAP) +
+jitter()` (`DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS` default 2.0,
+`DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS` default 300.0). `jitter()` comes
+through an injectable module-level seam, `dispatcher._jitter()`, returning a
+value in `[0, DISPATCHER_BACKOFF_JITTER_SECONDS]` (default 0.0 —
+deterministic/off in tests and single-instance operation; a future
+multi-instance deployment can set it above 0 to spread retries without a
+code change). Once a ticket's hard-failure count reaches
+`DISPATCHER_MAX_FAILURE_ATTEMPTS` (default 5), the dispatcher calls
+`store.mark_failed` instead of deferring again and posts a marker-prefixed
+`formatting.format_failure(pr_number, attempts)` comment naming the attempt
+count — no raw exception text, per this project's secrets-hygiene rule —
+satisfying "partial failure is always visible" for the terminal case. A
+subsequent successful review (or a fresh push re-arming the ticket) resets
+`attempts` to 0.
 
 **Placeholder → result, edited in place.** A ticket that can't run now (soft
 `blocked_until` gate, or a fresh `RateLimited`) gets a placeholder comment —
@@ -385,23 +422,32 @@ not, is each deferred ticket's own durable `not_before`.
 
 **Restart recovery.** At lifespan startup (`app/main.py`), before the
 dispatcher starts: `store.recover_on_startup()` resets any `running` ticket
-(interrupted mid-review by a crash) back to `pending`; `deferred` tickets are
-left as-is, gated by their persisted `not_before`. The dispatcher then simply
+(interrupted mid-review by a crash) back to `pending`, also clearing a
+`rereview_requested` flag if one was set (the fresh `pending` review already
+covers the latest commit, so the flag is moot); `deferred` tickets are left
+as-is, gated by their persisted `not_before`. The dispatcher then simply
 drains whatever is due.
 
 **Config** (`app/config.py`; none are per-provider caps): `QUEUE_DB_PATH`
 (default `./queue.db`, gitignored along with its `-wal`/`-shm` sidecars),
 `DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
-(default `1`).
+(default `1`), `DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS` (default `2.0`),
+`DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS` (default `300.0`),
+`DISPATCHER_MAX_FAILURE_ATTEMPTS` (default `5`),
+`DISPATCHER_MIN_RETRY_AFTER_SECONDS` (default `1.0`),
+`DISPATCHER_BACKOFF_JITTER_SECONDS` (default `0.0`, off),
+`DISPATCHER_REREVIEW_COOLDOWN_SECONDS` (default `300.0`).
 
 **Deliberate simplification vs. the design doc.** The design doc's §6.1/§9
 describe storing the posted comment's `comment_id` on the ticket so a future
 feature could reference "the review comment" directly. The `tickets` table
-does have a `comment_id` column, and `store.mark_done()` accepts an optional
-`comment_id` argument — but nothing in the current dispatcher/orchestrator
-path populates it (`mark_done` is always called with no `comment_id`), so it
-is presently unused. Placeholder→result replacement works purely off the
-existing comment marker, not off a stored `comment_id`. The column is kept
+does have a `comment_id` column, and `store.finalize_review()` (the method
+that replaced the earlier `mark_done()` when the dirty-flag re-review policy
+was added) accepts an optional `comment_id` argument — but nothing in the
+current dispatcher/orchestrator path populates it (`finalize_review` is
+always called with no `comment_id`), so it is presently unused.
+Placeholder→result replacement works purely off the existing comment
+marker, not off a stored `comment_id`. The column is kept
 available for the design doc's §13 "ping comment" future feature, which
 remains out of scope.
 
