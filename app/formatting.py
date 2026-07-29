@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from app.github_app import COMMENT_MARKER
+from app.github_app import COMMENT_MARKER, FAIL_NOTE_END, FAIL_NOTE_START
 from app.specialists.schemas import ReviewResult, SpecialistResult
 
 _SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
@@ -136,12 +136,26 @@ def format_placeholder(pr_number: int, retry_after: float, now: datetime) -> str
 
 def format_failure(pr_number: int, attempts: int) -> str:
     """Marker-prefixed comment shown when a review is abandoned after repeated
-    hard failures. Shows only the attempt count — never raw exception text
-    (secrets hygiene). The marker edits any existing review/placeholder in place.
-    """
+    hard failures AND no prior good review exists to preserve. Shows only the
+    attempt count — never raw exception text (secrets hygiene)."""
     header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
+    plural = "attempt" if attempts == 1 else "attempts"
     note = (
-        f"❌ Automated review could not be completed after {attempts} attempts "
+        f"❌ Automated review could not be completed after {attempts} {plural} "
         "due to a service error. It will retry automatically on the next push."
     )
     return f"{COMMENT_MARKER}\n{header}\n_{note}_\n"
+
+
+def format_failure_footnote(attempts: int) -> str:
+    """FAIL_NOTE_*-delimited footnote appended below a preserved good review when a
+    later re-review hard-fails. Self-cleaning (the next successful review overwrites
+    the whole comment) and idempotent (replaces any prior footnote). No raw error text."""
+    plural = "attempt" if attempts == 1 else "attempts"
+    return (
+        f"{FAIL_NOTE_START}\n"
+        f"> ⚠️ A later automated re-review could not be completed after {attempts} "
+        f"{plural} (service error). The review above may be behind the latest commit; "
+        "it will retry on the next push.\n"
+        f"{FAIL_NOTE_END}"
+    )

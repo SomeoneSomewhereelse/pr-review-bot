@@ -31,3 +31,24 @@ def test_format_failure_has_marker_pr_and_attempts_no_error_text():
     assert "PR #42" in body
     assert "5" in body                       # attempt count surfaced
     assert "traceback" not in body.lower()   # no raw error/exception text
+
+
+def test_format_failure_singular_grammar():
+    from app.formatting import format_failure
+
+    body = format_failure(pr_number=1, attempts=1)
+    assert "1 attempt" in body
+    assert "1 attempts" not in body
+
+
+def test_format_failure_footnote_submarkers_and_grammar():
+    from app.formatting import format_failure_footnote
+    from app.github_app import FAIL_NOTE_END, FAIL_NOTE_START
+
+    body = format_failure_footnote(attempts=3)
+    assert FAIL_NOTE_START in body and FAIL_NOTE_END in body
+    assert "3 attempts" in body
+    assert "traceback" not in body.lower()  # no raw error text
+
+    single = format_failure_footnote(attempts=1)
+    assert "1 attempt" in single and "1 attempts" not in single
