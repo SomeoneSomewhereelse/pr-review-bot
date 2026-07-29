@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     dispatcher_failure_base_backoff_seconds: float = 2.0
     dispatcher_failure_max_backoff_seconds: float = 300.0
     dispatcher_max_failure_attempts: int = 5
+    dispatcher_max_notice_post_attempts: int = 3
     dispatcher_min_retry_after_seconds: float = 1.0
     dispatcher_backoff_jitter_seconds: float = 0.0
     dispatcher_rereview_cooldown_seconds: float = 300.0

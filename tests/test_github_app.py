@@ -248,6 +248,55 @@ def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(fake_tr
     assert edited["body"].count(github_app.FAIL_NOTE_START) == 1  # no stacking
 
 
+def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_transport, monkeypatch):
+    """A stray, unmatched FAIL_NOTE_START inside real finding text (e.g. a
+    specialist quoting this very file's source) must NOT be treated as the
+    start of a footnote block to strip -- only a WELL-FORMED TRAILING block
+    (one that actually ends the body) should be replaced. Regression test for
+    the content-loss bug where a first-START-to-next-END regex spanned from
+    the stray marker all the way to the real trailing footnote's END,
+    deleting genuine review content in between.
+    """
+    edited = {}
+    existing_body = (
+        f"{github_app.COMMENT_MARKER}\n## Review\n"
+        f"Finding: the string `{github_app.FAIL_NOTE_START}` appears in app/github_app.py "
+        f"and should be reviewed for clarity.\n\n"
+        f"Other real finding: consider renaming this variable.\n\n"
+        f"{github_app.FAIL_NOTE_START}\n> old failure note\n{github_app.FAIL_NOTE_END}"
+    )
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        [{"id": 333, "body": existing_body, "user": {"login": "bot"},
+          "url": f"{REPO_API_URL}/issues/comments/333"}],
+    )
+
+    def send_with_patch_capture(request, **kwargs):
+        if request.method == "PATCH" and "/issues/comments/333" in request.url:
+            body = json.loads(request.body)
+            edited["body"] = body["body"]
+            return fake_transport._build_response(
+                request, {"id": 333, "body": body["body"], "user": {"login": "bot"}}, 200
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+
+    footnote = f"{github_app.FAIL_NOTE_START}\n> new failure note\n{github_app.FAIL_NOTE_END}"
+    github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
+
+    # The stray marker's surrounding real content must survive.
+    assert "appears in app/github_app.py" in edited["body"]
+    assert "consider renaming this variable" in edited["body"]
+    # Only the real trailing footnote was replaced.
+    assert "new failure note" in edited["body"]
+    assert "old failure note" not in edited["body"]
+    assert edited["body"].count(github_app.FAIL_NOTE_START) == 2  # stray + new trailing one
+
+
 def test_append_review_footnote_creates_marker_comment_when_none_exists(fake_transport, monkeypatch):
     created = {}
     fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())

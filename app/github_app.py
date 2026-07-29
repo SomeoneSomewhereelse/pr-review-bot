@@ -10,7 +10,6 @@ those belong to ``orchestrator.py`` / ``diff_utils.py``.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from github import Auth, Github
@@ -27,7 +26,26 @@ COMMENT_MARKER = "<!-- ai-code-review-bot -->"
 # successful review's full-body overwrite (via upsert_comment) removes it.
 FAIL_NOTE_START = "<!-- ai-review-fail-note -->"
 FAIL_NOTE_END = "<!-- /ai-review-fail-note -->"
-_FAIL_NOTE_RE = re.compile(re.escape(FAIL_NOTE_START) + r".*?" + re.escape(FAIL_NOTE_END), re.DOTALL)
+
+
+def _strip_existing_footnote(body: str) -> str:
+    """Strip a well-formed TRAILING footnote block, if one is present.
+
+    Deliberately NOT a regex-from-first-marker-to-next-marker scan: a
+    specialist's finding text could plausibly quote the literal
+    ``FAIL_NOTE_START`` string (this very file contains it), which would make
+    a "first START to next END" match span from that stray marker all the way
+    to the real trailing footnote's END, deleting genuine review content in
+    between. Instead: find the LAST occurrence of ``FAIL_NOTE_START`` and only
+    treat it as a real footnote to strip if the body actually ends with
+    ``FAIL_NOTE_END`` -- any earlier/unmatched occurrence is left alone as
+    incidental review text.
+    """
+    stripped = body.rstrip()
+    idx = stripped.rfind(FAIL_NOTE_START)
+    if idx != -1 and stripped.endswith(FAIL_NOTE_END):
+        return stripped[:idx].rstrip()
+    return stripped
 
 
 def _read_private_key() -> str:
@@ -111,7 +129,7 @@ def append_review_footnote(repo_full_name: str, pr_number: int, footnote: str) -
 
     for comment in pr.get_issue_comments():
         if COMMENT_MARKER in comment.body:
-            base = _FAIL_NOTE_RE.sub("", comment.body).rstrip()
+            base = _strip_existing_footnote(comment.body)
             comment.edit(f"{base}\n\n{footnote}")
             return comment
 

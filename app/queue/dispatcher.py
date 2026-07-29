@@ -5,9 +5,11 @@ serialized. ``blocked_until`` is a per-provider soft gate learned only from
 Retry-After (via ReviewRateLimited) so we don't fire calls we know will fail;
 it is intentionally in-memory — the durable truth is each ticket's not_before.
 
-Delay handling is uniform: any ticket that can't run now gets a placeholder
-comment (the notification) and is deferred; the real result later edits that
-same comment in place via the comment marker.
+Delay handling: a ticket that can't run now is deferred; it also gets a
+placeholder comment UNLESS a good review is already visible on the PR
+(``_has_visible_review``), in which case the existing review is preserved
+silently instead. The real result later edits that same comment in place
+via the comment marker.
 """
 from __future__ import annotations
 
@@ -123,6 +125,20 @@ async def process_next_due(now: datetime) -> StepResult:
                     )
             except Exception:  # noqa: BLE001 - couldn't post the notice; don't strand as terminal
                 logger.exception("failed to post terminal failure notice for ticket %s", ticket.id)
+                notice_post_ceiling = (
+                    settings.dispatcher_max_failure_attempts
+                    + settings.dispatcher_max_notice_post_attempts
+                )
+                if next_attempt > notice_post_ceiling:
+                    # The notice itself has now failed to post
+                    # dispatcher_max_notice_post_attempts times in a row on top
+                    # of the original hard-stop -- retrying forever would be an
+                    # unbounded retry loop for what is evidently a persistent
+                    # failure (not transient). Give up on the notice and go
+                    # terminal anyway: a lost notice is strictly better than
+                    # looping forever.
+                    store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
+                    return StepResult(action="failed", ticket_id=ticket.id)
                 backoff = compute_backoff(next_attempt, _jitter())
                 store.defer_failed(
                     ticket.id,

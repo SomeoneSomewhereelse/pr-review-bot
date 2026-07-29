@@ -367,6 +367,47 @@ async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypa
     assert t.not_before == (NOW + timedelta(seconds=2)).isoformat()
 
 
+async def test_repeated_notice_post_failure_eventually_goes_terminal(monkeypatch):
+    """Regression test for the unbounded-retry-loop finding: if the terminal
+    notice itself keeps failing to post, forever, the ticket must eventually
+    give up and go 'failed' rather than looping in 'deferred' indefinitely.
+    """
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
+    monkeypatch.setattr(settings, "dispatcher_max_notice_post_attempts", 3)
+    monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
+    monkeypatch.setattr(settings, "dispatcher_failure_max_backoff_seconds", 300.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    tid = _enqueue(pr=26)  # fresh -> overwrite path (upsert_comment)
+
+    def boom_post(repo, pr, body):
+        raise RuntimeError("github down")
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", boom_post)
+
+    async def boom(repo, pr):
+        raise RuntimeError("review outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    now = NOW
+    result = None
+    for _ in range(20):  # plenty more than the notice-post ceiling
+        t = store.get_ticket(tid)
+        if t.status == "failed":
+            break
+        result = await dispatcher.process_next_due(now)
+        t = store.get_ticket(tid)
+        if t.status == "failed":
+            break
+        assert t.status == "deferred"
+        # Advance past not_before so the next iteration can claim it again.
+        now = datetime.fromisoformat(t.not_before) + timedelta(seconds=1)
+
+    final = store.get_ticket(tid)
+    assert final.status == "failed"          # terminal reached, not looping forever
+    assert result.action == "failed"
+
+
 async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=4)
