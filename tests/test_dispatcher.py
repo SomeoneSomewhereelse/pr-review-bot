@@ -99,8 +99,11 @@ async def test_blocked_provider_defers_without_calling_attempt(monkeypatch):
     assert posted and "rate limit" in posted[0][1].lower()
 
 
-async def test_non_rate_limited_exception_marks_ticket_failed_not_stuck_running(monkeypatch):
+async def test_first_hard_failure_defers_with_backoff_not_terminal(monkeypatch):
     _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
     tid = _enqueue(pr=5)
 
     async def boom(repo, pr):
@@ -109,26 +112,81 @@ async def test_non_rate_limited_exception_marks_ticket_failed_not_stuck_running(
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
 
     result = await dispatcher.process_next_due(NOW)
-    assert result.action == "failed"
-    assert result.ticket_id == tid
+    assert result.action == "deferred"          # retryable, NOT terminal
     t = store.get_ticket(tid)
-    assert t.status == "failed"  # not stuck at 'running'
+    assert t.status == "deferred"
+    assert t.attempts == 1
+    assert t.not_before == (NOW + timedelta(seconds=2)).isoformat()  # base backoff
 
 
-async def test_failed_ticket_re_armed_to_pending_by_a_fresh_push(monkeypatch):
-    _stub_comments(monkeypatch)
-    tid = _enqueue(pr=6)
+async def test_hard_stop_marks_failed_and_posts_failure_comment(monkeypatch):
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)  # first failure is terminal
+    tid = _enqueue(pr=8)
 
     async def boom(repo, pr):
-        raise RuntimeError("boom")
+        raise RuntimeError("still broken")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
-    await dispatcher.process_next_due(NOW)
-    assert store.get_ticket(tid).status == "failed"
 
-    tid2 = _enqueue(pr=6, now=NOW + timedelta(seconds=1))
-    assert tid2 == tid
-    assert store.get_ticket(tid).status == "pending"
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "failed"
+    assert store.get_ticket(tid).status == "failed"
+    assert posted and posted[0][0] == 8
+    assert "could not be completed" in posted[0][1].lower()
+
+
+async def test_rate_limited_zero_retry_after_is_floored(monkeypatch):
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_min_retry_after_seconds", 1.0)
+    tid = _enqueue(pr=9)
+
+    async def rl(repo, pr):
+        return orchestrator.ReviewRateLimited(retry_after=0.0)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", rl)
+
+    await dispatcher.process_next_due(NOW)
+    t = store.get_ticket(tid)
+    assert t.not_before == (NOW + timedelta(seconds=1)).isoformat()   # floored, not now+0
+    assert t.attempts == 0                                            # RL not counted
+    assert dispatcher._blocked_until["groq"] == NOW + timedelta(seconds=1)
+
+
+async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    tid = _enqueue(pr=10)
+
+    async def attempt_then_push(repo, pr):
+        # A push lands mid-review -> dirty flag on the running ticket.
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=10, head_sha="sha2",
+            provider="groq", now=NOW.isoformat(),
+        )
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", attempt_then_push)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "ran"
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"                                     # re-armed, not done
+    assert t.not_before == (NOW + timedelta(seconds=300)).isoformat()  # at cooldown
+
+    # During the cooldown wait: nothing due, and NO placeholder churn.
+    posted.clear()
+    assert (await dispatcher.process_next_due(NOW + timedelta(seconds=60))).action == "idle"
+    assert posted == []
+
+    # After cooldown: the re-review runs.
+    async def ok(repo, pr):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", ok)
+    result = await dispatcher.process_next_due(NOW + timedelta(seconds=300))
+    assert result.action == "ran"
+    assert store.get_ticket(tid).status == "done"
 
 
 async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_provider(monkeypatch):

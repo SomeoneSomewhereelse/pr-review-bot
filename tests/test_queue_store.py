@@ -80,15 +80,6 @@ def test_deferred_ticket_not_claimed_before_not_before():
     assert store.claim_next_due(now=FUTURE).id == tid       # due now
 
 
-def test_mark_done_sets_status_and_comment_id():
-    tid = _enqueue()
-    store.claim_next_due(now=T0)
-    store.mark_done(tid, now=T1, comment_id=555)
-    t = store.get_ticket(tid)
-    assert t.status == "done"
-    assert t.comment_id == 555
-
-
 def test_recover_on_startup_resets_running_to_pending():
     tid = _enqueue()
     store.claim_next_due(now=T0)          # -> running

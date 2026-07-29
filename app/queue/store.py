@@ -172,15 +172,6 @@ def claim_next_due(now: str) -> Ticket | None:
         return _row_to_ticket(claimed)
 
 
-def defer(ticket_id: int, not_before: str, now: str) -> None:
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE tickets SET status = 'deferred', not_before = ?, "
-            "attempts = attempts + 1, updated_at = ? WHERE id = ?",
-            (not_before, now, ticket_id),
-        )
-
-
 def defer_rate_limited(ticket_id: int, not_before: str, now: str) -> None:
     """Per-provider rate-limit deferral. Does NOT count toward the hard stop."""
     with _connect() as conn:
@@ -197,14 +188,6 @@ def defer_failed(ticket_id: int, not_before: str, now: str) -> None:
             "UPDATE tickets SET status = 'deferred', not_before = ?, "
             "attempts = attempts + 1, updated_at = ? WHERE id = ?",
             (not_before, now, ticket_id),
-        )
-
-
-def mark_done(ticket_id: int, now: str, comment_id: int | None = None) -> None:
-    with _connect() as conn:
-        conn.execute(
-            "UPDATE tickets SET status = 'done', comment_id = ?, updated_at = ? WHERE id = ?",
-            (comment_id, now, ticket_id),
         )
 
 

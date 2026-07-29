@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from app import github_app
 from app.config import settings
-from app.formatting import format_placeholder
+from app.formatting import format_failure, format_placeholder
 from app.orchestrator import ReviewRateLimited, attempt_review
 from app.queue import store
 
@@ -70,7 +70,11 @@ async def _post_placeholder(repo: str, pr: int, retry_after: float, now: datetim
 
 
 async def process_next_due(now: datetime) -> StepResult:
-    """Claim and process one due ticket. Returns what happened."""
+    """Claim and process one due ticket. Returns what happened.
+
+    action semantics: "deferred" = RateLimited OR a retryable hard failure;
+    "failed" = terminal hard-stop; "ran" = completed; "idle" = nothing due.
+    """
     ticket = store.claim_next_due(now.isoformat())
     if ticket is None:
         return StepResult(action="idle")
@@ -81,26 +85,43 @@ async def process_next_due(now: datetime) -> StepResult:
     provider = settings.llm_provider
     blocked = _blocked_until.get(provider)
     if blocked is not None and now < blocked:
-        remaining = (blocked - now).total_seconds()
-        store.defer(ticket.id, not_before=blocked.isoformat(), now=now.isoformat())
-        await _post_placeholder(ticket.repo_full_name, ticket.pr_number, remaining, now)
+        store.defer_rate_limited(ticket.id, not_before=blocked.isoformat(), now=now.isoformat())
+        await _post_placeholder(
+            ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now
+        )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     try:
         outcome = await attempt_review(ticket.repo_full_name, ticket.pr_number)
-    except Exception as exc:  # noqa: BLE001 - any non-RateLimited failure must not strand the ticket
+    except Exception as exc:  # noqa: BLE001 - hard failure: back off per-ticket, hard-stop at the cap
         logger.exception("review attempt failed for ticket %s", ticket.id)
-        store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
-        return StepResult(action="failed", ticket_id=ticket.id)
-
-    if isinstance(outcome, ReviewRateLimited):
-        until = now + timedelta(seconds=outcome.retry_after)
-        _blocked_until[provider] = until
-        store.defer(ticket.id, not_before=until.isoformat(), now=now.isoformat())
-        await _post_placeholder(ticket.repo_full_name, ticket.pr_number, outcome.retry_after, now)
+        next_attempt = ticket.attempts + 1
+        if next_attempt >= settings.dispatcher_max_failure_attempts:
+            store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
+            await asyncio.to_thread(
+                github_app.upsert_comment,
+                ticket.repo_full_name,
+                ticket.pr_number,
+                format_failure(ticket.pr_number, next_attempt),
+            )
+            return StepResult(action="failed", ticket_id=ticket.id)
+        backoff = compute_backoff(next_attempt, _jitter())
+        until = now + timedelta(seconds=backoff)
+        store.defer_failed(ticket.id, not_before=until.isoformat(), now=now.isoformat())
         return StepResult(action="deferred", ticket_id=ticket.id)
 
-    store.mark_done(ticket.id, now=now.isoformat())
+    if isinstance(outcome, ReviewRateLimited):
+        wait = max(outcome.retry_after, settings.dispatcher_min_retry_after_seconds)
+        until = now + timedelta(seconds=wait)
+        _blocked_until[provider] = until
+        store.defer_rate_limited(ticket.id, not_before=until.isoformat(), now=now.isoformat())
+        await _post_placeholder(ticket.repo_full_name, ticket.pr_number, wait, now)
+        return StepResult(action="deferred", ticket_id=ticket.id)
+
+    rereview_not_before = (
+        now + timedelta(seconds=settings.dispatcher_rereview_cooldown_seconds)
+    ).isoformat()
+    store.finalize_review(ticket.id, now=now.isoformat(), rereview_not_before=rereview_not_before)
     return StepResult(action="ran", ticket_id=ticket.id)
 
 
