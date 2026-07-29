@@ -123,20 +123,68 @@ def test_mark_failed_sets_status_failed():
     assert t.updated_at == T1
 
 
-def test_mark_failed_ticket_is_re_armed_to_pending_by_a_fresh_push():
-    """A 'failed' ticket is NOT special-cased by enqueue_or_update's CASE
-    logic (which only protects 'running'), so a subsequent push to that PR
-    re-arms it to pending, unlike a stuck 'running' ticket would."""
+def test_push_during_deferred_rides_out_keeping_not_before():
+    tid = _enqueue(sha="sha1")
+    store.claim_next_due(now=T0)                       # -> running
+    store.defer_rate_limited(tid, not_before=FUTURE, now=T0)   # provider wait
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"       # not reset to pending
+    assert t.not_before == FUTURE       # provider clock NOT shortened
+    assert t.head_sha == "sha2"         # latest commit recorded
+
+
+def test_push_during_running_sets_rereview_flag_and_keeps_running():
+    tid = _enqueue(sha="sha1")
+    store.claim_next_due(now=T0)                       # -> running
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "running"
+    assert t.rereview_requested == 1
+    assert t.head_sha == "sha2"
+
+
+def test_push_to_done_ticket_within_cooldown_re_arms_deferred(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)
-    store.mark_failed(tid, now=T0, error="boom")
-    assert store.get_ticket(tid).status == "failed"
+    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL)  # done, last_reviewed_at=T0
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == T_COOL       # last_reviewed_at(T0) + 300s
+    assert t.attempts == 0
 
-    tid2 = _enqueue(sha="sha2", now=T1)
-    assert tid2 == tid
+
+def test_push_to_done_ticket_past_cooldown_re_arms_pending(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    tid = _enqueue(sha="sha1")
+    store.claim_next_due(now=T0)
+    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL)
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=FUTURE
+    )
     t = store.get_ticket(tid)
     assert t.status == "pending"
-    assert t.head_sha == "sha2"
+    assert t.not_before is None
+
+
+def test_recover_on_startup_clears_rereview_flag():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)                       # -> running
+    import sqlite3
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
+    store.recover_on_startup(now=T1)
+    t = store.get_ticket(tid)
+    assert t.status == "pending"
+    assert t.rereview_requested == 0
 
 
 def test_new_ticket_has_rereview_and_last_reviewed_defaults():

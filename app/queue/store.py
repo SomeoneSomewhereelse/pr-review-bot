@@ -84,34 +84,62 @@ def _row_to_ticket(row: sqlite3.Row) -> Ticket:
 def enqueue_or_update(
     *, repo_full_name: str, pr_number: int, head_sha: str | None, provider: str, now: str
 ) -> int:
-    """Insert a pending ticket, or collapse onto the existing one for this PR.
+    """Enqueue a review ticket, applying the per-state re-review policy.
 
-    On conflict: update head_sha and re-arm to 'pending' (clearing not_before)
-    UNLESS the ticket is currently 'running' — a running review is left to
-    finish; the newer head_sha is still recorded.
+    - no row        -> insert 'pending'
+    - 'pending'     -> update head_sha, stay pending (first review not yet run)
+    - 'deferred'    -> ride out: update head_sha only; keep status/not_before
+                       (a push cannot shorten a provider/cooldown wait)
+    - 'running'     -> update head_sha + set rereview_requested (dirty flag)
+    - 'done'/'failed' -> re-arm via cooldown helper; reset attempts to 0
     """
+    cooldown = settings.dispatcher_rereview_cooldown_seconds
     with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO tickets
-              (repo_full_name, pr_number, head_sha, status, provider,
-               not_before, attempts, comment_id, enqueued_at, updated_at)
-            VALUES (?, ?, ?, 'pending', ?, NULL, 0, NULL, ?, ?)
-            ON CONFLICT(repo_full_name, pr_number) DO UPDATE SET
-              head_sha   = excluded.head_sha,
-              status     = CASE WHEN tickets.status = 'running'
-                                THEN 'running' ELSE 'pending' END,
-              not_before = CASE WHEN tickets.status = 'running'
-                                THEN tickets.not_before ELSE NULL END,
-              updated_at = excluded.updated_at
-            """,
-            (repo_full_name, pr_number, head_sha, provider, now, now),
-        )
         row = conn.execute(
-            "SELECT id FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
+            "SELECT * FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
             (repo_full_name, pr_number),
         ).fetchone()
-        return int(row["id"])
+
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO tickets
+                  (repo_full_name, pr_number, head_sha, status, provider,
+                   not_before, attempts, comment_id, enqueued_at, updated_at,
+                   rereview_requested, last_reviewed_at)
+                VALUES (?, ?, ?, 'pending', ?, NULL, 0, NULL, ?, ?, 0, NULL)
+                ON CONFLICT(repo_full_name, pr_number) DO NOTHING
+                """,
+                (repo_full_name, pr_number, head_sha, provider, now, now),
+            )
+            row = conn.execute(
+                "SELECT id FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
+                (repo_full_name, pr_number),
+            ).fetchone()
+            return int(row["id"])
+
+        status = row["status"]
+        ticket_id = int(row["id"])
+
+        if status == "running":
+            conn.execute(
+                "UPDATE tickets SET head_sha = ?, rereview_requested = 1, updated_at = ? WHERE id = ?",
+                (head_sha, now, ticket_id),
+            )
+        elif status in ("pending", "deferred"):
+            # pending: stays pending. deferred: ride out (keep status + not_before).
+            conn.execute(
+                "UPDATE tickets SET head_sha = ?, updated_at = ? WHERE id = ?",
+                (head_sha, now, ticket_id),
+            )
+        else:  # 'done' or 'failed' -> re-arm, honoring the cooldown, fresh attempts budget
+            new_status, not_before = _due_after_cooldown(row["last_reviewed_at"], now, cooldown)
+            conn.execute(
+                "UPDATE tickets SET head_sha = ?, status = ?, not_before = ?, "
+                "attempts = 0, rereview_requested = 0, updated_at = ? WHERE id = ?",
+                (head_sha, new_status, not_before, now, ticket_id),
+            )
+        return ticket_id
 
 
 def claim_next_due(now: str) -> Ticket | None:
@@ -238,10 +266,12 @@ def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
 
 
 def recover_on_startup(now: str) -> None:
-    """Reset any ticket interrupted mid-review (crash) back to pending."""
+    """Reset any ticket interrupted mid-review (crash) back to pending, clearing the
+    dirty flag (the fresh pending review already covers the latest commit)."""
     with _connect() as conn:
         conn.execute(
-            "UPDATE tickets SET status = 'pending', updated_at = ? WHERE status = 'running'",
+            "UPDATE tickets SET status = 'pending', rereview_requested = 0, updated_at = ? "
+            "WHERE status = 'running'",
             (now,),
         )
 
