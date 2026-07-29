@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,30 @@ from app.orchestrator import ReviewRateLimited, attempt_review
 from app.queue import store
 
 logger = logging.getLogger(__name__)
+
+
+def _jitter() -> float:
+    """Injectable jitter source — 0.0 unless dispatcher_backoff_jitter_seconds > 0.
+
+    Kept as a module-level seam so tests monkeypatch it to a constant and the
+    whole system stays deterministic; a future multi-instance deployment sets
+    the config > 0 to spread retries without a code change.
+    """
+    jitter_max = settings.dispatcher_backoff_jitter_seconds
+    if jitter_max <= 0:
+        return 0.0
+    return random.uniform(0.0, jitter_max)
+
+
+def compute_backoff(attempts: int, jitter: float = 0.0) -> float:
+    """Exponential backoff for a hard-failure retry: min(base*2^(n-1), cap) + jitter.
+
+    ``attempts`` is the 1-based per-ticket hard-failure count (first failure -> base).
+    """
+    base = settings.dispatcher_failure_base_backoff_seconds
+    cap = settings.dispatcher_failure_max_backoff_seconds
+    return min(base * 2 ** (attempts - 1), cap) + jitter
+
 
 _blocked_until: dict[str, datetime] = {}
 
