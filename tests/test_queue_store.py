@@ -253,6 +253,40 @@ def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attem
     assert t.last_reviewed_at == T1
 
 
+def test_enqueue_or_update_serializes_under_concurrent_writers():
+    """Two threads enqueue the same PR concurrently. With BEGIN IMMEDIATE they
+    serialize (write lock up front) rather than interleave: both complete without
+    error and the final row is consistent. Serialization smoke test — a true race
+    needs threads and is timing-dependent, so this asserts the observable invariant
+    (no lost/corrupt write), not a specific interleaving."""
+    import threading
+
+    tid = _enqueue(pr=50, sha="sha0")
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def worker(sha: str) -> None:
+        try:
+            barrier.wait(timeout=5)
+            store.enqueue_or_update(
+                repo_full_name="owner/repo", pr_number=50,
+                head_sha=sha, provider="groq", now=T1,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(s,)) for s in ("shaA", "shaB")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert errors == []                          # no "database is locked" / no crash
+    final = store.get_ticket(tid)
+    assert final.head_sha in ("shaA", "shaB")    # a consistent, complete write won
+    assert final.status == "pending"
+
+
 def test_due_after_cooldown_branches():
     assert store._due_after_cooldown(None, T1, 300.0) == ("pending", None)
     # last review at T0 (12:00:00), cooldown 300s -> due at 12:05:00

@@ -93,58 +93,68 @@ def enqueue_or_update(
     - 'running'     -> update head_sha + set rereview_requested (dirty flag)
     - 'done'/'failed' -> re-arm via cooldown helper; reset attempts to 0
     """
-    # SELECT-then-UPDATE (not one atomic statement) is safe only because this
-    # always runs synchronously on the single-threaded event loop with no
-    # `await` in between (called directly from webhook.py, never wrapped in
-    # asyncio.to_thread). If ever moved off the loop, this becomes a real race
-    # against claim_next_due/finalize_review and needs an explicit transaction.
+    # Atomic against claim_next_due/finalize_review even off the event loop:
+    # BEGIN IMMEDIATE takes the write lock up front, so no concurrent writer can
+    # interleave between this SELECT and its UPDATE. Invariants that keep this
+    # deadlock-free (see the design doc's Finding 3): the body opens no second
+    # connection and calls no other store function (_due_after_cooldown is pure),
+    # and the write lock is always released via commit/rollback + close in finally.
     cooldown = settings.dispatcher_rereview_cooldown_seconds
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
-            (repo_full_name, pr_number),
-        ).fetchone()
-
-        if row is None:
-            conn.execute(
-                """
-                INSERT INTO tickets
-                  (repo_full_name, pr_number, head_sha, status, provider,
-                   not_before, attempts, comment_id, enqueued_at, updated_at,
-                   rereview_requested, last_reviewed_at)
-                VALUES (?, ?, ?, 'pending', ?, NULL, 0, NULL, ?, ?, 0, NULL)
-                ON CONFLICT(repo_full_name, pr_number) DO NOTHING
-                """,
-                (repo_full_name, pr_number, head_sha, provider, now, now),
-            )
+    conn = _connect()
+    conn.isolation_level = None  # manual transaction control (issue our own BEGIN)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
             row = conn.execute(
-                "SELECT id FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
+                "SELECT * FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
                 (repo_full_name, pr_number),
             ).fetchone()
-            return int(row["id"])
 
-        status = row["status"]
-        ticket_id = int(row["id"])
-
-        if status == "running":
-            conn.execute(
-                "UPDATE tickets SET head_sha = ?, rereview_requested = 1, updated_at = ? WHERE id = ?",
-                (head_sha, now, ticket_id),
-            )
-        elif status in ("pending", "deferred"):
-            # pending: stays pending. deferred: ride out (keep status + not_before).
-            conn.execute(
-                "UPDATE tickets SET head_sha = ?, updated_at = ? WHERE id = ?",
-                (head_sha, now, ticket_id),
-            )
-        else:  # 'done' or 'failed' -> re-arm, honoring the cooldown, fresh attempts budget
-            new_status, not_before = _due_after_cooldown(row["last_reviewed_at"], now, cooldown)
-            conn.execute(
-                "UPDATE tickets SET head_sha = ?, status = ?, not_before = ?, "
-                "attempts = 0, rereview_requested = 0, updated_at = ? WHERE id = ?",
-                (head_sha, new_status, not_before, now, ticket_id),
-            )
-        return ticket_id
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO tickets
+                      (repo_full_name, pr_number, head_sha, status, provider,
+                       not_before, attempts, comment_id, enqueued_at, updated_at,
+                       rereview_requested, last_reviewed_at)
+                    VALUES (?, ?, ?, 'pending', ?, NULL, 0, NULL, ?, ?, 0, NULL)
+                    ON CONFLICT(repo_full_name, pr_number) DO NOTHING
+                    """,
+                    (repo_full_name, pr_number, head_sha, provider, now, now),
+                )
+                row = conn.execute(
+                    "SELECT id FROM tickets WHERE repo_full_name = ? AND pr_number = ?",
+                    (repo_full_name, pr_number),
+                ).fetchone()
+                ticket_id = int(row["id"])
+            else:
+                status = row["status"]
+                ticket_id = int(row["id"])
+                if status == "running":
+                    conn.execute(
+                        "UPDATE tickets SET head_sha = ?, rereview_requested = 1, "
+                        "updated_at = ? WHERE id = ?",
+                        (head_sha, now, ticket_id),
+                    )
+                elif status in ("pending", "deferred"):
+                    conn.execute(
+                        "UPDATE tickets SET head_sha = ?, updated_at = ? WHERE id = ?",
+                        (head_sha, now, ticket_id),
+                    )
+                else:  # 'done'/'failed' -> re-arm honoring the cooldown, fresh attempts
+                    new_status, not_before = _due_after_cooldown(row["last_reviewed_at"], now, cooldown)
+                    conn.execute(
+                        "UPDATE tickets SET head_sha = ?, status = ?, not_before = ?, "
+                        "attempts = 0, rereview_requested = 0, updated_at = ? WHERE id = ?",
+                        (head_sha, new_status, not_before, now, ticket_id),
+                    )
+            conn.execute("COMMIT")
+            return ticket_id
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
 
 
 def claim_next_due(now: str) -> Ticket | None:
