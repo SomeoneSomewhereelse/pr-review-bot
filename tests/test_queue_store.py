@@ -127,6 +127,20 @@ def test_push_during_deferred_rides_out_keeping_not_before():
     assert t.head_sha == "sha2"         # latest commit recorded
 
 
+def test_push_during_hard_failure_deferred_rides_out_keeping_not_before_and_attempts():
+    tid = _enqueue(sha="sha1")
+    store.claim_next_due(now=T0)                       # -> running
+    store.defer_failed(tid, not_before=FUTURE, now=T0)  # hard-failure backoff, attempts -> 1
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"       # not reset to pending
+    assert t.not_before == FUTURE       # failure backoff deadline NOT shortened/reset
+    assert t.attempts == 1              # not reset by the push
+    assert t.head_sha == "sha2"         # latest commit recorded
+
+
 def test_push_during_running_sets_rereview_flag_and_keeps_running():
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)                       # -> running

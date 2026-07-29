@@ -93,6 +93,11 @@ def enqueue_or_update(
     - 'running'     -> update head_sha + set rereview_requested (dirty flag)
     - 'done'/'failed' -> re-arm via cooldown helper; reset attempts to 0
     """
+    # SELECT-then-UPDATE (not one atomic statement) is safe only because this
+    # always runs synchronously on the single-threaded event loop with no
+    # `await` in between (called directly from webhook.py, never wrapped in
+    # asyncio.to_thread). If ever moved off the loop, this becomes a real race
+    # against claim_next_due/finalize_review and needs an explicit transaction.
     cooldown = settings.dispatcher_rereview_cooldown_seconds
     with _connect() as conn:
         row = conn.execute(
@@ -162,7 +167,7 @@ def claim_next_due(now: str) -> Ticket | None:
         if row is None:
             return None
         cur = conn.execute(
-            "UPDATE tickets SET status = 'running', updated_at = ? "
+            "UPDATE tickets SET status = 'running', updated_at = ?, rereview_requested = 0 "
             "WHERE id = ? AND status IN ('pending', 'deferred')",
             (now, row["id"]),
         )
@@ -235,11 +240,13 @@ def finalize_review(
 def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
     """Mark a ticket as failed after a non-rate-limit exception from attempt_review.
 
-    Unlike a stuck 'running' ticket, 'failed' is NOT special-cased by
-    ``enqueue_or_update``'s CASE logic (which only protects 'running'), so a
-    fresh push to a failed PR re-arms it to 'pending' normally. ``error`` is
-    accepted for future use (e.g. logging/inspection) but is not persisted in
-    a column today — the schema has no error column.
+    A push to a 'failed' (or 'done') ticket is handled by
+    ``enqueue_or_update``'s terminal-state branch: it calls
+    ``_due_after_cooldown`` and re-arms the ticket to 'pending' (cooldown
+    elapsed, or no prior successful review) or 'deferred' (still cooling down
+    from the last completed review), resetting ``attempts`` to 0 either way.
+    ``error`` is accepted for future use (e.g. logging/inspection) but is not
+    persisted in a column today — the schema has no error column.
     """
     with _connect() as conn:
         conn.execute(

@@ -189,6 +189,46 @@ async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
     assert store.get_ticket(tid).status == "done"
 
 
+async def test_push_during_running_then_deferred_run_does_not_survive_to_next_success(monkeypatch):
+    """A push mid-run sets the dirty flag, but if THAT run gets deferred
+    (rate-limited here) instead of completing, the flag must not survive to
+    the later successful run -- claim_next_due clears it on claim, so the
+    flag from the earlier push is considered satisfied by the run that is
+    about to happen. Regression test for the stale-flag bug (Finding 1)."""
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    tid = _enqueue(pr=11)
+
+    async def attempt_then_push_then_rate_limited(repo, pr):
+        # A push lands mid-review -> dirty flag set on the running ticket.
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=11, head_sha="sha2",
+            provider="groq", now=NOW.isoformat(),
+        )
+        # But THIS attempt itself gets rate-limited (deferred, not completed).
+        return orchestrator.ReviewRateLimited(retry_after=30.0)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", attempt_then_push_then_rate_limited)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == (NOW + timedelta(seconds=30)).isoformat()
+
+    # The next claim (once due) must clear the stale flag at claim time, so
+    # a successful run does not spuriously re-arm for an extra re-review.
+    posted.clear()
+
+    async def ok(repo, pr):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", ok)
+    result = await dispatcher.process_next_due(NOW + timedelta(seconds=30))
+    assert result.action == "ran"
+    assert store.get_ticket(tid).status == "done"   # NOT "deferred" for a bogus re-review
+
+
 async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_provider(monkeypatch):
     """The ticket was enqueued under provider 'groq' (see _enqueue), but the
     _blocked_until gate must key off settings.llm_provider (the CURRENT
