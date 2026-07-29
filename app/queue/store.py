@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from app.config import settings
 
@@ -176,6 +177,47 @@ def mark_done(ticket_id: int, now: str, comment_id: int | None = None) -> None:
         conn.execute(
             "UPDATE tickets SET status = 'done', comment_id = ?, updated_at = ? WHERE id = ?",
             (comment_id, now, ticket_id),
+        )
+
+
+def _due_after_cooldown(
+    last_reviewed_at: str | None, now: str, cooldown_seconds: float
+) -> tuple[str, str | None]:
+    """Decide re-arm state honoring the per-PR cooldown (keyed on last completed review).
+
+    Returns ('deferred', <not_before>) while still cooling down, else ('pending', None).
+    """
+    if last_reviewed_at is None:
+        return ("pending", None)
+    due = datetime.fromisoformat(last_reviewed_at) + timedelta(seconds=cooldown_seconds)
+    if datetime.fromisoformat(now) < due:
+        return ("deferred", due.isoformat())
+    return ("pending", None)
+
+
+def finalize_review(
+    ticket_id: int, now: str, rereview_not_before: str, comment_id: int | None = None
+) -> None:
+    """Finalize a completed review, resolving the dirty flag in one statement.
+
+    Always records last_reviewed_at + comment_id. If a push set rereview_requested
+    during the run, re-arm to 'deferred' at rereview_not_before (= now + cooldown)
+    with a fresh attempts budget; otherwise mark 'done'.
+    """
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE tickets SET
+              last_reviewed_at   = :now,
+              comment_id         = :comment_id,
+              status             = CASE WHEN rereview_requested = 1 THEN 'deferred' ELSE 'done' END,
+              not_before         = CASE WHEN rereview_requested = 1 THEN :rnb ELSE NULL END,
+              attempts           = CASE WHEN rereview_requested = 1 THEN 0 ELSE attempts END,
+              rereview_requested = 0,
+              updated_at         = :now
+            WHERE id = :id
+            """,
+            {"now": now, "comment_id": comment_id, "rnb": rereview_not_before, "id": ticket_id},
         )
 
 

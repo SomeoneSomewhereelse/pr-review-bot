@@ -21,6 +21,7 @@ T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"
 FUTURE = "2026-01-01T18:00:00+00:00"
 PAST = "2026-01-01T06:00:00+00:00"
+T_COOL = "2026-01-01T12:05:00+00:00"
 
 
 @pytest.fixture(autouse=True)
@@ -168,3 +169,41 @@ def test_init_db_migrates_a_pre_existing_table_missing_new_columns(tmp_path, mon
     cols = _column_names(db)
     assert "rereview_requested" in cols
     assert "last_reviewed_at" in cols
+
+
+def test_finalize_review_without_flag_marks_done():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)          # -> running
+    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, comment_id=99)
+    t = store.get_ticket(tid)
+    assert t.status == "done"
+    assert t.comment_id == 99
+    assert t.last_reviewed_at == T1
+    assert t.not_before is None
+
+
+def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attempts():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)          # -> running
+    store.defer_failed(tid, not_before=T0, now=T0)   # attempts -> 1
+    store.claim_next_due(now=T0)          # -> running again
+    # Simulate a push during the run setting the dirty flag:
+    import sqlite3
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
+    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == T_COOL
+    assert t.attempts == 0
+    assert t.rereview_requested == 0
+    assert t.last_reviewed_at == T1
+
+
+def test_due_after_cooldown_branches():
+    assert store._due_after_cooldown(None, T1, 300.0) == ("pending", None)
+    # last review at T0 (12:00:00), cooldown 300s -> due at 12:05:00
+    status, nb = store._due_after_cooldown(T0, T1, 300.0)   # T1 is 12:00:01, still cooling
+    assert status == "deferred"
+    assert nb == T_COOL
+    assert store._due_after_cooldown(T0, FUTURE, 300.0) == ("pending", None)  # long past cooldown
