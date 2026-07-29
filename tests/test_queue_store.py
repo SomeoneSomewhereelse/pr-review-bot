@@ -10,6 +10,13 @@ import pytest
 from app.config import settings
 from app.queue import store
 
+
+def _column_names(db_path: str) -> set[str]:
+    import sqlite3
+
+    with sqlite3.connect(db_path) as conn:
+        return {row[1] for row in conn.execute("PRAGMA table_info(tickets)")}
+
 T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"
 FUTURE = "2026-01-01T18:00:00+00:00"
@@ -118,3 +125,35 @@ def test_mark_failed_ticket_is_re_armed_to_pending_by_a_fresh_push():
     t = store.get_ticket(tid)
     assert t.status == "pending"
     assert t.head_sha == "sha2"
+
+
+def test_new_ticket_has_rereview_and_last_reviewed_defaults():
+    tid = _enqueue()
+    t = store.get_ticket(tid)
+    assert t.rereview_requested == 0
+    assert t.last_reviewed_at is None
+
+
+def test_init_db_migrates_a_pre_existing_table_missing_new_columns(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = str(tmp_path / "old.db")
+    monkeypatch.setattr(settings, "queue_db_path", db)
+    # Create an OLD-shape table without the two new columns.
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE tickets (
+                id INTEGER PRIMARY KEY, repo_full_name TEXT NOT NULL,
+                pr_number INTEGER NOT NULL, head_sha TEXT, status TEXT NOT NULL,
+                provider TEXT NOT NULL, not_before TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0, comment_id INTEGER,
+                enqueued_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(repo_full_name, pr_number)
+            )
+            """
+        )
+    store.init_db()  # must add the missing columns, not crash
+    cols = _column_names(db)
+    assert "rereview_requested" in cols
+    assert "last_reviewed_at" in cols

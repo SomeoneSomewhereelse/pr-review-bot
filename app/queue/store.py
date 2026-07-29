@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     comment_id      INTEGER,
     enqueued_at     TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL,
+    rereview_requested INTEGER NOT NULL DEFAULT 0,
+    last_reviewed_at TEXT,
     UNIQUE(repo_full_name, pr_number)
 );
 """
@@ -47,6 +49,8 @@ class Ticket:
     comment_id: int | None
     enqueued_at: str
     updated_at: str
+    rereview_requested: int
+    last_reviewed_at: str | None
 
 
 def _connect() -> sqlite3.Connection:
@@ -55,9 +59,21 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the original schema, if missing (idempotent)."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(tickets)")}
+    if "rereview_requested" not in existing:
+        conn.execute(
+            "ALTER TABLE tickets ADD COLUMN rereview_requested INTEGER NOT NULL DEFAULT 0"
+        )
+    if "last_reviewed_at" not in existing:
+        conn.execute("ALTER TABLE tickets ADD COLUMN last_reviewed_at TEXT")
+
+
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        _ensure_columns(conn)
 
 
 def _row_to_ticket(row: sqlite3.Row) -> Ticket:
