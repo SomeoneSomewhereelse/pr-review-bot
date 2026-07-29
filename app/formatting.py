@@ -132,3 +132,16 @@ def format_placeholder(pr_number: int, retry_after: float, now: datetime) -> str
             f"automatically after the provider's limit resets (~{eta})."
         )
     return f"{COMMENT_MARKER}\n{header}\n_{note}_\n"
+
+
+def format_failure(pr_number: int, attempts: int) -> str:
+    """Marker-prefixed comment shown when a review is abandoned after repeated
+    hard failures. Shows only the attempt count — never raw exception text
+    (secrets hygiene). The marker edits any existing review/placeholder in place.
+    """
+    header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
+    note = (
+        f"❌ Automated review could not be completed after {attempts} attempts "
+        "due to a service error. It will retry automatically on the next push."
+    )
+    return f"{COMMENT_MARKER}\n{header}\n_{note}_\n"

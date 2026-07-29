@@ -21,3 +21,13 @@ def test_long_wait_is_daily_quota_wording_with_eta_and_marker():
     assert COMMENT_MARKER in body
     assert "daily" in body.lower()
     assert "18:00 UTC" in body
+
+
+def test_format_failure_has_marker_pr_and_attempts_no_error_text():
+    from app.formatting import format_failure
+
+    body = format_failure(pr_number=42, attempts=5)
+    assert COMMENT_MARKER in body
+    assert "PR #42" in body
+    assert "5" in body                       # attempt count surfaced
+    assert "traceback" not in body.lower()   # no raw error/exception text
