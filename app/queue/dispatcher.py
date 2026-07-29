@@ -57,6 +57,12 @@ def reset_blocked_until() -> None:
     _blocked_until.clear()
 
 
+def _has_visible_review(ticket: store.Ticket) -> bool:
+    """True when a prior successful review is already on the PR (worth preserving
+    over a placeholder or a bare failure notice). Set only by finalize_review."""
+    return ticket.last_reviewed_at is not None
+
+
 @dataclass
 class StepResult:
     action: str  # "idle" | "ran" | "deferred" | "failed"
@@ -86,9 +92,10 @@ async def process_next_due(now: datetime) -> StepResult:
     blocked = _blocked_until.get(provider)
     if blocked is not None and now < blocked:
         store.defer_rate_limited(ticket.id, not_before=blocked.isoformat(), now=now.isoformat())
-        await _post_placeholder(
-            ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now
-        )
+        if not _has_visible_review(ticket):
+            await _post_placeholder(
+                ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now
+            )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     try:
@@ -115,7 +122,8 @@ async def process_next_due(now: datetime) -> StepResult:
         until = now + timedelta(seconds=wait)
         _blocked_until[provider] = until
         store.defer_rate_limited(ticket.id, not_before=until.isoformat(), now=now.isoformat())
-        await _post_placeholder(ticket.repo_full_name, ticket.pr_number, wait, now)
+        if not _has_visible_review(ticket):
+            await _post_placeholder(ticket.repo_full_name, ticket.pr_number, wait, now)
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     rereview_not_before = (

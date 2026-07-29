@@ -254,6 +254,51 @@ async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_prov
     assert posted and "rate limit" in posted[0][1].lower()
 
 
+def _reviewed_then_pushed(pr, monkeypatch):
+    """A ticket that HAS a completed review (last_reviewed_at set) and a pending
+    re-review queued by a later push (cooldown 0 -> immediately claimable)."""
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
+    tid = _enqueue(pr=pr)
+    store.claim_next_due(NOW.isoformat())
+    store.finalize_review(tid, now=NOW.isoformat(), rereview_not_before=NOW.isoformat())
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=pr, head_sha="sha2",
+        provider="groq", now=NOW.isoformat(),
+    )
+    return tid
+
+
+async def test_gate_does_not_overwrite_good_review_with_placeholder(monkeypatch):
+    posted = _stub_comments(monkeypatch)
+    tid = _reviewed_then_pushed(20, monkeypatch)
+    dispatcher._blocked_until["groq"] = NOW + timedelta(seconds=120)
+
+    async def fake_attempt(repo, pr):
+        raise AssertionError("attempt_review must not run while blocked")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"
+    assert store.get_ticket(tid).status == "deferred"
+    assert posted == []  # good review preserved; no placeholder posted
+
+
+async def test_rate_limited_outcome_does_not_overwrite_good_review(monkeypatch):
+    posted = _stub_comments(monkeypatch)
+    tid = _reviewed_then_pushed(21, monkeypatch)
+
+    async def rl(repo, pr):
+        return orchestrator.ReviewRateLimited(retry_after=30.0)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", rl)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"
+    assert store.get_ticket(tid).status == "deferred"
+    assert posted == []  # no placeholder over the good review
+
+
 async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=4)
