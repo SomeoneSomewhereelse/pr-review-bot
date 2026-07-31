@@ -81,6 +81,26 @@ def _row_to_ticket(row: sqlite3.Row) -> Ticket:
     return Ticket(**{k: row[k] for k in row.keys()})
 
 
+_MAX_COOLDOWN_LEVEL = 30
+
+
+def effective_cooldown(level: int) -> float:
+    """Escalated per-PR cooldown: min(base * 2^level, cap).
+
+    level 0 -> base (identical to a non-escalating cooldown, so normal PRs are
+    unaffected). Each consecutive rapid re-review raises the level, geometrically
+    lengthening the next wait, capped at dispatcher_rereview_cooldown_max_seconds.
+    """
+    base = settings.dispatcher_rereview_cooldown_seconds
+    cap = settings.dispatcher_rereview_cooldown_max_seconds
+    return min(base * 2 ** min(level, _MAX_COOLDOWN_LEVEL), cap)
+
+
+def next_cooldown_level(level: int) -> int:
+    """Level for the next re-review after a churn re-review (guarded against overflow)."""
+    return min(level + 1, _MAX_COOLDOWN_LEVEL)
+
+
 def enqueue_or_update(
     *, repo_full_name: str, pr_number: int, head_sha: str | None, provider: str, now: str
 ) -> int:

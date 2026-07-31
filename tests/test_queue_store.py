@@ -294,3 +294,20 @@ def test_due_after_cooldown_branches():
     assert status == "deferred"
     assert nb == T_COOL
     assert store._due_after_cooldown(T0, FUTURE, 300.0) == ("pending", None)  # long past cooldown
+
+
+def test_effective_cooldown_escalates_and_caps(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    assert store.effective_cooldown(0) == 300.0     # level 0 == today's flat cooldown
+    assert store.effective_cooldown(1) == 600.0
+    assert store.effective_cooldown(2) == 1200.0
+    assert store.effective_cooldown(3) == 2400.0
+    assert store.effective_cooldown(4) == 3600.0    # 300*16=4800 -> capped
+    assert store.effective_cooldown(50) == 3600.0   # capped, no 2**50 blowup
+
+
+def test_next_cooldown_level_increments_and_guards():
+    assert store.next_cooldown_level(0) == 1
+    assert store.next_cooldown_level(4) == 5
+    assert store.next_cooldown_level(30) == 30      # _MAX_COOLDOWN_LEVEL guard

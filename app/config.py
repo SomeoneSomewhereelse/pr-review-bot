@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     dispatcher_min_retry_after_seconds: float = 1.0
     dispatcher_backoff_jitter_seconds: float = 0.0
     dispatcher_rereview_cooldown_seconds: float = 300.0
+    dispatcher_rereview_cooldown_max_seconds: float = 3600.0
 
 
 settings = Settings()
