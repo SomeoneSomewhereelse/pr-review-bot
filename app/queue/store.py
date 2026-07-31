@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     updated_at      TEXT    NOT NULL,
     rereview_requested INTEGER NOT NULL DEFAULT 0,
     last_reviewed_at TEXT,
+    cooldown_level  INTEGER NOT NULL DEFAULT 0,
     UNIQUE(repo_full_name, pr_number)
 );
 """
@@ -52,6 +53,7 @@ class Ticket:
     updated_at: str
     rereview_requested: int
     last_reviewed_at: str | None
+    cooldown_level: int
 
 
 def _connect() -> sqlite3.Connection:
@@ -69,6 +71,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         )
     if "last_reviewed_at" not in existing:
         conn.execute("ALTER TABLE tickets ADD COLUMN last_reviewed_at TEXT")
+    if "cooldown_level" not in existing:
+        conn.execute("ALTER TABLE tickets ADD COLUMN cooldown_level INTEGER NOT NULL DEFAULT 0")
 
 
 def init_db() -> None:

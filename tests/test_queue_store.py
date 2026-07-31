@@ -311,3 +311,31 @@ def test_next_cooldown_level_increments_and_guards():
     assert store.next_cooldown_level(0) == 1
     assert store.next_cooldown_level(4) == 5
     assert store.next_cooldown_level(30) == 30      # _MAX_COOLDOWN_LEVEL guard
+
+
+def test_new_ticket_has_cooldown_level_zero():
+    tid = _enqueue()
+    assert store.get_ticket(tid).cooldown_level == 0
+
+
+def test_init_db_backfills_cooldown_level_on_pre_existing_table(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = str(tmp_path / "old.db")
+    monkeypatch.setattr(settings, "queue_db_path", db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE tickets (
+                id INTEGER PRIMARY KEY, repo_full_name TEXT NOT NULL,
+                pr_number INTEGER NOT NULL, head_sha TEXT, status TEXT NOT NULL,
+                provider TEXT NOT NULL, not_before TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0, comment_id INTEGER,
+                enqueued_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                rereview_requested INTEGER NOT NULL DEFAULT 0, last_reviewed_at TEXT,
+                UNIQUE(repo_full_name, pr_number)
+            )
+            """
+        )
+    store.init_db()
+    assert "cooldown_level" in _column_names(db)
