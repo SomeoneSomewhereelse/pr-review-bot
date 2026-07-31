@@ -162,10 +162,16 @@ async def process_next_due(now: datetime) -> StepResult:
             await _post_placeholder(ticket.repo_full_name, ticket.pr_number, wait, now)
         return StepResult(action="deferred", ticket_id=ticket.id)
 
+    level = ticket.cooldown_level
     rereview_not_before = (
-        now + timedelta(seconds=settings.dispatcher_rereview_cooldown_seconds)
+        now + timedelta(seconds=store.effective_cooldown(level))
     ).isoformat()
-    store.finalize_review(ticket.id, now=now.isoformat(), rereview_not_before=rereview_not_before)
+    store.finalize_review(
+        ticket.id,
+        now=now.isoformat(),
+        rereview_not_before=rereview_not_before,
+        rereview_cooldown_level=store.next_cooldown_level(level),
+    )
     return StepResult(action="ran", ticket_id=ticket.id)
 
 

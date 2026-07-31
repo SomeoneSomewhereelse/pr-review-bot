@@ -250,13 +250,18 @@ def _due_after_cooldown(
 
 
 def finalize_review(
-    ticket_id: int, now: str, rereview_not_before: str, comment_id: int | None = None
+    ticket_id: int,
+    now: str,
+    rereview_not_before: str,
+    rereview_cooldown_level: int,
+    comment_id: int | None = None,
 ) -> None:
     """Finalize a completed review, resolving the dirty flag in one statement.
 
     Always records last_reviewed_at + comment_id. If a push set rereview_requested
-    during the run, re-arm to 'deferred' at rereview_not_before (= now + cooldown)
-    with a fresh attempts budget; otherwise mark 'done'.
+    during the run, re-arm to 'deferred' at rereview_not_before with a fresh
+    attempts budget and store the escalated rereview_cooldown_level; otherwise mark
+    'done' and leave the level unchanged (latent — the next push resolves it).
     """
     with _connect() as conn:
         conn.execute(
@@ -267,11 +272,18 @@ def finalize_review(
               status             = CASE WHEN rereview_requested = 1 THEN 'deferred' ELSE 'done' END,
               not_before         = CASE WHEN rereview_requested = 1 THEN :rnb ELSE NULL END,
               attempts           = CASE WHEN rereview_requested = 1 THEN 0 ELSE attempts END,
+              cooldown_level     = CASE WHEN rereview_requested = 1 THEN :new_level ELSE cooldown_level END,
               rereview_requested = 0,
               updated_at         = :now
             WHERE id = :id
             """,
-            {"now": now, "comment_id": comment_id, "rnb": rereview_not_before, "id": ticket_id},
+            {
+                "now": now,
+                "comment_id": comment_id,
+                "rnb": rereview_not_before,
+                "new_level": rereview_cooldown_level,
+                "id": ticket_id,
+            },
         )
 
 

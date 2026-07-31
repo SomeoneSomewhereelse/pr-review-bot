@@ -189,6 +189,33 @@ async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
     assert store.get_ticket(tid).status == "done"
 
 
+async def test_dispatcher_escalates_cooldown_on_churn_completion(monkeypatch):
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    tid = _enqueue(pr=30)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET cooldown_level = 1 WHERE id = ?", (tid,))
+
+    async def attempt_then_push(repo, pr):
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=30, head_sha="sha2",
+            provider="groq", now=NOW.isoformat(),
+        )
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", attempt_then_push)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "ran"
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == (NOW + timedelta(seconds=600)).isoformat()   # effective_cooldown(1)
+    assert t.cooldown_level == 2                                        # next_cooldown_level(1)
+
+
 async def test_push_during_running_then_deferred_run_does_not_survive_to_next_success(monkeypatch):
     """A push mid-run sets the dirty flag, but if THAT run gets deferred
     (rate-limited here) instead of completing, the flag must not survive to
@@ -260,7 +287,9 @@ def _reviewed_then_pushed(pr, monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
     tid = _enqueue(pr=pr)
     store.claim_next_due(NOW.isoformat())
-    store.finalize_review(tid, now=NOW.isoformat(), rereview_not_before=NOW.isoformat())
+    store.finalize_review(
+        tid, now=NOW.isoformat(), rereview_not_before=NOW.isoformat(), rereview_cooldown_level=0
+    )
     store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=pr, head_sha="sha2",
         provider="groq", now=NOW.isoformat(),

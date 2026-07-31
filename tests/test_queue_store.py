@@ -157,7 +157,9 @@ def test_push_to_done_ticket_within_cooldown_re_arms_deferred(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)
-    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL)  # done, last_reviewed_at=T0
+    store.finalize_review(
+        tid, now=T0, rereview_not_before=T_COOL, rereview_cooldown_level=0
+    )  # done, last_reviewed_at=T0
     store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
     )
@@ -171,7 +173,7 @@ def test_push_to_done_ticket_past_cooldown_re_arms_pending(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)
-    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL)
+    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL, rereview_cooldown_level=0)
     store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=FUTURE
     )
@@ -227,12 +229,16 @@ def test_init_db_migrates_a_pre_existing_table_missing_new_columns(tmp_path, mon
 def test_finalize_review_without_flag_marks_done():
     tid = _enqueue()
     store.claim_next_due(now=T0)          # -> running
-    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, comment_id=99)
+    store.finalize_review(
+        tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=7, comment_id=99
+    )
     t = store.get_ticket(tid)
     assert t.status == "done"
     assert t.comment_id == 99
     assert t.last_reviewed_at == T1
     assert t.not_before is None
+    # non-dirty -> level unchanged (passed value ignored)
+    assert store.get_ticket(tid).cooldown_level == 0
 
 
 def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attempts():
@@ -244,13 +250,28 @@ def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attem
     import sqlite3
     with sqlite3.connect(settings.queue_db_path) as conn:
         conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
-    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL)
+    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=2)
     t = store.get_ticket(tid)
     assert t.status == "deferred"
     assert t.not_before == T_COOL
     assert t.attempts == 0
     assert t.rereview_requested == 0
     assert t.last_reviewed_at == T1
+    assert t.cooldown_level == 2  # dirty -> stores passed level
+
+
+def test_finalize_review_dirty_flag_stores_passed_cooldown_level():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
+    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=3)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == T_COOL
+    assert t.cooldown_level == 3
 
 
 def test_enqueue_or_update_serializes_under_concurrent_writers():
