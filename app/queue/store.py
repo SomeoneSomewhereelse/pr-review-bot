@@ -123,7 +123,6 @@ def enqueue_or_update(
     # deadlock-free (see the design doc's Finding 3): the body opens no second
     # connection and calls no other store function (_due_after_cooldown is pure),
     # and the write lock is always released via commit/rollback + close in finally.
-    cooldown = settings.dispatcher_rereview_cooldown_seconds
     conn = _connect()
     conn.isolation_level = None  # manual transaction control (issue our own BEGIN)
     try:
@@ -165,12 +164,15 @@ def enqueue_or_update(
                         "UPDATE tickets SET head_sha = ?, updated_at = ? WHERE id = ?",
                         (head_sha, now, ticket_id),
                     )
-                else:  # 'done'/'failed' -> re-arm honoring the cooldown, fresh attempts
-                    new_status, not_before = _due_after_cooldown(row["last_reviewed_at"], now, cooldown)
+                else:  # 'done'/'failed' -> re-arm honoring the escalating cooldown
+                    new_status, not_before, new_level = _due_after_cooldown(
+                        row["last_reviewed_at"], now, row["cooldown_level"]
+                    )
                     conn.execute(
                         "UPDATE tickets SET head_sha = ?, status = ?, not_before = ?, "
-                        "attempts = 0, rereview_requested = 0, updated_at = ? WHERE id = ?",
-                        (head_sha, new_status, not_before, now, ticket_id),
+                        "attempts = 0, rereview_requested = 0, cooldown_level = ?, "
+                        "updated_at = ? WHERE id = ?",
+                        (head_sha, new_status, not_before, new_level, now, ticket_id),
                     )
             conn.execute("COMMIT")
             return ticket_id
@@ -231,18 +233,20 @@ def defer_failed(ticket_id: int, not_before: str, now: str) -> None:
 
 
 def _due_after_cooldown(
-    last_reviewed_at: str | None, now: str, cooldown_seconds: float
-) -> tuple[str, str | None]:
-    """Decide re-arm state honoring the per-PR cooldown (keyed on last completed review).
+    last_reviewed_at: str | None, now: str, level: int
+) -> tuple[str, str | None, int]:
+    """Re-arm state + next escalation level, honoring the escalating cooldown.
 
-    Returns ('deferred', <not_before>) while still cooling down, else ('pending', None).
+    Churn (still within effective_cooldown(level) of the last completed review)
+    -> ('deferred', due, next_cooldown_level(level)). Quiet or never-reviewed
+    -> ('pending', None, 0) (escalation resets).
     """
     if last_reviewed_at is None:
-        return ("pending", None)
-    due = datetime.fromisoformat(last_reviewed_at) + timedelta(seconds=cooldown_seconds)
+        return ("pending", None, 0)
+    due = datetime.fromisoformat(last_reviewed_at) + timedelta(seconds=effective_cooldown(level))
     if datetime.fromisoformat(now) < due:
-        return ("deferred", due.isoformat())
-    return ("pending", None)
+        return ("deferred", due.isoformat(), next_cooldown_level(level))
+    return ("pending", None, 0)
 
 
 def finalize_review(

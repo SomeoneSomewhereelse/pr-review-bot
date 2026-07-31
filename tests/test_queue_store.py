@@ -287,13 +287,65 @@ def test_enqueue_or_update_serializes_under_concurrent_writers():
     assert final.status == "pending"
 
 
-def test_due_after_cooldown_branches():
-    assert store._due_after_cooldown(None, T1, 300.0) == ("pending", None)
-    # last review at T0 (12:00:00), cooldown 300s -> due at 12:05:00
-    status, nb = store._due_after_cooldown(T0, T1, 300.0)   # T1 is 12:00:01, still cooling
+T_400 = "2026-01-01T12:06:40+00:00"   # T0 (12:00:00) + 400s
+
+
+def _make_done(tid, last_reviewed_at, level, now=T0):
+    """Directly force a ticket to a completed state (bypasses finalize_review so
+    Task 3 tests don't depend on finalize's Task-4 signature)."""
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='done', last_reviewed_at=?, cooldown_level=?, "
+            "updated_at=? WHERE id=?",
+            (last_reviewed_at, level, now, tid),
+        )
+
+
+def test_due_after_cooldown_branches(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    # never reviewed -> pending, level 0
+    assert store._due_after_cooldown(None, T1, 0) == ("pending", None, 0)
+    # within window (level 0 -> 300s; T0=12:00:00, T1=12:00:01) -> deferred, escalate to 1
+    assert store._due_after_cooldown(T0, T1, 0) == ("deferred", T_COOL, 1)
+    # elapsed -> pending, reset to 0
+    assert store._due_after_cooldown(T0, FUTURE, 0) == ("pending", None, 0)
+    # at level 1 the window is 600s; a push 400s after T0 is still within -> deferred, escalate to 2
+    status, nb, lvl = store._due_after_cooldown(T0, T_400, 1)
     assert status == "deferred"
-    assert nb == T_COOL
-    assert store._due_after_cooldown(T0, FUTURE, 300.0) == ("pending", None)  # long past cooldown
+    assert nb == "2026-01-01T12:10:00+00:00"   # T0 + 600s
+    assert lvl == 2
+
+
+def test_enqueue_push_within_cooldown_escalates_level(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    tid = _enqueue(sha="sha1")
+    _make_done(tid, last_reviewed_at=T0, level=1)   # last review T0, already at level 1 (eff=600s)
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T_400
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == "2026-01-01T12:10:00+00:00"   # T0 + 600s
+    assert t.cooldown_level == 2                          # escalated
+    assert t.head_sha == "sha2"
+
+
+def test_enqueue_push_after_cooldown_resets_level(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    tid = _enqueue(sha="sha1")
+    _make_done(tid, last_reviewed_at=T0, level=3)   # window eff(3)=2400s (until 12:40)
+    store.enqueue_or_update(   # FUTURE = 18:00, well past the window -> quiet -> reset
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=FUTURE
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "pending"
+    assert t.not_before is None
+    assert t.cooldown_level == 0
 
 
 def test_effective_cooldown_escalates_and_caps(monkeypatch):
