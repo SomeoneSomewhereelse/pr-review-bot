@@ -89,7 +89,7 @@ _MAX_COOLDOWN_LEVEL = 30
 
 
 def effective_cooldown(level: int) -> float:
-    """Escalated per-PR cooldown: min(base * 2^level, cap).
+    """Escalated per-PR cooldown: max(base, min(base * 2^level, cap)).
 
     level 0 -> base (identical to a non-escalating cooldown, so normal PRs are
     unaffected). Each consecutive rapid re-review raises the level, geometrically
@@ -97,7 +97,7 @@ def effective_cooldown(level: int) -> float:
     """
     base = settings.dispatcher_rereview_cooldown_seconds
     cap = settings.dispatcher_rereview_cooldown_max_seconds
-    return min(base * 2 ** min(level, _MAX_COOLDOWN_LEVEL), cap)
+    return max(base, min(base * 2 ** min(level, _MAX_COOLDOWN_LEVEL), cap))
 
 
 def next_cooldown_level(level: int) -> int:

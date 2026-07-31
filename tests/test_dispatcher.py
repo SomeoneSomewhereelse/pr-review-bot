@@ -190,7 +190,7 @@ async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
 
 
 async def test_dispatcher_escalates_cooldown_on_churn_completion(monkeypatch):
-    _stub_comments(monkeypatch)
+    posted = _stub_comments(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
     tid = _enqueue(pr=30)
@@ -214,6 +214,7 @@ async def test_dispatcher_escalates_cooldown_on_churn_completion(monkeypatch):
     assert t.status == "deferred"
     assert t.not_before == (NOW + timedelta(seconds=600)).isoformat()   # effective_cooldown(1)
     assert t.cooldown_level == 2                                        # next_cooldown_level(1)
+    assert posted == []
 
 
 async def test_push_during_running_then_deferred_run_does_not_survive_to_next_success(monkeypatch):

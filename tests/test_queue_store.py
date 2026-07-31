@@ -380,6 +380,12 @@ def test_effective_cooldown_escalates_and_caps(monkeypatch):
     assert store.effective_cooldown(50) == 3600.0   # capped, no 2**50 blowup
 
 
+def test_effective_cooldown_never_drops_below_base_when_cap_misconfigured(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 100.0)
+    assert store.effective_cooldown(0) == 300.0     # base wins over a misconfigured lower cap
+
+
 def test_next_cooldown_level_increments_and_guards():
     assert store.next_cooldown_level(0) == 1
     assert store.next_cooldown_level(4) == 5
