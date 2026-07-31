@@ -355,6 +355,15 @@ immediately or `deferred` until the per-PR cooldown
 `last_reviewed_at`, the timestamp of the last *completed* review) elapses.
 The cooldown is silent by design — the previous review's comment stays on
 the PR while a re-review waits it out, so there is nothing to notify.
+This cooldown now **escalates** per PR — a `cooldown_level` raises the
+effective wait geometrically (`effective_cooldown(level) = min(base·2^level, cap)`,
+`DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` default 3600s) for a PR that keeps
+being pushed inside each window, resetting to 0 once the PR stays quiet for a
+full window. Level 0 equals the base cooldown, so normal PRs are unchanged;
+escalation is silent (only lengthens `not_before`); it bounds a churning PR from
+~288 to ~26 reviews/day without ever abandoning it. The two escalation sites are:
+(1) `enqueue_or_update` done/failed re-arm, and (2) `finalize_review`'s
+dirty-flag branch.
 `claim_next_due` claims the oldest due ticket (`pending`, or `deferred`
 whose `not_before` has passed) with an atomic
 `UPDATE ... WHERE status IN ('pending', 'deferred')`, so a claimed ticket
@@ -490,7 +499,8 @@ drains whatever is due.
 `DISPATCHER_MAX_FAILURE_ATTEMPTS` (default `5`),
 `DISPATCHER_MIN_RETRY_AFTER_SECONDS` (default `1.0`),
 `DISPATCHER_BACKOFF_JITTER_SECONDS` (default `0.0`, off),
-`DISPATCHER_REREVIEW_COOLDOWN_SECONDS` (default `300.0`).
+`DISPATCHER_REREVIEW_COOLDOWN_SECONDS` (default `300.0`),
+`DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` (default `3600.0`).
 
 **Deliberate simplification vs. the design doc.** The design doc's §6.1/§9
 describe storing the posted comment's `comment_id` on the ticket so a future
