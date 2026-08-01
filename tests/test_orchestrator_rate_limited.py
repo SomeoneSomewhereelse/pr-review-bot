@@ -6,6 +6,7 @@ visible failed row — only a real 429 makes the whole review rate-limited.
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from app.config import settings
 from app.providers.base import RateLimited
@@ -53,10 +54,13 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
 
     monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
     posted = {}
-    monkeypatch.setattr(
-        orchestrator.github_app, "upsert_comment",
-        lambda repo, pr, body: posted.update(body=body) or "cid",
-    )
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted["body"] = body
+        posted["comment_id_in"] = comment_id
+        return SimpleNamespace(id=222)
+
+    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
     async def mk(name):
         async def _inner(_):
@@ -67,11 +71,13 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
     monkeypatch.setattr(orchestrator, "run_performance_specialist", await mk("Performance"))
     monkeypatch.setattr(orchestrator, "run_quality_specialist", await mk("Code Quality"))
 
-    outcome = await orchestrator.attempt_review("owner/repo", 2)
+    outcome = await orchestrator.attempt_review("owner/repo", 2, comment_id=555)
 
     assert isinstance(outcome, orchestrator.ReviewCompleted)
     assert outcome.review.pr_number == 2
     assert "PR #2" in posted["body"]
+    assert posted["comment_id_in"] == 555   # incoming id threaded to the post
+    assert outcome.comment_id == 222         # posted comment's id captured
 
 
 async def test_run_review_raises_on_rate_limited(monkeypatch):

@@ -50,6 +50,7 @@ def _active_model() -> str:
 @dataclass
 class ReviewCompleted:
     review: ReviewResult
+    comment_id: int | None = None
 
 
 @dataclass
@@ -58,7 +59,7 @@ class ReviewRateLimited:
 
 
 async def attempt_review(
-    repo_full_name: str, pr_number: int
+    repo_full_name: str, pr_number: int, comment_id: int | None = None
 ) -> ReviewCompleted | ReviewRateLimited:
     """Run the full review pipeline once for one PR.
 
@@ -114,8 +115,10 @@ async def attempt_review(
     )
 
     body = format_comment(review_result)
-    await asyncio.to_thread(github_app.upsert_comment, repo_full_name, pr_number, body)
-    return ReviewCompleted(review=review_result)
+    posted = await asyncio.to_thread(
+        github_app.upsert_comment, repo_full_name, pr_number, body, comment_id
+    )
+    return ReviewCompleted(review=review_result, comment_id=posted.id)
 
 
 async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
