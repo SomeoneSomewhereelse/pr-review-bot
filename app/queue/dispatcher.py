@@ -7,9 +7,12 @@ it is intentionally in-memory — the durable truth is each ticket's not_before.
 
 Delay handling: a ticket that can't run now is deferred; it also gets a
 placeholder comment UNLESS a good review is already visible on the PR
-(``_has_visible_review``), in which case the existing review is preserved
-silently instead. The real result later edits that same comment in place
-via the comment marker.
+(``_has_visible_review``), in which case a self-cleaning "re-review
+scheduled" footnote is shown instead (posted/refreshed by the
+``post_pending_notices`` sweep, run once per loop iteration) rather than
+staying fully silent. The real result later edits that same comment in
+place via the comment marker; claiming a ticket strips any pending
+schedule footnote first, since the wait is over regardless of outcome.
 """
 from __future__ import annotations
 
@@ -21,7 +24,12 @@ from datetime import datetime, timedelta, timezone
 
 from app import github_app
 from app.config import settings
-from app.formatting import format_failure, format_failure_footnote, format_placeholder
+from app.formatting import (
+    format_failure,
+    format_failure_footnote,
+    format_placeholder,
+    format_schedule_notice,
+)
 from app.orchestrator import ReviewRateLimited, attempt_review
 from app.queue import store
 
@@ -77,6 +85,27 @@ async def _post_placeholder(
     await asyncio.to_thread(
         github_app.upsert_comment, repo, pr, format_placeholder(pr, retry_after, now), comment_id
     )
+
+
+async def post_pending_notices(now: datetime) -> int:
+    """Refresh the schedule footnote on every deferred ticket whose not_before
+    changed since the last notice. Returns the count posted. Called once per
+    run_forever iteration, alongside process_next_due."""
+    posted = 0
+    for ticket in store.tickets_needing_notice(now.isoformat()):
+        try:
+            await asyncio.to_thread(
+                github_app.append_schedule_notice,
+                ticket.repo_full_name,
+                ticket.pr_number,
+                format_schedule_notice(datetime.fromisoformat(ticket.not_before)),
+                ticket.comment_id,
+            )
+            store.mark_notice_posted(ticket.id, ticket.not_before)
+            posted += 1
+        except Exception:  # noqa: BLE001 - one ticket's failure must not block the rest
+            logger.exception("failed to post schedule notice for ticket %s", ticket.id)
+    return posted
 
 
 async def process_next_due(now: datetime) -> StepResult:
@@ -208,8 +237,15 @@ async def run_forever() -> None:
     also defends any future fast-loop path.
     """
     while True:
+        now = datetime.now(timezone.utc)
         try:
-            await process_next_due(datetime.now(timezone.utc))
+            await process_next_due(now)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - the dispatcher must never die on one ticket
+            logger.exception("dispatcher step failed")
+        try:
+            await post_pending_notices(now)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the dispatcher must never die on one ticket

@@ -614,3 +614,86 @@ async def test_claim_clear_failure_does_not_block_review_attempt(monkeypatch):
     result = await dispatcher.process_next_due(NOW)
     assert result.action == "ran"                       # review still proceeded
     assert store.get_ticket(tid).notice_not_before == "2026-01-01T11:00:00+00:00"
+
+
+def _stub_append_schedule(monkeypatch):
+    posted = []
+    monkeypatch.setattr(dispatcher.github_app, "append_schedule_notice",
+                        lambda repo, pr, footnote, comment_id=None: posted.append(
+                            (pr, footnote, comment_id)
+                        ))
+    return posted
+
+
+async def test_post_pending_notices_posts_for_matching_ticket(monkeypatch):
+    posted = _stub_append_schedule(monkeypatch)
+    tid = _enqueue(pr=80)
+    _set_comment_id(tid, 8080)
+    future = NOW + timedelta(hours=1)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=? WHERE id=?",
+            (future.isoformat(), NOW.isoformat(), tid),
+        )
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 1
+    assert posted and posted[0][0] == 80
+    assert posted[0][2] == 8080
+    assert "13:00 UTC" in posted[0][1]
+    assert store.get_ticket(tid).notice_not_before == future.isoformat()
+
+
+async def test_post_pending_notices_does_not_repost_when_marker_matches(monkeypatch):
+    posted = _stub_append_schedule(monkeypatch)
+    tid = _enqueue(pr=81)
+    future = NOW + timedelta(hours=1)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=?, "
+            "notice_not_before=? WHERE id=?",
+            (future.isoformat(), NOW.isoformat(), future.isoformat(), tid),
+        )
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 0
+    assert posted == []
+
+
+async def test_post_pending_notices_per_ticket_failure_does_not_block_others(monkeypatch):
+    tid1 = _enqueue(pr=82)
+    tid2 = _enqueue(pr=83)
+    future = NOW + timedelta(hours=1)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=? WHERE id=?",
+            (future.isoformat(), NOW.isoformat(), tid1),
+        )
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=? WHERE id=?",
+            (future.isoformat(), NOW.isoformat(), tid2),
+        )
+
+    calls = []
+
+    def flaky_append(repo, pr, footnote, comment_id=None):
+        calls.append(pr)
+        if pr == 82:
+            raise RuntimeError("github down")
+
+    monkeypatch.setattr(dispatcher.github_app, "append_schedule_notice", flaky_append)
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 1                                       # only the successful one counted
+    assert set(calls) == {82, 83}                            # both attempted
+    assert store.get_ticket(tid1).notice_not_before is None  # failed post -> marker not set
+    assert store.get_ticket(tid2).notice_not_before == future.isoformat()
