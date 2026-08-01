@@ -27,6 +27,13 @@ COMMENT_MARKER = "<!-- ai-code-review-bot -->"
 FAIL_NOTE_START = "<!-- ai-review-fail-note -->"
 FAIL_NOTE_END = "<!-- /ai-review-fail-note -->"
 
+# Sub-marker delimiting the self-cleaning "re-review scheduled" notice shown
+# while a cooldown/rate-limit wait is pending. Mutually exclusive with
+# FAIL_NOTE_* by construction (a ticket is never both mid-failure-retry and
+# in a completed cooldown/rate-limit wait) -- see _strip_existing_footnote.
+SCHEDULE_NOTE_START = "<!-- ai-review-schedule-note -->"
+SCHEDULE_NOTE_END = "<!-- /ai-review-schedule-note -->"
+
 
 def _is_bot_comment(comment: IssueComment) -> bool:
     """True if authored by a GitHub App bot (not a human), so a human quoting
@@ -52,23 +59,34 @@ def _find_bot_comment(repo, pr, comment_id: int | None) -> IssueComment | None:
     return None
 
 
+_FOOTNOTE_MARKERS = (
+    (FAIL_NOTE_START, FAIL_NOTE_END),
+    (SCHEDULE_NOTE_START, SCHEDULE_NOTE_END),
+)
+
+
 def _strip_existing_footnote(body: str) -> str:
-    """Strip a well-formed TRAILING footnote block, if one is present.
+    """Strip whichever known footnote block (failure note or schedule note) is
+    present as a well-formed TRAILING block, if any.
 
     Deliberately NOT a regex-from-first-marker-to-next-marker scan: a
-    specialist's finding text could plausibly quote the literal
-    ``FAIL_NOTE_START`` string (this very file contains it), which would make
-    a "first START to next END" match span from that stray marker all the way
-    to the real trailing footnote's END, deleting genuine review content in
-    between. Instead: find the LAST occurrence of ``FAIL_NOTE_START`` and only
-    treat it as a real footnote to strip if the body actually ends with
-    ``FAIL_NOTE_END`` -- any earlier/unmatched occurrence is left alone as
-    incidental review text.
+    specialist's finding text could plausibly quote a literal marker string
+    (this very file contains both), which would make a "first START to next
+    END" match span from that stray marker all the way to the real trailing
+    footnote's END, deleting genuine review content in between. Instead: for
+    each known marker pair, find the LAST occurrence of its START and only
+    treat it as a real footnote to strip if the body actually ends with its
+    END -- any earlier/unmatched occurrence is left alone as incidental
+    review text. Trying both pairs means whichever footnote-writing function
+    runs next cleans up a stale leftover of the OTHER kind too, so the two
+    kinds can never both be visible at once even if an earlier cleanup step
+    failed.
     """
     stripped = body.rstrip()
-    idx = stripped.rfind(FAIL_NOTE_START)
-    if idx != -1 and stripped.endswith(FAIL_NOTE_END):
-        return stripped[:idx].rstrip()
+    for start, end in _FOOTNOTE_MARKERS:
+        idx = stripped.rfind(start)
+        if idx != -1 and stripped.endswith(end):
+            return stripped[:idx].rstrip()
     return stripped
 
 
@@ -153,3 +171,41 @@ def append_review_footnote(
         existing.edit(f"{base}\n\n{footnote}")
         return existing
     return pr.create_issue_comment(f"{COMMENT_MARKER}\n{footnote}")
+
+
+def append_schedule_notice(
+    repo_full_name: str, pr_number: int, footnote: str, comment_id: int | None = None
+) -> IssueComment:
+    """Append/refresh the schedule-wait footnote below the bot's own comment,
+    preserving the review. Finds the comment by id then author-filtered marker
+    scan; creates a marker-carrying comment if none exists."""
+    gh = get_installation_client()
+    repo = gh.get_repo(repo_full_name)
+    pr = repo.get_pull(pr_number)
+
+    existing = _find_bot_comment(repo, pr, comment_id)
+    if existing is not None:
+        base = _strip_existing_footnote(existing.body)
+        existing.edit(f"{base}\n\n{footnote}")
+        return existing
+    return pr.create_issue_comment(f"{COMMENT_MARKER}\n{footnote}")
+
+
+def clear_schedule_notice(
+    repo_full_name: str, pr_number: int, comment_id: int | None = None
+) -> IssueComment | None:
+    """Strip any existing footnote (schedule note or, defensively, failure
+    note) from the bot's comment -- called once a deferred ticket is claimed
+    and its wait is over. No-op (no edit call) if the comment has no footnote
+    to strip, or if no bot comment exists yet."""
+    gh = get_installation_client()
+    repo = gh.get_repo(repo_full_name)
+    pr = repo.get_pull(pr_number)
+
+    existing = _find_bot_comment(repo, pr, comment_id)
+    if existing is None:
+        return None
+    stripped = _strip_existing_footnote(existing.body)
+    if stripped != existing.body.rstrip():
+        existing.edit(stripped)
+    return existing
