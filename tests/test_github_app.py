@@ -186,7 +186,7 @@ def test_upsert_comment_edits_existing_marker_comment_in_place(fake_transport, m
             {
                 "id": 333,
                 "body": existing_body,
-                "user": {"login": "bot"},
+                "user": {"login": "bot", "type": "Bot"},
                 "url": f"{REPO_API_URL}/issues/comments/333",
             }
         ],
@@ -224,7 +224,7 @@ def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(fake_tr
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
-        [{"id": 333, "body": existing_body, "user": {"login": "bot"},
+        [{"id": 333, "body": existing_body, "user": {"login": "bot", "type": "Bot"},
           "url": f"{REPO_API_URL}/issues/comments/333"}],
     )
 
@@ -233,7 +233,7 @@ def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(fake_tr
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot"}}, 200
+                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
             )
         return fake_transport.send(request, **kwargs)
 
@@ -270,7 +270,7 @@ def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_tran
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
-        [{"id": 333, "body": existing_body, "user": {"login": "bot"},
+        [{"id": 333, "body": existing_body, "user": {"login": "bot", "type": "Bot"},
           "url": f"{REPO_API_URL}/issues/comments/333"}],
     )
 
@@ -279,7 +279,7 @@ def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_tran
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot"}}, 200
+                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
             )
         return fake_transport.send(request, **kwargs)
 
@@ -323,3 +323,89 @@ def test_append_review_footnote_creates_marker_comment_when_none_exists(fake_tra
 
     assert github_app.COMMENT_MARKER in created["body"]
     assert "failure note" in created["body"]
+
+
+def test_upsert_comment_skips_human_comment_containing_the_marker(fake_transport, monkeypatch):
+    created = {}
+    # A human comment that quotes the marker must NOT be edited.
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        [{"id": 501, "body": f"quoting the bot: {github_app.COMMENT_MARKER}",
+          "user": {"login": "a-human", "type": "User"},
+          "url": f"{REPO_API_URL}/issues/comments/501"}],
+    )
+
+    def send(request, **kwargs):
+        if request.method == "PATCH" and "/issues/comments/501" in request.url:
+            raise AssertionError("must not edit a human comment that merely quotes the marker")
+        if request.method == "POST" and request.url.endswith(f"/issues/{PR_NUMBER}/comments"):
+            body = json.loads(request.body)
+            created["body"] = body["body"]
+            return fake_transport._build_response(
+                request, {"id": 777, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 201
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send))
+
+    result = github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nfresh")
+    assert result.id == 777                       # created a new bot comment
+    assert github_app.COMMENT_MARKER in created["body"]
+
+
+def test_upsert_comment_edits_by_id_when_comment_id_given(fake_transport, monkeypatch):
+    edited = {}
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/comments/333",
+        {"id": 333, "body": f"{github_app.COMMENT_MARKER}\nold", "user": {"login": "bot", "type": "Bot"},
+         "url": f"{REPO_API_URL}/issues/comments/333"},
+    )
+
+    def send(request, **kwargs):
+        if request.method == "GET" and request.url.endswith(f"/issues/{PR_NUMBER}/comments"):
+            raise AssertionError("must not scan the thread when a comment_id is known")
+        if request.method == "PATCH" and "/issues/comments/333" in request.url:
+            body = json.loads(request.body)
+            edited["body"] = body["body"]
+            return fake_transport._build_response(
+                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send))
+
+    result = github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nnew", comment_id=333)
+    assert result.id == 333
+    assert "new" in edited["body"]
+
+
+def test_upsert_comment_falls_back_to_scan_when_comment_id_deleted(fake_transport, monkeypatch):
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/issues/comments/999",
+                         {"message": "Not Found"}, 404)
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        [{"id": 333, "body": f"{github_app.COMMENT_MARKER}\nold", "user": {"login": "bot", "type": "Bot"},
+          "url": f"{REPO_API_URL}/issues/comments/333"}],
+    )
+
+    def send(request, **kwargs):
+        if request.method == "PATCH" and "/issues/comments/333" in request.url:
+            return fake_transport._build_response(
+                request, {"id": 333, "body": json.loads(request.body)["body"],
+                          "user": {"login": "bot", "type": "Bot"}}, 200
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send))
+
+    result = github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nnew", comment_id=999)
+    assert result.id == 333   # deleted id -> fell back to the author-filtered scan

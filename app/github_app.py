@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from github import Auth, Github
+from github import Auth, Github, GithubException
 from github.IssueComment import IssueComment
 
 from app.config import settings
@@ -26,6 +26,31 @@ COMMENT_MARKER = "<!-- ai-code-review-bot -->"
 # successful review's full-body overwrite (via upsert_comment) removes it.
 FAIL_NOTE_START = "<!-- ai-review-fail-note -->"
 FAIL_NOTE_END = "<!-- /ai-review-fail-note -->"
+
+
+def _is_bot_comment(comment: IssueComment) -> bool:
+    """True if authored by a GitHub App bot (not a human), so a human quoting
+    the marker is never mistaken for the bot's own comment."""
+    user_data = comment._rawData.get("user", {})
+    return user_data.get("type") == "Bot"
+
+
+def _find_bot_comment(repo, pr, comment_id: int | None) -> IssueComment | None:
+    """Locate the bot's own comment: by stored id first (trusted — we created it),
+    else an author-filtered marker scan (bot-authored AND our marker). Returns
+    None if neither finds one, so the caller creates a fresh marker comment."""
+    if comment_id is not None:
+        try:
+            headers, data = repo._requester.requestJsonAndCheck(
+                "GET", f"/repos/{repo.full_name}/issues/comments/{comment_id}"
+            )
+            return IssueComment(repo._requester, headers, data, completed=True)
+        except GithubException:
+            pass  # deleted/unknown id -> fall back to the scan
+    for comment in pr.get_issue_comments():
+        if _is_bot_comment(comment) and COMMENT_MARKER in comment.body:
+            return comment
+    return None
 
 
 def _strip_existing_footnote(body: str) -> str:
@@ -96,41 +121,36 @@ def fetch_pr_diff(repo_full_name: str, pr_number: int) -> str:
     return "\n".join(chunks)
 
 
-def upsert_comment(repo_full_name: str, pr_number: int, body: str) -> IssueComment:
-    """Find the bot's marker comment on the PR and edit it in place; else create one.
-
-    This is what makes re-reviews on `synchronize` edit rather than spam new
-    comments. Returns the resulting IssueComment.
-    """
+def upsert_comment(
+    repo_full_name: str, pr_number: int, body: str, comment_id: int | None = None
+) -> IssueComment:
+    """Find the bot's own comment (by id, else author-filtered marker scan) and edit
+    it in place; else create one. Returns the resulting IssueComment."""
     gh = get_installation_client()
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 
     marked_body = body if COMMENT_MARKER in body else f"{COMMENT_MARKER}\n{body}"
-
-    for comment in pr.get_issue_comments():
-        if COMMENT_MARKER in comment.body:
-            comment.edit(marked_body)
-            return comment
-
+    existing = _find_bot_comment(repo, pr, comment_id)
+    if existing is not None:
+        existing.edit(marked_body)
+        return existing
     return pr.create_issue_comment(marked_body)
 
 
-def append_review_footnote(repo_full_name: str, pr_number: int, footnote: str) -> IssueComment:
-    """Append a failure footnote below the bot's marker comment, preserving the review.
-
-    Strips any existing FAIL_NOTE_* block first, so repeated failures replace the
-    footnote in place rather than stacking. If no marker comment exists (e.g. it was
-    manually deleted), creates one carrying COMMENT_MARKER so future upserts find it.
-    """
+def append_review_footnote(
+    repo_full_name: str, pr_number: int, footnote: str, comment_id: int | None = None
+) -> IssueComment:
+    """Append a failure footnote below the bot's own comment, preserving the review.
+    Finds the comment by id then author-filtered marker scan; creates a
+    marker-carrying comment if none exists."""
     gh = get_installation_client()
     repo = gh.get_repo(repo_full_name)
     pr = repo.get_pull(pr_number)
 
-    for comment in pr.get_issue_comments():
-        if COMMENT_MARKER in comment.body:
-            base = _strip_existing_footnote(comment.body)
-            comment.edit(f"{base}\n\n{footnote}")
-            return comment
-
+    existing = _find_bot_comment(repo, pr, comment_id)
+    if existing is not None:
+        base = _strip_existing_footnote(existing.body)
+        existing.edit(f"{base}\n\n{footnote}")
+        return existing
     return pr.create_issue_comment(f"{COMMENT_MARKER}\n{footnote}")
