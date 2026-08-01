@@ -342,6 +342,32 @@ async def test_rate_limited_outcome_does_not_overwrite_good_review(monkeypatch):
     assert posted == []  # no placeholder over the good review
 
 
+async def test_rate_limited_outcome_then_sweep_posts_schedule_notice(monkeypatch):
+    """End-to-end path for the second gap the feature closed: a ticket with a
+    visible good review that gets rate-limited on its next attempt must not
+    stay fully silent -- the following post_pending_notices sweep should pick
+    up exactly the row shape process_next_due's RateLimited path produces and
+    post a schedule notice for it."""
+    posted = _stub_comments(monkeypatch)
+    notices = _stub_append_schedule(monkeypatch)
+    tid = _reviewed_then_pushed(23, monkeypatch)
+
+    async def rl(repo, pr, comment_id=None):
+        return orchestrator.ReviewRateLimited(retry_after=30.0)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", rl)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"
+    assert posted == []  # no placeholder over the good review
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 1
+    assert notices and notices[0][0] == 23
+    assert store.get_ticket(tid).notice_not_before == store.get_ticket(tid).not_before
+
+
 def _stub_footnotes(monkeypatch):
     appended = []
     monkeypatch.setattr(dispatcher.github_app, "append_review_footnote",

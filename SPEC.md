@@ -341,8 +341,8 @@ construction.
 applies a single per-state re-review policy (full design rationale:
 `docs/superpowers/specs/2026-07-28-dispatcher-followups-design.md` §6):
 a push to a **`pending`** ticket updates `head_sha` and stays `pending`
-(unreviewed, so no cooldown applies); a push to a **`deferred`** ticket
-**rides out** — `head_sha` is updated but `status`/`not_before` are left
+(unreviewed, so no cooldown applies); a push to a **`deferred`**/**`retrying`**
+ticket **rides out** — `head_sha` is updated but `status`/`not_before` are left
 untouched, so a push can never shorten a provider's rate-limit wait or an
 in-progress cooldown; a push to a **`running`** ticket updates `head_sha`
 and sets a `rereview_requested` dirty flag (no task cancellation), so
@@ -397,9 +397,9 @@ anything else — the wait is over regardless of what happens next — and
 footnote-writing call runs next self-heals a stale leftover of the other
 kind even if a strip attempt failed.
 
-`claim_next_due` claims the oldest due ticket (`pending`, or `deferred`
+`claim_next_due` claims the oldest due ticket (`pending`, or `deferred`/`retrying`
 whose `not_before` has passed) with an atomic
-`UPDATE ... WHERE status IN ('pending', 'deferred')`, so a claimed ticket
+`UPDATE ... WHERE status IN ('pending', 'deferred', 'retrying')`, so a claimed ticket
 cannot be re-claimed. `enqueue_or_update`'s own SELECT → branch → INSERT/
 UPDATE runs inside an explicit `BEGIN IMMEDIATE` transaction (manual
 begin/commit/rollback, connection closed in a `finally`) on its single
@@ -521,8 +521,8 @@ not, is each deferred ticket's own durable `not_before`.
 dispatcher starts: `store.recover_on_startup()` resets any `running` ticket
 (interrupted mid-review by a crash) back to `pending`, also clearing a
 `rereview_requested` flag if one was set (the fresh `pending` review already
-covers the latest commit, so the flag is moot); `deferred` tickets are left
-as-is, gated by their persisted `not_before`. The dispatcher then simply
+covers the latest commit, so the flag is moot); `deferred`/`retrying` tickets
+are left as-is, gated by their persisted `not_before`. The dispatcher then simply
 drains whatever is due.
 
 **Config** (`app/config.py`; none are per-provider caps): `QUEUE_DB_PATH`

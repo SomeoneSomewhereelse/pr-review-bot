@@ -237,17 +237,16 @@ async def run_forever() -> None:
     also defends any future fast-loop path.
     """
     while True:
-        now = datetime.now(timezone.utc)
         try:
-            await process_next_due(now)
+            await process_next_due(datetime.now(timezone.utc))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - the dispatcher must never die on one ticket
             logger.exception("dispatcher step failed")
         try:
-            await post_pending_notices(now)
+            await post_pending_notices(datetime.now(timezone.utc))
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - the dispatcher must never die on one ticket
-            logger.exception("dispatcher step failed")
+        except Exception:  # noqa: BLE001 - notice sweep failure must not stop the loop
+            logger.exception("notice sweep failed")
         await asyncio.sleep(settings.dispatcher_idle_sleep_seconds)
