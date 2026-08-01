@@ -112,8 +112,9 @@ def enqueue_or_update(
 
     - no row        -> insert 'pending'
     - 'pending'     -> update head_sha, stay pending (first review not yet run)
-    - 'deferred'    -> ride out: update head_sha only; keep status/not_before
-                       (a push cannot shorten a provider/cooldown wait)
+    - 'deferred'/'retrying' -> ride out: update head_sha only; keep
+                       status/not_before (a push cannot shorten a
+                       provider/cooldown wait or a failure backoff)
     - 'running'     -> update head_sha + set rereview_requested (dirty flag)
     - 'done'/'failed' -> re-arm via cooldown helper; escalate cooldown_level
                        on churn, reset to 0 when cooldown elapsed; always
@@ -161,7 +162,7 @@ def enqueue_or_update(
                         "updated_at = ? WHERE id = ?",
                         (head_sha, now, ticket_id),
                     )
-                elif status in ("pending", "deferred"):
+                elif status in ("pending", "deferred", "retrying"):
                     conn.execute(
                         "UPDATE tickets SET head_sha = ?, updated_at = ? WHERE id = ?",
                         (head_sha, now, ticket_id),
@@ -186,7 +187,7 @@ def enqueue_or_update(
 
 
 def claim_next_due(now: str) -> Ticket | None:
-    """Claim the oldest due ticket (pending, or deferred whose not_before passed).
+    """Claim the oldest due ticket (pending, or deferred/retrying whose not_before passed).
 
     Atomic: the UPDATE-to-running only succeeds if the row is still claimable,
     so a second concurrent claim of the same row is impossible.
@@ -196,7 +197,8 @@ def claim_next_due(now: str) -> Ticket | None:
             """
             SELECT * FROM tickets
             WHERE status = 'pending'
-               OR (status = 'deferred' AND not_before IS NOT NULL AND not_before <= ?)
+               OR (status IN ('deferred', 'retrying') AND not_before IS NOT NULL
+                   AND not_before <= ?)
             ORDER BY enqueued_at ASC, id ASC
             LIMIT 1
             """,
@@ -206,7 +208,7 @@ def claim_next_due(now: str) -> Ticket | None:
             return None
         cur = conn.execute(
             "UPDATE tickets SET status = 'running', updated_at = ?, rereview_requested = 0 "
-            "WHERE id = ? AND status IN ('pending', 'deferred')",
+            "WHERE id = ? AND status IN ('pending', 'deferred', 'retrying')",
             (now, row["id"]),
         )
         if cur.rowcount != 1:
@@ -225,10 +227,13 @@ def defer_rate_limited(ticket_id: int, not_before: str, now: str) -> None:
 
 
 def defer_failed(ticket_id: int, not_before: str, now: str) -> None:
-    """Per-ticket hard-failure deferral. Increments attempts (drives backoff + hard stop)."""
+    """Per-ticket hard-failure backoff. Sets status='retrying' (distinct from a
+    cooldown/rate-limit 'deferred' wait, so a schedule notice never posts on a
+    ticket that's actually silently retrying after an error) and increments
+    attempts (drives backoff + hard stop)."""
     with _connect() as conn:
         conn.execute(
-            "UPDATE tickets SET status = 'deferred', not_before = ?, "
+            "UPDATE tickets SET status = 'retrying', not_before = ?, "
             "attempts = attempts + 1, updated_at = ? WHERE id = ?",
             (not_before, now, ticket_id),
         )

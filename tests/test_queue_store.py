@@ -101,8 +101,17 @@ def test_defer_failed_increments_attempts():
     store.claim_next_due(now=T0)
     store.defer_failed(tid, not_before=FUTURE, now=T0)
     t = store.get_ticket(tid)
-    assert t.status == "deferred"
+    assert t.status == "retrying"
     assert t.attempts == 1
+
+
+def test_retrying_ticket_is_claimable_once_not_before_passes():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.defer_failed(tid, not_before=T1, now=T0)
+    claimed = store.claim_next_due(now=T1)
+    assert claimed.id == tid
+    assert store.get_ticket(tid).status == "running"
 
 
 def test_mark_failed_sets_status_failed():
@@ -127,7 +136,7 @@ def test_push_during_deferred_rides_out_keeping_not_before():
     assert t.head_sha == "sha2"         # latest commit recorded
 
 
-def test_push_during_hard_failure_deferred_rides_out_keeping_not_before_and_attempts():
+def test_push_during_retrying_rides_out_keeping_not_before_and_attempts():
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)                       # -> running
     store.defer_failed(tid, not_before=FUTURE, now=T0)  # hard-failure backoff, attempts -> 1
@@ -135,7 +144,7 @@ def test_push_during_hard_failure_deferred_rides_out_keeping_not_before_and_atte
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
     )
     t = store.get_ticket(tid)
-    assert t.status == "deferred"       # not reset to pending
+    assert t.status == "retrying"       # not reset to pending
     assert t.not_before == FUTURE       # failure backoff deadline NOT shortened/reset
     assert t.attempts == 1              # not reset by the push
     assert t.head_sha == "sha2"         # latest commit recorded

@@ -127,7 +127,7 @@ async def test_first_hard_failure_defers_with_backoff_not_terminal(monkeypatch):
     result = await dispatcher.process_next_due(NOW)
     assert result.action == "deferred"          # retryable, NOT terminal
     t = store.get_ticket(tid)
-    assert t.status == "deferred"
+    assert t.status == "retrying"
     assert t.attempts == 1
     assert t.not_before == (NOW + timedelta(seconds=2)).isoformat()  # base backoff
 
@@ -411,7 +411,7 @@ async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypa
     result = await dispatcher.process_next_due(NOW)
     assert result.action == "deferred"           # NOT failed (visibility guaranteed first)
     t = store.get_ticket(tid)
-    assert t.status == "deferred"
+    assert t.status == "retrying"
     assert t.attempts == 1
     assert t.not_before == (NOW + timedelta(seconds=2)).isoformat()
 
@@ -419,7 +419,7 @@ async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypa
 async def test_repeated_notice_post_failure_eventually_goes_terminal(monkeypatch):
     """Regression test for the unbounded-retry-loop finding: if the terminal
     notice itself keeps failing to post, forever, the ticket must eventually
-    give up and go 'failed' rather than looping in 'deferred' indefinitely.
+    give up and go 'failed' rather than looping in 'retrying' indefinitely.
     """
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     monkeypatch.setattr(settings, "dispatcher_max_notice_post_attempts", 3)
@@ -448,7 +448,7 @@ async def test_repeated_notice_post_failure_eventually_goes_terminal(monkeypatch
         t = store.get_ticket(tid)
         if t.status == "failed":
             break
-        assert t.status == "deferred"
+        assert t.status == "retrying"
         # Advance past not_before so the next iteration can claim it again.
         now = datetime.fromisoformat(t.not_before) + timedelta(seconds=1)
 
