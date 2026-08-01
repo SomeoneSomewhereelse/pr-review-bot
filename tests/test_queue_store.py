@@ -418,3 +418,16 @@ def test_init_db_backfills_cooldown_level_on_pre_existing_table(tmp_path, monkey
         )
     store.init_db()
     assert "cooldown_level" in _column_names(db)
+
+
+def test_finalize_non_dirty_leaves_nonzero_cooldown_level():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET cooldown_level = 3 WHERE id = ?", (tid,))  # rereview_requested stays 0
+    store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=9)
+    t = store.get_ticket(tid)
+    assert t.status == "done"
+    assert t.cooldown_level == 3   # non-dirty -> ELSE keeps the existing level, ignores the passed 9

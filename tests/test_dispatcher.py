@@ -494,3 +494,29 @@ async def test_attempt_review_is_called_with_ticket_comment_id(monkeypatch):
 
     await dispatcher.process_next_due(NOW)
     assert seen["comment_id"] == 909   # ticket's stored id passed into attempt_review
+
+
+async def test_sustained_churn_escalates_then_plateaus(monkeypatch):
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    tid = _enqueue(pr=40)
+
+    async def complete_with_push(repo, pr, comment_id=None):
+        # a push lands during every review -> dirty flag -> re-arm each cycle
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=40, head_sha="s",
+            provider="groq", now="2026-01-01T00:00:00+00:00",
+        )
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", complete_with_push)
+
+    t = NOW
+    for secs in (300, 600, 1200, 2400, 3600, 3600):   # levels 0..5, plateau at the 3600 cap
+        result = await dispatcher.process_next_due(t)
+        assert result.action == "ran"
+        tk = store.get_ticket(tid)
+        assert tk.status == "deferred"
+        assert tk.not_before == (t + timedelta(seconds=secs)).isoformat()
+        t = t + timedelta(seconds=secs)   # advance to the next due time
