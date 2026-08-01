@@ -150,7 +150,7 @@ def test_upsert_comment_creates_when_no_marker_comment_exists(fake_transport, mo
             {
                 "id": 111,
                 "body": "an unrelated human comment, no marker here",
-                "user": {"login": "someone"},
+                "user": {"login": "someone", "type": "User"},
             }
         ],
     )
@@ -304,7 +304,7 @@ def test_append_review_footnote_creates_marker_comment_when_none_exists(fake_tra
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
-        [{"id": 111, "body": "human comment, no marker", "user": {"login": "someone"}}],
+        [{"id": 111, "body": "human comment, no marker", "user": {"login": "someone", "type": "User"}}],
     )
 
     def send_with_create_capture(request, **kwargs):

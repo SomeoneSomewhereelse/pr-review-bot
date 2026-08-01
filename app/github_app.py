@@ -31,8 +31,7 @@ FAIL_NOTE_END = "<!-- /ai-review-fail-note -->"
 def _is_bot_comment(comment: IssueComment) -> bool:
     """True if authored by a GitHub App bot (not a human), so a human quoting
     the marker is never mistaken for the bot's own comment."""
-    user_data = comment._rawData.get("user", {})
-    return user_data.get("type") == "Bot"
+    return getattr(comment.user, "type", None) == "Bot"
 
 
 def _find_bot_comment(repo, pr, comment_id: int | None) -> IssueComment | None:
@@ -41,10 +40,10 @@ def _find_bot_comment(repo, pr, comment_id: int | None) -> IssueComment | None:
     None if neither finds one, so the caller creates a fresh marker comment."""
     if comment_id is not None:
         try:
-            headers, data = repo._requester.requestJsonAndCheck(
+            headers, data = repo.requester.requestJsonAndCheck(
                 "GET", f"/repos/{repo.full_name}/issues/comments/{comment_id}"
             )
-            return IssueComment(repo._requester, headers, data, completed=True)
+            return IssueComment(repo.requester, headers, data, completed=True)
         except GithubException:
             pass  # deleted/unknown id -> fall back to the scan
     for comment in pr.get_issue_comments():
