@@ -271,7 +271,7 @@ def finalize_review(
             """
             UPDATE tickets SET
               last_reviewed_at   = :now,
-              comment_id         = :comment_id,
+              comment_id         = COALESCE(:comment_id, comment_id),
               status             = CASE WHEN rereview_requested = 1 THEN 'deferred' ELSE 'done' END,
               not_before         = CASE WHEN rereview_requested = 1 THEN :rnb ELSE NULL END,
               attempts           = CASE WHEN rereview_requested = 1 THEN 0 ELSE attempts END,

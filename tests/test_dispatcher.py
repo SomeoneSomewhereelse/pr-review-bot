@@ -37,8 +37,17 @@ def _enqueue(pr, now=NOW):
 def _stub_comments(monkeypatch):
     posted = []
     monkeypatch.setattr(dispatcher.github_app, "upsert_comment",
-                        lambda repo, pr, body, comment_id=None: posted.append((pr, body)))
+                        lambda repo, pr, body, comment_id=None: posted.append(
+                            (pr, body, comment_id)
+                        ))
     return posted
+
+
+def _set_comment_id(tid, comment_id):
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET comment_id = ? WHERE id = ?", (comment_id, tid))
 
 
 async def test_idle_when_no_tickets(monkeypatch):
@@ -65,6 +74,7 @@ async def test_completed_ticket_runs_and_marks_done(monkeypatch):
 async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypatch):
     posted = _stub_comments(monkeypatch)
     tid = _enqueue(pr=2)
+    _set_comment_id(tid, 202)
 
     async def fake_attempt(repo, pr, comment_id=None):
         return orchestrator.ReviewRateLimited(retry_after=30.0)
@@ -77,12 +87,14 @@ async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypat
     assert t.status == "deferred"
     assert t.not_before == (NOW + timedelta(seconds=30)).isoformat()
     assert posted and posted[0][0] == 2            # placeholder posted on PR 2
+    assert posted[0][2] == 202                     # threaded comment_id preserved
     assert dispatcher._blocked_until["groq"] == NOW + timedelta(seconds=30)
 
 
 async def test_blocked_provider_defers_without_calling_attempt(monkeypatch):
     posted = _stub_comments(monkeypatch)
-    _enqueue(pr=3)
+    tid = _enqueue(pr=3)
+    _set_comment_id(tid, 303)
     dispatcher._blocked_until["groq"] = NOW + timedelta(seconds=120)
 
     called = []
@@ -97,6 +109,7 @@ async def test_blocked_provider_defers_without_calling_attempt(monkeypatch):
     assert result.action == "deferred"
     assert called == []                            # never fired a doomed call
     assert posted and "rate limit" in posted[0][1].lower()
+    assert posted[0][2] == 303                     # threaded comment_id preserved
 
 
 async def test_first_hard_failure_defers_with_backoff_not_terminal(monkeypatch):
@@ -332,7 +345,9 @@ async def test_rate_limited_outcome_does_not_overwrite_good_review(monkeypatch):
 def _stub_footnotes(monkeypatch):
     appended = []
     monkeypatch.setattr(dispatcher.github_app, "append_review_footnote",
-                        lambda repo, pr, footnote, comment_id=None: appended.append((pr, footnote)))
+                        lambda repo, pr, footnote, comment_id=None: appended.append(
+                            (pr, footnote, comment_id)
+                        ))
     return appended
 
 
@@ -341,6 +356,7 @@ async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeyp
     appended = _stub_footnotes(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     tid = _reviewed_then_pushed(22, monkeypatch)
+    _set_comment_id(tid, 2222)
 
     async def boom(repo, pr, comment_id=None):
         raise RuntimeError("outage")
@@ -351,6 +367,7 @@ async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeyp
     assert result.action == "failed"
     assert store.get_ticket(tid).status == "failed"
     assert appended and appended[0][0] == 22   # footnote appended
+    assert appended[0][2] == 2222               # threaded comment_id preserved
     assert posted == []                         # good review NOT overwritten
 
 
@@ -359,6 +376,7 @@ async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch):
     appended = _stub_footnotes(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     tid = _enqueue(pr=24)  # fresh: last_reviewed_at is None
+    _set_comment_id(tid, 2424)
 
     async def boom(repo, pr, comment_id=None):
         raise RuntimeError("outage")
@@ -370,6 +388,7 @@ async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch):
     assert store.get_ticket(tid).status == "failed"
     assert posted and posted[0][0] == 24        # overwrite via upsert_comment
     assert "could not be completed" in posted[0][1].lower()
+    assert posted[0][2] == 2424                  # threaded comment_id preserved
     assert appended == []                        # no footnote when nothing to preserve
 
 

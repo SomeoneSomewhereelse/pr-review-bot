@@ -241,6 +241,22 @@ def test_finalize_review_without_flag_marks_done():
     assert store.get_ticket(tid).cooldown_level == 0
 
 
+def test_finalize_review_none_comment_id_does_not_erase_persisted_id():
+    """A future completion path that forgets to pass a real comment_id must not
+    silently demote the ticket back to scan-only identity (losing the id)."""
+    tid = _enqueue()
+    store.claim_next_due(now=T0)          # -> running
+    store.finalize_review(
+        tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=0, comment_id=555
+    )
+    assert store.get_ticket(tid).comment_id == 555
+
+    store.finalize_review(
+        tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=0, comment_id=None
+    )
+    assert store.get_ticket(tid).comment_id == 555   # NOT overwritten to None
+
+
 def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attempts():
     tid = _enqueue()
     store.claim_next_due(now=T0)          # -> running
