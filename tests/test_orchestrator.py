@@ -4,6 +4,8 @@ specialists (step 6), including partial-failure resilience.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.config import settings
 from app.specialists.schemas import SpecialistResult
 
@@ -26,10 +28,12 @@ async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypat
 
     posted = {}
 
-    def fake_upsert(repo, pr, body):
+    def fake_upsert(repo, pr, body, comment_id=None):
         posted["repo"] = repo
         posted["pr"] = pr
         posted["body"] = body
+        posted["comment_id_in"] = comment_id
+        return SimpleNamespace(id=111)
 
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
@@ -58,6 +62,7 @@ async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypat
     assert posted["repo"] == "owner/repo"
     assert posted["pr"] == 99
     assert "PR #99" in posted["body"]
+    assert posted["comment_id_in"] is None   # run_review never threads a comment_id
 
 
 async def test_run_review_survives_one_specialist_raising(monkeypatch):
@@ -71,9 +76,13 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
 
     posted = {}
-    monkeypatch.setattr(
-        orchestrator.github_app, "upsert_comment", lambda repo, pr, body: posted.update(body=body)
-    )
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted["body"] = body
+        posted["comment_id_in"] = comment_id
+        return SimpleNamespace(id=222)
+
+    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
 
     async def fake_security(annotated_diff):
         return _ok_result("Security")
@@ -101,13 +110,14 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     assert "❌ Performance check failed" in posted["body"]
     assert "Security" in posted["body"]
     assert "Code Quality" in posted["body"]
+    assert posted["comment_id_in"] is None   # run_review never threads a comment_id
 
 
 async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     import app.orchestrator as orchestrator
 
     monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
-    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: None)
+    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: SimpleNamespace(id=1))
 
     async def ok(name):
         async def _inner(annotated_diff):
