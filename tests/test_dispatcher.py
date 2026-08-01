@@ -37,7 +37,7 @@ def _enqueue(pr, now=NOW):
 def _stub_comments(monkeypatch):
     posted = []
     monkeypatch.setattr(dispatcher.github_app, "upsert_comment",
-                        lambda repo, pr, body: posted.append((pr, body)))
+                        lambda repo, pr, body, comment_id=None: posted.append((pr, body)))
     return posted
 
 
@@ -51,7 +51,7 @@ async def test_completed_ticket_runs_and_marks_done(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=1)
 
-    async def fake_attempt(repo, pr):
+    async def fake_attempt(repo, pr, comment_id=None):
         review = type("R", (), {})()
         return orchestrator.ReviewCompleted(review=review)
 
@@ -66,7 +66,7 @@ async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypat
     posted = _stub_comments(monkeypatch)
     tid = _enqueue(pr=2)
 
-    async def fake_attempt(repo, pr):
+    async def fake_attempt(repo, pr, comment_id=None):
         return orchestrator.ReviewRateLimited(retry_after=30.0)
 
     monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
@@ -87,7 +87,7 @@ async def test_blocked_provider_defers_without_calling_attempt(monkeypatch):
 
     called = []
 
-    async def fake_attempt(repo, pr):
+    async def fake_attempt(repo, pr, comment_id=None):
         called.append(pr)
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
@@ -106,7 +106,7 @@ async def test_first_hard_failure_defers_with_backoff_not_terminal(monkeypatch):
     monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
     tid = _enqueue(pr=5)
 
-    async def boom(repo, pr):
+    async def boom(repo, pr, comment_id=None):
         raise RuntimeError("github api exploded")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
@@ -124,7 +124,7 @@ async def test_hard_stop_marks_failed_and_posts_failure_comment(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)  # first failure is terminal
     tid = _enqueue(pr=8)
 
-    async def boom(repo, pr):
+    async def boom(repo, pr, comment_id=None):
         raise RuntimeError("still broken")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
@@ -141,7 +141,7 @@ async def test_rate_limited_zero_retry_after_is_floored(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_min_retry_after_seconds", 1.0)
     tid = _enqueue(pr=9)
 
-    async def rl(repo, pr):
+    async def rl(repo, pr, comment_id=None):
         return orchestrator.ReviewRateLimited(retry_after=0.0)
 
     monkeypatch.setattr(dispatcher, "attempt_review", rl)
@@ -158,7 +158,7 @@ async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     tid = _enqueue(pr=10)
 
-    async def attempt_then_push(repo, pr):
+    async def attempt_then_push(repo, pr, comment_id=None):
         # A push lands mid-review -> dirty flag on the running ticket.
         store.enqueue_or_update(
             repo_full_name="owner/repo", pr_number=10, head_sha="sha2",
@@ -180,7 +180,7 @@ async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
     assert posted == []
 
     # After cooldown: the re-review runs.
-    async def ok(repo, pr):
+    async def ok(repo, pr, comment_id=None):
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
     monkeypatch.setattr(dispatcher, "attempt_review", ok)
@@ -199,7 +199,7 @@ async def test_dispatcher_escalates_cooldown_on_churn_completion(monkeypatch):
     with sqlite3.connect(settings.queue_db_path) as conn:
         conn.execute("UPDATE tickets SET cooldown_level = 1 WHERE id = ?", (tid,))
 
-    async def attempt_then_push(repo, pr):
+    async def attempt_then_push(repo, pr, comment_id=None):
         store.enqueue_or_update(
             repo_full_name="owner/repo", pr_number=30, head_sha="sha2",
             provider="groq", now=NOW.isoformat(),
@@ -227,7 +227,7 @@ async def test_push_during_running_then_deferred_run_does_not_survive_to_next_su
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     tid = _enqueue(pr=11)
 
-    async def attempt_then_push_then_rate_limited(repo, pr):
+    async def attempt_then_push_then_rate_limited(repo, pr, comment_id=None):
         # A push lands mid-review -> dirty flag set on the running ticket.
         store.enqueue_or_update(
             repo_full_name="owner/repo", pr_number=11, head_sha="sha2",
@@ -248,7 +248,7 @@ async def test_push_during_running_then_deferred_run_does_not_survive_to_next_su
     # a successful run does not spuriously re-arm for an extra re-review.
     posted.clear()
 
-    async def ok(repo, pr):
+    async def ok(repo, pr, comment_id=None):
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
     monkeypatch.setattr(dispatcher, "attempt_review", ok)
@@ -270,7 +270,7 @@ async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_prov
 
     called = []
 
-    async def fake_attempt(repo, pr):
+    async def fake_attempt(repo, pr, comment_id=None):
         called.append(pr)
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
@@ -303,7 +303,7 @@ async def test_gate_does_not_overwrite_good_review_with_placeholder(monkeypatch)
     tid = _reviewed_then_pushed(20, monkeypatch)
     dispatcher._blocked_until["groq"] = NOW + timedelta(seconds=120)
 
-    async def fake_attempt(repo, pr):
+    async def fake_attempt(repo, pr, comment_id=None):
         raise AssertionError("attempt_review must not run while blocked")
 
     monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
@@ -318,7 +318,7 @@ async def test_rate_limited_outcome_does_not_overwrite_good_review(monkeypatch):
     posted = _stub_comments(monkeypatch)
     tid = _reviewed_then_pushed(21, monkeypatch)
 
-    async def rl(repo, pr):
+    async def rl(repo, pr, comment_id=None):
         return orchestrator.ReviewRateLimited(retry_after=30.0)
 
     monkeypatch.setattr(dispatcher, "attempt_review", rl)
@@ -332,7 +332,7 @@ async def test_rate_limited_outcome_does_not_overwrite_good_review(monkeypatch):
 def _stub_footnotes(monkeypatch):
     appended = []
     monkeypatch.setattr(dispatcher.github_app, "append_review_footnote",
-                        lambda repo, pr, footnote: appended.append((pr, footnote)))
+                        lambda repo, pr, footnote, comment_id=None: appended.append((pr, footnote)))
     return appended
 
 
@@ -342,7 +342,7 @@ async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeyp
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     tid = _reviewed_then_pushed(22, monkeypatch)
 
-    async def boom(repo, pr):
+    async def boom(repo, pr, comment_id=None):
         raise RuntimeError("outage")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
@@ -360,7 +360,7 @@ async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     tid = _enqueue(pr=24)  # fresh: last_reviewed_at is None
 
-    async def boom(repo, pr):
+    async def boom(repo, pr, comment_id=None):
         raise RuntimeError("outage")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
@@ -379,12 +379,12 @@ async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypa
     monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
     tid = _enqueue(pr=25)  # fresh -> overwrite path
 
-    def boom_post(repo, pr, body):
+    def boom_post(repo, pr, body, comment_id=None):
         raise RuntimeError("github down")
 
     monkeypatch.setattr(dispatcher.github_app, "upsert_comment", boom_post)
 
-    async def boom(repo, pr):
+    async def boom(repo, pr, comment_id=None):
         raise RuntimeError("review outage")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
@@ -409,12 +409,12 @@ async def test_repeated_notice_post_failure_eventually_goes_terminal(monkeypatch
     monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
     tid = _enqueue(pr=26)  # fresh -> overwrite path (upsert_comment)
 
-    def boom_post(repo, pr, body):
+    def boom_post(repo, pr, body, comment_id=None):
         raise RuntimeError("github down")
 
     monkeypatch.setattr(dispatcher.github_app, "upsert_comment", boom_post)
 
-    async def boom(repo, pr):
+    async def boom(repo, pr, comment_id=None):
         raise RuntimeError("review outage")
 
     monkeypatch.setattr(dispatcher, "attempt_review", boom)
@@ -442,7 +442,7 @@ async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=4)
 
-    async def rate_limited(repo, pr):
+    async def rate_limited(repo, pr, comment_id=None):
         return orchestrator.ReviewRateLimited(retry_after=6 * 3600)
 
     monkeypatch.setattr(dispatcher, "attempt_review", rate_limited)
@@ -453,7 +453,7 @@ async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     assert (await dispatcher.process_next_due(NOW + timedelta(hours=1))).action == "idle"
 
     # After reset: blocked_until has passed, ticket runs.
-    async def ok(repo, pr):
+    async def ok(repo, pr, comment_id=None):
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
     monkeypatch.setattr(dispatcher, "attempt_review", ok)
@@ -461,3 +461,36 @@ async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     result = await dispatcher.process_next_due(later)
     assert result.action == "ran"
     assert store.get_ticket(tid).status == "done"
+
+
+async def test_completed_review_persists_returned_comment_id(monkeypatch):
+    _stub_comments(monkeypatch)
+    tid = _enqueue(pr=60)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})(), comment_id=4242)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "ran"
+    assert store.get_ticket(tid).comment_id == 4242
+
+
+async def test_attempt_review_is_called_with_ticket_comment_id(monkeypatch):
+    _stub_comments(monkeypatch)
+    tid = _enqueue(pr=61)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute("UPDATE tickets SET comment_id = 909 WHERE id = ?", (tid,))
+    seen = {}
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        seen["comment_id"] = comment_id
+        return orchestrator.ReviewCompleted(review=type("R", (), {})(), comment_id=909)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    await dispatcher.process_next_due(NOW)
+    assert seen["comment_id"] == 909   # ticket's stored id passed into attempt_review

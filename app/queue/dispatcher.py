@@ -71,9 +71,11 @@ class StepResult:
     ticket_id: int | None = None
 
 
-async def _post_placeholder(repo: str, pr: int, retry_after: float, now: datetime) -> None:
+async def _post_placeholder(
+    repo: str, pr: int, retry_after: float, now: datetime, comment_id: int | None = None
+) -> None:
     await asyncio.to_thread(
-        github_app.upsert_comment, repo, pr, format_placeholder(pr, retry_after, now)
+        github_app.upsert_comment, repo, pr, format_placeholder(pr, retry_after, now), comment_id
     )
 
 
@@ -96,12 +98,15 @@ async def process_next_due(now: datetime) -> StepResult:
         store.defer_rate_limited(ticket.id, not_before=blocked.isoformat(), now=now.isoformat())
         if not _has_visible_review(ticket):
             await _post_placeholder(
-                ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now
+                ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now,
+                ticket.comment_id,
             )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     try:
-        outcome = await attempt_review(ticket.repo_full_name, ticket.pr_number)
+        outcome = await attempt_review(
+            ticket.repo_full_name, ticket.pr_number, comment_id=ticket.comment_id
+        )
     except Exception as exc:  # noqa: BLE001 - hard failure: back off per-ticket, hard-stop at the cap
         logger.exception("review attempt failed for ticket %s", ticket.id)
         next_attempt = ticket.attempts + 1
@@ -114,6 +119,7 @@ async def process_next_due(now: datetime) -> StepResult:
                         ticket.repo_full_name,
                         ticket.pr_number,
                         format_failure_footnote(next_attempt),
+                        ticket.comment_id,
                     )
                 else:
                     # No good review to preserve — the notice takes the marker comment.
@@ -122,6 +128,7 @@ async def process_next_due(now: datetime) -> StepResult:
                         ticket.repo_full_name,
                         ticket.pr_number,
                         format_failure(ticket.pr_number, next_attempt),
+                        ticket.comment_id,
                     )
             except Exception:  # noqa: BLE001 - couldn't post the notice; don't strand as terminal
                 logger.exception("failed to post terminal failure notice for ticket %s", ticket.id)
@@ -159,7 +166,9 @@ async def process_next_due(now: datetime) -> StepResult:
         _blocked_until[provider] = until
         store.defer_rate_limited(ticket.id, not_before=until.isoformat(), now=now.isoformat())
         if not _has_visible_review(ticket):
-            await _post_placeholder(ticket.repo_full_name, ticket.pr_number, wait, now)
+            await _post_placeholder(
+                ticket.repo_full_name, ticket.pr_number, wait, now, ticket.comment_id
+            )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     level = ticket.cooldown_level
@@ -171,6 +180,7 @@ async def process_next_due(now: datetime) -> StepResult:
         now=now.isoformat(),
         rereview_not_before=rereview_not_before,
         rereview_cooldown_level=store.next_cooldown_level(level),
+        comment_id=outcome.comment_id,
     )
     return StepResult(action="ran", ticket_id=ticket.id)
 
