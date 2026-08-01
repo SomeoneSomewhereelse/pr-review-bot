@@ -1,0 +1,233 @@
+# Design — Re-review scheduled notice (Finding 2)
+
+**Date:** 2026-08-01
+**Status:** Approved for planning
+**Relates to:** `docs/2026-07-31-comment-lifecycle-followups.md` (Finding 2 —
+this; Finding 1, robust comment identity, is a prerequisite and is now
+merged), `docs/superpowers/specs/2026-07-29-comment-visibility-followups-design.md`
+(§6.4 "silent cooldown" — this design refines that statement),
+`docs/superpowers/specs/2026-07-31-escalating-cooldown-design.md` (§3.3
+"silent" — refined here too; also the source of the two re-arm sites this
+design hooks into), `docs/superpowers/specs/2026-07-31-comment-identity-design.md`
+(the `comment_id`-first resolver this design routes all posts through).
+Branch: `master`.
+
+## 1. Problem
+
+Both the comment-visibility design (§6.4) and the escalating-cooldown design
+(§3.3) chose the cooldown/rate-limit wait to be **fully silent**: while a
+re-review is deferred, a prior good review's comment stays visible,
+unedited, and nothing new is posted — "there is nothing to notify."
+
+With escalation, that wait can now reach an hour. A viewer opening the PR
+sees a stale review with no explanation — indistinguishable from a broken
+bot. Separately, tracing the current code surfaced a second, previously
+unnoticed instance of the same gap: when a good review already exists and
+the *next* attempt gets rate-limited (not cooldown-deferred), the dispatcher
+today posts nothing at all (`_post_placeholder` is only called when
+`not _has_visible_review(ticket)`) — the identical silent-wait problem,
+under a different trigger.
+
+## 2. Decision
+
+**Append a self-cleaning "re-review scheduled" footnote, unified across
+every trigger that puts a reviewed ticket into `deferred`.** One mechanism,
+one new dispatcher-loop step, no new process.
+
+| Decision | Choice |
+|---|---|
+| Scope | Any `deferred` ticket with a visible prior review — covers cooldown re-arm (webhook- or dispatcher-triggered) AND rate-limit defer-with-good-review alike |
+| Content | Absolute UTC time only — `"🔄 Re-review scheduled ~HH:MM UTC"` |
+| Throttling visibility | Not mentioned — the note states the schedule, not the mechanism |
+| Mechanism | A sweep step in the dispatcher's existing loop, keyed by a persisted "last notified `not_before`" marker |
+| New process/config | None |
+
+### Why absolute time, not relative
+
+GitHub's comment body is static, sanitized Markdown/HTML rendered
+identically for every viewer — there is no per-viewer timezone
+localization available to third-party comment content (the `<relative-time>`
+custom element GitHub itself uses for commit/review timestamps is stripped
+by the sanitizer on ordinary posted comments). Given that constraint,
+relative time (`"in ~45 min"`) is actively worse than it first appears: this
+note is only *edited* on a re-arm event, not continuously updated like a
+live chat UI, so a relative string starts going stale the moment it's
+posted. Absolute UTC stays accurate for as long as the comment sits
+unedited, and matches the wording style already used in the existing
+placeholder's daily-quota case (`format_placeholder`).
+
+### Why a unified sweep, not per-site inline posting
+
+Tracing the current code, of the four moments a ticket becomes `deferred`,
+three already run inside the dispatcher (which already does GitHub work):
+the dirty-flag re-arm on completion, and both rate-limit branches in
+`process_next_due`. Only one — a push arriving at the webhook while a
+ticket sits `done`/`deferred`/`failed` (`enqueue_or_update`'s re-arm
+branches) — has no GitHub-capable process watching it, since the webhook
+handler does zero GitHub work by design (HMAC verify → enqueue → `202`
+immediately).
+
+Rather than special-case that one webhook-triggered path (inline posting at
+the three dispatcher-side moments, plus a narrow sweep only for the fourth),
+a single uniform sweep over `deferred` tickets, run once per existing
+dispatcher loop tick, covers all four triggers with one code path. The
+cost is bounded by the dispatcher's existing poll cadence
+(`dispatcher_idle_sleep_seconds`) — negligible — and, more importantly, the
+GitHub-call volume is bounded by *actual schedule changes*, not polling
+frequency: the persisted marker means a ticket is only touched again once
+its `not_before` has actually moved, so cost scales with PR push activity,
+not with how often the dispatcher wakes up. This directly answers the
+original finding's "disproportionate for a demo" cost concern — the
+mechanism was never as expensive as "a new dispatcher" implied; it's one
+more bounded query and at-most-one-call-per-re-arm added to the process
+that already exists.
+
+A rejected alternative: have the webhook post the notice itself via a
+FastAPI `BackgroundTask`. Rejected because it would give the webhook
+handler a new GitHub-calling responsibility it doesn't have today (breaking
+its "HMAC + enqueue only" boundary) and duplicate identity/posting logic
+across two processes instead of centralizing it in the dispatcher, which
+already owns all GitHub-facing work in this system.
+
+## 3. Mechanism
+
+### 3.1 State
+
+New nullable column on `tickets`: `notice_not_before TEXT NULL` — records
+which `not_before` value the currently-posted notice (if any) reflects. A
+ticket whose `notice_not_before` doesn't match its current `not_before`
+needs a fresh (or first) notice; no explicit reset is needed elsewhere,
+since every re-arm changes `not_before` and the mismatch falls out
+automatically.
+
+### 3.2 Store additions (`app/queue/store.py`)
+
+```python
+def tickets_needing_notice(now: str) -> list[Ticket]:
+    """Deferred tickets with a visible prior review whose schedule has
+    changed since the last notice was posted (or none was posted yet)."""
+    # status = 'deferred' AND not_before IS NOT NULL
+    # AND last_reviewed_at IS NOT NULL   -- has a visible review to preserve;
+    #     a never-reviewed deferred ticket keeps today's immediate placeholder,
+    #     posted inline in process_next_due, untouched by this feature
+    # AND (notice_not_before IS NULL OR notice_not_before != not_before)
+
+
+def mark_notice_posted(ticket_id: int, not_before: str) -> None:
+    """Record that a notice reflecting `not_before` was just posted.
+    A single independent UPDATE — not inside enqueue_or_update's or
+    finalize_review's transactions, same pattern as mark_failed."""
+```
+
+No change to `enqueue_or_update`, `finalize_review`, or either rate-limit
+branch in `process_next_due` — the `last_reviewed_at IS NOT NULL` +
+`deferred` + `not_before` shape those functions already produce is exactly
+what the sweep query matches. This is what makes the rate-limit-with-good-
+review case fall out "for free": it was never a distinct code path to add,
+just the same data shape the sweep already looks for.
+
+### 3.3 Formatting + marker (`app/formatting.py`, `app/github_app.py`)
+
+```python
+SCHEDULE_NOTE_START = "<!-- ai-review-schedule-note -->"
+SCHEDULE_NOTE_END = "<!-- /ai-review-schedule-note -->"
+
+
+def format_schedule_notice(not_before: datetime) -> str:
+    """Self-cleaning notice appended below a preserved good review when the
+    next re-review is scheduled (cooldown or rate-limit wait)."""
+    eta = not_before.strftime("%H:%M UTC")
+    return f"{SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~{eta}\n{SCHEDULE_NOTE_END}"
+```
+
+`_strip_existing_footnote` (currently `FAIL_NOTE_*`-specific) is generalized
+to take a marker-pair argument, since the schedule note needs the identical
+"last START, only strip if body ends with END" logic that already guards
+against the stray-marker-substring bug (`2026-07-29-comment-visibility-
+final-review-fixes.md`, fix 2). The two footnote kinds are mutually
+exclusive by construction — a ticket is never simultaneously mid-failure-
+retry (`defer_failed`/`mark_failed`) and in a completed cooldown/rate-limit
+wait (`deferred` with `last_reviewed_at` set) — so one parameterized helper
+replaces what would otherwise be near-duplicate logic, rather than two
+independent single-purpose strip functions.
+
+### 3.4 Dispatcher sweep (`app/queue/dispatcher.py`)
+
+A new function, called once per `run_forever` iteration immediately after
+the existing `process_next_due` call:
+
+```python
+async def post_pending_notices(now: datetime) -> int:
+    """Refresh the schedule footnote on every deferred ticket whose
+    not_before changed since the last notice. Returns the count posted."""
+    posted = 0
+    for ticket in store.tickets_needing_notice(now.isoformat()):
+        try:
+            await asyncio.to_thread(
+                github_app.append_review_footnote,
+                ticket.repo_full_name,
+                ticket.pr_number,
+                format_schedule_notice(datetime.fromisoformat(ticket.not_before)),
+                ticket.comment_id,
+            )
+            store.mark_notice_posted(ticket.id, ticket.not_before)
+            posted += 1
+        except Exception:  # noqa: BLE001 - one ticket's failure must not block the rest
+            logger.exception("failed to post schedule notice for ticket %s", ticket.id)
+    return posted
+```
+
+Posting routes through `append_review_footnote`, which already resolves the
+bot's own comment via Finding 1's `comment_id`-first, author-filtered-scan
+resolver — no new identity logic needed here.
+
+`run_forever` gains one line: `await post_pending_notices(now)` alongside
+the existing `await process_next_due(now)`, both inside the same
+try/except-and-continue loop body it already has.
+
+## 4. Error handling
+
+A single ticket's notice-post failure (transient network error, etc.) is
+caught per-ticket inside the sweep (so one bad ticket doesn't block the
+rest of the batch) and logged, matching the existing `run_forever`
+belt-and-suspenders pattern. It self-heals with no new backoff/ceiling
+bookkeeping: since `notice_not_before` wasn't updated on failure, the same
+ticket matches the sweep query again next tick — and unlike the
+failure-path ceiling, there is no "give up" case, because the ticket
+naturally stops mattering to this sweep once it becomes due for a real
+review (status changes away from `deferred`). No secret is ever included in
+the note — it carries only a formatted timestamp.
+
+## 5. Testing (deterministic-first, injected clock, stubbed GitHub)
+
+- **`tickets_needing_notice` (pure query shape):** never-notified (`notice_not_before`
+  is `NULL`) → matches; stale (`notice_not_before != not_before`) → matches;
+  up-to-date (`notice_not_before == not_before`) → excluded; no visible
+  review (`last_reviewed_at IS NULL`) → excluded regardless of notice state;
+  wrong status (`pending`/`running`/`done`/`failed`) → excluded.
+- **`mark_notice_posted`:** persists the marker; a ticket re-queried
+  afterward no longer matches `tickets_needing_notice` for that same
+  `not_before`.
+- **Dispatcher sweep:** posts a correctly-formatted UTC-time footnote for a
+  matching ticket via the stubbed `append_review_footnote`, passing the
+  ticket's `comment_id`; does not post again on a second sweep tick with no
+  schedule change; a per-ticket stubbed failure is caught and logged without
+  stopping the sweep from processing other due tickets.
+- **Self-cleaning:** a subsequent full review completion (`upsert_comment`'s
+  full-body overwrite) removes the schedule footnote — same test shape as
+  the existing failure-footnote self-cleaning test.
+- **Regression:** no existing test in `process_next_due`'s rate-limit or
+  cooldown paths changes behavior — the sweep is purely additive and
+  covered by its own tests, not by modifying existing ones.
+
+## 6. Non-goals
+
+- No change to escalation math, the rate-limit gate, the failure-path
+  ceiling, or the dirty-flag coalescing logic.
+- No new configuration — reuses `dispatcher_idle_sleep_seconds` as the
+  sweep's effective cadence.
+- Rewording the existing "no review yet" placeholder's copy
+  (`format_placeholder`) to match the new notice's tone — a separate,
+  optional follow-up, not required for this fix to be complete.
+- Mentioning escalation level or throttling mechanics in the notice text —
+  deliberately kept to just the schedule, per design decision above.
