@@ -351,6 +351,13 @@ def _stub_footnotes(monkeypatch):
     return appended
 
 
+def _stub_clear_schedule(monkeypatch):
+    cleared = []
+    monkeypatch.setattr(dispatcher.github_app, "clear_schedule_notice",
+                        lambda repo, pr, comment_id=None: cleared.append((pr, comment_id)))
+    return cleared
+
+
 async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeypatch):
     posted = _stub_comments(monkeypatch)
     appended = _stub_footnotes(monkeypatch)
@@ -539,3 +546,71 @@ async def test_sustained_churn_escalates_then_plateaus(monkeypatch):
         assert tk.status == "deferred"
         assert tk.not_before == (t + timedelta(seconds=secs)).isoformat()
         t = t + timedelta(seconds=secs)   # advance to the next due time
+
+
+async def test_claim_clears_schedule_notice_when_one_was_pending(monkeypatch):
+    _stub_comments(monkeypatch)
+    cleared = _stub_clear_schedule(monkeypatch)
+    tid = _enqueue(pr=70)
+    _set_comment_id(tid, 7070)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=?, "
+            "notice_not_before=? WHERE id=?",
+            (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
+        )
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})(), comment_id=7070)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "ran"
+    assert cleared == [(70, 7070)]
+    assert store.get_ticket(tid).notice_not_before is None
+
+
+async def test_claim_does_not_call_clear_when_no_notice_pending(monkeypatch):
+    _stub_comments(monkeypatch)
+    cleared = _stub_clear_schedule(monkeypatch)
+    _enqueue(pr=71)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "ran"
+    assert cleared == []
+
+
+async def test_claim_clear_failure_does_not_block_review_attempt(monkeypatch):
+    _stub_comments(monkeypatch)
+    tid = _enqueue(pr=72)
+    _set_comment_id(tid, 7272)
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=?, "
+            "notice_not_before=? WHERE id=?",
+            (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
+        )
+
+    def boom_clear(repo, pr, comment_id=None):
+        raise RuntimeError("github down")
+
+    monkeypatch.setattr(dispatcher.github_app, "clear_schedule_notice", boom_clear)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})(), comment_id=7272)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "ran"                       # review still proceeded
+    assert store.get_ticket(tid).notice_not_before == "2026-01-01T11:00:00+00:00"

@@ -89,6 +89,16 @@ async def process_next_due(now: datetime) -> StepResult:
     if ticket is None:
         return StepResult(action="idle")
 
+    if ticket.notice_not_before is not None:
+        try:
+            await asyncio.to_thread(
+                github_app.clear_schedule_notice,
+                ticket.repo_full_name, ticket.pr_number, ticket.comment_id,
+            )
+            store.clear_notice(ticket.id)
+        except Exception:  # noqa: BLE001 - a stale note is cosmetic; must not block the review
+            logger.exception("failed to clear schedule notice for ticket %s", ticket.id)
+
     # Gate on the CURRENT provider (settings.llm_provider), not the provider
     # recorded on the ticket at enqueue time — attempt_review always runs
     # against whatever provider is active now, so that's what can be blocked.
