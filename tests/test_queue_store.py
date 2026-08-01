@@ -456,3 +456,110 @@ def test_finalize_non_dirty_leaves_nonzero_cooldown_level():
     t = store.get_ticket(tid)
     assert t.status == "done"
     assert t.cooldown_level == 3   # non-dirty -> ELSE keeps the existing level, ignores the passed 9
+
+
+def test_new_ticket_has_notice_not_before_none():
+    tid = _enqueue()
+    assert store.get_ticket(tid).notice_not_before is None
+
+
+def test_init_db_backfills_notice_not_before_on_pre_existing_table(tmp_path, monkeypatch):
+    import sqlite3
+
+    db = str(tmp_path / "old.db")
+    monkeypatch.setattr(settings, "queue_db_path", db)
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE tickets (
+                id INTEGER PRIMARY KEY, repo_full_name TEXT NOT NULL,
+                pr_number INTEGER NOT NULL, head_sha TEXT, status TEXT NOT NULL,
+                provider TEXT NOT NULL, not_before TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0, comment_id INTEGER,
+                enqueued_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                rereview_requested INTEGER NOT NULL DEFAULT 0, last_reviewed_at TEXT,
+                cooldown_level INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(repo_full_name, pr_number)
+            )
+            """
+        )
+    store.init_db()
+    assert "notice_not_before" in _column_names(db)
+
+
+def _seed_deferred_with_review(tid, not_before, notice_not_before=None, last_reviewed_at=T0):
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, notice_not_before=?, "
+            "last_reviewed_at=? WHERE id=?",
+            (not_before, notice_not_before, last_reviewed_at, tid),
+        )
+
+
+def test_tickets_needing_notice_matches_never_notified():
+    tid = _enqueue()
+    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=None)
+    result = store.tickets_needing_notice(now=T0)
+    assert [t.id for t in result] == [tid]
+
+
+def test_tickets_needing_notice_matches_stale_marker():
+    tid = _enqueue()
+    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=T_COOL)
+    result = store.tickets_needing_notice(now=T0)
+    assert [t.id for t in result] == [tid]
+
+
+def test_tickets_needing_notice_excludes_up_to_date_marker():
+    tid = _enqueue()
+    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=FUTURE)
+    assert store.tickets_needing_notice(now=T0) == []
+
+
+def test_tickets_needing_notice_excludes_no_visible_review():
+    tid = _enqueue()
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='deferred', not_before=?, notice_not_before=NULL "
+            "WHERE id=?",
+            (FUTURE, tid),
+        )
+    assert store.tickets_needing_notice(now=T0) == []
+
+
+def test_tickets_needing_notice_excludes_already_due_ticket():
+    tid = _enqueue()
+    _seed_deferred_with_review(tid, not_before=PAST, notice_not_before=None)
+    assert store.tickets_needing_notice(now=T0) == []
+
+
+def test_tickets_needing_notice_excludes_retrying_status():
+    tid = _enqueue()
+    import sqlite3
+
+    with sqlite3.connect(settings.queue_db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET status='retrying', not_before=?, last_reviewed_at=?, "
+            "notice_not_before=NULL WHERE id=?",
+            (FUTURE, T0, tid),
+        )
+    assert store.tickets_needing_notice(now=T0) == []
+
+
+def test_mark_notice_posted_persists_marker():
+    tid = _enqueue()
+    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=None)
+    store.mark_notice_posted(tid, FUTURE)
+    assert store.get_ticket(tid).notice_not_before == FUTURE
+    assert store.tickets_needing_notice(now=T0) == []
+
+
+def test_clear_notice_resets_marker_to_none():
+    tid = _enqueue()
+    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=FUTURE)
+    store.clear_notice(tid)
+    assert store.get_ticket(tid).notice_not_before is None

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     rereview_requested INTEGER NOT NULL DEFAULT 0,
     last_reviewed_at TEXT,
     cooldown_level  INTEGER NOT NULL DEFAULT 0,
+    notice_not_before TEXT,
     UNIQUE(repo_full_name, pr_number)
 );
 """
@@ -54,6 +55,7 @@ class Ticket:
     rereview_requested: int
     last_reviewed_at: str | None
     cooldown_level: int
+    notice_not_before: str | None
 
 
 def _connect() -> sqlite3.Connection:
@@ -73,6 +75,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tickets ADD COLUMN last_reviewed_at TEXT")
     if "cooldown_level" not in existing:
         conn.execute("ALTER TABLE tickets ADD COLUMN cooldown_level INTEGER NOT NULL DEFAULT 0")
+    if "notice_not_before" not in existing:
+        conn.execute("ALTER TABLE tickets ADD COLUMN notice_not_before TEXT")
 
 
 def init_db() -> None:
@@ -311,6 +315,50 @@ def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
         conn.execute(
             "UPDATE tickets SET status = 'failed', updated_at = ? WHERE id = ?",
             (now, ticket_id),
+        )
+
+
+def tickets_needing_notice(now: str) -> list[Ticket]:
+    """Deferred (schedule-wait, never retry-backoff since 'retrying' is a
+    distinct status) tickets with a visible prior review whose schedule has
+    changed since the last notice was posted (or none was posted yet).
+    Excludes a ticket whose not_before has already passed -- it is about to
+    be claimed for a real review, so a "scheduled" note for a time that's
+    already gone would be wrong."""
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE status = 'deferred'
+              AND not_before IS NOT NULL
+              AND not_before > ?
+              AND last_reviewed_at IS NOT NULL
+              AND (notice_not_before IS NULL OR notice_not_before != not_before)
+            ORDER BY enqueued_at ASC, id ASC
+            """,
+            (now,),
+        ).fetchall()
+        return [_row_to_ticket(row) for row in rows]
+
+
+def mark_notice_posted(ticket_id: int, not_before: str) -> None:
+    """Record that a notice reflecting not_before was just posted. A single
+    independent UPDATE -- not inside enqueue_or_update's or finalize_review's
+    transactions, same pattern as mark_failed."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tickets SET notice_not_before = ? WHERE id = ?",
+            (not_before, ticket_id),
+        )
+
+
+def clear_notice(ticket_id: int) -> None:
+    """Clear the notice marker after the dispatcher has stripped the schedule
+    footnote from GitHub (called right after a ticket is claimed)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tickets SET notice_not_before = NULL WHERE id = ?",
+            (ticket_id,),
         )
 
 
