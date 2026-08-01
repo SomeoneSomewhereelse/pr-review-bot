@@ -353,17 +353,50 @@ helper — `attempts` resets to 0, and the ticket lands on `pending`
 immediately or `deferred` until the per-PR cooldown
 (`DISPATCHER_REREVIEW_COOLDOWN_SECONDS`, default 300s, keyed on
 `last_reviewed_at`, the timestamp of the last *completed* review) elapses.
-The cooldown is silent by design — the previous review's comment stays on
-the PR while a re-review waits it out, so there is nothing to notify.
+While a re-review waits out the cooldown, a self-cleaning "re-review
+scheduled ~HH:MM UTC" footnote is shown below the preserved review (see
+below) rather than staying silent.
 This cooldown now **escalates** per PR — a `cooldown_level` raises the
 effective wait geometrically (`effective_cooldown(level) = min(base·2^level, cap)`,
 `DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` default 3600s) for a PR that keeps
 being pushed inside each window, resetting to 0 once the PR stays quiet for a
 full window. Level 0 equals the base cooldown, so normal PRs are unchanged;
-escalation is silent (only lengthens `not_before`); it bounds a churning PR from
+escalation only lengthens `not_before` (the schedule notice's ETA reflects it
+automatically); it bounds a churning PR from
 ~288 to ~26 reviews/day without ever abandoning it. The two escalation sites are:
 (1) `enqueue_or_update` done/failed re-arm, and (2) `finalize_review`'s
 dirty-flag branch.
+
+**Re-review scheduled notice.** Rather than a fully silent wait, a deferred
+ticket with a visible prior review gets a self-cleaning footnote —
+`formatting.format_schedule_notice(not_before)`, "🔄 Re-review scheduled
+~HH:MM UTC" (absolute time only; GitHub can't localize a comment per
+viewer, and a relative string would go stale since this note is only
+edited on a re-arm event) — appended via `github_app.append_schedule_notice`
+below the review, delimited by `SCHEDULE_NOTE_START`/`SCHEDULE_NOTE_END`.
+Posting/refreshing happens in a dispatcher-loop step,
+`post_pending_notices(now)`, run once per `run_forever` iteration alongside
+`process_next_due`: it queries `store.tickets_needing_notice(now)` —
+`deferred` tickets with a visible review whose `not_before` has moved since
+the marker column `notice_not_before` was last set — and calls
+`store.mark_notice_posted` after each successful post. This single sweep
+covers every trigger that puts a reviewed ticket into `deferred` (cooldown
+re-arm, whether from a webhook push or `finalize_review`'s dirty-flag
+branch, and a rate-limited wait with a good review already present — the
+placeholder mechanism below only fires when no review exists yet) with one
+code path, since the webhook process that runs `enqueue_or_update` does no
+GitHub work by design. `defer_failed` (hard-failure retry backoff) sets a
+distinct status, `'retrying'`, instead of `'deferred'`, so this sweep can
+never mistake a silently-retrying ticket for a scheduled one —
+`claim_next_due` and `enqueue_or_update`'s ride-out branch treat `'retrying'`
+identically to `'deferred'` for claimability and push handling. The moment
+a ticket is claimed, `process_next_due` strips any live schedule footnote
+(`github_app.clear_schedule_notice` + `store.clear_notice`) before doing
+anything else — the wait is over regardless of what happens next — and
+`_strip_existing_footnote` recognizes either footnote kind, so whichever
+footnote-writing call runs next self-heals a stale leftover of the other
+kind even if a strip attempt failed.
+
 `claim_next_due` claims the oldest due ticket (`pending`, or `deferred`
 whose `not_before` has passed) with an atomic
 `UPDATE ... WHERE status IN ('pending', 'deferred')`, so a claimed ticket
@@ -466,15 +499,16 @@ Both `format_failure` and `format_failure_footnote` pluralize correctly
 `formatting.format_placeholder()` — posted through the same marker-based
 `upsert_comment` used for real results, **unless** a good review is already
 present (`_has_visible_review`), in which case the placeholder is
-suppressed and the ticket still defers silently — the existing good review
-stays up untouched until a later successful re-review overwrites it in
-place. (A first-ever review, with `last_reviewed_at` still `None`, always
-gets the placeholder — it is the only signal available at that point.) The
-real comment later overwrites the placeholder in place, found via the
-existing bot marker (no separate tracking needed for this). Wording varies
-by wait magnitude: short waits say a rate limit was hit and the review will
-appear shortly; waits at or above `PLACEHOLDER_DAILY_THRESHOLD_SECONDS`
-(300s) name a daily quota and show an ETA computed from `now + retry_after`.
+suppressed — the existing good review stays up, with the schedule-notice
+sweep (above) appending its footnote instead of a fully silent wait — until
+a later successful re-review overwrites the whole comment in place. (A
+first-ever review, with `last_reviewed_at` still `None`, always gets the
+placeholder — it is the only signal available at that point.) The real
+comment later overwrites the placeholder in place, found via the existing
+bot marker (no separate tracking needed for this). Wording varies by wait
+magnitude: short waits say a rate limit was hit and the review will appear
+shortly; waits at or above `PLACEHOLDER_DAILY_THRESHOLD_SECONDS` (300s) name
+a daily quota and show an ETA computed from `now + retry_after`.
 
 **In-memory `blocked_until` gate.** The dispatcher keeps a per-provider
 `blocked_until` timestamp, learned only from the most recent
@@ -523,7 +557,9 @@ layers, all using an injected clock (no real sleeps): ticket store
 (`tests/test_queue_store.py`), provider `RateLimited` parsing
 (`tests/test_provider_rate_limited.py`), atomic rate-limit propagation
 (`tests/test_orchestrator_rate_limited.py`), placeholder rendering
-(`tests/test_placeholder_formatting.py`), the dispatcher's burst/daily-wall/
+(`tests/test_placeholder_formatting.py`), the
+schedule notice (`tests/test_schedule_notice_formatting.py`), the
+dispatcher's burst/daily-wall/
 restart-recovery behavior (`tests/test_dispatcher.py`), and the webhook's
 enqueue path (`tests/test_webhook.py`). One live-verification item remains
 per `CLAUDE.md`'s hygiene rules: confirming GitHub Models actually sends a
