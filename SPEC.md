@@ -502,18 +502,14 @@ drains whatever is due.
 `DISPATCHER_REREVIEW_COOLDOWN_SECONDS` (default `300.0`),
 `DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` (default `3600.0`).
 
-**Deliberate simplification vs. the design doc.** The design doc's §6.1/§9
-describe storing the posted comment's `comment_id` on the ticket so a future
-feature could reference "the review comment" directly. The `tickets` table
-does have a `comment_id` column, and `store.finalize_review()` (the method
-that replaced the earlier `mark_done()` when the dirty-flag re-review policy
-was added) accepts an optional `comment_id` argument — but nothing in the
-current dispatcher/orchestrator path populates it (`finalize_review` is
-always called with no `comment_id`), so it is presently unused.
-Placeholder→result replacement works purely off the existing comment
-marker, not off a stored `comment_id`. The column is kept
-available for the design doc's §13 "ping comment" future feature, which
-remains out of scope.
+**Robust comment identity.** The bot identifies its own comment by the
+persisted `comment_id` first, falling back to an author-filtered marker scan
+(`user.type == "Bot"` + marker), so a human/other comment containing the
+marker is never edited by mistake. `finalize_review` now persists the posted
+comment's id (`comment_id` column) on successful review completion,
+guaranteeing that future edits (placeholder→result, or a re-review) locate
+the correct comment without ambiguity. The column is also available for the
+design doc's §13 "ping comment" future feature, which remains out of scope.
 
 **Out of scope** (unchanged from the design doc, all deliberate): provider
 failover on a daily wall, proactive quota accounting (no `x-ratelimit-*`

@@ -89,7 +89,7 @@ _MAX_COOLDOWN_LEVEL = 30
 
 
 def effective_cooldown(level: int) -> float:
-    """Escalated per-PR cooldown: max(base, min(base * 2^level, cap)).
+    """Escalated per-PR cooldown: min(base * 2^min(level, _MAX_COOLDOWN_LEVEL), cap).
 
     level 0 -> base (identical to a non-escalating cooldown, so normal PRs are
     unaffected). Each consecutive rapid re-review raises the level, geometrically
@@ -115,7 +115,9 @@ def enqueue_or_update(
     - 'deferred'    -> ride out: update head_sha only; keep status/not_before
                        (a push cannot shorten a provider/cooldown wait)
     - 'running'     -> update head_sha + set rereview_requested (dirty flag)
-    - 'done'/'failed' -> re-arm via cooldown helper; reset attempts to 0
+    - 'done'/'failed' -> re-arm via cooldown helper; escalate cooldown_level
+                       on churn, reset to 0 when cooldown elapsed; always
+                       reset attempts to 0
     """
     # Atomic against claim_next_due/finalize_review even off the event loop:
     # BEGIN IMMEDIATE takes the write lock up front, so no concurrent writer can
@@ -237,9 +239,10 @@ def _due_after_cooldown(
 ) -> tuple[str, str | None, int]:
     """Re-arm state + next escalation level, honoring the escalating cooldown.
 
-    Churn (still within effective_cooldown(level) of the last completed review)
-    -> ('deferred', due, next_cooldown_level(level)). Quiet or never-reviewed
-    -> ('pending', None, 0) (escalation resets).
+    Churn (within effective_cooldown(level) of last completed review):
+      → ('deferred', due, next_cooldown_level(level)).
+    Quiet or never-reviewed:
+      → ('pending', None, 0); escalation resets.
     """
     if last_reviewed_at is None:
         return ("pending", None, 0)
@@ -294,7 +297,8 @@ def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
     ``enqueue_or_update``'s terminal-state branch: it calls
     ``_due_after_cooldown`` and re-arms the ticket to 'pending' (cooldown
     elapsed, or no prior successful review) or 'deferred' (still cooling down
-    from the last completed review), resetting ``attempts`` to 0 either way.
+    from the last completed review), escalating/resetting ``cooldown_level``
+    per the escalation policy and resetting ``attempts`` to 0 either way.
     ``error`` is accepted for future use (e.g. logging/inspection) but is not
     persisted in a column today — the schema has no error column.
     """
