@@ -563,3 +563,22 @@ def test_clear_notice_resets_marker_to_none():
     _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=FUTURE)
     store.clear_notice(tid)
     assert store.get_ticket(tid).notice_not_before is None
+
+
+def test_tickets_needing_notice_respects_batch_cap(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_notice_sweep_batch_size", 2)
+    tids = []
+    for pr in range(1, 4):  # 3 tickets, cap is 2
+        tid = _enqueue(pr=pr, now=T0)
+        _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=None)
+        tids.append(tid)
+
+    first_batch = store.tickets_needing_notice(now=T0)
+    assert len(first_batch) == 2
+    assert [t.id for t in first_batch] == tids[:2]  # oldest-enqueued first
+
+    for t in first_batch:
+        store.mark_notice_posted(t.id, FUTURE)
+
+    second_batch = store.tickets_needing_notice(now=T0)
+    assert [t.id for t in second_batch] == tids[2:]  # the leftover ticket, picked up next "tick"

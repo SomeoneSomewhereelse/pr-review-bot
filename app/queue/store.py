@@ -324,7 +324,10 @@ def tickets_needing_notice(now: str) -> list[Ticket]:
     changed since the last notice was posted (or none was posted yet).
     Excludes a ticket whose not_before has already passed -- it is about to
     be claimed for a real review, so a "scheduled" note for a time that's
-    already gone would be wrong."""
+    already gone would be wrong. Capped at dispatcher_notice_sweep_batch_size
+    per call so a mass re-arm can't stall process_next_due for a whole
+    dispatcher tick; any ticket past the cap keeps its stale marker and is
+    picked up by the next call (self-healing, no new state)."""
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -335,8 +338,9 @@ def tickets_needing_notice(now: str) -> list[Ticket]:
               AND last_reviewed_at IS NOT NULL
               AND (notice_not_before IS NULL OR notice_not_before != not_before)
             ORDER BY enqueued_at ASC, id ASC
+            LIMIT ?
             """,
-            (now,),
+            (now, settings.dispatcher_notice_sweep_batch_size),
         ).fetchall()
         return [_row_to_ticket(row) for row in rows]
 

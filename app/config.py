@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     dispatcher_backoff_jitter_seconds: float = 0.0
     dispatcher_rereview_cooldown_seconds: float = 300.0
     dispatcher_rereview_cooldown_max_seconds: float = 3600.0
+    dispatcher_notice_sweep_batch_size: int = 20
 
 
 settings = Settings()
