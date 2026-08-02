@@ -172,6 +172,12 @@ def format_schedule_notice(not_before: datetime) -> str:
     next re-review is scheduled (cooldown or rate-limit wait). Absolute UTC
     time only -- GitHub's comment body can't be localized per viewer, and this
     note is only edited on a re-arm event (not continuously updated), so a
-    relative string would go stale the moment it's posted."""
+    relative string would go stale the moment it's posted. Requires a
+    timezone-aware ``not_before``: ``datetime.astimezone()`` silently treats a
+    naive datetime as system-local time rather than raising, so a naive value
+    is rejected explicitly here instead of producing a host-timezone-dependent
+    result."""
+    if not_before.tzinfo is None:
+        raise ValueError("format_schedule_notice requires a timezone-aware datetime")
     eta = not_before.astimezone(timezone.utc).strftime("%H:%M UTC")
     return f"{SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~{eta}\n{SCHEDULE_NOTE_END}"

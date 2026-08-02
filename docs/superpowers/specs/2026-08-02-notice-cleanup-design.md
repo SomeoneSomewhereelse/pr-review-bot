@@ -75,7 +75,11 @@ permanently: the `ORDER BY enqueued_at ASC, id ASC` already used by this
 query means the same oldest-first prioritization `claim_next_due` uses
 elsewhere in this file, so a consistently-overflowing batch would still
 cycle through every waiting ticket over successive ticks rather than
-always serving the same prefix.
+always serving the same prefix. This assumes each attempted post either
+succeeds or fails only transiently; a ticket whose post fails
+*persistently* stays at the same `ORDER BY` position every tick, so with
+a backlog larger than the cap it could delay tickets behind it
+indefinitely — a narrow edge case, not addressed by this cleanup.
 
 ## 3. Mechanism
 
@@ -106,10 +110,13 @@ as what actually enforces this — not the ticket state machine alone.
 eta = not_before.astimezone(timezone.utc).strftime("%H:%M UTC")
 ```
 
-(was `not_before.strftime("%H:%M UTC")`). Requires `not_before` remain a
-timezone-aware `datetime` (unchanged requirement — a naive datetime still
-raises, now explicitly via `astimezone`'s own error rather than silently
-mislabeling a non-UTC offset as "UTC").
+(was `not_before.strftime("%H:%M UTC")`). Requires `not_before` be a
+timezone-aware `datetime` — enforced by an explicit
+`if not_before.tzinfo is None: raise ValueError(...)` guard, since
+`datetime.astimezone()` does NOT raise on a naive datetime (it silently
+assumes system-local time and converts from there), so relying on
+`astimezone` alone would not have been self-enforcing against the one
+input class this fix needs to guard.
 
 ### 3.5 Self-cleaning test (`tests/test_github_app.py`)
 

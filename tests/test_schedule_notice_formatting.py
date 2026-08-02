@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.formatting import format_schedule_notice
 from app.github_app import SCHEDULE_NOTE_END, SCHEDULE_NOTE_START
 
@@ -28,3 +30,9 @@ def test_format_schedule_notice_normalizes_non_utc_timezone():
     body = format_schedule_notice(local_time)
     assert "12:00 UTC" in body
     assert "17:00 UTC" not in body
+
+
+def test_format_schedule_notice_rejects_naive_datetime():
+    naive = datetime(2026, 1, 1, 12, 0, 0)  # no tzinfo
+    with pytest.raises(ValueError, match="timezone-aware"):
+        format_schedule_notice(naive)

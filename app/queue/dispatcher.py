@@ -88,9 +88,10 @@ async def _post_placeholder(
 
 
 async def post_pending_notices(now: datetime) -> int:
-    """Refresh the schedule footnote on every deferred ticket whose not_before
-    changed since the last notice. Returns the count posted. Called once per
-    run_forever iteration, alongside process_next_due."""
+    """Refresh the schedule footnote on up to `dispatcher_notice_sweep_batch_size`
+    deferred tickets whose not_before changed since the last notice. Returns the
+    count posted. Called once per run_forever iteration, alongside
+    process_next_due."""
     posted = 0
     for ticket in store.tickets_needing_notice(now.isoformat()):
         try:
