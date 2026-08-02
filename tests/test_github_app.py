@@ -483,6 +483,43 @@ def test_append_schedule_notice_replaces_prior_schedule_note(fake_transport, mon
     assert edited["body"].count(github_app.SCHEDULE_NOTE_START) == 1
 
 
+def test_upsert_comment_full_overwrite_removes_stale_schedule_note(fake_transport, monkeypatch):
+    """A real review completion (upsert_comment's full-body overwrite) must
+    wipe a previously-posted schedule note -- self-cleaning, no separate
+    cleanup code needed."""
+    edited = {}
+    existing_body = (
+        f"{github_app.COMMENT_MARKER}\n## Review\nold findings\n\n"
+        f"{github_app.SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~10:00 UTC\n"
+        f"{github_app.SCHEDULE_NOTE_END}"
+    )
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route(
+        "GET",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        [{"id": 333, "body": existing_body, "user": {"login": "bot", "type": "Bot"},
+          "url": f"{REPO_API_URL}/issues/comments/333"}],
+    )
+
+    def send_with_patch_capture(request, **kwargs):
+        if request.method == "PATCH" and "/issues/comments/333" in request.url:
+            body = json.loads(request.body)
+            edited["body"] = body["body"]
+            return fake_transport._build_response(
+                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+            )
+        return fake_transport.send(request, **kwargs)
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+
+    github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nnew findings")
+
+    assert "new findings" in edited["body"]
+    assert "old findings" not in edited["body"]
+    assert "Re-review scheduled" not in edited["body"]   # schedule note wiped by full overwrite
+
+
 def test_strip_existing_footnote_removes_schedule_note_when_writing_fail_note(
     fake_transport, monkeypatch
 ):

@@ -28,9 +28,12 @@ FAIL_NOTE_START = "<!-- ai-review-fail-note -->"
 FAIL_NOTE_END = "<!-- /ai-review-fail-note -->"
 
 # Sub-marker delimiting the self-cleaning "re-review scheduled" notice shown
-# while a cooldown/rate-limit wait is pending. Mutually exclusive with
-# FAIL_NOTE_* by construction (a ticket is never both mid-failure-retry and
-# in a completed cooldown/rate-limit wait) -- see _strip_existing_footnote.
+# while a cooldown/rate-limit wait is pending. NOT mutually exclusive with
+# FAIL_NOTE_* by ticket-state construction alone -- a ticket that hits the
+# failure ceiling (fail note posted) and is then pushed can briefly carry
+# both footnote kinds on GitHub at once. What actually guarantees only one
+# is ever visible is _strip_existing_footnote recognizing both marker pairs:
+# whichever footnote-writing function runs next cleans up the other kind.
 SCHEDULE_NOTE_START = "<!-- ai-review-schedule-note -->"
 SCHEDULE_NOTE_END = "<!-- /ai-review-schedule-note -->"
 
