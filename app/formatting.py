@@ -14,7 +14,7 @@ this file's control flow, only the ``_SECTION_CONFIG`` table.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.github_app import (
     COMMENT_MARKER,
@@ -173,5 +173,5 @@ def format_schedule_notice(not_before: datetime) -> str:
     time only -- GitHub's comment body can't be localized per viewer, and this
     note is only edited on a re-arm event (not continuously updated), so a
     relative string would go stale the moment it's posted."""
-    eta = not_before.strftime("%H:%M UTC")
+    eta = not_before.astimezone(timezone.utc).strftime("%H:%M UTC")
     return f"{SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~{eta}\n{SCHEDULE_NOTE_END}"
