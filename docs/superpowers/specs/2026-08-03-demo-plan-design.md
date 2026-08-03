@@ -1,7 +1,16 @@
 # Demo plan — Zoom screen-share, course grading presentation
 
 Date: 2026-08-03
-Status: draft, pending user review
+Status: **Paused** — a new requirement (persistent internet hosting, so the
+instructor can test the bot independently as a collaborator on the testbed
+repo, not just during the scheduled Zoom call) surfaced mid-planning and
+needs its own brainstorm + plan first. See
+`docs/2026-08-03-supabase-hosting-migration-handoff.md`. This document's
+segment content (happy path, GitHub Models dead-vendor swap, Groq quota
+exhaustion + cooldown) is still the intended demo material — resume this
+plan once the hosting migration lands, re-validating any step that assumed
+your own terminal (e.g. restarting `uvicorn` for a provider swap may work
+differently on a managed host).
 
 ## Purpose
 
