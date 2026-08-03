@@ -1,0 +1,174 @@
+# Demo plan — Zoom screen-share, course grading presentation
+
+Date: 2026-08-03
+Status: draft, pending user review
+
+## Purpose
+
+A live, screen-shared walkthrough of the Autonomous Code Review Engine for a
+course grading presentation. Budget: 10-15 minutes of demo time. All core
+moments (the bot actually reviewing PRs) are **live against the real GitHub
+webhook path, no recorded fallback** — confirmed acceptable risk given the
+project's prior rehearsal history (PR #2, #3) and the fact that the two
+"failure" beats below are now *engineered into the plan on purpose*, not
+things we're hoping don't happen.
+
+## Environment facts established during planning (2026-08-03)
+
+- `gh`, `cloudflared`, `uv` all resolve and work from this session (Windows
+  binaries via `/mnt/c/Program Files/...`, `/mnt/c/Users/Home/.local/bin/uv.exe`).
+  `gh auth status` initially showed an invalid token; user regenerated /
+  re-logged in and it now shows `✓ Logged in ... (keyring)` with `repo` scope.
+- No bot instance is currently running (nothing on port 8000, no
+  `uvicorn`/`cloudflared` process, Docker Desktop daemon not even up). The
+  runbook's startup step checks `/healthz` first and only redeploys if it
+  doesn't respond, rather than assuming a fresh start every time.
+- **GitHub Models is fully retired** as of 2026-07-30 (confirmed via GitHub's
+  own changelog — playground, catalog, inference API, and BYOK gone for all
+  customers, including existing ones with active usage; no drop-in official
+  replacement). This is not a rate-limit or misconfiguration — the endpoint
+  is genuinely gone. `.env`'s `LLM_PROVIDER` currently reads `groq`.
+- Test repo: `SomeoneSomewhereelse/pr-review-bot-testbed`. GitHub App:
+  `tov-pr-review-bot-testbed`
+  (`https://github.com/settings/apps/tov-pr-review-bot-testbed`).
+- Measured live (one deliberate call, per `CLAUDE.md`'s LLM-testing-hygiene
+  rule): a single specialist call against the real `fixtures/bad_code`
+  diff via Groq costs **1,673 tokens in / 77 tokens out** (~1,750 total).
+  Three specialists/review ⇒ **~5,250 tokens per full review**. Against
+  Groq's free-tier **12K TPM** cap (the binding constraint — 30 RPM gives
+  10 reviews/min of headroom, far looser than TPM's ~2.3 reviews/min), two
+  reviews land safely (~10.5K), a third has only ~1.5K headroom against a
+  ~5.25K need — a real 429 is very likely by the 3rd review in the same
+  60s window, guaranteed by any review after that.
+- No queue.db currently exists (fresh state) — `init_db()` runs
+  `CREATE TABLE IF NOT EXISTS` on every startup, so no cleanup is required,
+  but any leftover `queue.db` from a rehearsal should be deleted before the
+  real call to avoid stale deferred tickets muddying the burst timing.
+- Restarting the `uvicorn` process (needed to change `LLM_PROVIDER`, since
+  `Settings()` is built once at import time) does **not** kill the
+  `cloudflared` tunnel (separate process) or require a new webhook URL —
+  the tunnel/webhook-URL update is a **one-time** step per session, not
+  per-provider-swap.
+- `attempt_review`'s "atomic" behavior only applies when a specialist call
+  raises `RateLimited` (429) — that defers the *whole* ticket with no
+  comment posted. A specialist that fails for any other reason (dead
+  endpoint, network error) is caught inside `run_specialist` and turned
+  into a `status="failed"` result; `attempt_review` still completes
+  normally and **posts a real comment with failed rows** — this is not
+  gated by the "preserve a good review" guard (that guard only fires on
+  the dispatcher's rate-limit pre-flight gate and the terminal hard-stop
+  retry path). This means reviewing an *already-reviewed* PR with a fully
+  dead provider would overwrite its good comment with an all-failed one —
+  which is why Segment B below uses a **fresh PR**, not the happy-path PR.
+
+## Segment plan (~14 min total)
+
+### 1. Architecture overview (~2 min)
+
+Narrate the flow from `README.md`/`SPEC.md`'s diagram: webhook → HMAC verify
+→ dedup → durable SQLite ticket → single serial dispatcher → diff fetch +
+annotate → 3 concurrent specialists → merge (atomic on rate-limit, never
+partial otherwise) → upsert PR comment. No live action needed yet.
+
+### 2. Happy path (~3 min) — establishes the baseline
+
+- Provider: `groq` (already the default in `.env`).
+- `uv run python scripts/seed_demo_pr.py` → opens **PR-1** with the planted
+  `fixtures/bad_code/billing_report.py` issues (hardcoded credential, N+1
+  query, magic number).
+- Narrate while waiting (~8s historically): webhook → 202 → dispatcher
+  claims the ticket → 3 specialists run concurrently → comment posts.
+- Show the resulting comment: real findings across Security/Performance/
+  Code Quality, footer with runtime/tokens/cost.
+
+### 3. Segment B — a real vendor died overnight (~4 min)
+
+- Switch `.env`: `LLM_PROVIDER=github_models`. Restart `uvicorn` only (tunnel
+  stays up, no webhook URL change needed).
+- `uv run python scripts/seed_demo_pr.py` → opens **PR-2** (fresh PR, not
+  PR-1 — see the "atomic" note above for why).
+- Live result: all 3 specialists fail (dead endpoint) → comment posts
+  immediately (no dispatcher-level retry needed — this is a same-attempt
+  completed review with 3 failed rows, not a deferred one) → narrate: this
+  is GitHub's actual July 30, 2026 retirement, not a staged failure — link
+  to `github.blog/changelog/2026-07-30-github-models-is-now-retired`.
+- Switch `.env` back: `LLM_PROVIDER=groq`. Restart `uvicorn` again.
+- Trigger a re-review of PR-2: push a trivial follow-up commit to its
+  branch (`synchronize` event) — need to keep the branch checked out
+  (`gh pr checkout <PR-2 number>` in a scratch dir) since
+  `seed_demo_pr.py`'s clone is discarded after each run.
+- Live result: same comment (same marker) edits in place, now showing real
+  findings from `groq`. This is the "provider seam survives a full vendor
+  outage" proof.
+
+### 4. Segment C — quota exhaustion + auto-recovery (~4-5 min)
+
+Still on `groq`. Fire, in quick succession:
+
+1. `seed_demo_pr.py` → **PR-3** (new)
+2. `seed_demo_pr.py` → **PR-4** (new)
+3. `seed_demo_pr.py` → **PR-5** (new)
+4. `seed_demo_pr.py` → **PR-6** (new)
+5. **Last**, a follow-up commit on **PR-1** (the happy-path PR, already has
+   a good review) — fire this one last so quota is already exhausted by
+   the time its ticket is claimed, maximizing the odds it's the one that
+   demonstrates the footnote path rather than succeeding outright.
+
+Expected (per the token math above, some timing variance possible — narrate
+this as "roughly" rather than promising an exact count live):
+- The first ~2 tickets claimed likely **succeed** normally (~10.5K
+  cumulative tokens, under the 12K TPM cap).
+- The remaining new-PR tickets (no prior review) hit a real 429 → deferred
+  → **plain placeholder comment** posted (`format_placeholder`).
+- PR-1's re-review ticket (has `last_reviewed_at` set → a good review is
+  already visible) hits the same 429 → deferred → **self-cleaning schedule
+  footnote** appended instead of overwriting the good comment
+  (`format_schedule_notice` / `append_schedule_notice`), per the
+  "never overwrite a good visible review" guarantee.
+- Narrate while waiting for the automatic retry (dispatcher polls every
+  `dispatcher_idle_sleep_seconds` = 1s; the deferred tickets' `not_before`
+  is set from Groq's real `Retry-After`) — no manual intervention. Once due,
+  each deferred ticket re-attempts and, once the per-minute TPM window has
+  rolled forward, succeeds: placeholders get replaced with real reviews,
+  and PR-1's footnote disappears, leaving the original comment intact.
+
+### 5. Wrap-up (~1 min)
+
+- Cost model: `cost.md`'s ~$8-10/mo at brief scale, demo ran at $0
+  (Groq + Cloudflare free tiers).
+- What's not live: Vertex (mocked-only, needs GCP billing).
+- One-line callout: GitHub Models' retirement happened *during this
+  project's life* and the architecture absorbed it without a code change —
+  only an env var + restart.
+
+## Pre-call / pre-rehearsal checklist
+
+1. `curl localhost:8000/healthz` — if `200`, skip to step 5. If not, continue.
+2. Delete any stale `queue.db` from a prior rehearsal.
+3. Confirm `.env`: `LLM_PROVIDER=groq` (Segments 2 and the end state of
+   Segment B/C all expect Groq as the resting state).
+4. Start the server: `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
+   (background/separate terminal).
+5. Start the tunnel: `cloudflared tunnel --url http://localhost:8000`
+   (background/separate terminal) — capture the printed
+   `https://*.trycloudflare.com` hostname.
+6. Update the GitHub App's webhook URL (`.../settings/apps/tov-pr-review-bot-testbed`
+   → General → Webhook URL) to `<hostname>/webhook`. **One-time per tunnel
+   session** — provider swaps via `uvicorn` restart do not require redoing
+   this.
+7. Sanity check: `curl <tunnel-url>/healthz` → `200`; an unsigned
+   `curl -X POST <tunnel-url>/webhook` → `401`.
+8. Confirm `gh auth status` is logged in as `SomeoneSomewhereelse`.
+
+## Open items / risks accepted
+
+- Segment C's exact split between "succeeds" vs. "defers" depends on real
+  Groq timing and is not deterministic — the 5-item burst (4 new + 1
+  resync, resync fired last) was sized with margin from a real measurement,
+  not guessed, but a live rehearsal (next step) is what actually confirms
+  it, not this document.
+- No recorded fallback for any segment, by explicit choice — a live failure
+  during the actual call has no on-the-spot recovery.
+- The GitHub Models failure mode (Segment B) depends on it staying dead
+  between now and the call date — extremely likely given it's a confirmed
+  permanent retirement, not a transient outage.
