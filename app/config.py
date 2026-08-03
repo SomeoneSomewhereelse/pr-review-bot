@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,7 +37,10 @@ class Settings(BaseSettings):
     dispatcher_backoff_jitter_seconds: float = 0.0
     dispatcher_rereview_cooldown_seconds: float = 300.0
     dispatcher_rereview_cooldown_max_seconds: float = 3600.0
-    dispatcher_notice_sweep_batch_size: int = 20
+    # gt=0: 0 would silently disable the notice sweep entirely, and -1 means
+    # "no limit" in SQLite, silently reverting to the unbounded pre-fix
+    # behavior this setting exists to prevent.
+    dispatcher_notice_sweep_batch_size: int = Field(default=20, gt=0)
 
 
 settings = Settings()
