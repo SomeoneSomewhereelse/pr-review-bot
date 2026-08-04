@@ -639,3 +639,27 @@ def test_read_private_key_prefers_base64_env(monkeypatch):
         base64.b64encode(pem.encode()).decode(),
     )
     assert github_app._read_private_key() == pem
+
+
+def test_discover_installation_id_returns_id(fake_transport):
+    from app import github_app
+
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/installation", {"id": 424242})
+    assert github_app.discover_installation_id(REPO_FULL_NAME) == 424242
+
+
+def test_discover_installation_id_raises_when_not_installed(fake_transport):
+    from app import github_app
+
+    fake_transport.route(
+        "GET", f"/repos/{REPO_FULL_NAME}/installation", {"message": "Not Found"}, 404
+    )
+    with pytest.raises(RuntimeError, match="not installed"):
+        github_app.discover_installation_id(REPO_FULL_NAME)
+
+
+def test_set_webhook_url_patches_hook_config(fake_transport):
+    from app import github_app
+
+    fake_transport.route("PATCH", "/app/hook/config", {"url": "https://x/webhook"})
+    github_app.set_webhook_url("https://x/webhook")  # must not raise

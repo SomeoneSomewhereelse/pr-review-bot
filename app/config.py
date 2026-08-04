@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     github_app_private_key_b64: str = ""
     github_webhook_secret: str = ""
     github_target_repo: str = ""
+    public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
     llm_provider: str = "gemini"
     # ``llm_model`` is consumed by the google-genai family (vertex/gemini) only.

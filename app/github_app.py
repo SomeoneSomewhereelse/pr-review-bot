@@ -124,6 +124,41 @@ def get_installation_client() -> Github:
     return Github(auth=get_installation_auth())
 
 
+def _app_jwt_client() -> Github:
+    """Client authenticated as the App itself (JWT), for App-level endpoints."""
+    return Github(auth=Auth.AppAuth(settings.github_app_id, _read_private_key()))
+
+
+def discover_installation_id(repo_full_name: str) -> int:
+    """Return the installation id for the App on `repo_full_name` (App JWT).
+
+    Raises RuntimeError with an actionable message if the App is not installed
+    -- GitHub does not permit an App to install itself; a repo admin must
+    authorize it once in the GitHub UI.
+
+    Uses the raw requester (``GET /repos/{repo}/installation``) rather than a
+    typed PyGithub method: the installed PyGithub version's ``Repository``
+    class has no ``get_installation()`` method for this endpoint.
+    """
+    gh = _app_jwt_client()
+    try:
+        _, data = gh.requester.requestJsonAndCheck(
+            "GET", f"/repos/{repo_full_name}/installation"
+        )
+    except GithubException as exc:
+        raise RuntimeError(
+            f"GitHub App is not installed on {repo_full_name}: install it once via the "
+            f"GitHub UI (repo Settings -> GitHub Apps), then redeploy. ({exc.status})"
+        ) from exc
+    return int(data["id"])
+
+
+def set_webhook_url(url: str) -> None:
+    """Idempotently point the App's webhook at `url` (PATCH /app/hook/config, App JWT)."""
+    gh = _app_jwt_client()
+    gh.requester.requestJsonAndCheck("PATCH", "/app/hook/config", input={"url": url})
+
+
 def fetch_pr_diff(repo_full_name: str, pr_number: int) -> str:
     """Fetch a PR's raw unified diff text.
 
