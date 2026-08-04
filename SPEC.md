@@ -5,7 +5,7 @@ receives new commits, an **Orchestrator** fetches the diff and runs three
 **Specialist Agents** (Security, Performance, Code Quality) in parallel, each
 backed by an LLM call with a structured-output schema. The Orchestrator merges
 their findings into a single Markdown comment and posts it back to the PR.
-Runs in production (public URL via Cloudflare Tunnel), not localhost.
+Runs in production on **Render** with **Supabase Postgres** for the durable queue.
 
 ## Confirmed decisions
 
