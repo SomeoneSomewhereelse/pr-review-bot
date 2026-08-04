@@ -73,7 +73,11 @@ For a stable, production-ready deployment with a persistent webhook URL:
 
 1. **Set up Supabase and Render** — see the full runbook in [`SETUP.md`](SETUP.md)
    section 3 ("Deploying to Render + Supabase").
-2. **Register the webhook** — once deployed, run `uv run python -m scripts.deploy`
+2. **Register the webhook** — once deployed, run, **locally from your own
+   machine** (not inside the Render container — `scripts/` isn't copied into
+   the Docker image), with the public URL passed explicitly since
+   `RENDER_EXTERNAL_URL` only exists inside Render's own container:
+   `PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy`
    to set the stable Render URL as the GitHub App's webhook endpoint.
 3. **Keep services warm** — register Render's `/healthz` endpoint with a free
    cron pinger (cron-job.org or UptimeRobot, ~10 min interval) to prevent
@@ -102,6 +106,13 @@ For production, use the stable Render deployment instead.
 uv run ruff check .
 uv run pytest -v
 ```
+
+**Prerequisite:** the queue store runs on Postgres, so DB-touching tests need
+either Docker installed locally (`tests/conftest.py`'s `db_url` fixture spins
+up a throwaway Postgres 16 via `testcontainers` automatically) or a
+`DATABASE_URL` env var pointing at a reachable local Postgres. Without either,
+those tests fail with an opaque testcontainers error. CI provides this
+automatically via a `services: postgres` container — no action needed there.
 
 99 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
