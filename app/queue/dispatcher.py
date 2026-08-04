@@ -93,7 +93,8 @@ async def post_pending_notices(now: datetime) -> int:
     count posted. Called once per run_forever iteration, alongside
     process_next_due."""
     posted = 0
-    for ticket in store.tickets_needing_notice(now.isoformat()):
+    tickets = await asyncio.to_thread(store.tickets_needing_notice, now.isoformat())
+    for ticket in tickets:
         try:
             await asyncio.to_thread(
                 github_app.append_schedule_notice,
@@ -102,7 +103,9 @@ async def post_pending_notices(now: datetime) -> int:
                 format_schedule_notice(datetime.fromisoformat(ticket.not_before)),
                 ticket.comment_id,
             )
-            store.mark_notice_posted(ticket.id, ticket.not_before)
+            await asyncio.to_thread(
+                store.mark_notice_posted, ticket.id, ticket.not_before
+            )
             posted += 1
         except Exception:  # noqa: BLE001 - one ticket's failure must not block the rest
             logger.exception("failed to post schedule notice for ticket %s", ticket.id)
@@ -115,7 +118,7 @@ async def process_next_due(now: datetime) -> StepResult:
     action semantics: "deferred" = RateLimited OR a retryable hard failure;
     "failed" = terminal hard-stop; "ran" = completed; "idle" = nothing due.
     """
-    ticket = store.claim_next_due(now.isoformat())
+    ticket = await asyncio.to_thread(store.claim_next_due, now.isoformat())
     if ticket is None:
         return StepResult(action="idle")
 
@@ -125,7 +128,7 @@ async def process_next_due(now: datetime) -> StepResult:
                 github_app.clear_schedule_notice,
                 ticket.repo_full_name, ticket.pr_number, ticket.comment_id,
             )
-            store.clear_notice(ticket.id)
+            await asyncio.to_thread(store.clear_notice, ticket.id)
         except Exception:  # noqa: BLE001 - a stale note is cosmetic; must not block the review
             logger.exception("failed to clear schedule notice for ticket %s", ticket.id)
 
@@ -135,7 +138,12 @@ async def process_next_due(now: datetime) -> StepResult:
     provider = settings.llm_provider
     blocked = _blocked_until.get(provider)
     if blocked is not None and now < blocked:
-        store.defer_rate_limited(ticket.id, not_before=blocked.isoformat(), now=now.isoformat())
+        await asyncio.to_thread(
+            store.defer_rate_limited,
+            ticket.id,
+            not_before=blocked.isoformat(),
+            now=now.isoformat(),
+        )
         if not _has_visible_review(ticket):
             await _post_placeholder(
                 ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now,
@@ -184,27 +192,45 @@ async def process_next_due(now: datetime) -> StepResult:
                     # failure (not transient). Give up on the notice and go
                     # terminal anyway: a lost notice is strictly better than
                     # looping forever.
-                    store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
+                    await asyncio.to_thread(
+                        store.mark_failed,
+                        ticket.id,
+                        now=now.isoformat(),
+                        error=str(exc),
+                    )
                     return StepResult(action="failed", ticket_id=ticket.id)
                 backoff = compute_backoff(next_attempt, _jitter())
-                store.defer_failed(
+                await asyncio.to_thread(
+                    store.defer_failed,
                     ticket.id,
                     not_before=(now + timedelta(seconds=backoff)).isoformat(),
                     now=now.isoformat(),
                 )
                 return StepResult(action="deferred", ticket_id=ticket.id)
-            store.mark_failed(ticket.id, now=now.isoformat(), error=str(exc))
+            await asyncio.to_thread(
+                store.mark_failed, ticket.id, now=now.isoformat(), error=str(exc)
+            )
             return StepResult(action="failed", ticket_id=ticket.id)
         backoff = compute_backoff(next_attempt, _jitter())
         until = now + timedelta(seconds=backoff)
-        store.defer_failed(ticket.id, not_before=until.isoformat(), now=now.isoformat())
+        await asyncio.to_thread(
+            store.defer_failed,
+            ticket.id,
+            not_before=until.isoformat(),
+            now=now.isoformat(),
+        )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     if isinstance(outcome, ReviewRateLimited):
         wait = max(outcome.retry_after, settings.dispatcher_min_retry_after_seconds)
         until = now + timedelta(seconds=wait)
         _blocked_until[provider] = until
-        store.defer_rate_limited(ticket.id, not_before=until.isoformat(), now=now.isoformat())
+        await asyncio.to_thread(
+            store.defer_rate_limited,
+            ticket.id,
+            not_before=until.isoformat(),
+            now=now.isoformat(),
+        )
         if not _has_visible_review(ticket):
             await _post_placeholder(
                 ticket.repo_full_name, ticket.pr_number, wait, now, ticket.comment_id
@@ -215,7 +241,8 @@ async def process_next_due(now: datetime) -> StepResult:
     rereview_not_before = (
         now + timedelta(seconds=store.effective_cooldown(level))
     ).isoformat()
-    store.finalize_review(
+    await asyncio.to_thread(
+        store.finalize_review,
         ticket.id,
         now=now.isoformat(),
         rereview_not_before=rereview_not_before,

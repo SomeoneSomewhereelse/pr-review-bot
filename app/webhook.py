@@ -1,5 +1,6 @@
 """GitHub PR webhook route: HMAC verification, delivery dedup, durable enqueue."""
 
+import asyncio
 import json
 import logging
 from collections import OrderedDict
@@ -41,7 +42,7 @@ def _is_duplicate_delivery(delivery_id: str) -> bool:
     return False
 
 
-def _enqueue_from_payload(payload: dict) -> None:
+async def _enqueue_from_payload(payload: dict) -> None:
     """Enqueue a durable review ticket for a triggering PR action (no-op otherwise)."""
     if payload.get("action") not in _REVIEW_TRIGGER_ACTIONS:
         return
@@ -53,7 +54,8 @@ def _enqueue_from_payload(payload: dict) -> None:
         logger.warning("pull_request webhook missing repo/pr number; skipping enqueue")
         return
     head_sha = (pull_request.get("head") or {}).get("sha")
-    store.enqueue_or_update(
+    await asyncio.to_thread(
+        store.enqueue_or_update,
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         head_sha=head_sha,
@@ -76,5 +78,5 @@ async def webhook(request: Request) -> Response:
         return Response(status_code=200, content="already processed")
 
     payload = json.loads(raw_body)
-    _enqueue_from_payload(payload)
+    await _enqueue_from_payload(payload)
     return Response(status_code=202)
