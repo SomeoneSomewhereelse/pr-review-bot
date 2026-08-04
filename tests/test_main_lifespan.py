@@ -32,6 +32,11 @@ async def _hang_forever() -> None:
 
 async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(monkeypatch):
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    # Ambient GitHub App config (e.g. local dev's .env) is not real in CI, so
+    # pin installation_id here to skip the discovery branch (see
+    # test_lifespan_skips_discovery_when_installation_id_already_set below) —
+    # this test isn't exercising discovery, just db init/recovery/dispatcher.
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
 
     # Seed a ticket stuck 'running' (as if the process crashed mid-review),
     # via the real test DB, mirroring what recover_on_startup will see when
