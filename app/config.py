@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     github_app_installation_id: int = 0
     github_app_private_key_path: str = "./github-app-private-key.pem"
     github_webhook_secret: str = ""
+    github_target_repo: str = ""
 
     llm_provider: str = "gemini"
     # ``llm_model`` is consumed by the google-genai family (vertex/gemini) only.

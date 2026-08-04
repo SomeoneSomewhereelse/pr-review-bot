@@ -22,6 +22,7 @@ def _sign(body: bytes, secret: str = TEST_SECRET) -> str:
 def _isolate(db, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", TEST_SECRET)
     monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     webhook.reset_dedup_cache()
     yield
     webhook.reset_dedup_cache()
@@ -114,3 +115,17 @@ async def test_ignored_action_does_not_enqueue():
 
     assert response.status_code == 202
     assert store.claim_next_due(now="2026-01-01T12:00:00+00:00") is None
+
+
+async def test_webhook_ignores_non_target_repo(monkeypatch, db_query):
+    monkeypatch.setattr(settings, "github_target_repo", "owner/target-repo")
+    payload = {"action": "opened",
+               "repository": {"full_name": "someone/OTHER-repo"},
+               "pull_request": {"number": 5, "head": {"sha": "abc"}}}
+    body = json.dumps(payload).encode()
+    sig = _sign(body)   # existing helper in this module
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.post("/webhook", content=body,
+                            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-nonmatch"})
+    assert resp.status_code == 202                      # accepted, but...
+    assert db_query("SELECT count(*) FROM tickets") == [(0,)]   # ...no ticket enqueued

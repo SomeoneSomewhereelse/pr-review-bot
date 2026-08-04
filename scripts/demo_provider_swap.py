@@ -29,7 +29,7 @@ import sys
 from app.config import settings
 from app.orchestrator import run_review
 
-DEFAULT_REPO = "SomeoneSomewhereelse/pr-review-bot-testbed"
+DEFAULT_REPO = settings.github_target_repo
 DEFAULT_PR_NUMBER = 2
 
 

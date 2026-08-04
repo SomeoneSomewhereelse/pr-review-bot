@@ -53,6 +53,9 @@ async def _enqueue_from_payload(payload: dict) -> None:
     if not repo_full_name or pr_number is None:
         logger.warning("pull_request webhook missing repo/pr number; skipping enqueue")
         return
+    if repo_full_name != settings.github_target_repo:
+        logger.info("Ignoring webhook for non-target repo %s", repo_full_name)
+        return
     head_sha = (pull_request.get("head") or {}).get("sha")
     await asyncio.to_thread(
         store.enqueue_or_update,
