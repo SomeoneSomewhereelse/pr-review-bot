@@ -19,11 +19,9 @@ def _sign(body: bytes, secret: str = TEST_SECRET) -> str:
 
 
 @pytest.fixture(autouse=True)
-def _isolate(monkeypatch, tmp_path):
+def _isolate(db, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", TEST_SECRET)
-    monkeypatch.setattr(settings, "queue_db_path", str(tmp_path / "queue.db"))
     monkeypatch.setattr(settings, "llm_provider", "groq")
-    store.init_db()
     webhook.reset_dedup_cache()
     yield
     webhook.reset_dedup_cache()

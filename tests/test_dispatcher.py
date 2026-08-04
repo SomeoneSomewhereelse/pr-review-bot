@@ -2,7 +2,7 @@
 
 Tests drive process_next_due(now) directly with an injected clock and stubbed
 attempt_review — the infinite run_forever loop is a thin wrapper and is not
-unit-tested. Uses a temp DB and a cleared blocked_until map.
+unit-tested. Uses the shared Postgres test harness and a cleared blocked_until map.
 """
 from __future__ import annotations
 
@@ -18,10 +18,8 @@ NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture(autouse=True)
-def _env(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "queue_db_path", str(tmp_path / "queue.db"))
+def _env(db, monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "groq")
-    store.init_db()
     dispatcher.reset_blocked_until()
     yield
     dispatcher.reset_blocked_until()
@@ -43,11 +41,8 @@ def _stub_comments(monkeypatch):
     return posted
 
 
-def _set_comment_id(tid, comment_id):
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET comment_id = ? WHERE id = ?", (comment_id, tid))
+def _set_comment_id(db_exec, tid, comment_id):
+    db_exec("UPDATE tickets SET comment_id = %s WHERE id = %s", (comment_id, tid))
 
 
 async def test_idle_when_no_tickets(monkeypatch):
@@ -71,10 +66,10 @@ async def test_completed_ticket_runs_and_marks_done(monkeypatch):
     assert store.get_ticket(tid).status == "done"
 
 
-async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypatch):
+async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     tid = _enqueue(pr=2)
-    _set_comment_id(tid, 202)
+    _set_comment_id(db_exec, tid, 202)
 
     async def fake_attempt(repo, pr, comment_id=None):
         return orchestrator.ReviewRateLimited(retry_after=30.0)
@@ -91,10 +86,10 @@ async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypat
     assert dispatcher._blocked_until["groq"] == NOW + timedelta(seconds=30)
 
 
-async def test_blocked_provider_defers_without_calling_attempt(monkeypatch):
+async def test_blocked_provider_defers_without_calling_attempt(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     tid = _enqueue(pr=3)
-    _set_comment_id(tid, 303)
+    _set_comment_id(db_exec, tid, 303)
     dispatcher._blocked_until["groq"] = NOW + timedelta(seconds=120)
 
     called = []
@@ -202,15 +197,12 @@ async def test_push_during_running_triggers_one_cooldown_re_review(monkeypatch):
     assert store.get_ticket(tid).status == "done"
 
 
-async def test_dispatcher_escalates_cooldown_on_churn_completion(monkeypatch):
+async def test_dispatcher_escalates_cooldown_on_churn_completion(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
     tid = _enqueue(pr=30)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET cooldown_level = 1 WHERE id = ?", (tid,))
+    db_exec("UPDATE tickets SET cooldown_level = 1 WHERE id = %s", (tid,))
 
     async def attempt_then_push(repo, pr, comment_id=None):
         store.enqueue_or_update(
@@ -384,12 +376,12 @@ def _stub_clear_schedule(monkeypatch):
     return cleared
 
 
-async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeypatch):
+async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     appended = _stub_footnotes(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     tid = _reviewed_then_pushed(22, monkeypatch)
-    _set_comment_id(tid, 2222)
+    _set_comment_id(db_exec, tid, 2222)
 
     async def boom(repo, pr, comment_id=None):
         raise RuntimeError("outage")
@@ -404,12 +396,12 @@ async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeyp
     assert posted == []                         # good review NOT overwritten
 
 
-async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch):
+async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     appended = _stub_footnotes(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
     tid = _enqueue(pr=24)  # fresh: last_reviewed_at is None
-    _set_comment_id(tid, 2424)
+    _set_comment_id(db_exec, tid, 2424)
 
     async def boom(repo, pr, comment_id=None):
         raise RuntimeError("outage")
@@ -529,13 +521,10 @@ async def test_completed_review_persists_returned_comment_id(monkeypatch):
     assert store.get_ticket(tid).comment_id == 4242
 
 
-async def test_attempt_review_is_called_with_ticket_comment_id(monkeypatch):
+async def test_attempt_review_is_called_with_ticket_comment_id(monkeypatch, db_exec):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=61)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET comment_id = 909 WHERE id = ?", (tid,))
+    db_exec("UPDATE tickets SET comment_id = 909 WHERE id = %s", (tid,))
     seen = {}
 
     async def fake_attempt(repo, pr, comment_id=None):
@@ -574,19 +563,16 @@ async def test_sustained_churn_escalates_then_plateaus(monkeypatch):
         t = t + timedelta(seconds=secs)   # advance to the next due time
 
 
-async def test_claim_clears_schedule_notice_when_one_was_pending(monkeypatch):
+async def test_claim_clears_schedule_notice_when_one_was_pending(monkeypatch, db_exec):
     _stub_comments(monkeypatch)
     cleared = _stub_clear_schedule(monkeypatch)
     tid = _enqueue(pr=70)
-    _set_comment_id(tid, 7070)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=?, "
-            "notice_not_before=? WHERE id=?",
-            (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
-        )
+    _set_comment_id(db_exec, tid, 7070)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s, "
+        "notice_not_before=%s WHERE id=%s",
+        (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
+    )
 
     async def fake_attempt(repo, pr, comment_id=None):
         return orchestrator.ReviewCompleted(review=type("R", (), {})(), comment_id=7070)
@@ -614,18 +600,15 @@ async def test_claim_does_not_call_clear_when_no_notice_pending(monkeypatch):
     assert cleared == []
 
 
-async def test_claim_clear_failure_does_not_block_review_attempt(monkeypatch):
+async def test_claim_clear_failure_does_not_block_review_attempt(monkeypatch, db_exec):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=72)
-    _set_comment_id(tid, 7272)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=?, "
-            "notice_not_before=? WHERE id=?",
-            (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
-        )
+    _set_comment_id(db_exec, tid, 7272)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s, "
+        "notice_not_before=%s WHERE id=%s",
+        (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
+    )
 
     def boom_clear(repo, pr, comment_id=None):
         raise RuntimeError("github down")
@@ -651,18 +634,15 @@ def _stub_append_schedule(monkeypatch):
     return posted
 
 
-async def test_post_pending_notices_posts_for_matching_ticket(monkeypatch):
+async def test_post_pending_notices_posts_for_matching_ticket(monkeypatch, db_exec):
     posted = _stub_append_schedule(monkeypatch)
     tid = _enqueue(pr=80)
-    _set_comment_id(tid, 8080)
+    _set_comment_id(db_exec, tid, 8080)
     future = NOW + timedelta(hours=1)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=? WHERE id=?",
-            (future.isoformat(), NOW.isoformat(), tid),
-        )
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s WHERE id=%s",
+        (future.isoformat(), NOW.isoformat(), tid),
+    )
 
     count = await dispatcher.post_pending_notices(NOW)
 
@@ -673,18 +653,15 @@ async def test_post_pending_notices_posts_for_matching_ticket(monkeypatch):
     assert store.get_ticket(tid).notice_not_before == future.isoformat()
 
 
-async def test_post_pending_notices_does_not_repost_when_marker_matches(monkeypatch):
+async def test_post_pending_notices_does_not_repost_when_marker_matches(monkeypatch, db_exec):
     posted = _stub_append_schedule(monkeypatch)
     tid = _enqueue(pr=81)
     future = NOW + timedelta(hours=1)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=?, "
-            "notice_not_before=? WHERE id=?",
-            (future.isoformat(), NOW.isoformat(), future.isoformat(), tid),
-        )
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s, "
+        "notice_not_before=%s WHERE id=%s",
+        (future.isoformat(), NOW.isoformat(), future.isoformat(), tid),
+    )
 
     count = await dispatcher.post_pending_notices(NOW)
 
@@ -692,21 +669,18 @@ async def test_post_pending_notices_does_not_repost_when_marker_matches(monkeypa
     assert posted == []
 
 
-async def test_post_pending_notices_per_ticket_failure_does_not_block_others(monkeypatch):
+async def test_post_pending_notices_per_ticket_failure_does_not_block_others(monkeypatch, db_exec):
     tid1 = _enqueue(pr=82)
     tid2 = _enqueue(pr=83)
     future = NOW + timedelta(hours=1)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=? WHERE id=?",
-            (future.isoformat(), NOW.isoformat(), tid1),
-        )
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, last_reviewed_at=? WHERE id=?",
-            (future.isoformat(), NOW.isoformat(), tid2),
-        )
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s WHERE id=%s",
+        (future.isoformat(), NOW.isoformat(), tid1),
+    )
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s WHERE id=%s",
+        (future.isoformat(), NOW.isoformat(), tid2),
+    )
 
     calls = []
 

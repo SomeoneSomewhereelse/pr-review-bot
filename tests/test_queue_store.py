@@ -1,7 +1,7 @@
 """Ticket store: enqueue/collapse, atomic claim, defer, recover-on-startup.
 
-Uses a temp DB path via monkeypatching settings.queue_db_path (matching the
-codebase's settings-monkeypatch convention). No network, no real time.
+Uses the shared Postgres test harness (``db``/``db_exec``/``db_query`` from
+tests/conftest.py) — a real Postgres, truncated between tests.
 """
 from __future__ import annotations
 
@@ -9,13 +9,6 @@ import pytest
 
 from app.config import settings
 from app.queue import store
-
-
-def _column_names(db_path: str) -> set[str]:
-    import sqlite3
-
-    with sqlite3.connect(db_path) as conn:
-        return {row[1] for row in conn.execute("PRAGMA table_info(tickets)")}
 
 T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"
@@ -25,9 +18,7 @@ T_COOL = "2026-01-01T12:05:00+00:00"
 
 
 @pytest.fixture(autouse=True)
-def _temp_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "queue_db_path", str(tmp_path / "queue.db"))
-    store.init_db()
+def _temp_db(db):
     yield
 
 
@@ -191,12 +182,10 @@ def test_push_to_done_ticket_past_cooldown_re_arms_pending(monkeypatch):
     assert t.not_before is None
 
 
-def test_recover_on_startup_clears_rereview_flag():
+def test_recover_on_startup_clears_rereview_flag(db_exec):
     tid = _enqueue()
     store.claim_next_due(now=T0)                       # -> running
-    import sqlite3
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
+    db_exec("UPDATE tickets SET rereview_requested = 1 WHERE id = %s", (tid,))
     store.recover_on_startup(now=T1)
     t = store.get_ticket(tid)
     assert t.status == "pending"
@@ -208,31 +197,6 @@ def test_new_ticket_has_rereview_and_last_reviewed_defaults():
     t = store.get_ticket(tid)
     assert t.rereview_requested == 0
     assert t.last_reviewed_at is None
-
-
-def test_init_db_migrates_a_pre_existing_table_missing_new_columns(tmp_path, monkeypatch):
-    import sqlite3
-
-    db = str(tmp_path / "old.db")
-    monkeypatch.setattr(settings, "queue_db_path", db)
-    # Create an OLD-shape table without the two new columns.
-    with sqlite3.connect(db) as conn:
-        conn.execute(
-            """
-            CREATE TABLE tickets (
-                id INTEGER PRIMARY KEY, repo_full_name TEXT NOT NULL,
-                pr_number INTEGER NOT NULL, head_sha TEXT, status TEXT NOT NULL,
-                provider TEXT NOT NULL, not_before TEXT,
-                attempts INTEGER NOT NULL DEFAULT 0, comment_id INTEGER,
-                enqueued_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                UNIQUE(repo_full_name, pr_number)
-            )
-            """
-        )
-    store.init_db()  # must add the missing columns, not crash
-    cols = _column_names(db)
-    assert "rereview_requested" in cols
-    assert "last_reviewed_at" in cols
 
 
 def test_finalize_review_without_flag_marks_done():
@@ -266,15 +230,13 @@ def test_finalize_review_none_comment_id_does_not_erase_persisted_id():
     assert store.get_ticket(tid).comment_id == 555   # NOT overwritten to None
 
 
-def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attempts():
+def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attempts(db_exec):
     tid = _enqueue()
     store.claim_next_due(now=T0)          # -> running
     store.defer_failed(tid, not_before=T0, now=T0)   # attempts -> 1
     store.claim_next_due(now=T0)          # -> running again
     # Simulate a push during the run setting the dirty flag:
-    import sqlite3
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
+    db_exec("UPDATE tickets SET rereview_requested = 1 WHERE id = %s", (tid,))
     store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=2)
     t = store.get_ticket(tid)
     assert t.status == "deferred"
@@ -285,13 +247,10 @@ def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attem
     assert t.cooldown_level == 2  # dirty -> stores passed level
 
 
-def test_finalize_review_dirty_flag_stores_passed_cooldown_level():
+def test_finalize_review_dirty_flag_stores_passed_cooldown_level(db_exec):
     tid = _enqueue()
     store.claim_next_due(now=T0)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET rereview_requested = 1 WHERE id = ?", (tid,))
+    db_exec("UPDATE tickets SET rereview_requested = 1 WHERE id = %s", (tid,))
     store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=3)
     t = store.get_ticket(tid)
     assert t.status == "deferred"
@@ -300,11 +259,12 @@ def test_finalize_review_dirty_flag_stores_passed_cooldown_level():
 
 
 def test_enqueue_or_update_serializes_under_concurrent_writers():
-    """Two threads enqueue the same PR concurrently. With BEGIN IMMEDIATE they
-    serialize (write lock up front) rather than interleave: both complete without
-    error and the final row is consistent. Serialization smoke test — a true race
-    needs threads and is timing-dependent, so this asserts the observable invariant
-    (no lost/corrupt write), not a specific interleaving."""
+    """Two threads enqueue the same PR concurrently. With SELECT ... FOR UPDATE
+    they serialize (row lock taken up front) rather than interleave: both
+    complete without error and the final row is consistent. Serialization
+    smoke test — a true race needs threads and is timing-dependent, so this
+    asserts the observable invariant (no lost/corrupt write), not a specific
+    interleaving."""
     import threading
 
     tid = _enqueue(pr=50, sha="sha0")
@@ -327,7 +287,7 @@ def test_enqueue_or_update_serializes_under_concurrent_writers():
     for t in threads:
         t.join(timeout=10)
 
-    assert errors == []                          # no "database is locked" / no crash
+    assert errors == []                          # no lock error / no crash
     final = store.get_ticket(tid)
     assert final.head_sha in ("shaA", "shaB")    # a consistent, complete write won
     assert final.status == "pending"
@@ -336,17 +296,14 @@ def test_enqueue_or_update_serializes_under_concurrent_writers():
 T_400 = "2026-01-01T12:06:40+00:00"   # T0 (12:00:00) + 400s
 
 
-def _make_done(tid, last_reviewed_at, level, now=T0):
+def _make_done(db_exec, tid, last_reviewed_at, level, now=T0):
     """Directly force a ticket to a completed state (bypasses finalize_review so
     Task 3 tests don't depend on finalize's Task-4 signature)."""
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='done', last_reviewed_at=?, cooldown_level=?, "
-            "updated_at=? WHERE id=?",
-            (last_reviewed_at, level, now, tid),
-        )
+    db_exec(
+        "UPDATE tickets SET status='done', last_reviewed_at=%s, cooldown_level=%s, "
+        "updated_at=%s WHERE id=%s",
+        (last_reviewed_at, level, now, tid),
+    )
 
 
 def test_due_after_cooldown_branches(monkeypatch):
@@ -365,11 +322,11 @@ def test_due_after_cooldown_branches(monkeypatch):
     assert lvl == 2
 
 
-def test_enqueue_push_within_cooldown_escalates_level(monkeypatch):
+def test_enqueue_push_within_cooldown_escalates_level(monkeypatch, db_exec):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
     tid = _enqueue(sha="sha1")
-    _make_done(tid, last_reviewed_at=T0, level=1)   # last review T0, already at level 1 (eff=600s)
+    _make_done(db_exec, tid, last_reviewed_at=T0, level=1)   # last review T0, already at level 1 (eff=600s)
     store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T_400
     )
@@ -380,11 +337,11 @@ def test_enqueue_push_within_cooldown_escalates_level(monkeypatch):
     assert t.head_sha == "sha2"
 
 
-def test_enqueue_push_after_cooldown_resets_level(monkeypatch):
+def test_enqueue_push_after_cooldown_resets_level(monkeypatch, db_exec):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
     tid = _enqueue(sha="sha1")
-    _make_done(tid, last_reviewed_at=T0, level=3)   # window eff(3)=2400s (until 12:40)
+    _make_done(db_exec, tid, last_reviewed_at=T0, level=3)   # window eff(3)=2400s (until 12:40)
     store.enqueue_or_update(   # FUTURE = 18:00, well past the window -> quiet -> reset
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=FUTURE
     )
@@ -422,36 +379,12 @@ def test_new_ticket_has_cooldown_level_zero():
     assert store.get_ticket(tid).cooldown_level == 0
 
 
-def test_init_db_backfills_cooldown_level_on_pre_existing_table(tmp_path, monkeypatch):
-    import sqlite3
-
-    db = str(tmp_path / "old.db")
-    monkeypatch.setattr(settings, "queue_db_path", db)
-    with sqlite3.connect(db) as conn:
-        conn.execute(
-            """
-            CREATE TABLE tickets (
-                id INTEGER PRIMARY KEY, repo_full_name TEXT NOT NULL,
-                pr_number INTEGER NOT NULL, head_sha TEXT, status TEXT NOT NULL,
-                provider TEXT NOT NULL, not_before TEXT,
-                attempts INTEGER NOT NULL DEFAULT 0, comment_id INTEGER,
-                enqueued_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                rereview_requested INTEGER NOT NULL DEFAULT 0, last_reviewed_at TEXT,
-                UNIQUE(repo_full_name, pr_number)
-            )
-            """
-        )
-    store.init_db()
-    assert "cooldown_level" in _column_names(db)
-
-
-def test_finalize_non_dirty_leaves_nonzero_cooldown_level():
+def test_finalize_non_dirty_leaves_nonzero_cooldown_level(db_exec):
     tid = _enqueue()
     store.claim_next_due(now=T0)
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute("UPDATE tickets SET cooldown_level = 3 WHERE id = ?", (tid,))  # rereview_requested stays 0
+    db_exec(
+        "UPDATE tickets SET cooldown_level = 3 WHERE id = %s", (tid,)
+    )  # rereview_requested stays 0
     store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=9)
     t = store.get_ticket(tid)
     assert t.status == "done"
@@ -463,114 +396,81 @@ def test_new_ticket_has_notice_not_before_none():
     assert store.get_ticket(tid).notice_not_before is None
 
 
-def test_init_db_backfills_notice_not_before_on_pre_existing_table(tmp_path, monkeypatch):
-    import sqlite3
-
-    db = str(tmp_path / "old.db")
-    monkeypatch.setattr(settings, "queue_db_path", db)
-    with sqlite3.connect(db) as conn:
-        conn.execute(
-            """
-            CREATE TABLE tickets (
-                id INTEGER PRIMARY KEY, repo_full_name TEXT NOT NULL,
-                pr_number INTEGER NOT NULL, head_sha TEXT, status TEXT NOT NULL,
-                provider TEXT NOT NULL, not_before TEXT,
-                attempts INTEGER NOT NULL DEFAULT 0, comment_id INTEGER,
-                enqueued_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                rereview_requested INTEGER NOT NULL DEFAULT 0, last_reviewed_at TEXT,
-                cooldown_level INTEGER NOT NULL DEFAULT 0,
-                UNIQUE(repo_full_name, pr_number)
-            )
-            """
-        )
-    store.init_db()
-    assert "notice_not_before" in _column_names(db)
+def _seed_deferred_with_review(db_exec, tid, not_before, notice_not_before=None, last_reviewed_at=T0):
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, notice_not_before=%s, "
+        "last_reviewed_at=%s WHERE id=%s",
+        (not_before, notice_not_before, last_reviewed_at, tid),
+    )
 
 
-def _seed_deferred_with_review(tid, not_before, notice_not_before=None, last_reviewed_at=T0):
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, notice_not_before=?, "
-            "last_reviewed_at=? WHERE id=?",
-            (not_before, notice_not_before, last_reviewed_at, tid),
-        )
-
-
-def test_tickets_needing_notice_matches_never_notified():
+def test_tickets_needing_notice_matches_never_notified(db_exec):
     tid = _enqueue()
-    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=None)
+    _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
     result = store.tickets_needing_notice(now=T0)
     assert [t.id for t in result] == [tid]
 
 
-def test_tickets_needing_notice_matches_stale_marker():
+def test_tickets_needing_notice_matches_stale_marker(db_exec):
     tid = _enqueue()
-    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=T_COOL)
+    _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=T_COOL)
     result = store.tickets_needing_notice(now=T0)
     assert [t.id for t in result] == [tid]
 
 
-def test_tickets_needing_notice_excludes_up_to_date_marker():
+def test_tickets_needing_notice_excludes_up_to_date_marker(db_exec):
     tid = _enqueue()
-    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=FUTURE)
+    _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=FUTURE)
     assert store.tickets_needing_notice(now=T0) == []
 
 
-def test_tickets_needing_notice_excludes_no_visible_review():
+def test_tickets_needing_notice_excludes_no_visible_review(db_exec):
     tid = _enqueue()
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='deferred', not_before=?, notice_not_before=NULL "
-            "WHERE id=?",
-            (FUTURE, tid),
-        )
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, notice_not_before=NULL "
+        "WHERE id=%s",
+        (FUTURE, tid),
+    )
     assert store.tickets_needing_notice(now=T0) == []
 
 
-def test_tickets_needing_notice_excludes_already_due_ticket():
+def test_tickets_needing_notice_excludes_already_due_ticket(db_exec):
     tid = _enqueue()
-    _seed_deferred_with_review(tid, not_before=PAST, notice_not_before=None)
+    _seed_deferred_with_review(db_exec, tid, not_before=PAST, notice_not_before=None)
     assert store.tickets_needing_notice(now=T0) == []
 
 
-def test_tickets_needing_notice_excludes_retrying_status():
+def test_tickets_needing_notice_excludes_retrying_status(db_exec):
     tid = _enqueue()
-    import sqlite3
-
-    with sqlite3.connect(settings.queue_db_path) as conn:
-        conn.execute(
-            "UPDATE tickets SET status='retrying', not_before=?, last_reviewed_at=?, "
-            "notice_not_before=NULL WHERE id=?",
-            (FUTURE, T0, tid),
-        )
+    db_exec(
+        "UPDATE tickets SET status='retrying', not_before=%s, last_reviewed_at=%s, "
+        "notice_not_before=NULL WHERE id=%s",
+        (FUTURE, T0, tid),
+    )
     assert store.tickets_needing_notice(now=T0) == []
 
 
-def test_mark_notice_posted_persists_marker():
+def test_mark_notice_posted_persists_marker(db_exec):
     tid = _enqueue()
-    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=None)
+    _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
     store.mark_notice_posted(tid, FUTURE)
     assert store.get_ticket(tid).notice_not_before == FUTURE
     assert store.tickets_needing_notice(now=T0) == []
 
 
-def test_clear_notice_resets_marker_to_none():
+def test_clear_notice_resets_marker_to_none(db_exec):
     tid = _enqueue()
-    _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=FUTURE)
+    _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=FUTURE)
     store.clear_notice(tid)
     assert store.get_ticket(tid).notice_not_before is None
 
 
-def test_tickets_needing_notice_respects_batch_cap(monkeypatch):
+def test_tickets_needing_notice_respects_batch_cap(monkeypatch, db_exec):
     monkeypatch.setattr(settings, "dispatcher_notice_sweep_batch_size", 2)
     tids = []
     for pr in range(1, 4):  # 3 tickets, cap is 2
         tid = _enqueue(pr=pr, now=T0)
-        _seed_deferred_with_review(tid, not_before=FUTURE, notice_not_before=None)
+        _seed_deferred_with_review(db_exec, tid, not_before=FUTURE, notice_not_before=None)
         tids.append(tid)
 
     first_batch = store.tickets_needing_notice(now=T0)

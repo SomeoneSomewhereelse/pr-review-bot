@@ -10,7 +10,7 @@ from app.webhook import router as webhook_router
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    store.init_db()
+    store.init_pool()
     store.recover_on_startup(datetime.now(timezone.utc).isoformat())
     task = asyncio.create_task(dispatcher.run_forever())
     try:
@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI):
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        store.close_pool()
 
 
 app = FastAPI(title="pr-review-engine", lifespan=lifespan)

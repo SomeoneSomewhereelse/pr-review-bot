@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     github_models_token: str = ""
     github_models_model: str = "openai/gpt-4o-mini"
 
-    queue_db_path: str = "./queue.db"
+    database_url: str = ""
     dispatcher_idle_sleep_seconds: float = 1.0
     default_retry_after_seconds: float = 60.0
     dispatcher_failure_base_backoff_seconds: float = 2.0

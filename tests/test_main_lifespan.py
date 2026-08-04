@@ -1,4 +1,4 @@
-"""Tests for app.main's lifespan: init_db, recover_on_startup, and the
+"""Tests for app.main's lifespan: init_pool, recover_on_startup, and the
 dispatcher background task's start/stop.
 
 ``ASGITransport`` (used in the existing webhook tests) never fires ASGI
@@ -13,13 +13,11 @@ import asyncio
 import pytest
 
 import app.main as main
-from app.config import settings
 from app.queue import dispatcher, store
 
 
 @pytest.fixture(autouse=True)
-def _env(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "queue_db_path", str(tmp_path / "queue.db"))
+def _env(db):
     dispatcher.reset_blocked_until()
     yield
     dispatcher.reset_blocked_until()
@@ -35,9 +33,8 @@ async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(m
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
 
     # Seed a ticket stuck 'running' (as if the process crashed mid-review),
-    # via a real DB at the temp path, mirroring what recover_on_startup will
-    # see when the real init_db()/recover_on_startup() run inside lifespan.
-    store.init_db()
+    # via the real test DB, mirroring what recover_on_startup will see when
+    # the real init_pool()/recover_on_startup() run inside lifespan.
     tid = store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=1, head_sha="sha1",
         provider="groq", now="2026-01-01T12:00:00+00:00",
@@ -58,7 +55,7 @@ async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(m
     monkeypatch.setattr(main.asyncio, "create_task", _spy_create_task)
 
     async with main.lifespan(main.app):
-        # (a) init_db ran: a fresh insert works without error.
+        # (a) init_pool ran: a fresh insert works without error.
         store.enqueue_or_update(
             repo_full_name="owner/repo", pr_number=2, head_sha="sha2",
             provider="groq", now="2026-01-01T12:00:02+00:00",
