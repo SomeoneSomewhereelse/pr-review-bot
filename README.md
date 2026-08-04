@@ -46,7 +46,7 @@ restart recovery).
 
 FastAPI (async) · `uv` · PyGitHub (GitHub App auth) · `google-genai` +
 `groq` behind a swappable `LLMProvider` seam · Pydantic v2 validate-repair ·
-`pytest`/`pytest-asyncio`/`respx` · Docker · Cloudflare Tunnel.
+`pytest`/`pytest-asyncio`/`respx` · Docker · Render + Supabase Postgres.
 
 ## Running locally
 
@@ -67,18 +67,34 @@ docker build -t pr-review-engine .
 docker run -p 8000:8000 --env-file .env pr-review-engine
 ```
 
-### Exposing a public webhook URL
+### Deploying to production (Render + Supabase)
 
-This project uses a **Cloudflare quick tunnel** (see "Known limitations"):
+For a stable, production-ready deployment with a persistent webhook URL:
+
+1. **Set up Supabase and Render** — see the full runbook in [`SETUP.md`](SETUP.md)
+   section 3 ("Deploying to Render + Supabase").
+2. **Register the webhook** — once deployed, run `uv run python -m scripts.deploy`
+   to set the stable Render URL as the GitHub App's webhook endpoint.
+3. **Keep services warm** — register Render's `/healthz` endpoint with a free
+   cron pinger (cron-job.org or UptimeRobot, ~10 min interval) to prevent
+   spin-down and keep Supabase un-paused.
+
+The webhook URL is stable and persists across deployments (no manual edits needed).
+
+### Local testing with a tunnel (optional)
+
+For local manual testing, a **Cloudflare quick tunnel** can still expose
+localhost to a public URL:
 
 ```bash
 cloudflared tunnel --url http://localhost:8000
 ```
 
 Copy the printed `https://*.trycloudflare.com` hostname into the GitHub
-App's webhook URL setting (`.../settings/apps/<slug>` → General → Webhook
-URL), appending `/webhook`. **This has to be redone every time the tunnel
-restarts** — the hostname is random and doesn't persist.
+App's webhook URL setting, appending `/webhook`. **This has to be redone
+every time the tunnel restarts** — the hostname is random and doesn't persist.
+
+For production, use the stable Render deployment instead.
 
 ## Testing
 
@@ -149,10 +165,9 @@ the full history of runs and timings.
   Free tier caps are modest (single-digit RPM, ~150 requests/day on the
   low-access-tier models) — fine for demonstration, a real constraint at any
   meaningful sustained volume.
-- **Cloudflare quick tunnel**, not a named tunnel — no domain was available
-  to register as a Cloudflare zone. The webhook URL must be updated on every
-  tunnel restart (see above); a named tunnel would remove this step but
-  needs a domain.
+- **Local tunnel testing (optional)** — for purely local development, the
+  Cloudflare quick tunnel can still be used; the webhook URL must be updated
+  on every tunnel restart. Production uses the stable Render deployment instead.
 - **Docker**: fully verified (`docker build` + container boot + endpoint
   checks) — installed partway through development, not from the start.
 - **Durable review queue is single-process** (see `SPEC.md` §12) — one

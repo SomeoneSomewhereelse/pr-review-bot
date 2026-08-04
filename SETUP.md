@@ -145,24 +145,97 @@ and reinstalled dev dependencies (ruff, etc.) at runtime — the build-time
 `uv sync --frozen --no-dev` didn't carry over to `uv run`'s own implicit sync.
 Fixed by adding `--no-dev` to the `CMD`'s `uv run` invocation too.
 
-## 3. Cloudflare Tunnel — quick tunnel, not named
+## 3. Deploying to Render + Supabase (production)
 
-- **Deviation from the original plan:** a *named* tunnel requires a domain
-  added as a Cloudflare zone. The user doesn't own a domain and declined to
-  buy one (Cloudflare Registrar, ~$1-9/yr) or claim a free one via GitHub
-  Student Pack.
-- Using a **quick tunnel** instead: `cloudflared tunnel --url http://localhost:8000`.
-  No login, no account, no domain needed — verified working (smoke-tested
-  against a temporary local server, got a `*.trycloudflare.com` URL with clean
-  connectivity pre-checks).
-- **Known limitation:** the hostname is random and changes every time the
-  tunnel restarts. **Each time you start the tunnel, you must update the
-  GitHub App's webhook URL** to the new hostname + `/webhook`
-  (`https://github.com/settings/apps/tov-pr-review-bot-testbed` → General →
-  Webhook URL).
-- `gcloud` and `cloudflared` were installed via `winget` (`Google.CloudSDK`,
-  `Cloudflare.cloudflared`); both are confirmed on PATH after a terminal
-  restart.
+The production deployment uses:
+- **Supabase** for the durable review queue (Postgres), replacing local SQLite
+- **Render** for the web service, replacing local machine + Cloudflare Tunnel
+- **Free cron pinger** (cron-job.org or UptimeRobot) to keep both services warm
+
+### 3.1 Supabase setup
+
+1. Create a Supabase project at https://supabase.com
+2. Go to the project's **Databases** settings
+3. Copy the **Session-mode pooler** connection string (the one with port 5432,
+   not 6543) → set as `DATABASE_URL` env var
+   - Example: `postgresql://postgres:[password]@[host].pooler.supabase.com:5432/postgres`
+4. Keep this connection string handy for the Render dashboard env vars
+
+### 3.2 Render web service setup
+
+1. Push the `feat/supabase-hosting` branch to GitHub (if testing locally)
+2. Go to https://render.com/dashboard
+3. Click **"New +"** → **Web Service** → connect your GitHub repo
+4. **Build Command**: `uv sync --frozen`
+5. **Start Command**: `uv run gunicorn -w 1 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`
+   (or the command in `render.yaml` if using that)
+6. In the **Environment** tab, set these variables:
+   - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
+   - `GITHUB_APP_ID`: (from `.env`)
+   - `GITHUB_APP_PRIVATE_KEY_B64`: base64-encoded PEM (see "Secrets encoding" below)
+   - `GITHUB_TARGET_REPO`: e.g., `SomeoneSomewhereelse/pr-review-bot-testbed`
+   - `GITHUB_WEBHOOK_SECRET`: (from `.env`)
+   - `LLM_PROVIDER`: `groq` (or your chosen provider)
+   - `GROQ_API_KEY`: (if using Groq)
+   - (Other provider creds as needed: `GEMINI_API_KEY`, etc.)
+7. Click **Deploy**
+
+### 3.3 Secrets encoding
+
+The PEM file must be base64-encoded for the `GITHUB_APP_PRIVATE_KEY_B64` env var:
+
+```bash
+base64 -w0 < github-app-private-key.pem
+```
+
+Copy the output and paste it into the Render dashboard's `GITHUB_APP_PRIVATE_KEY_B64`
+field (the app code will decode it at startup).
+
+### 3.4 GitHub App installation and webhook registration
+
+1. **Install the GitHub App** on your test repo:
+   - Go to https://github.com/settings/apps/tov-pr-review-bot-testbed
+   - Click **Install App** (if not already installed)
+   - Select the test repo (e.g., `SomeoneSomewhereelse/pr-review-bot-testbed`)
+
+2. **Register the webhook URL** (one-time, after Render deployment):
+   Once Render finishes deploying, you'll have a public URL (e.g.,
+   `https://pr-review-bot.onrender.com`). Run the registration script:
+   ```bash
+   uv run python -m scripts.deploy
+   ```
+   This script will:
+   - Authenticate as the GitHub App (using the PEM)
+   - Confirm the installation ID
+   - Post the Render URL + `/webhook` to the GitHub App's webhook settings
+   - Return success if everything is set up correctly
+
+3. **Verify**: The GitHub App webhook URL setting
+   (https://github.com/settings/apps/tov-pr-review-bot-testbed → General →
+   Webhook URL) should now show your stable Render URL.
+
+### 3.5 Keep-warm pinger (free)
+
+Both Render (free tier) and Supabase (free tier) spin down after inactivity.
+To keep them warm and ensure fast responses:
+
+1. Go to https://cron-job.org or https://uptimerobot.com (both free)
+2. Create a new job/monitor that GETs your Render URL's `/healthz` endpoint
+   every 10 minutes
+3. This keeps Render warm and also keeps Supabase un-paused (the dispatcher
+   polls the queue continuously, so pinging `/healthz` guarantees activity)
+
+## 3.6 Cloudflare Tunnel (local testing only, optional)
+
+For **local development only**, a quick tunnel can still be used:
+- `cloudflared tunnel --url http://localhost:8000`
+- No login, no account, no domain needed
+- **Known limitation:** the hostname is random and changes every restart
+- Each restart requires manually updating the GitHub App's webhook URL
+- `gcloud` and `cloudflared` were installed via `winget`
+
+**Note:** production uses the stable Render URL instead; the tunnel is purely
+optional for local manual testing if needed.
 
 ## 4. Secrets hygiene
 

@@ -11,7 +11,7 @@ Runs in production (public URL via Cloudflare Tunnel), not localhost.
 
 | Decision | Choice |
 |---|---|
-| Prod deploy | Docker container + **Cloudflare Tunnel** (portable to CF Container) |
+| Prod deploy | Docker container on **Render** + **Supabase Postgres** for queue (free tier) |
 | LLM providers | **Vertex (default) + free-Gemini + Groq** via `google-genai` |
 | Model | **`gemini-flash-latest`** (brief's `gemini-2.5-flash` is deprecated; pinnable via env) |
 | Structured output | Per-provider native schema + **shared Pydantic validate-repair** |
@@ -21,6 +21,7 @@ Runs in production (public URL via Cloudflare Tunnel), not localhost.
 | Webhook processing | Verify HMAC → **202 immediately** → background task runs review |
 | Diff handling | Whole annotated diff per specialist + **token cap + visible truncation** |
 | Replay defense | Dedup on `X-GitHub-Delivery` UUID (bounded in-memory LRU) |
+| Durable queue | **Supabase Postgres** (`FOR UPDATE SKIP LOCKED` claim, `ON CONFLICT` enqueue) |
 
 ---
 
@@ -48,7 +49,7 @@ timeout; a slow synchronous handler causes GitHub to mark the delivery failed an
 *comment-appears*, not to HTTP response.
 
 **Updated in section 12:** step (4) above (`BackgroundTask: run_review()`) is
-now a durable SQLite ticket enqueue; a single serial dispatcher — not the
+now a durable Postgres ticket enqueue; a single serial dispatcher — not the
 webhook request — is the one caller of the review pipeline. This absorbs
 per-minute/daily rate limits from the live providers without changing the
 steps *inside* a review (diff prep → fan-out → merge → comment).
@@ -81,7 +82,7 @@ app/
     validate.py        validate-and-repair (one repair retry → typed empty-with-error)
     pricing.py         per-provider/model rate table → est_cost_usd
   queue/
-    store.py           durable SQLite ticket store: enqueue_or_update, claim_next_due,
+    store.py           durable Postgres ticket store: enqueue_or_update, claim_next_due,
                        defer, mark_done, recover_on_startup, get_ticket (section 12)
     dispatcher.py      single serial consumer: process_next_due, run_forever,
                        in-memory blocked_until gate (section 12)
@@ -265,11 +266,17 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
 
 ## 9. Deploy + cost model
 
-- **Dockerfile**: `uvicorn app.main:app`; runs identical locally / tunneled / on CF Container.
-- **Public URL**: `cloudflared tunnel` → stable hostname → set as the GitHub App webhook URL.
-- **Secrets/env**: `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
-  `GITHUB_APP_INSTALLATION_ID`, `LLM_PROVIDER`, plus provider creds
-  (`GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_LOCATION` for vertex, `GEMINI_API_KEY`, `GROQ_API_KEY`).
+- **Dockerfile**: `uvicorn app.main:app`; runs identical locally / on Render.
+- **Production hosting**: Render web service (free tier, spin-down after 15 min
+  idle) + Supabase Postgres for the durable review queue (free tier, pauses
+  after ~7 days inactivity). A free cron pinger (cron-job.org / UptimeRobot,
+  ~10 min interval) keeps both services warm.
+- **Public URL**: Render assigns a stable public hostname (persists across restarts)
+  → set once as the GitHub App webhook URL via the `scripts/deploy.py` registration
+  script (one-time, no manual edits on restart).
+- **Secrets/env**: `DATABASE_URL` (Supabase pooler connection string),
+  `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64` (base64-encoded PEM),
+  `GITHUB_TARGET_REPO`, `LLM_PROVIDER`, plus provider creds (`GROQ_API_KEY`, etc.).
 - **Cost**: see `cost.md`. Documented production total ≈ $8–10/mo at brief scale;
   the demo runs at $0 on free tiers + the $300 GCP trial credit.
 
@@ -329,16 +336,16 @@ per-request `BackgroundTask` with zero coordination across PRs.
 
 **Producer/consumer split.** `webhook.py` no longer runs any LLM work: it
 verifies HMAC, dedups the delivery, and calls
-`store.enqueue_or_update(...)` to upsert a durable ticket, then returns `202`
+`store.enqueue_or_update(...)` to upsert a durable Postgres ticket, then returns `202`
 immediately. A single serial dispatcher (`app/queue/dispatcher.py`,
 `run_forever`) is started as an `asyncio` task from the app lifespan
 (`app/main.py`) and is the **only** caller of the review pipeline — this
 serializes every pacing/quota decision, and serial dispatch is anti-burst by
 construction.
 
-**Durable SQLite ticket, one per PR.** `app/queue/store.py` keeps one row per
-`(repo_full_name, pr_number)` (`UNIQUE` constraint). `enqueue_or_update`
-applies a single per-state re-review policy (full design rationale:
+**Durable Postgres ticket, one per PR.** `app/queue/store.py` keeps one row per
+`(repo_full_name, pr_number)` (from `GITHUB_TARGET_REPO` env var) with a `UNIQUE` constraint.
+`enqueue_or_update` applies a single per-state re-review policy (full design rationale:
 `docs/superpowers/specs/2026-07-28-dispatcher-followups-design.md` §6):
 a push to a **`pending`** ticket updates `head_sha` and stays `pending`
 (unreviewed, so no cooldown applies); a push to a **`deferred`**/**`retrying`**
@@ -398,28 +405,21 @@ footnote-writing call runs next self-heals a stale leftover of the other
 kind even if a strip attempt failed.
 
 `claim_next_due` claims the oldest due ticket (`pending`, or `deferred`/`retrying`
-whose `not_before` has passed) with an atomic
-`UPDATE ... WHERE status IN ('pending', 'deferred', 'retrying')`, so a claimed ticket
-cannot be re-claimed. `enqueue_or_update`'s own SELECT → branch → INSERT/
-UPDATE runs inside an explicit `BEGIN IMMEDIATE` transaction (manual
-begin/commit/rollback, connection closed in a `finally`) on its single
-connection, so the whole read-branch-write is atomic against
-`claim_next_due`/`finalize_review`/`defer_*` even if a future change moves
-the call off the event loop (e.g. `asyncio.to_thread`) — not merely safe by
-virtue of today's synchronous, no-`await`-in-between execution. This is
-deadlock-free: one lockable resource (`queue.db`) and one connection per
-transaction rules out a circular wait, the transaction body opens no
-second connection and calls no other `store` function (`_due_after_cooldown`
-is pure Python), and no lock is ever held across an `await` (dispatcher
-store calls are synchronous; the only `await`s in the review path — network
-I/O in `attempt_review` — touch no DB). `BEGIN IMMEDIATE` also removes the
-classic SQLite footgun it replaces (two connections each holding a SHARED
-read lock, then both trying to upgrade to write, deadlocking each other):
-it takes the write lock up front, so a losing concurrent writer blocks
-before touching anything, waits up to the default 5s busy-timeout, and
-raises `OperationalError("database is locked")` on contention rather than
-deadlocking — and these transactions are sub-millisecond, so real
-contention is negligible.
+whose `not_before` has passed) using an atomic
+`SELECT ... FOR UPDATE SKIP LOCKED ... WHERE status IN ('pending', 'deferred', 'retrying') LIMIT 1`,
+so a claimed ticket cannot be re-claimed (the row lock prevents concurrent claims).
+`enqueue_or_update` uses a transactional `SELECT ... FOR UPDATE` + `ON CONFLICT`
+pattern to check and update the row atomically — the `FOR UPDATE` lock ensures
+the read-check-write is atomic against other `enqueue_or_update` calls and against
+`claim_next_due`, even if called from the event loop or moved to `asyncio.to_thread`
+in the future. The Postgres row-level locking and transaction semantics guarantee
+safety: no deadlock risk (Postgres detects circular waits and aborts), lock waiters
+are fair, and transactions are brief (no `await` inside the transaction body).
+`ON CONFLICT` handles the natural case where a ticket row may be created by
+`enqueue_or_update` or already exist (upsert without a separate DELETE/INSERT).
+Compared to SQLite's `BEGIN IMMEDIATE`, this is simpler (no manual begin/commit/rollback,
+no busy-timeout handling) and scales: read-only replicas can serve `claim_next_due`
+queries in the future without code change.
 
 **Reactive detection, no caps.** Adapters (`app/providers/base.py` +
 `google_genai.py`/`groq.py`/`github_models.py`) raise `RateLimited(retry_after)`
@@ -525,8 +525,8 @@ covers the latest commit, so the flag is moot); `deferred`/`retrying` tickets
 are left as-is, gated by their persisted `not_before`. The dispatcher then simply
 drains whatever is due.
 
-**Config** (`app/config.py`; none are per-provider caps): `QUEUE_DB_PATH`
-(default `./queue.db`, gitignored along with its `-wal`/`-shm` sidecars),
+**Config** (`app/config.py`; none are per-provider caps): `DATABASE_URL`
+(Postgres/Supabase connection string, required for production),
 `DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
 (default `1`), `DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS` (default `2.0`),
 `DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS` (default `300.0`),

@@ -7,17 +7,16 @@
 
 ## 1. Deploy-approach comparison
 
-| Approach | Infra $/mo | Cold start | Full stack native? | Demo fit | Notes |
+| Approach | Infra $/mo | Persistence | Public URL | Demo fit | Notes |
 |---|---|---|---|---|---|
-| **Container + Cloudflare Tunnel** (chosen) | **$0** (local/free host + free tunnel) | none (kept running) | ✅ FastAPI + PyGitHub + Vertex SDK | ✅ best | Public URL via `cloudflared`; portable to CF Container unchanged |
-| Cloudflare Container | ~$5 (Workers Paid base; scales to zero) | few seconds after idle | ✅ | ✅ (pre-warm) | Matches "Workers" checkbox literally; only real cost is the $5 base |
-| Cloudflare Python Workers (Pyodide) | $0–5 | minimal | ❌ Vertex SDK won't run; PyGitHub risky | ❌ | Most literal "Workers" but breaks the mandated stack (SDK → REST) |
-| Render (Starter, always-on) | $7 | none | ✅ | ✅ | Zero-setup always-warm; weakest match to "Workers" wording |
-| Render (Free, spin-down) | $0 | ~60s after 15 min idle | ✅ | ⚠️ risky | Free public URL, but cold start can blow the 15s demo budget |
+| **Render (Free) + Supabase (Free)** (chosen) | **$0** (free tiers + external pinger) | ✅ Postgres queue | ✅ stable | ✅ best | Render spins down after 15 min idle; kept warm by cron pinger (~10 min); Supabase pauses after ~7 days, mitigated by dispatcher polling |
+| Render (Starter, always-on) | $7 | ✅ Postgres queue | ✅ stable | ✅ | Always warm; costs $7/mo infra alone |
+| Cloudflare Container | ~$5 (Workers Paid base) | ❌ SQLite only (ephemeral) | ✅ stable | ✅ | Scales to zero but queue state lost on redeploy; would need separate DB |
+| Local + Cloudflare Tunnel | $0 (if local machine kept on) | ✅ SQLite queue | ⚠️ unstable | ⚠️ only local | Tunnel URL changes every restart (no stable webhook); local machine must stay on |
 
-**Choice rationale:** the chosen path is $0, keeps the full stack native (no Pyodide
-compromises), gives a real public URL, and is portable to the $5 CF Container later
-with zero code change if the literal "Workers" checkbox is wanted.
+**Choice rationale:** the chosen path is $0 on free tiers with stable public URLs and
+durable queue state via Postgres. The keep-warm pinger (~$0, free service) mitigates
+Render and Supabase idle spin-down, keeping both within the demo's 15s responsiveness target.
 
 ## 2. LLM cost (same across every deploy approach)
 
@@ -47,13 +46,19 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
   provider, independent $0 path.
 - **GitHub Models** free tier: rides the user's GitHub account, no card —
   a second genuinely live $0 cross-vendor path (modest RPM/RPD, see `SETUP.md`).
-- **Host**: local/free host + **free Cloudflare Tunnel** → $0 public URL.
+- **Render** free tier: 750 instance-hours/month (15 min idle spin-down).
+  Mitigated by keep-warm pinger (free service, cron-job.org / UptimeRobot).
+- **Supabase** free tier: ~500 MB Postgres storage, pauses after ~7 days
+  inactivity. Mitigated by dispatcher's continuous polling while kept warm
+  by the pinger.
+- **External pinger**: cron-job.org or UptimeRobot (both free tier).
 - **CI**: GitHub Actions — $0 on the free tier for this workload.
 
-## 5. Durable review queue — no cost impact
+## 5. Durable review queue — included in Supabase free tier
 
 The durable review queue (`SPEC.md` §12) changes **when** LLM calls happen
 (serialized through one dispatcher, deferred/retried on a `429`), not **how
 many** are made per review — the per-review token math in section 2 is
-unchanged. SQLite ticket persistence is embedded (stdlib `sqlite3`, a local
-file), so it adds **$0** infra cost.
+unchanged. Postgres ticket persistence is now served by Supabase's free tier
+(~500 MB storage), so queue state adds **$0** cost and is durable across
+Render redeploys.
