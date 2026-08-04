@@ -22,7 +22,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    installation_id = github_app.discover_installation_id(repo)  # raises if not installed
+    try:
+        installation_id = github_app.discover_installation_id(repo)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     github_app.set_webhook_url(f"{base.rstrip('/')}/webhook")
     print(f"registered: installation={installation_id} webhook={base.rstrip('/')}/webhook")
     return 0

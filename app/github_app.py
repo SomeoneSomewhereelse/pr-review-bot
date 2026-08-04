@@ -134,7 +134,10 @@ def discover_installation_id(repo_full_name: str) -> int:
 
     Raises RuntimeError with an actionable message if the App is not installed
     -- GitHub does not permit an App to install itself; a repo admin must
-    authorize it once in the GitHub UI.
+    authorize it once in the GitHub UI. Only a 404 is interpreted as "not
+    installed" -- any other status (e.g. a 401 from a malformed
+    GITHUB_APP_PRIVATE_KEY_B64, or a transient 5xx) is a genuine auth/API
+    error and must not be misdiagnosed as a missing installation.
 
     Uses the raw requester (``GET /repos/{repo}/installation``) rather than a
     typed PyGithub method: the installed PyGithub version's ``Repository``
@@ -146,9 +149,15 @@ def discover_installation_id(repo_full_name: str) -> int:
             "GET", f"/repos/{repo_full_name}/installation"
         )
     except GithubException as exc:
+        if exc.status == 404:
+            raise RuntimeError(
+                f"GitHub App is not installed on {repo_full_name}: install it once via the "
+                f"GitHub UI (repo Settings -> GitHub Apps), then redeploy. ({exc.status})"
+            ) from exc
         raise RuntimeError(
-            f"GitHub App is not installed on {repo_full_name}: install it once via the "
-            f"GitHub UI (repo Settings -> GitHub Apps), then redeploy. ({exc.status})"
+            f"GitHub App installation lookup for {repo_full_name} failed with "
+            f"{exc.status} ({exc.data}) -- likely a bad GITHUB_APP_ID or "
+            f"GITHUB_APP_PRIVATE_KEY_B64, not a missing App installation."
         ) from exc
     return int(data["id"])
 

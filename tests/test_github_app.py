@@ -658,6 +658,21 @@ def test_discover_installation_id_raises_when_not_installed(fake_transport):
         github_app.discover_installation_id(REPO_FULL_NAME)
 
 
+def test_discover_installation_id_non_404_is_not_misdiagnosed_as_not_installed(fake_transport):
+    """A 401 (e.g. a malformed GITHUB_APP_PRIVATE_KEY_B64) or other non-404
+    status must not be reported as "not installed" -- that's a misdiagnosis
+    that would send an operator chasing the wrong fix."""
+    from app import github_app
+
+    fake_transport.route(
+        "GET", f"/repos/{REPO_FULL_NAME}/installation", {"message": "Bad credentials"}, 401
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        github_app.discover_installation_id(REPO_FULL_NAME)
+    assert "not installed" not in str(exc_info.value)
+    assert "401" in str(exc_info.value)
+
+
 def test_set_webhook_url_patches_hook_config(fake_transport):
     from app import github_app
 
