@@ -13,6 +13,7 @@ import asyncio
 import pytest
 
 import app.main as main
+from app.config import settings
 from app.queue import dispatcher, store
 
 
@@ -69,3 +70,44 @@ async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(m
     assert len(created_tasks) == 1
     assert created_tasks[0].done()
     assert created_tasks[0].cancelled()
+
+
+async def test_lifespan_skips_discovery_when_installation_id_already_set(monkeypatch):
+    """When GITHUB_APP_INSTALLATION_ID is already configured (e.g. local dev's
+    .env), lifespan must not spend a GitHub App JWT call rediscovering it."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 123456)
+
+    def _boom(repo_full_name: str) -> int:
+        raise AssertionError("discover_installation_id must not be called when already set")
+
+    monkeypatch.setattr(main.github_app, "discover_installation_id", _boom)
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert settings.github_app_installation_id == 123456
+
+
+async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
+    """When GITHUB_APP_INSTALLATION_ID is unset (0, e.g. on Render — see design
+    spec §6, "becomes optional (auto-discovered)"), lifespan must resolve it
+    via github_app.discover_installation_id before the dispatcher starts, and
+    assign the resolved id onto settings."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 0)
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+
+    calls = []
+
+    def _fake_discover(repo_full_name: str) -> int:
+        calls.append(repo_full_name)
+        return 999999
+
+    monkeypatch.setattr(main.github_app, "discover_installation_id", _fake_discover)
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert calls == ["owner/repo"]
+    assert settings.github_app_installation_id == 999999

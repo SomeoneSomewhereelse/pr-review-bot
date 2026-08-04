@@ -4,12 +4,24 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 
+from app import github_app
+from app.config import settings
 from app.queue import dispatcher, store
 from app.webhook import router as webhook_router
 
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not settings.github_app_installation_id:
+        # Not set (e.g. on Render, per docs/superpowers/specs/.../design.md
+        # §6: the installation id "becomes optional (auto-discovered)").
+        # Resolve it once via the App JWT before anything tries to use it.
+        # A genuine RuntimeError here (App not installed) is allowed to
+        # propagate and fail startup loudly -- same pattern as init_pool()
+        # failing loudly on an unreachable Postgres.
+        settings.github_app_installation_id = await asyncio.to_thread(
+            github_app.discover_installation_id, settings.github_target_repo
+        )
     store.init_pool()
     store.recover_on_startup(datetime.now(timezone.utc).isoformat())
     task = asyncio.create_task(dispatcher.run_forever())
