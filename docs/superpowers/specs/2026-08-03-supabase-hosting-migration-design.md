@@ -23,10 +23,13 @@ and move the queue off the local file into **Supabase-hosted Postgres**.
 
 ## 2. Scope guardrails (hard)
 
-- **Single-tenant, unchanged behavior.** Still one hardcoded GitHub App
-  installation, one hardcoded testbed repo (`SomeoneSomewhereelse/pr-review-bot-testbed`).
-  **No** user registration, per-user config, or multi-tenant data model. Only
-  *where the app runs* and *where the queue persists* change — not what it does.
+- **Single-tenant, unchanged behavior.** Still one GitHub App installation, one
+  target testbed repo served at a time. This migration **softcodes** that repo
+  from source/scripts into a single config value (§6, §7) — still exactly one
+  repo, still single-tenant: **no** user registration, per-user config, dynamic
+  repo discovery, or multi-tenant data model. Only *where the app runs*, *where
+  the queue persists*, and *how the one repo is configured* change — not what it
+  does.
 - **One deployment serves both** the graded Zoom demo and later ad-hoc
   instructor testing. Not two environments.
 - **Migrating the queue to Supabase is decided** (the handoff settled *whether*);
@@ -45,6 +48,7 @@ and move the queue off the local file into **Supabase-hosted Postgres**.
 | Timestamps | Keep columns **`TEXT` ISO-8601** (lexical comparison already correct; minimal change) |
 | Tests | DB-touching tests hit a **throwaway local Postgres** (testcontainers locally, `services: postgres` in CI); never Supabase |
 | PEM secret | Load from **base64 env var** (`GITHUB_APP_PRIVATE_KEY_B64`), file-path fallback for local dev |
+| Target repo | **Configured** via `GITHUB_TARGET_REPO` (single repo, still single-tenant) |
 | Cloudflare Tunnel | **Retired** |
 
 ## 4. Architecture
@@ -142,6 +146,10 @@ construction). Column list and `Ticket` fields are unchanged.
 - Remove `queue_db_path`; add **`database_url: str`** (psycopg connection string).
   Local/CI point it at the throwaway Postgres; prod at Supabase's Session-mode
   pooler URL (IPv4 — Supabase *direct* is IPv6-only and Render egress is IPv4).
+- Add **`github_target_repo: str`** (env `GITHUB_TARGET_REPO`, e.g.
+  `SomeoneSomewhereelse/pr-review-bot-testbed`) — the single repo this deployment
+  serves. The webhook gates on it (§7) and scripts read it instead of a hardcoded
+  literal. Still one repo — this is configuration, not multi-tenancy.
 - **PEM:** add `github_app_private_key_b64: str = ""`. `github_app._read_private_key`
   prefers it (base64-decode → PEM text) and falls back to
   `github_app_private_key_path` for local dev. Base64 avoids multiline-in-dashboard
@@ -149,11 +157,40 @@ construction). Column list and `Ticket` fields are unchanged.
 - All other secrets (`GROQ_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`,
   `GITHUB_APP_INSTALLATION_ID`, `GITHUB_MODELS_TOKEN`, `DATABASE_URL`) → **Render's
   env-var dashboard** in prod; `.env` stays the local mechanism. `.env.example`
-  updated (add `DATABASE_URL`, `GITHUB_APP_PRIVATE_KEY_B64`; drop `QUEUE_DB_PATH`).
+  updated (add `DATABASE_URL`, `GITHUB_APP_PRIVATE_KEY_B64`, `GITHUB_TARGET_REPO`;
+  drop `QUEUE_DB_PATH`).
 - Dependencies: add `psycopg[binary]`, `psycopg_pool`; add `testcontainers` to the
   dev group.
 
-## 7. Test infrastructure
+## 7. Softcoding the testbed repo (hardcoded → configured)
+
+Today the app is single-tenant by *installation scope*, not by code:
+`app/webhook.py` derives `repo_full_name` from the webhook payload and would
+process any repo the App installation delivers events for; the repo literal only
+appears in scripts (`scripts/seed_demo_pr.py`, `manual_verify_step3.py`,
+`demo_provider_swap.py`), `tests/test_github_app.py`, and `SETUP.md`. This
+migration makes the single served repo an explicit config value — cleaner for a
+real deployment (no repo baked into source) and a small defense-in-depth for
+single-tenancy. **Still one repo; this is not multi-tenant.**
+
+- **Config:** `settings.github_target_repo` (§6).
+- **Webhook gate (`app/webhook.py`):** after HMAC verification and the existing
+  action filter, ignore any payload whose `repo_full_name !=
+  settings.github_target_repo` — return the same `202` no-op the app already uses
+  for irrelevant actions (a valid *signed* webhook for a different repo is simply
+  not ours to review; it is not a `401`). This makes "one repo" explicit and
+  enforced in code, independent of the App's installation scope.
+- **Scripts:** `seed_demo_pr.py` / `manual_verify_step3.py` /
+  `demo_provider_swap.py` read the repo from `settings.github_target_repo` (env)
+  instead of the hardcoded string, so a redeploy or a different testbed needs
+  only an env change.
+- **Tests:** `tests/test_github_app.py` keeps a test-local repo constant (its
+  mocked transport doesn't depend on the real repo); tests that reach the webhook
+  gate set `settings.github_target_repo` via the existing settings-monkeypatch
+  pattern. Add a webhook test asserting a non-target repo is a `202` no-op.
+- **Docs:** `SETUP.md` documents `GITHUB_TARGET_REPO` as the single-repo knob.
+
+## 8. Test infrastructure
 
 DB-touching tests (`tests/test_queue_store.py`, `tests/test_dispatcher.py`,
 `tests/test_webhook.py`, `tests/test_main_lifespan.py`) run against a **throwaway
@@ -173,7 +210,7 @@ local Postgres**:
 Docker is already a project dependency (SETUP.md), so `uv run pytest` stays a
 single command (testcontainers auto-spins the container).
 
-## 8. Deploy & ops
+## 9. Deploy & ops
 
 - **`render.yaml`** (blueprint) declaring the web service: Docker runtime from the
   repo `Dockerfile`, `healthCheckPath: /healthz`, free plan, env vars referenced
@@ -184,7 +221,7 @@ single command (testcontainers auto-spins the container).
   per-tunnel-restart).
 - `Dockerfile` unchanged (already `uv sync --frozen --no-dev` + uvicorn).
 
-## 9. Docs updates
+## 10. Docs updates
 
 - **`README.md`/`SETUP.md`:** describe the Render + Supabase + pinger deployment;
   **stop presenting the Cloudflare quick tunnel as the live path** (the
@@ -201,7 +238,7 @@ single command (testcontainers auto-spins the container).
   monthly total stays **$0** on free tiers; the LLM cost model (§2, ~$4–5/mo at
   brief scale) is independent of hosting and unchanged.
 
-## 10. Error handling / operational notes
+## 11. Error handling / operational notes
 
 - **Startup ordering:** `init_pool()` → `recover_on_startup()` (resets stale
   `running` rows) → `run_forever()`. If Postgres is unreachable at boot, startup
@@ -214,16 +251,18 @@ single command (testcontainers auto-spins the container).
 - **Polling cost:** the 1s-idle poll issues one lightweight indexed `SELECT`/sec;
   negligible for Supabase free, and it's what keeps the project un-paused.
 
-## 11. Out of scope / non-goals
+## 12. Out of scope / non-goals
 
-- Multi-tenant anything (registration, per-user repos/bots) — explicit guardrail.
+- Multi-tenant anything (registration, per-user repos/bots, dynamic repo
+  discovery) — explicit guardrail. Softcoding the single served repo (§7) is
+  configuration, not multi-tenancy.
 - `timestamptz` columns / async store functions / an ORM — deliberately not done
   (minimal-change, low-risk port).
 - Provider changes (Vertex "Express Mode" etc.) — unrelated, noted in the handoff.
 - Horizontal scaling — still one instance, one dispatcher (the `FOR UPDATE
   SKIP LOCKED` claim would *permit* it later, but it is neither built nor tested).
 
-## 12. Follow-up (separate session)
+## 13. Follow-up (separate session)
 
 Once this lands, **re-validate the paused Zoom demo plan**
 (`docs/superpowers/specs/2026-08-03-demo-plan-design.md`) against the hosted
