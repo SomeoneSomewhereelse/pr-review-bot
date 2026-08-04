@@ -150,6 +150,10 @@ construction). Column list and `Ticket` fields are unchanged.
   `SomeoneSomewhereelse/pr-review-bot-testbed`) — the single repo this deployment
   serves. The webhook gates on it (§7) and scripts read it instead of a hardcoded
   literal. Still one repo — this is configuration, not multi-tenancy.
+- Add **`public_base_url: str`** (env `PUBLIC_BASE_URL`, **not a secret**) —
+  this deployment's public origin, used by the deploy-time registration (§9) to
+  set the App's webhook URL. Defaults to Render's auto-provided
+  `RENDER_EXTERNAL_URL`, so on Render it needs no manual value.
 - **PEM:** add `github_app_private_key_b64: str = ""`. `github_app._read_private_key`
   prefers it (base64-decode → PEM text) and falls back to
   `github_app_private_key_path` for local dev. Base64 avoids multiline-in-dashboard
@@ -157,10 +161,14 @@ construction). Column list and `Ticket` fields are unchanged.
 - All other secrets (`GROQ_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`,
   `GITHUB_APP_INSTALLATION_ID`, `GITHUB_MODELS_TOKEN`, `DATABASE_URL`) → **Render's
   env-var dashboard** in prod; `.env` stays the local mechanism. `.env.example`
-  updated (add `DATABASE_URL`, `GITHUB_APP_PRIVATE_KEY_B64`, `GITHUB_TARGET_REPO`;
-  drop `QUEUE_DB_PATH`).
+  updated (add `DATABASE_URL`, `GITHUB_APP_PRIVATE_KEY_B64`, `GITHUB_TARGET_REPO`,
+  `PUBLIC_BASE_URL` (optional; auto on Render); drop `QUEUE_DB_PATH`).
 - Dependencies: add `psycopg[binary]`, `psycopg_pool`; add `testcontainers` to the
   dev group.
+- **Secrets audit for deploy-time registration (§9): zero new secrets.** It runs
+  off the existing App JWT (`GITHUB_APP_ID` + private key). `GITHUB_APP_INSTALLATION_ID`
+  becomes **optional** (auto-discovered); the only new input is the non-secret
+  `public_base_url` above (free on Render via `RENDER_EXTERNAL_URL`).
 
 ## 7. Softcoding the testbed repo (hardcoded → configured)
 
@@ -217,9 +225,24 @@ single command (testcontainers auto-spins the container).
   (values set in the dashboard, not committed). Port already `8000` / `--host 0.0.0.0`.
 - **Keep-warm pinger:** documented deploy step — register the Render URL's
   `/healthz` with cron-job.org or UptimeRobot at ~10-min interval.
-- **GitHub App webhook URL** updated once to the stable Render URL (no longer
-  per-tunnel-restart).
 - `Dockerfile` unchanged (already `uv sync --frozen --no-dev` + uvicorn).
+- **Deploy-time registration — hint only** (to become a `/deploy` slash command
+  in the implementation session; this spec captures the facts it needs, not a
+  finished component). Idempotent ("no-op if already registered"), safe to run on
+  every deploy/boot, and — key point — **runs entirely off the existing App JWT**
+  (minted from `GITHUB_APP_ID` + the private key), so **zero new secrets**:
+  - **Verify/discover the installation** on `github_target_repo` via
+    `GET /repos/{owner}/{repo}/installation` (App JWT): no-op if installed, and it
+    auto-derives the installation id (making `GITHUB_APP_INSTALLATION_ID`
+    optional). If the App is **not** installed, fail fast with a clear message —
+    **GitHub does not allow an App to install itself**; a repo admin authorizes it
+    once in the GitHub UI (the one genuinely manual, one-time step).
+  - **Set the webhook URL** idempotently via `PATCH /app/hook/config` (App JWT) to
+    `{public_base_url}/webhook` — `public_base_url` defaults to Render's
+    `RENDER_EXTERNAL_URL`. No-op when already correct; this replaces the old
+    per-tunnel-restart manual webhook-URL edit.
+  - (The webhook secret already matches `GITHUB_WEBHOOK_SECRET`; the routine only
+    sets the URL, not the secret.)
 
 ## 10. Docs updates
 
