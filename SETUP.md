@@ -145,6 +145,22 @@ and reinstalled dev dependencies (ruff, etc.) at runtime — the build-time
 `uv sync --frozen --no-dev` didn't carry over to `uv run`'s own implicit sync.
 Fixed by adding `--no-dev` to the `CMD`'s `uv run` invocation too.
 
+## 2c. Running tests locally (Postgres prerequisite)
+
+Since the queue store moved from local SQLite to Postgres, `uv run pytest`
+needs a real Postgres reachable one of two ways:
+
+- **Docker installed** (see 2a above) — `tests/conftest.py`'s `db_url`
+  fixture spins up a throwaway Postgres 16 container via `testcontainers`
+  automatically; nothing to configure.
+- **No Docker** — set `DATABASE_URL` to point at a local/CI Postgres
+  instance yourself, e.g. `DATABASE_URL=postgresql://postgres@127.0.0.1:5433/test
+  uv run pytest`. Without either Docker or `DATABASE_URL`, the DB-touching
+  tests fail with an opaque testcontainers error.
+
+CI (`.github/workflows/project-d-ci.yml`) provides this automatically via a
+`services: postgres` container — no action needed there.
+
 ## 3. Deploying to Render + Supabase (production)
 
 The production deployment uses:
@@ -165,11 +181,13 @@ The production deployment uses:
 
 1. Push the `feat/supabase-hosting` branch to GitHub (if testing locally)
 2. Go to https://render.com/dashboard
-3. Click **"New +"** → **Web Service** → connect your GitHub repo
-4. **Build Command**: `uv sync --frozen`
-5. **Start Command**: `uv run gunicorn -w 1 -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:8000`
-   (or the command in `render.yaml` if using that)
-6. In the **Environment** tab, set these variables:
+3. Click **"New +"** → **Blueprint** → connect your GitHub repo and point it at
+   `render.yaml` at the repo root. `render.yaml` declares `runtime: docker`
+   with a `dockerfilePath`, so Render builds and runs this project's
+   `Dockerfile` as-is — there is no separate Build/Start command to configure;
+   the container's entrypoint is the Dockerfile's own `CMD`
+   (`uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port 8000`).
+4. In the **Environment** tab, set these variables:
    - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
    - `GITHUB_APP_ID`: (from `.env`)
    - `GITHUB_APP_PRIVATE_KEY_B64`: base64-encoded PEM (see "Secrets encoding" below)
@@ -178,7 +196,7 @@ The production deployment uses:
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
    - (Other provider creds as needed: `GEMINI_API_KEY`, etc.)
-7. Click **Deploy**
+5. Click **Deploy**
 
 ### 3.3 Secrets encoding
 
@@ -200,9 +218,14 @@ field (the app code will decode it at startup).
 
 2. **Register the webhook URL** (one-time, after Render deployment):
    Once Render finishes deploying, you'll have a public URL (e.g.,
-   `https://pr-review-bot.onrender.com`). Run the registration script:
+   `https://pr-review-bot.onrender.com`). Run the registration script
+   **locally, from your own machine — not inside the Render container**
+   (`scripts/` is intentionally not copied into the Docker image; see
+   `Dockerfile`, which only `COPY`s `app/`). Since `RENDER_EXTERNAL_URL` is an
+   env var Render injects only *inside* its own container, it will not be set
+   on your laptop, so pass the public URL explicitly via `PUBLIC_BASE_URL`:
    ```bash
-   uv run python -m scripts.deploy
+   PUBLIC_BASE_URL=https://pr-review-bot.onrender.com uv run python -m scripts.deploy
    ```
    This script will:
    - Authenticate as the GitHub App (using the PEM)
