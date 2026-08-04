@@ -627,3 +627,15 @@ def test_clear_schedule_notice_returns_none_when_no_bot_comment_exists(fake_tran
 
     result = github_app.clear_schedule_notice(REPO_FULL_NAME, PR_NUMBER)
     assert result is None
+
+
+def test_read_private_key_prefers_base64_env(monkeypatch):
+    import base64
+
+    pem = "-----BEGIN KEY-----\nabc\n-----END KEY-----\n"
+    monkeypatch.setattr(
+        settings,
+        "github_app_private_key_b64",
+        base64.b64encode(pem.encode()).decode(),
+    )
+    assert github_app._read_private_key() == pem

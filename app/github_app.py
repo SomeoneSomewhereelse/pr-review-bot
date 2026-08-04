@@ -94,10 +94,13 @@ def _strip_existing_footnote(body: str) -> str:
 
 
 def _read_private_key() -> str:
-    """Read the App's PEM private key from disk.
+    """Prefer the base64 env var (host-portable); fall back to the PEM file for
+    local dev. Never logged."""
+    b64 = settings.github_app_private_key_b64
+    if b64:
+        import base64
 
-    Never logged/printed — callers must not do so either.
-    """
+        return base64.b64decode(b64).decode()
     key_path = Path(settings.github_app_private_key_path)
     if not key_path.is_absolute():
         key_path = Path.cwd() / key_path

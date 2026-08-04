@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     github_app_id: int = 0
     github_app_installation_id: int = 0
     github_app_private_key_path: str = "./github-app-private-key.pem"
+    github_app_private_key_b64: str = ""
     github_webhook_secret: str = ""
     github_target_repo: str = ""
 
