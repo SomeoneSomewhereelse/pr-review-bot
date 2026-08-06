@@ -50,9 +50,11 @@ confirmed the app provisions its own schema against a real Supabase project.
 
 One spec, two phases, in order.
 
-**Phase 1 (repo change):** the hardening fix. Lands and is committed *before*
-any live infrastructure exists, so Phase 2 follows the corrected docs literally
-and the run becomes the test of the docs.
+**Phase 1 (repo change):** the hardening fix (§3.1-3.4), plus two prerequisites
+for anyone repeating this procedure — de-hardcoding the owner/App identifiers
+(§3.5) and retiring the remaining Cloudflare Tunnel references (§3.6). All of it
+lands and is committed *before* any live infrastructure exists, so Phase 2
+follows the corrected docs literally and the run becomes the test of the docs.
 
 **Phase 2 (live run, no repo changes between A0 and the end of Block B):**
 provision Supabase and Render, verify first-boot schema provisioning
@@ -153,7 +155,75 @@ exits 3.
 shapes instead. The connection string carries the password, and CLAUDE.md's
 no-secret-ever-logged rule is absolute.
 
-### 3.5 Rejected alternatives
+### 3.5 Repeatability — de-hardcode the owner and App identifiers
+
+This procedure is meant to be repeatable by someone other than its author, so no
+document or docstring should name a specific GitHub account or App slug as if it
+were the only one.
+
+The **code is already correct**: `scripts/seed_demo_pr.py:38`,
+`scripts/manual_verify_step3.py:27`, and `scripts/demo_provider_swap.py:32` all
+read `settings.github_target_repo`, so the hosting-migration plan's
+de-hardcoding step did land. Only prose lags behind it:
+
+- **Docstrings** — `scripts/seed_demo_pr.py:9` and
+  `scripts/manual_verify_step3.py:4-5` still name the owner and the App slug.
+  They become references to `GITHUB_TARGET_REPO` and "the configured GitHub
+  App", matching what the code actually does.
+- **Test fixture** — `tests/test_github_app.py:21`'s `REPO_FULL_NAME` becomes a
+  neutral placeholder. It is a fake value in a mocked test, so this is hygiene,
+  not a behavior change.
+- **`SETUP.md`** — lines 16, 194, 217, and 296 become `<your-user>/…`
+  placeholders, and the `settings/apps/<app-slug>` URLs stop hardcoding one App
+  slug. This dovetails with §3.3, which is already rewriting §1 to explain how a
+  reader obtains their *own* App ID.
+- **`docs/superpowers/specs/2026-08-03-demo-plan-design.md`** lines 40 and 170 —
+  genericized, since that document is paused-but-live rather than a record.
+
+Historical documents are left alone: `docs/2026-08-03-supabase-hosting-migration-handoff.md`,
+`docs/superpowers/plans/2026-08-03-supabase-hosting-migration.md`, and
+`docs/superpowers/specs/2026-08-03-supabase-hosting-migration-design.md` record
+what was actually done at the time.
+
+### 3.6 Retire the remaining Cloudflare Tunnel references
+
+The Render migration retired the tunnel, but references survive in normative
+docs — including `CLAUDE.md:9,25`, which still describes the deployment as
+"Docker + Cloudflare Tunnel" and is the most authoritative file in the repo.
+
+Worth stating up front: **there is no dependency to remove.** `cloudflared`
+appears in no `pyproject.toml`, `Dockerfile`, or `uv.lock` entry. It was always
+an external binary invoked by hand, so this is entirely a documentation change.
+
+**Cleaned (normative):**
+
+- `CLAUDE.md:9,25` — deployment described as Docker on Render + Supabase.
+- `README.md:88-99, 139-141, 179-181` — the tunnel sections go; `README.md:207`'s
+  "Groq + Cloudflare free tiers" becomes Groq + Render + Supabase free tiers.
+- `SETUP.md:23-24` — §1's webhook bullet stops describing a per-tunnel-restart
+  webhook edit as the live path. SETUP.md's own §3.6 (lines 251-261) is deleted
+  outright,
+  including the `winget`-installed-`cloudflared` note. Lines 298-300's
+  tunnel-start instructions go from the redo-from-scratch notes.
+- `SPEC.md:292,319` — replaced by the Render deployment path.
+- `cost.md:14-15` — **both rows stay**, because they are the documented
+  comparison that justifies choosing Render + Supabase, and deleting them would
+  remove the rationale rather than a stale instruction. The surrounding prose is
+  reworded to state plainly that both were evaluated and rejected, removing any
+  implication that the tunnel is a current fallback.
+- `docs/superpowers/specs/2026-08-03-demo-plan-design.md` — its environment facts
+  (lines 27, 32, 58-59) and pre-call checklist (lines 161-169) move to the hosted
+  stack. Its per-segment narrative is left to the §13 re-validation follow-up;
+  updating the checklist without it would be half a job, but rewriting the
+  choreography belongs to that separate pass, and this spec's Block B is what
+  will inform it.
+
+**Kept as historical record**, because rewriting them would falsify what
+happened: `SETUP.md:284,287`'s PR #3 rehearsal row genuinely *was* delivered over
+a quick tunnel — Block C adds hosted rows alongside it rather than editing it —
+along with the `docs/2026-08-03-*` handoff, plan, and migration design.
+
+### 3.7 Rejected alternatives
 
 - **Docs-only, no code change.** Defensible — the pool already retries ~30s
   internally, the real cause is already logged, and the remedy is one redeploy.
@@ -173,9 +243,10 @@ creation but before Render's first boot, or the battery has no "before" state.
 
 ### Block A — provision, then verify
 
-- **A0** (Claude, local): full suite green, `ruff` clean, `gh auth status` as
-  `SomeoneSomewhereelse`, `.env` has `LLM_PROVIDER=groq`. Rehearse every
-  verification query from §7a against local Postgres.
+- **A0** (Claude, local): full suite green, `ruff` clean, `gh auth status`
+  showing the account that owns the `GITHUB_TARGET_REPO` testbed, `.env` has
+  `LLM_PROVIDER=groq`. Rehearse every verification query from §7.2a against
+  local Postgres.
 - **A1** (operator): create the Supabase project, wait for ready, paste the
   Session-mode pooler string into `.env` as `DATABASE_URL`.
 - **A2** (Claude): baseline — `SELECT 1` succeeds and
@@ -214,7 +285,7 @@ startup loudly, so a clean startup proves it resolved.
 
 - **B1 happy path (PR-1).** `uv run python scripts/seed_demo_pr.py`. A comment
   with three specialist rows appears; record wall-clock latency against the 15s
-  target; confirm the ticket row per §7a.
+  target; confirm the ticket row per §7.2a.
 - **B2 Segment B (provider swap).** Each "restart" is a Render redeploy: with a
   key, a per-key env update followed by an explicit deploy trigger (env changes
   do not auto-deploy); without one, a dashboard edit plus Manual Deploy.
@@ -386,9 +457,14 @@ confirming the run did not perturb the repo.
 
 ## 8. Deliverables
 
-1. **Phase 1 commit** — SETUP.md §1/§3.1/§3.2, the `.env.example` App ID comment
-   and optional `RENDER_API_KEY` entry, `store.py`'s `_POOL_TIMEOUT_SECONDS` and
-   diagnostic wrapper, and the five tests.
+1. **Phase 1**, as three separate commits so each is reviewable on its own terms:
+   - **Hardening** — SETUP.md §1/§3.1/§3.2, the `.env.example` App ID comment and
+     optional `RENDER_API_KEY` entry, `store.py`'s `_POOL_TIMEOUT_SECONDS` and
+     diagnostic wrapper, and the five tests (§3.1-3.4, §7.1).
+   - **Repeatability** — docstrings, the test fixture, and the SETUP.md and
+     demo-plan identifiers (§3.5).
+   - **Tunnel retirement** — CLAUDE.md, README.md, SETUP.md §3.6, SPEC.md,
+     cost.md's rewording, and the demo plan's environment/checklist (§3.6).
 2. **`docs/2026-08-05-first-hosted-run-findings.md`** — divergences from the
    corrected docs, which tooling lane was used, measured Render restart duration
    for the demo plan's timing, actual Segment C counts, whether the diagnostic
@@ -401,9 +477,6 @@ confirming the run did not perturb the repo.
 
 - `app/webhook.py:57`'s `logger.info` never surfaces under uvicorn's default
   root level of WARNING, so the non-target-repo skip is invisible in production.
-- `SETUP.md` §1's webhook bullet (lines 20-24) still describes the Cloudflare
-  quick tunnel as the live path, which the Render migration retired — the same
-  staleness a previous commit fixed in SPEC.md.
 - `/deploy`'s `check_database` should use a plain short-timeout
   `psycopg.connect`, **not** the app's pool, so it reports the real libpq error
   instead of a 30-second `PoolTimeout`. Whether it also asserts `tickets` exists
