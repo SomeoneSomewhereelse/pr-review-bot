@@ -482,3 +482,15 @@ def test_tickets_needing_notice_respects_batch_cap(monkeypatch, db_exec):
 
     second_batch = store.tickets_needing_notice(now=T0)
     assert [t.id for t in second_batch] == tids[2:]  # the leftover ticket, picked up next "tick"
+
+
+def test_schema_columns_match_the_ticket_dataclass(db_query):
+    """_row_to_ticket does Ticket(**row), so _SCHEMA and the dataclass must agree
+    exactly -- drift is a production TypeError. This also makes the hosted run's
+    column check (plan Task 9) a machine-checked invariant rather than a number
+    written down in a doc."""
+    rows = db_query(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = 'tickets'"
+    )
+    assert {row[0] for row in rows} == set(store.Ticket.__dataclass_fields__)

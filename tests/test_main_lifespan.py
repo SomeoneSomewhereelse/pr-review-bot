@@ -116,3 +116,35 @@ async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
 
     assert calls == ["owner/repo"]
     assert settings.github_app_installation_id == 999999
+
+
+async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch):
+    """Design spec section 11: "If Postgres is unreachable at boot, startup fails
+    loudly (correct)". Guards that init_pool()'s diagnostic rewrite did not soften
+    that into a warning, and that no dispatcher task is left running."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+
+    # The autouse _env(db) fixture already opened a pool on the test Postgres.
+    store.close_pool()
+    monkeypatch.setattr(
+        settings, "database_url", "postgresql://u:p@127.0.0.1:1/postgres?connect_timeout=1"
+    )
+    monkeypatch.setattr(store, "_POOL_TIMEOUT_SECONDS", 1)
+
+    created_tasks = []
+    real_create_task = asyncio.create_task
+
+    def _spy_create_task(coro, *args, **kwargs):
+        task = real_create_task(coro, *args, **kwargs)
+        created_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(main.asyncio, "create_task", _spy_create_task)
+
+    with pytest.raises(RuntimeError):
+        async with main.lifespan(main.app):
+            pass
+
+    # init_pool() raised before create_task was reached: no leaked dispatcher.
+    assert created_tasks == []
