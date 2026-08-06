@@ -44,8 +44,15 @@ def db_url() -> str:
     from testcontainers.postgres import PostgresContainer
 
     with PostgresContainer("postgres:16-alpine") as pg:
-        # psycopg (not psycopg2) driver URL
-        yield pg.get_connection_url(driver="psycopg")
+        # driver=None gives a bare "postgresql://" scheme for raw psycopg3.
+        # driver="psycopg" (the previous value) builds a SQLAlchemy-style
+        # "postgresql+psycopg://" dialect+driver URL, which psycopg3's own
+        # parser cannot read at all ('missing "=" after "postgresql+psycopg:...'"').
+        # This was masked until now: CI's services:postgres sets DATABASE_URL
+        # directly and never calls this method, and every local run before
+        # Docker/WSL integration was enabled failed earlier on
+        # docker.errors.DockerException, before this code path ever ran.
+        yield pg.get_connection_url(driver=None)
 
 
 @pytest.fixture
