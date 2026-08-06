@@ -26,6 +26,19 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   `github-app-private-key.pem` at the repo root (gitignored). Referenced by
   path via `GITHUB_APP_PRIVATE_KEY_PATH` in `.env` (chosen over base64-encoding
   the key inline).
+- **Obtaining the App ID** (needed as `GITHUB_APP_ID`): open the App's settings
+  at `https://github.com/settings/apps/<your-app-slug>` → **General** → **App
+  ID**, near the top. The manifest-conversion flow above also returns it
+  directly. Three IDs sit close together and only two are used here:
+  - **App ID** → `GITHUB_APP_ID`. A short integer. `app/config.py` types it as
+    `int`, so a non-numeric paste fails config validation at startup, and
+    `app/github_app.py` reports "likely a bad `GITHUB_APP_ID`" on a 401.
+  - **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Optional** — the app
+    auto-discovers it at boot when unset. Capture it manually via
+    `GET /app/installations` (signed with a short-lived JWT) if you want it
+    pinned.
+  - **Client ID** — not used by this project at all. Easy to grab by mistake,
+    since it sits on the same page.
 
 ## 2. LLM provider — Groq (live), not Vertex, Gemini currently blocked
 
@@ -171,11 +184,24 @@ The production deployment uses:
 ### 3.1 Supabase setup
 
 1. Create a Supabase project at https://supabase.com
-2. Go to the project's **Databases** settings
-3. Copy the **Session-mode pooler** connection string (the one with port 5432,
-   not 6543) → set as `DATABASE_URL` env var
-   - Example: `postgresql://postgres:[password]@[host].pooler.supabase.com:5432/postgres`
-4. Keep this connection string handy for the Render dashboard env vars
+2. **Wait until the dashboard reports the project ready** (~2 minutes). A
+   connection attempt against a still-provisioning project fails, and Render
+   does not retry a failed deploy — see §3.2's troubleshooting note.
+3. Open **Connect** (or Project Settings → Database) and copy the
+   **Session-mode pooler** connection string — port **5432**, not 6543.
+   - Shape: `postgresql://postgres.<project-ref>:<password>@aws-<region>.pooler.supabase.com:5432/postgres`
+   - **Copy it verbatim; do not retype or reconstruct it.** Both the
+     `postgres.<project-ref>` username and the region-varying subdomain are
+     project-specific, and either one wrong yields
+     `FATAL: Tenant or user not found`.
+   - If the password contains `@ # / ?`, percent-encode it — those characters
+     terminate fields in a URI.
+4. Set it as the `DATABASE_URL` env var (locally in `.env`, and in the Render
+   dashboard per §3.2).
+5. Optional hardening: libpq's default `sslmode=prefer` gets an encrypted
+   connection but performs no certificate verification. For MITM protection use
+   `sslmode=verify-full` together with Supabase's CA certificate. The app does
+   not enforce this.
 
 ### 3.2 Render web service setup
 
@@ -189,14 +215,30 @@ The production deployment uses:
    (`uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port 8000`).
 4. In the **Environment** tab, set these variables:
    - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
-   - `GITHUB_APP_ID`: (from `.env`)
+   - `GITHUB_APP_ID`: the numeric App ID — see §1 for where to find it
    - `GITHUB_APP_PRIVATE_KEY_B64`: base64-encoded PEM (see "Secrets encoding" below)
    - `GITHUB_TARGET_REPO`: e.g., `SomeoneSomewhereelse/pr-review-bot-testbed`
    - `GITHUB_WEBHOOK_SECRET`: (from `.env`)
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
    - (Other provider creds as needed: `GEMINI_API_KEY`, etc.)
+   - Do **not** set `GITHUB_APP_INSTALLATION_ID`. Leaving it unset is
+     deliberate: the app auto-discovers it at boot from the App JWT.
+   - `RENDER_API_KEY` is **not** a service env var. It is optional
+     operator-local tooling (Account Settings → API Keys) that lets deploy
+     scripts set env vars and read logs from your machine. Never add it to
+     `render.yaml` and never give it to the service.
 5. Click **Deploy**
+6. **Verify before considering this step done:**
+   - The deploy's logs end with uvicorn's `Application startup complete.`
+   - `curl https://<your-service>.onrender.com/healthz` returns `{"status":"ok"}`.
+
+**Troubleshooting the first deploy.** If it fails with
+`error connecting in 'pool-1'` or a `RuntimeError` about the connection not
+opening, the usual cause is a Supabase project that was not ready yet, or a
+mistyped pooler string (§3.1). Render does **not** retry failed deploys
+automatically, and a first deploy leaves no previous instance running — fix the
+value and click **Manual Deploy**.
 
 ### 3.3 Secrets encoding
 
