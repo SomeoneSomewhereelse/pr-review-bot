@@ -14,9 +14,14 @@
 | Cloudflare Container | ~$5 (Workers Paid base) | ❌ SQLite only (ephemeral) | ✅ stable | ✅ | Scales to zero but queue state lost on redeploy; would need separate DB |
 | Local + Cloudflare Tunnel | $0 (if local machine kept on) | ✅ SQLite queue | ⚠️ unstable | ⚠️ only local | Tunnel URL changes every restart (no stable webhook); local machine must stay on |
 
-**Choice rationale:** the chosen path is $0 on free tiers with stable public URLs and
-durable queue state via Postgres. The keep-warm pinger (~$0, free service) mitigates
-Render and Supabase idle spin-down, keeping both within the demo's 15s responsiveness target.
+**Choice rationale:** the chosen path is $0 on free tiers with stable public URLs
+and durable queue state via Postgres. The keep-warm pinger (~$0, free service)
+mitigates Render and Supabase idle spin-down, keeping both within the demo's 15s
+responsiveness target. The two lower rows were evaluated and **rejected**, and
+are listed here only to document that comparison: the Cloudflare Container loses
+queue state on redeploy, and the local-machine-plus-tunnel setup — which this
+project used before the Render migration — has no stable webhook URL and needs a
+laptop kept awake. Neither is a supported deployment path today.
 
 ## 2. LLM cost (same across every deploy approach)
 

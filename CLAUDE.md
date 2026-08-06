@@ -6,7 +6,7 @@ Autonomous code-review engine. A GitHub PR webhook triggers an **Orchestrator**
 that fetches the diff and fans out to **three parallel LLM specialists**
 (Security, Performance, Code Quality); their findings are merged into a **single
 Markdown PR comment**. Runs in production via a Docker container exposed through a
-Cloudflare Tunnel (public URL, not localhost).
+Render (stable public URL, not localhost), with the queue in Supabase Postgres.
 
 Full design lives in `SPEC.md`; cost model in `cost.md`.
 
@@ -22,7 +22,8 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 - **Validation**: Pydantic v2 with a shared validate-and-repair layer.
 - **Tests**: `pytest`, `pytest-asyncio`, `httpx.AsyncClient`, `respx`.
 - **CI**: GitHub Actions — `ruff` lint + `pytest` (deterministic test layers 1–6) on push/PR.
-- **Deploy**: Docker + Cloudflare Tunnel (portable to a $5/mo Cloudflare Container).
+- **Deploy**: Docker on Render (free tier) + Supabase Postgres, kept warm by a
+  free external pinger. See `cost.md` for the alternatives that were weighed.
 
 ## Architecture of the agents
 

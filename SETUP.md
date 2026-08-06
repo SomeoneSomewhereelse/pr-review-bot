@@ -17,11 +17,9 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   (created via `gh repo create --private`). Installation ID captured via
   `GET /app/installations` (signed with a short-lived JWT built from the PEM)
   → stored as `GITHUB_APP_INSTALLATION_ID`.
-- **Webhook URL**: currently a placeholder (`https://example.com/webhook`) from
-  app creation. **Must be updated** in the app's webhook settings
-  (`https://github.com/settings/apps/<your-app-slug>`) once the
-  Cloudflare quick tunnel is running and the local server is up (step 1 of the
-  build) — see the Tunnel section below for why this happens on every restart.
+- **Webhook URL**: set to the deployed service's `<public-url>/webhook`. This is
+  stable and set once by `uv run python -m scripts.deploy` (§3.4) — it does not
+  need re-editing between runs.
 - Private key: downloaded as part of the manifest exchange, saved to
   `github-app-private-key.pem` at the repo root (gitignored). Referenced by
   path via `GITHUB_APP_PRIVATE_KEY_PATH` in `.env` (chosen over base64-encoding
@@ -290,18 +288,6 @@ To keep them warm and ensure fast responses:
 3. This keeps Render warm and also keeps Supabase un-paused (the dispatcher
    polls the queue continuously, so pinging `/healthz` guarantees activity)
 
-## 3.6 Cloudflare Tunnel (local testing only, optional)
-
-For **local development only**, a quick tunnel can still be used:
-- `cloudflared tunnel --url http://localhost:8000`
-- No login, no account, no domain needed
-- **Known limitation:** the hostname is random and changes every restart
-- Each restart requires manually updating the GitHub App's webhook URL
-- `gcloud` and `cloudflared` were installed via `winget`
-
-**Note:** production uses the stable Render URL instead; the tunnel is purely
-optional for local manual testing if needed.
-
 ## 4. Secrets hygiene
 
 - Root `.gitignore` updated (before any secret file existed) to ignore
@@ -337,6 +323,3 @@ If any of this needs to be redone (e.g. rotating the webhook secret, a new PEM):
 - GitHub App settings: `https://github.com/settings/apps/<your-app-slug>`
 - Test repo: `https://github.com/<your-user>/pr-review-bot-testbed`
 - Gemini key management: `https://aistudio.google.com/app/apikey`
-- To start the tunnel: `cloudflared tunnel --url http://localhost:8000`, then
-  copy the printed `https://*.trycloudflare.com` URL into the GitHub App's
-  webhook URL setting (append `/webhook`).

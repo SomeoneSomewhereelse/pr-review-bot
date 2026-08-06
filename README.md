@@ -85,21 +85,6 @@ For a stable, production-ready deployment with a persistent webhook URL:
 
 The webhook URL is stable and persists across deployments (no manual edits needed).
 
-### Local testing with a tunnel (optional)
-
-For local manual testing, a **Cloudflare quick tunnel** can still expose
-localhost to a public URL:
-
-```bash
-cloudflared tunnel --url http://localhost:8000
-```
-
-Copy the printed `https://*.trycloudflare.com` hostname into the GitHub
-App's webhook URL setting, appending `/webhook`. **This has to be redone
-every time the tunnel restarts** — the hostname is random and doesn't persist.
-
-For production, use the stable Render deployment instead.
-
 ## Testing
 
 ```bash
@@ -136,9 +121,9 @@ CI. Each is self-contained and prints what it's proving:
 
 ### Live end-to-end rehearsal
 
-1. Start the app (`uv run uvicorn ...`) and a tunnel (`cloudflared tunnel
-   --url http://localhost:8000`).
-2. Update the GitHub App's webhook URL to the tunnel's hostname + `/webhook`.
+1. Ensure the Render service is deployed and `/healthz` returns 200.
+2. The GitHub App's webhook URL is already the stable Render URL — no per-run
+   update needed (`uv run python -m scripts.deploy` sets it once).
 3. `uv run python scripts/seed_demo_pr.py` — opens a real PR with a
    hardcoded credential, an N+1 query, and a magic number planted in
    `fixtures/bad_code/`.
@@ -176,9 +161,6 @@ the full history of runs and timings.
   Free tier caps are modest (single-digit RPM, ~150 requests/day on the
   low-access-tier models) — fine for demonstration, a real constraint at any
   meaningful sustained volume.
-- **Local tunnel testing (optional)** — for purely local development, the
-  Cloudflare quick tunnel can still be used; the webhook URL must be updated
-  on every tunnel restart. Production uses the stable Render deployment instead.
 - **Docker**: fully verified (`docker build` + container boot + endpoint
   checks) — installed partway through development, not from the start.
 - **Durable review queue is single-process** (see `SPEC.md` §12) — one
@@ -204,6 +186,6 @@ tried and why.
 
 ## Cost
 
-Demo runs at **$0** (Groq + Cloudflare free tiers). Documented production
+Demo runs at **$0** (Groq + Render + Supabase free tiers). Documented production
 cost model (~$8-10/mo at brief scale) is in [`cost.md`](cost.md) — cost is
 graded as that documented calculation, not actual spend.

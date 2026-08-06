@@ -1,5 +1,12 @@
 # Demo plan — Zoom screen-share, course grading presentation
 
+> **Status note:** the per-segment narrative below still assumes the old
+> local-plus-tunnel flow and its two-second `uvicorn` restarts. Its environment
+> facts and checklist have been updated to the hosted stack, but the choreography
+> and timing await the §13 re-validation — see
+> `docs/2026-08-05-first-hosted-run-findings.md` for the measured Render restart
+> durations that re-validation needs.
+
 Date: 2026-08-03
 Status: **Paused** — a new requirement (persistent internet hosting, so the
 instructor can test the bot independently as a collaborator on the testbed
@@ -24,14 +31,12 @@ things we're hoping don't happen.
 
 ## Environment facts established during planning (2026-08-03)
 
-- `gh`, `cloudflared`, `uv` all resolve and work from this session (Windows
-  binaries via `/mnt/c/Program Files/...`, `/mnt/c/Users/Home/.local/bin/uv.exe`).
-  `gh auth status` initially showed an invalid token; user regenerated /
-  re-logged in and it now shows `✓ Logged in ... (keyring)` with `repo` scope.
-- No bot instance is currently running (nothing on port 8000, no
-  `uvicorn`/`cloudflared` process, Docker Desktop daemon not even up). The
-  runbook's startup step checks `/healthz` first and only redeploys if it
-  doesn't respond, rather than assuming a fresh start every time.
+- `gh` and `uv` both resolve and work from this session (Windows binaries via
+  `/mnt/c/Program Files/...`, `/mnt/c/Users/Home/.local/bin/uv.exe`).
+  `gh auth status` shows `✓ Logged in ... (keyring)` with `repo` scope.
+- The bot runs as a deployed Render service, kept warm by the free pinger, so
+  there is no local process to start. The runbook's first step checks
+  `<render-url>/healthz` and only redeploys if it does not respond.
 - **GitHub Models is fully retired** as of 2026-07-30 (confirmed via GitHub's
   own changelog — playground, catalog, inference API, and BYOK gone for all
   customers, including existing ones with active usage; no drop-in official
@@ -49,15 +54,14 @@ things we're hoping don't happen.
   reviews land safely (~10.5K), a third has only ~1.5K headroom against a
   ~5.25K need — a real 429 is very likely by the 3rd review in the same
   60s window, guaranteed by any review after that.
-- No queue.db currently exists (fresh state) — `init_db()` runs
-  `CREATE TABLE IF NOT EXISTS` on every startup, so no cleanup is required,
-  but any leftover `queue.db` from a rehearsal should be deleted before the
-  real call to avoid stale deferred tickets muddying the burst timing.
-- Restarting the `uvicorn` process (needed to change `LLM_PROVIDER`, since
-  `Settings()` is built once at import time) does **not** kill the
-  `cloudflared` tunnel (separate process) or require a new webhook URL —
-  the tunnel/webhook-URL update is a **one-time** step per session, not
-  per-provider-swap.
+- The queue lives in Supabase Postgres, not a local `queue.db`.
+  `store.init_pool()` runs `CREATE TABLE IF NOT EXISTS` on every boot, so no
+  setup is needed — but tickets now **survive** restarts, so any leftover
+  `deferred`/`retrying` rows from a rehearsal must be checked (and allowed to
+  drain) before the real call, or they will muddy the burst timing.
+- Changing `LLM_PROVIDER` means a Render redeploy rather than a local `uvicorn`
+  restart, since `Settings()` is built once at import. The webhook URL is stable
+  and never needs re-editing.
 - `attempt_review`'s "atomic" behavior only applies when a specialist call
   raises `RateLimited` (429) — that defers the *whole* ticket with no
   comment posted. A specialist that fails for any other reason (dead
@@ -144,7 +148,7 @@ this as "roughly" rather than promising an exact count live):
 ### 5. Wrap-up (~1 min)
 
 - Cost model: `cost.md`'s ~$8-10/mo at brief scale, demo ran at $0
-  (Groq + Cloudflare free tiers).
+  (Groq + Render + Supabase free tiers).
 - What's not live: Vertex (mocked-only, needs GCP billing).
 - One-line callout: GitHub Models' retirement happened *during this
   project's life* and the architecture absorbed it without a code change —
@@ -152,22 +156,16 @@ this as "roughly" rather than promising an exact count live):
 
 ## Pre-call / pre-rehearsal checklist
 
-1. `curl localhost:8000/healthz` — if `200`, skip to step 5. If not, continue.
-2. Delete any stale `queue.db` from a prior rehearsal.
-3. Confirm `.env`: `LLM_PROVIDER=groq` (Segments 2 and the end state of
-   Segment B/C all expect Groq as the resting state).
-4. Start the server: `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`
-   (background/separate terminal).
-5. Start the tunnel: `cloudflared tunnel --url http://localhost:8000`
-   (background/separate terminal) — capture the printed
-   `https://*.trycloudflare.com` hostname.
-6. Update the GitHub App's webhook URL (`.../settings/apps/<your-app-slug>`
-   → General → Webhook URL) to `<hostname>/webhook`. **One-time per tunnel
-   session** — provider swaps via `uvicorn` restart do not require redoing
-   this.
-7. Sanity check: `curl <tunnel-url>/healthz` → `200`; an unsigned
-   `curl -X POST <tunnel-url>/webhook` → `401`.
-8. Confirm `gh auth status` shows you logged in as the account that owns the
+1. `curl <render-url>/healthz` → `200`. If not, redeploy and wait for
+   `Application startup complete.` in the logs.
+2. Confirm the keep-warm monitor is active so the instance is not cold.
+3. Confirm `LLM_PROVIDER=groq` on the Render service (the resting state every
+   segment assumes).
+4. Check for leftover `deferred`/`retrying` tickets from a prior rehearsal and
+   let them drain.
+5. Confirm the GitHub App's webhook URL is `<render-url>/webhook`.
+6. Sanity check: an unsigned `curl -X POST <render-url>/webhook` → `401`.
+7. Confirm `gh auth status` shows you logged in as the account that owns the
    `GITHUB_TARGET_REPO` testbed.
 
 ## Open items / risks accepted

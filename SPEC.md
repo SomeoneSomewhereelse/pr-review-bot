@@ -289,8 +289,9 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
      install on a throwaway test repo; capture App ID + installation ID.
    - **GCP / Vertex**: create project, enable Vertex AI, `! gcloud auth application-default login`
      (run in-session via the `!` prefix); confirm the $300 trial is active.
-   - **Cloudflare Tunnel**: `! cloudflared tunnel login`; create a **named** tunnel
-     (stable hostname, survives restarts); map it to local `:8000`.
+   - **Hosting**: create a Supabase project (Session-mode pooler URL as
+     `DATABASE_URL`) and a Render service from `render.yaml`; the Render URL is
+     the stable public webhook target.
    - **Secrets hygiene**: create `.env` from `.env.example`; add `.env` + the PEM to
      `.gitignore` BEFORE the first commit; decide PEM-as-file-path vs base64 env value.
    Output: a filled `.env` + a `SETUP.md` checklist capturing the values and steps.
@@ -316,7 +317,7 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
 - `docker build` + local `uvicorn` boots; `/healthz` → 200; `/webhook` rejects an
   unsigned request (401) and no-ops a replayed delivery (200). GitHub Actions CI
   (`ruff` + `pytest` layers 1–6) is green on the PR.
-- `cloudflared tunnel` public URL set as the GitHub App webhook; a manual GitHub
+- The deployed Render URL is set as the GitHub App webhook; a manual GitHub
   "Redeliver" of a `pull_request` event produces a comment.
 - **Live rehearsal**: `python scripts/seed_demo_pr.py` opens a PR with the three
   planted issues; the bot comment appears within 15s naming the hardcoded credential,
