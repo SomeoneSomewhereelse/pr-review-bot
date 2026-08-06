@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from app.config import settings
 
@@ -40,6 +40,22 @@ CREATE TABLE IF NOT EXISTS tickets (
 
 _pool: ConnectionPool | None = None
 
+# Explicit rather than relying on psycopg_pool's default (same value), so a test
+# can shrink it without waiting 30s for a connection that will never open.
+_POOL_TIMEOUT_SECONDS = 30
+
+_FIRST_CONNECT_HELP = (
+    "could not open a Postgres connection at startup within {timeout:.0f}s. "
+    "On a first deploy this is nearly always one of:\n"
+    "  1. the database is still provisioning -- wait until it reports ready, "
+    "then deploy again (a failed deploy is not retried automatically);\n"
+    "  2. a pooler connection string whose username is missing its project "
+    "suffix -- it must look like postgres.<project-ref>, not plain postgres;\n"
+    "  3. a password containing characters that must be percent-encoded "
+    "(@ # / ?).\n"
+    "The driver's own error is logged above as \"error connecting in 'pool-1'\"."
+)
+
 
 @dataclass
 class Ticket:
@@ -65,14 +81,34 @@ def _configure(conn) -> None:
 
 
 def init_pool() -> None:
-    """Open the connection pool (if not already) and ensure the schema. Idempotent."""
+    """Open the connection pool (if not already) and ensure the schema. Idempotent.
+
+    A PoolTimeout here means the very first connection never succeeded, which on a
+    hosted first deploy is nearly always a provisioning or connection-string
+    problem rather than a transient blip. Re-raise it as a RuntimeError carrying
+    the likely causes: the bare PoolTimeout reads like a hang, and the driver's
+    real error is tens of lines further up the log. Startup still fails loudly
+    (design spec section 11) -- RuntimeError matches _require_pool()'s convention
+    and app/main.py's lifespan already documents it as the fail-loudly path. The
+    message never includes settings.database_url, which carries the password.
+    """
     global _pool
     if _pool is None:
         _pool = ConnectionPool(
-            settings.database_url, min_size=1, max_size=4, configure=_configure, open=True
+            settings.database_url,
+            min_size=1,
+            max_size=4,
+            timeout=_POOL_TIMEOUT_SECONDS,
+            configure=_configure,
+            open=True,
         )
-    with _pool.connection() as conn:
-        conn.execute(_SCHEMA)
+    try:
+        with _pool.connection() as conn:
+            conn.execute(_SCHEMA)
+    except PoolTimeout as exc:
+        raise RuntimeError(
+            _FIRST_CONNECT_HELP.format(timeout=_POOL_TIMEOUT_SECONDS)
+        ) from exc
 
 
 def close_pool() -> None:
