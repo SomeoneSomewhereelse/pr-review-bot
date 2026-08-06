@@ -10,16 +10,16 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   `code`, exchanged via `POST /app-manifests/{code}/conversions` for the App ID,
   PEM, and webhook secret in one step — no manual "generate private key" click
   needed).
-- App: **`tov-pr-review-bot-testbed`** (App ID in `.env` as `GITHUB_APP_ID`).
+- App: **`<your-app-slug>`** (App ID in `.env` as `GITHUB_APP_ID`).
 - Permissions: `pull_requests: write`, `contents: read`, `issues: write`,
   `metadata: read`. Events: `pull_request`.
-- Installed on throwaway test repo: `SomeoneSomewhereelse/pr-review-bot-testbed`
+- Installed on throwaway test repo: `<your-user>/pr-review-bot-testbed`
   (created via `gh repo create --private`). Installation ID captured via
   `GET /app/installations` (signed with a short-lived JWT built from the PEM)
   → stored as `GITHUB_APP_INSTALLATION_ID`.
 - **Webhook URL**: currently a placeholder (`https://example.com/webhook`) from
   app creation. **Must be updated** in the app's webhook settings
-  (`https://github.com/settings/apps/tov-pr-review-bot-testbed`) once the
+  (`https://github.com/settings/apps/<your-app-slug>`) once the
   Cloudflare quick tunnel is running and the local server is up (step 1 of the
   build) — see the Tunnel section below for why this happens on every restart.
 - Private key: downloaded as part of the manifest exchange, saved to
@@ -217,7 +217,7 @@ The production deployment uses:
    - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
    - `GITHUB_APP_ID`: the numeric App ID — see §1 for where to find it
    - `GITHUB_APP_PRIVATE_KEY_B64`: base64-encoded PEM (see "Secrets encoding" below)
-   - `GITHUB_TARGET_REPO`: e.g., `SomeoneSomewhereelse/pr-review-bot-testbed`
+   - `GITHUB_TARGET_REPO`: e.g., `<your-user>/pr-review-bot-testbed`
    - `GITHUB_WEBHOOK_SECRET`: (from `.env`)
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
@@ -254,9 +254,9 @@ field (the app code will decode it at startup).
 ### 3.4 GitHub App installation and webhook registration
 
 1. **Install the GitHub App** on your test repo:
-   - Go to https://github.com/settings/apps/tov-pr-review-bot-testbed
+   - Go to https://github.com/settings/apps/<your-app-slug>
    - Click **Install App** (if not already installed)
-   - Select the test repo (e.g., `SomeoneSomewhereelse/pr-review-bot-testbed`)
+   - Select the test repo (e.g., `<your-user>/pr-review-bot-testbed`)
 
 2. **Register the webhook URL** (one-time, after Render deployment):
    Once Render finishes deploying, you'll have a public URL (e.g.,
@@ -276,7 +276,7 @@ field (the app code will decode it at startup).
    - Return success if everything is set up correctly
 
 3. **Verify**: The GitHub App webhook URL setting
-   (https://github.com/settings/apps/tov-pr-review-bot-testbed → General →
+   (https://github.com/settings/apps/<your-app-slug> → General →
    Webhook URL) should now show your stable Render URL.
 
 ### 3.5 Keep-warm pinger (free)
@@ -334,8 +334,8 @@ target.
 ## Redo-from-scratch notes
 
 If any of this needs to be redone (e.g. rotating the webhook secret, a new PEM):
-- GitHub App settings: `https://github.com/settings/apps/tov-pr-review-bot-testbed`
-- Test repo: `https://github.com/SomeoneSomewhereelse/pr-review-bot-testbed`
+- GitHub App settings: `https://github.com/settings/apps/<your-app-slug>`
+- Test repo: `https://github.com/<your-user>/pr-review-bot-testbed`
 - Gemini key management: `https://aistudio.google.com/app/apikey`
 - To start the tunnel: `cloudflared tunnel --url http://localhost:8000`, then
   copy the printed `https://*.trycloudflare.com` URL into the GitHub App's

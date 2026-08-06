@@ -37,9 +37,9 @@ things we're hoping don't happen.
   customers, including existing ones with active usage; no drop-in official
   replacement). This is not a rate-limit or misconfiguration — the endpoint
   is genuinely gone. `.env`'s `LLM_PROVIDER` currently reads `groq`.
-- Test repo: `SomeoneSomewhereelse/pr-review-bot-testbed`. GitHub App:
-  `tov-pr-review-bot-testbed`
-  (`https://github.com/settings/apps/tov-pr-review-bot-testbed`).
+- Test repo: `<your-user>/pr-review-bot-testbed`. GitHub App:
+  `<your-app-slug>`
+  (`https://github.com/settings/apps/<your-app-slug>`).
 - Measured live (one deliberate call, per `CLAUDE.md`'s LLM-testing-hygiene
   rule): a single specialist call against the real `fixtures/bad_code`
   diff via Groq costs **1,673 tokens in / 77 tokens out** (~1,750 total).
@@ -161,13 +161,14 @@ this as "roughly" rather than promising an exact count live):
 5. Start the tunnel: `cloudflared tunnel --url http://localhost:8000`
    (background/separate terminal) — capture the printed
    `https://*.trycloudflare.com` hostname.
-6. Update the GitHub App's webhook URL (`.../settings/apps/tov-pr-review-bot-testbed`
+6. Update the GitHub App's webhook URL (`.../settings/apps/<your-app-slug>`
    → General → Webhook URL) to `<hostname>/webhook`. **One-time per tunnel
    session** — provider swaps via `uvicorn` restart do not require redoing
    this.
 7. Sanity check: `curl <tunnel-url>/healthz` → `200`; an unsigned
    `curl -X POST <tunnel-url>/webhook` → `401`.
-8. Confirm `gh auth status` is logged in as `SomeoneSomewhereelse`.
+8. Confirm `gh auth status` shows you logged in as the account that owns the
+   `GITHUB_TARGET_REPO` testbed.
 
 ## Open items / risks accepted
 

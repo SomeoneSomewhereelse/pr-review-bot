@@ -6,8 +6,8 @@ authenticated as the repo owner. This is the "live rehearsal" fixture named
 in SPEC.md section 8/11 and CLAUDE.md step 5/9.
 
 What it does:
-  1. Clones the real test repo (SomeoneSomewhereelse/pr-review-bot-testbed)
-     into a fresh temp directory via `gh repo clone`.
+  1. Clones the configured test repo (GITHUB_TARGET_REPO) into a fresh temp
+     directory via `gh repo clone`.
   2. Creates a new branch off the default branch.
   3. Copies fixtures/bad_code/*.py into the clone.
   4. Commits + pushes the branch.

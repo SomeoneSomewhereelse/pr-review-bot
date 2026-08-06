@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from app import github_app
 from app.config import settings
 
-REPO_FULL_NAME = "SomeoneSomewhereelse/pr-review-bot-testbed"
+REPO_FULL_NAME = "test-owner/pr-review-bot-testbed"
 PR_NUMBER = 1
 REPO_API_URL = f"https://api.github.com/repos/{REPO_FULL_NAME}"
 PR_API_URL = f"{REPO_API_URL}/pulls/{PR_NUMBER}"
