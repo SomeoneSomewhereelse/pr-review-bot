@@ -410,10 +410,15 @@ shape. Five additions, all offline:
    password; assert it and the full URL are absent from `str(exc)` and the
    exception's `args`. Guards the one rule where a future well-meaning "include
    the URL for debuggability" edit would do real damage.
-3. **Wrapper stays narrow.** A malformed conninfo propagates as its own psycopg
-   error, unwrapped, so the friendly message cannot mask a different fault. Also
-   asserts `store._pool is None` afterward, guarding against a refactor leaving
-   a half-built pool installed globally.
+3. **Wrapper stays narrow.** Measured rather than assumed: a malformed conninfo
+   does *not* fail eagerly — `ConnectionPool` constructs fine and the failure
+   still arrives as `PoolTimeout` — and `PoolTimeout` itself subclasses
+   `psycopg.OperationalError`, so "assert a psycopg error escapes" would be
+   vacuous. The test instead injects a non-timeout failure at the DDL step
+   (`psycopg.errors.InsufficientPrivilege` raised from `conn.execute(_SCHEMA)`)
+   and asserts it propagates unwrapped. That is also the case that matters most
+   in practice: a privilege error on `CREATE TABLE` must never be reported as
+   "the project is still provisioning."
 4. **Schema matches the dataclass.** After `init_pool()` against the test
    Postgres, the `information_schema.columns` set for `tickets` equals
    `Ticket.__dataclass_fields__` exactly. `_row_to_ticket` does `Ticket(**row)`,
