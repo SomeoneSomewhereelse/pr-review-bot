@@ -310,6 +310,9 @@ independently; this is now the standalone home going forward.
 | #2 | Direct `orchestrator.run_review()` call (step 5/6 milestone) | 8s, all 3 specialists ok, comment correct |
 | #2 | `demo_provider_swap.py` (step 7) | groq ok → gemini fails gracefully (real error) → groq restored |
 | **#3** | **Real GitHub webhook delivery** (quick tunnel + `PATCH /app/hook/config` JWT-updated URL + `seed_demo_pr.py`) | **8s** PR-created → comment-appeared, all 3 specialists found real issues |
+| **#4** | **First hosted run** (Render + Supabase, 2026-08-07) — happy path, `seed_demo_pr.py` against the deployed service | **~9.2s** PR-created → comment-appeared, real findings via groq; `tickets` created by the app's own first boot against a real Supabase project (see `docs/2026-08-05-first-hosted-run-findings.md`) |
+| **#5** | **Hosted Segment B** — `LLM_PROVIDER=github_models` redeploy (real 2026-07-30 retirement) → all 3 specialists fail visibly → `groq` redeploy → follow-up commit → same comment updates in place | Redeploys **65.5s** / **56.7s** (not a 2s local restart); ticket survived both restarts intact |
+| **#6-#9** | **Hosted Segment C** — 4 new PRs + a follow-up commit fired in quick succession under `groq` | **No 429 observed** (see findings doc — current Groq headroom exceeds the 2026-08-03 token-math measurement; not retried, per CLAUDE.md hygiene rules) |
 
 PR #3 is the definitive rehearsal for step 8/11's verification — it's the
 first run of the *actual* webhook path end-to-end (GitHub → tunnel → HMAC

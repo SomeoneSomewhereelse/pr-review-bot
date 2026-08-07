@@ -1,11 +1,16 @@
-# Design (PARKED) — `/deploy` slash command
+# Design — `/deploy` slash command
 
 **Date:** 2026-08-05
-**Status:** Paused — blocked on
-`docs/2026-08-05-supabase-first-deploy-provisioning-handoff.md` (verify the
-app's first-time Supabase schema-provisioning story before finishing this
-design; one of the five checks below, `check_database`, assumes that story
-already works reliably)
+**Status:** Ready to resume (unblocked 2026-08-07) — the provisioning handoff
+this design was paused on is resolved; see
+`docs/2026-08-05-supabase-first-deploy-provisioning-handoff.md` and
+`docs/2026-08-05-first-hosted-run-findings.md`. Resume brainstorming from
+"Design, part 2: data flow, error handling, testing" per the "Resuming this
+design" section at the bottom of this document. That section's open question
+on `check_database`'s exact behavior is answered by the findings doc: use a
+short-timeout `psycopg.connect` + `SELECT 1` directly, not the app's
+`ConnectionPool`, so a real connection failure reports immediately rather
+than waiting out `init_pool()`'s 30-second pool timeout.
 **Relates to:** `scripts/deploy.py` (existing registration script this
 command wraps), `app/github_app.py` (`discover_installation_id`,
 `set_webhook_url`), `app/queue/store.py` (`init_pool`/`_SCHEMA` — the piece

@@ -1,13 +1,41 @@
 # Handoff — verify the first-time Supabase database provisioning story
 
 **Date:** 2026-08-05
-**Status:** Open — needs investigation, not necessarily a full plan; may turn
-out there's no real gap
+**Status:** **Resolved (2026-08-07)** — confirmed by direct observation
+against a real Supabase project and a real Render deploy. See
+`docs/2026-08-05-first-hosted-run-findings.md` for the full run; summary
+below. `docs/superpowers/specs/2026-08-05-deploy-command-design.md` is
+unblocked and may resume.
 **Relates to:** `app/queue/store.py` (`init_pool`, `_SCHEMA`), `SETUP.md` §3.1
 ("Supabase setup"), `docs/superpowers/specs/2026-08-03-supabase-hosting-migration-design.md`
 §5.1 (pool lifecycle), `docs/superpowers/specs/2026-08-05-deploy-command-design.md`
-(**paused** pending this — its `check_database` check assumes whatever this
-investigation finds is already handled correctly)
+
+## Resolution (2026-08-07)
+
+Each of the five concrete unknowns below is resolved, empirically:
+
+1. **TLS** — no gap. The pooler connection negotiates TLS correctly with a
+   bare connection string; no `sslmode` enforcement was needed.
+2. **Cold project** — not observed as a real risk in this run (the project
+   was given time to finish provisioning per the corrected SETUP.md §3.1
+   before deploying), and `app/queue/store.py`'s `init_pool()` now reports
+   an actionable message if this ever does happen (see the hardening spec,
+   `docs/superpowers/specs/2026-08-05-supabase-first-deploy-hardening-and-first-hosted-run-design.md`).
+3. **Privileges** — no gap. The default `postgres` role, through the
+   Session-mode pooler, created the full schema without incident.
+4. **Idempotency across restarts** — confirmed unaffected; not re-tested here
+   since it was never in question.
+5. **Documentation gap** — fixed. SETUP.md §3.1-3.2 now give the correct
+   pooler connection-string shape, a wait-for-ready step, and a post-deploy
+   verification step.
+
+The conclusive empirical evidence: `SELECT to_regclass('public.tickets')`
+was `None` immediately before the first hosted deploy, and 15 columns
+(set-equal to `Ticket.__dataclass_fields__`) immediately after — the app's
+own `init_pool()` created its schema, unattended, on a real first boot
+against a real, freshly-provisioned Supabase project. Full detail, including
+several unrelated environment findings from the run, is in
+`docs/2026-08-05-first-hosted-run-findings.md`.
 
 ## Context
 
