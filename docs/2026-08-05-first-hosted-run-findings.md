@@ -158,7 +158,7 @@ documentation research alone.
   due, the same comment (`comment_id` unchanged) updated in place with real
   findings from the restored provider.
 
-## A genuine code-level finding: `/healthz` doesn't support `HEAD`
+## A genuine code-level finding: `/healthz` didn't support `HEAD` — fixed
 
 The keep-warm pinger (UptimeRobot) never successfully verified the service,
 for two stacked reasons:
@@ -179,25 +179,26 @@ for two stacked reasons:
    Allow: [GET]
    ```
 
-   `app/main.py`'s `/healthz` route only registers `GET`. This is a
+   `app/main.py`'s `/healthz` route only registered `GET`. This was a
    **code-level finding**, not an operator mistake or a docs gap — no
-   dashboard setting fixes it. Recommended follow-up: add `HEAD` support
-   (`@app.head("/healthz")` alongside the existing `@app.get`, or declare the
-   route with `methods=["GET", "HEAD"]`) — also just correct REST practice
-   for a health-check endpoint generally.
+   dashboard setting could fix it.
 
-   **Not fixed during this run**, per the plan's own discipline (no repo
-   changes between Task 6 and Block C). Functionally moot for keeping Render
-   warm — real webhook `POST` traffic and Render's own internal `GET` health
-   probe both reset the idle-spindown timer regardless — but the monitor
-   itself cannot report a healthy check without this fix, and it should land
-   before this deployment is relied on for an unattended production period or
-   a live demo.
+   **Fixed after the run closed** (commit `ed4ec55`, TDD: a failing
+   `test_healthz_supports_head` in `tests/test_skeleton.py` asserting
+   `client.head("/healthz")` returns 200, then `@app.head("/healthz")` added
+   alongside the existing `@app.get`). Pushed to the Render-connected
+   remote's `main`; the Blueprint service auto-deployed on push (no manual
+   redeploy needed, no `RENDER_API_KEY` required — it had already been
+   revoked by this point). Reverified directly against the live URL
+   afterward: `GET` and `HEAD` both return `200 {"status":"ok"}`.
 
-   **This sub-check is recorded as unverified**, not passed, per the plan's
-   own "label unexercised paths unverified" principle. Every other Task 9
-   check (boot log, `/healthz` via `GET`, schema creation, webhook
-   registration) passed conclusively.
+   This sub-check was recorded as unverified at the time the run itself
+   closed (per the plan's own "label unexercised paths unverified"
+   principle, since no repo changes were allowed mid-run) — it is now
+   resolved and verified live, just outside the run's own boundary. Every
+   other Task 9 check (boot log, `/healthz` via `GET`, schema creation,
+   webhook registration) had already passed conclusively during the run
+   itself.
 
 ## `check_database` recommendation for `/deploy`
 
@@ -213,9 +214,10 @@ exists via `to_regclass`, now that this run has shown that's a meaningful,
 fast, read-only check — worth deciding when `/deploy`'s design resumes,
 rather than prescribing it here.
 
-## Recommended follow-ups (not done in this run)
+## Recommended follow-ups
 
-1. Add `HEAD` support to `/healthz` (see above) — small, contained, testable.
+1. ~~Add `HEAD` support to `/healthz`~~ — **done**, commit `ed4ec55`, verified
+   live.
 2. Re-validate the demo plan's Segment B timing (real ~60-90s redeploys, not
    ~2s local restarts) and Segment C token math (current Groq headroom
    exceeds the `2026-08-03` measurement) before relying on it for a live
@@ -224,3 +226,12 @@ rather than prescribing it here.
    first-class part of `/deploy`'s design (it materially reduced setup risk
    in this run — see the plan's own tooling rationale) now that it has been
    exercised end-to-end.
+
+## Post-run addendum (same day)
+
+After the run and its findings were committed, the branch was merged to
+`master` locally (fast-forward, `69802b9..3aaddc7`) and the worktree removed.
+The `/healthz` `HEAD` fix above was then implemented via TDD directly on
+`master` (commit `ed4ec55`) and pushed to the Render-connected remote, which
+auto-deployed it without any manual redeploy step or API key. The pinger
+issue is now fully resolved, not merely diagnosed.
