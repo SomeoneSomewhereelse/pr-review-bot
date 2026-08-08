@@ -9,6 +9,8 @@ tests/test_github_app.py for why respx cannot see PyGithub traffic.
 
 from __future__ import annotations
 
+import pytest
+
 from app.config import settings
 from scripts import deploy
 
@@ -61,3 +63,67 @@ def test_render_report_indents_continuation_lines():
 def test_render_report_summary_when_everything_passes():
     report = deploy.render_report([deploy.CheckResult("config", "PASS", "")])
     assert report.split("\n")[-1] == "all checks passed"
+
+
+@pytest.fixture
+def complete_config(monkeypatch, tmp_path):
+    """Every value check_config requires, present and valid."""
+    pem = tmp_path / "key.pem"
+    pem.write_text("-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n")
+    monkeypatch.setattr(settings, "github_app_id", 999999)
+    monkeypatch.setattr(settings, "github_app_private_key_b64", "")
+    monkeypatch.setattr(settings, "github_app_private_key_path", str(pem))
+    monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(settings, "public_base_url", "https://x.onrender.com")
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    return pem
+
+
+def test_check_config_passes_when_everything_is_present(complete_config):
+    assert deploy.check_config().status == "PASS"
+
+
+def test_check_config_accepts_base64_key_without_a_pem_file(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_private_key_path", "/nonexistent.pem")
+    monkeypatch.setattr(settings, "github_app_private_key_b64", "aGVsbG8=")
+    assert deploy.check_config().status == "PASS"
+
+
+def test_check_config_fails_when_the_pem_path_does_not_exist(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_private_key_path", "/nonexistent.pem")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GITHUB_APP_PRIVATE_KEY" in result.detail
+
+
+def test_check_config_names_every_missing_key_at_once(complete_config, monkeypatch):
+    """One run should surface all of them, not the first alphabetically."""
+    monkeypatch.setattr(settings, "github_webhook_secret", "")
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GITHUB_WEBHOOK_SECRET" in result.detail
+    assert "GITHUB_TARGET_REPO" in result.detail
+
+
+def test_check_config_requires_the_key_for_the_selected_provider(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "github_models")
+    monkeypatch.setattr(settings, "github_models_token", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GITHUB_MODELS_TOKEN" in result.detail
+
+
+def test_check_config_ignores_provider_keys_for_other_providers(complete_config, monkeypatch):
+    """groq is selected, so a missing GITHUB_MODELS_TOKEN is irrelevant."""
+    monkeypatch.setattr(settings, "github_models_token", "")
+    assert deploy.check_config().status == "PASS"
+
+
+def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "github_webhook_secret", "")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_SUPER_SECRET_VALUE")
+    result = deploy.check_config()
+    assert "gsk_SUPER_SECRET_VALUE" not in result.detail
