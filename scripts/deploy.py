@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from github import GithubException
 
 from app import github_app
@@ -29,6 +30,7 @@ from app.config import settings
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
 _README_ANCHOR = "README.md#deploying-to-production"
+_HTTP_TIMEOUT = 10.0
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,31 @@ def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
             name, "PASS", f"installation={installation_id}; webhook updated from {current}"
         )
     return CheckResult(name, "PASS", f"installation={installation_id}; webhook set")
+
+
+def check_health_endpoint(base: str) -> CheckResult:
+    """Both verbs must answer 200.
+
+    HEAD is not redundant: UptimeRobot's free tier sends HEAD by default, so a
+    GET-only /healthz returns 405 to the pinger and the instance sleeps -- a
+    failure invisible from a browser.
+    """
+    name = "health"
+    url = f"{base}/healthz"
+    try:
+        get_status = httpx.get(url, timeout=_HTTP_TIMEOUT).status_code
+        head_status = httpx.head(url, timeout=_HTTP_TIMEOUT).status_code
+    except httpx.HTTPError as exc:
+        return CheckResult(name, "FAIL", f"{type(exc).__name__} reaching {url}")
+    if get_status != 200 and head_status != 200:
+        return CheckResult(name, "FAIL", f"GET -> {get_status}, HEAD -> {head_status}")
+    if get_status != 200:
+        return CheckResult(name, "FAIL", f"GET /healthz -> {get_status} (HEAD ok)")
+    if head_status != 200:
+        return CheckResult(
+            name, "FAIL", f"HEAD /healthz -> {head_status} (GET ok); pinger sends HEAD"
+        )
+    return CheckResult(name, "PASS", "GET + HEAD -> 200")
 
 
 def render_report(results: list[CheckResult]) -> str:

@@ -9,10 +9,15 @@ tests/test_github_app.py for why respx cannot see PyGithub traffic.
 
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
 
 from app.config import settings
 from scripts import deploy
+
+BASE = "https://x.onrender.com"
+HEALTH = f"{BASE}/healthz"
 
 
 def test_resolve_base_url_prefers_settings_and_strips_trailing_slash(monkeypatch):
@@ -197,3 +202,37 @@ def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
     assert result.status == "FAIL"
     assert "500" in result.detail
     assert github_seam["written"] == []
+
+
+def test_health_passes_when_get_and_head_both_return_200():
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(200))
+        respx.head(HEALTH).mock(return_value=httpx.Response(200))
+        result = deploy.check_health_endpoint(BASE)
+    assert result.status == "PASS"
+
+
+def test_health_fails_when_head_is_405_even_though_get_is_200():
+    """The exact regression that silently broke keep-warm for 71 minutes."""
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(200))
+        respx.head(HEALTH).mock(return_value=httpx.Response(405))
+        result = deploy.check_health_endpoint(BASE)
+    assert result.status == "FAIL"
+    assert "HEAD" in result.detail
+
+
+def test_health_fails_when_get_is_not_200():
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(503))
+        respx.head(HEALTH).mock(return_value=httpx.Response(200))
+        result = deploy.check_health_endpoint(BASE)
+    assert result.status == "FAIL"
+    assert "503" in result.detail
+
+
+def test_health_fails_on_a_transport_error():
+    with respx.mock:
+        respx.get(HEALTH).mock(side_effect=httpx.ConnectError("refused"))
+        result = deploy.check_health_endpoint(BASE)
+    assert result.status == "FAIL"
