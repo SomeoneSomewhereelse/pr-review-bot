@@ -35,6 +35,9 @@ _README_ANCHOR = "README.md#deploying-to-production"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
 _RENDER_API = "https://api.render.com/v1"
+_UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
+# Render free instances spin down after ~15 minutes idle; 10 minutes leaves margin.
+_MAX_PINGER_INTERVAL_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -230,6 +233,41 @@ def check_render_service() -> CheckResult:
     if status != "live":
         return CheckResult(name, "FAIL", f"latest deploy status: {status}")
     return CheckResult(name, "PASS", "latest deploy live")
+
+
+def check_uptime_pinger(base: str) -> CheckResult:
+    """The keep-warm monitor exists, is active, and polls often enough.
+
+    The URL is compared by exact equality on purpose: the real outage was a
+    trailing comma, which fired perfectly on schedule and 404'd every time.
+    """
+    name = "uptime-pinger"
+    if not settings.uptimerobot_api_key:
+        return CheckResult(name, "SKIPPED", "set UPTIMEROBOT_API_KEY to check keep-warm")
+    wanted = f"{base}/healthz"
+    try:
+        resp = httpx.post(
+            _UPTIMEROBOT_API,
+            data={"api_key": settings.uptimerobot_api_key, "format": "json"},
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        monitors = resp.json().get("monitors") or []
+    except httpx.HTTPError as exc:
+        return CheckResult(name, "FAIL", f"UptimeRobot API error ({type(exc).__name__})")
+
+    match = next((m for m in monitors if m.get("url") == wanted), None)
+    if match is None:
+        found = ", ".join(m.get("url", "?") for m in monitors) or "none"
+        return CheckResult(name, "FAIL", f"no monitor matches {wanted}\nfound: {found}")
+    if match.get("status") == 0:
+        return CheckResult(name, "FAIL", "monitor is paused")
+    interval = int(match.get("interval") or 0)
+    if interval > _MAX_PINGER_INTERVAL_SECONDS:
+        return CheckResult(
+            name, "FAIL", f"interval {interval}s > {_MAX_PINGER_INTERVAL_SECONDS}s; will sleep"
+        )
+    return CheckResult(name, "PASS", f"interval {interval}s; status={match.get('status')}")
 
 
 def render_report(results: list[CheckResult]) -> str:

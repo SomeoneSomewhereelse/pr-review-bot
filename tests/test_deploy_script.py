@@ -353,3 +353,71 @@ def test_render_service_never_echoes_the_api_key(monkeypatch):
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(401, json={}))
         result = deploy.check_render_service()
     assert "rnd_SUPER_SECRET" not in result.detail
+
+
+UPTIMEROBOT = "https://api.uptimerobot.com/v2/getMonitors"
+
+
+def _monitors(*monitors):
+    return {"stat": "ok", "monitors": list(monitors)}
+
+
+def test_uptime_pinger_skips_with_a_hint_when_key_unset(monkeypatch):
+    monkeypatch.setattr(settings, "uptimerobot_api_key", "")
+    result = deploy.check_uptime_pinger(BASE)
+    assert result.status == "SKIPPED"
+    assert "UPTIMEROBOT_API_KEY" in result.detail
+
+
+def test_uptime_pinger_passes_for_an_active_five_minute_monitor(monkeypatch):
+    monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
+    with respx.mock:
+        respx.post(UPTIMEROBOT).mock(
+            return_value=httpx.Response(200, json=_monitors({"url": HEALTH, "status": 2, "interval": 300}))
+        )
+        result = deploy.check_uptime_pinger(BASE)
+    assert result.status == "PASS"
+
+
+def test_uptime_pinger_fails_on_a_near_miss_url(monkeypatch):
+    """The real outage: a trailing comma, firing on schedule, 404ing every time."""
+    monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
+    with respx.mock:
+        respx.post(UPTIMEROBOT).mock(
+            return_value=httpx.Response(
+                200, json=_monitors({"url": HEALTH + ",", "status": 2, "interval": 300})
+            )
+        )
+        result = deploy.check_uptime_pinger(BASE)
+    assert result.status == "FAIL"
+    assert HEALTH + "," in result.detail       # the near-miss is visible on sight
+
+
+def test_uptime_pinger_fails_when_paused(monkeypatch):
+    monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
+    with respx.mock:
+        respx.post(UPTIMEROBOT).mock(
+            return_value=httpx.Response(200, json=_monitors({"url": HEALTH, "status": 0, "interval": 300}))
+        )
+        result = deploy.check_uptime_pinger(BASE)
+    assert result.status == "FAIL"
+    assert "paused" in result.detail
+
+
+def test_uptime_pinger_fails_when_the_interval_lets_the_instance_sleep(monkeypatch):
+    monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
+    with respx.mock:
+        respx.post(UPTIMEROBOT).mock(
+            return_value=httpx.Response(200, json=_monitors({"url": HEALTH, "status": 2, "interval": 1800}))
+        )
+        result = deploy.check_uptime_pinger(BASE)
+    assert result.status == "FAIL"
+    assert "1800" in result.detail
+
+
+def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "uptimerobot_api_key", "u_SUPER_SECRET")
+    with respx.mock:
+        respx.post(UPTIMEROBOT).mock(return_value=httpx.Response(500, json={}))
+        result = deploy.check_uptime_pinger(BASE)
+    assert "u_SUPER_SECRET" not in result.detail
