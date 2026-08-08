@@ -205,6 +205,7 @@ def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
     result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
     assert result.status == "FAIL"
     assert "500" in result.detail
+    assert github_seam["written"] == []
 
 
 def test_failed_webhook_write_fails_with_the_status(github_seam, monkeypatch):
@@ -243,7 +244,6 @@ def test_installation_lookup_non_404_reports_the_underlying_status(github_seam, 
     result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
     assert result.status == "FAIL"
     assert "401" in result.detail
-    assert github_seam["written"] == []
     assert github_seam["written"] == []
 
 
