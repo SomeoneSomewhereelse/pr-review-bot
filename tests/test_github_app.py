@@ -678,3 +678,41 @@ def test_set_webhook_url_patches_hook_config(fake_transport):
 
     fake_transport.route("PATCH", "/app/hook/config", {"url": "https://x/webhook"})
     github_app.set_webhook_url("https://x/webhook")  # must not raise
+
+
+def test_discover_installation_id_raises_app_not_installed_on_404(fake_transport):
+    """A distinct type lets callers branch without matching on message text."""
+    fake_transport.route(
+        "GET", f"/repos/{REPO_FULL_NAME}/installation", {"message": "Not Found"}, 404
+    )
+    with pytest.raises(github_app.AppNotInstalledError):
+        github_app.discover_installation_id(REPO_FULL_NAME)
+
+
+def test_discover_installation_id_non_404_is_not_app_not_installed(fake_transport):
+    """A 401 from a bad key must not be reported as a missing installation."""
+    fake_transport.route(
+        "GET", f"/repos/{REPO_FULL_NAME}/installation", {"message": "Bad credentials"}, 401
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        github_app.discover_installation_id(REPO_FULL_NAME)
+    assert not isinstance(excinfo.value, github_app.AppNotInstalledError)
+
+
+def test_get_webhook_url_returns_the_configured_url(fake_transport):
+    fake_transport.route("GET", "/app/hook/config", {"url": "https://x.test/webhook"})
+    assert github_app.get_webhook_url() == "https://x.test/webhook"
+
+
+def test_get_webhook_url_returns_empty_when_never_configured(fake_transport):
+    """An App whose webhook was never set is the genuine first-deploy state,
+    not an error."""
+    fake_transport.route("GET", "/app/hook/config", {})
+    assert github_app.get_webhook_url() == ""
+
+
+def test_get_webhook_url_ignores_a_non_absolute_url(fake_transport):
+    """PyGithub injects the request path as a synthetic `url` when the response
+    has none, so only an absolute http(s) URL counts as configured."""
+    fake_transport.route("GET", "/app/hook/config", {"url": "/app/hook/config"})
+    assert github_app.get_webhook_url() == ""

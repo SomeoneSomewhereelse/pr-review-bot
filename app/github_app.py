@@ -129,6 +129,15 @@ def _app_jwt_client() -> Github:
     return Github(auth=Auth.AppAuth(settings.github_app_id, _read_private_key()))
 
 
+class AppNotInstalledError(RuntimeError):
+    """The App is not installed on the target repo (GitHub returned 404).
+
+    Subclasses RuntimeError so existing callers and tests that catch
+    RuntimeError keep working; the distinct type exists so a caller can branch
+    on "not installed" without matching on message text.
+    """
+
+
 def discover_installation_id(repo_full_name: str) -> int:
     """Return the installation id for the App on `repo_full_name` (App JWT).
 
@@ -150,7 +159,7 @@ def discover_installation_id(repo_full_name: str) -> int:
         )
     except GithubException as exc:
         if exc.status == 404:
-            raise RuntimeError(
+            raise AppNotInstalledError(
                 f"GitHub App is not installed on {repo_full_name}: install it once via the "
                 f"GitHub UI (repo Settings -> GitHub Apps), then redeploy. ({exc.status})"
             ) from exc
@@ -166,6 +175,27 @@ def set_webhook_url(url: str) -> None:
     """Idempotently point the App's webhook at `url` (PATCH /app/hook/config, App JWT)."""
     gh = _app_jwt_client()
     gh.requester.requestJsonAndCheck("PATCH", "/app/hook/config", input={"url": url})
+
+
+def get_webhook_url() -> str:
+    """Return the App's currently configured webhook URL (App JWT).
+
+    Returns "" when the App has no webhook URL set, which is the genuine
+    first-deploy state rather than an error. Any API failure propagates as
+    GithubException so the caller can decline to write after a failed read.
+
+    Only an absolute http(s) URL counts as configured. PyGithub's
+    Requester.__postProcess injects a synthetic ``url`` key -- the literal
+    request path -- into any GET response dict that lacks one, so an
+    unconfigured webhook arrives here as {"url": "/app/hook/config"} rather
+    than {}. A webhook URL is by definition absolute, so requiring that scheme
+    rejects the synthetic value without depending on PyGithub's internals or
+    hard-coding the path it happens to inject.
+    """
+    gh = _app_jwt_client()
+    _, data = gh.requester.requestJsonAndCheck("GET", "/app/hook/config")
+    url = (data or {}).get("url") or ""
+    return url if url.startswith(("http://", "https://")) else ""
 
 
 def fetch_pr_diff(repo_full_name: str, pr_number: int) -> str:

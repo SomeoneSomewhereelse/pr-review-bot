@@ -21,6 +21,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from github import GithubException
+
+from app import github_app
 from app.config import settings
 
 _NAME_WIDTH = 18
@@ -90,6 +93,38 @@ def check_config() -> CheckResult:
     if missing:
         return CheckResult("config", "FAIL", "missing: " + ", ".join(missing))
     return CheckResult("config", "PASS", "")
+
+
+def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
+    """Installation discovery plus an idempotent webhook registration.
+
+    Reads the current webhook URL before writing so a re-run reports "already
+    correct" rather than silently re-PATCHing, and so a failed read never
+    triggers a blind write that could clobber a good URL.
+    """
+    name = "github-app"
+    try:
+        installation_id = github_app.discover_installation_id(repo)
+    except github_app.AppNotInstalledError:
+        return CheckResult(name, "FAIL", f"App not installed on {repo}; install via GitHub UI")
+    except RuntimeError:
+        return CheckResult(name, "FAIL", "installation lookup failed; check App ID / private key")
+
+    wanted = f"{base}/webhook"
+    try:
+        current = github_app.get_webhook_url()
+    except GithubException as exc:
+        return CheckResult(
+            name, "FAIL", f"installation={installation_id}; webhook read failed ({exc.status})"
+        )
+    if current == wanted:
+        return CheckResult(name, "PASS", f"installation={installation_id}; webhook already correct")
+    github_app.set_webhook_url(wanted)
+    if current:
+        return CheckResult(
+            name, "PASS", f"installation={installation_id}; webhook updated from {current}"
+        )
+    return CheckResult(name, "PASS", f"installation={installation_id}; webhook set")
 
 
 def render_report(results: list[CheckResult]) -> str:

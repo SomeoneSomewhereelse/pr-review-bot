@@ -127,3 +127,73 @@ def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "groq_api_key", "gsk_SUPER_SECRET_VALUE")
     result = deploy.check_config()
     assert "gsk_SUPER_SECRET_VALUE" not in result.detail
+
+
+@pytest.fixture
+def github_seam(monkeypatch):
+    """Monkeypatch the github_app boundary and record webhook writes.
+
+    The check's job is the decision logic (read -> compare -> conditionally
+    write); github_app's own HTTP behavior is covered in tests/test_github_app.py
+    with the requests-level fake_transport harness, which respx cannot replace.
+    """
+    from app import github_app
+
+    state = {"installation_id": 424242, "current_url": "", "written": []}
+
+    monkeypatch.setattr(github_app, "discover_installation_id", lambda repo: state["installation_id"])
+    monkeypatch.setattr(github_app, "get_webhook_url", lambda: state["current_url"])
+    monkeypatch.setattr(github_app, "set_webhook_url", lambda url: state["written"].append(url))
+    return state
+
+
+def test_webhook_already_correct_passes_without_writing(github_seam):
+    github_seam["current_url"] = "https://x.onrender.com/webhook"
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "PASS"
+    assert "already correct" in result.detail
+    assert github_seam["written"] == []          # no PATCH issued
+
+
+def test_webhook_mismatch_is_updated(github_seam):
+    github_seam["current_url"] = "https://old.example/webhook"
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "PASS"
+    assert github_seam["written"] == ["https://x.onrender.com/webhook"]
+    assert "https://old.example/webhook" in result.detail
+
+
+def test_webhook_absent_is_set_on_first_deploy(github_seam):
+    github_seam["current_url"] = ""
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "PASS"
+    assert github_seam["written"] == ["https://x.onrender.com/webhook"]
+
+
+def test_app_not_installed_fails_with_an_actionable_detail(github_seam, monkeypatch):
+    from app import github_app
+
+    def _raise(repo):
+        raise github_app.AppNotInstalledError("not installed")
+
+    monkeypatch.setattr(github_app, "discover_installation_id", _raise)
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "FAIL"
+    assert "install" in result.detail.lower()
+    assert github_seam["written"] == []
+
+
+def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
+    """Writing blind after a failed read is how a correct URL gets clobbered."""
+    from github import GithubException
+
+    from app import github_app
+
+    def _raise():
+        raise GithubException(500, {"message": "boom"}, None)
+
+    monkeypatch.setattr(github_app, "get_webhook_url", _raise)
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "FAIL"
+    assert "500" in result.detail
+    assert github_seam["written"] == []
