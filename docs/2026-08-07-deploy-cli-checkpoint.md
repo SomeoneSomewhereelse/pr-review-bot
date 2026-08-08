@@ -1,148 +1,104 @@
-# Checkpoint — deploy verification CLI (paused mid fix-wave)
+# Deploy verification CLI — completion record
 
 **Date:** 2026-08-07
-**Status:** Paused at a token-budget boundary. Implementation complete and
-reviewed; the final-review fix wave **landed cleanly** just after this file was
-first written (see "Update" below — it supersedes the in-flight warning).
-**Branch:** `feat/deploy-verification-cli` — 14 commits ahead of `master`
-(branch point `5addf5d`), HEAD `691a3ba`. **Working tree is clean.**
-
-## Update — the fix wave completed
-
-It finished on its own moments after the checkpoint was committed, so nothing
-was parked or lost:
-
-- **Commit `691a3ba`** — "fix(deploy): close six cross-cutting gaps from the
-  final branch review". All six items below are fixed.
-- **259 tests pass** (254 baseline + 5 new), `ruff check .` clean.
-- The working tree is clean; the "uncommitted partial work" warning below no
-  longer applies and is kept only as a record of what the pause looked like.
-
-**One honest caveat the implementer raised, which the re-review should judge:**
-item 4's broadened `except Exception` in `sync_env()` does **not** cover
-`_wanted_env()`'s own `OSError` from `read_bytes()`, because that call happens
-before the `try:` block begins. Moving it inside would reorder guard
-evaluation — the empty-value and provider guards both need `_wanted_env()`'s
-result first — so it was left as-is and reported rather than silently widened.
-That reasoning looks sound but has not been independently reviewed.
-
-**So the immediate next step is step 2 below (the scoped re-review), not
-step 1.**
+**Status:** **Complete and merged to `master`** (fast-forward, `5addf5d..2786f49`).
+This file began as a mid-work checkpoint; it is now the record of what shipped
+and what deliberately did not.
 **Relates to:** `docs/superpowers/specs/2026-08-05-deploy-command-design.md`
-(the spec), `docs/superpowers/plans/2026-08-07-deploy-verification-cli.md`
-(the plan), `.superpowers/sdd/2026-08-07-deploy-verification-cli/progress.md`
-(the SDD ledger — **git-ignored**, so treat this file as the durable record).
+(spec), `docs/superpowers/plans/2026-08-07-deploy-verification-cli.md` (plan),
+`docs/2026-08-05-first-hosted-run-findings.md` (the hosted run that shaped
+three of the six checks).
 
-## Where things stand
+## What shipped
 
-All **11 tasks are implemented, individually reviewed, and committed.** The
-full suite was green at HEAD: **254 passed**, `ruff check .` clean, verified
-directly rather than taken from a subagent's report.
+`scripts/deploy.py` is now a standalone deploy-verification CLI: six checks
+(config, GitHub App install + webhook, `/healthz` via **both** `GET` and `HEAD`,
+Postgres reachability **and** schema provisioning, Render deploy status,
+UptimeRobot keep-warm), one aligned table, exit codes 0/1/2. It also has an
+opt-in `--sync-env` that pushes config to Render, triggers a deploy, and polls
+until live. `.claude/commands/deploy.md` wraps it for Claude Code users and
+holds no logic — the CLI works identically without it.
 
-The final whole-branch review then ran and returned **1 Critical, 3 Important,
-and 12 Minor** findings. A single fix wave covering six of them (the Critical,
-all three Important, and two one-line docs/anchor items) was dispatched and was
-**still running when work stopped**.
+**Verified on the merged result:** 259 tests pass
+(`TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest -q`), `ruff check .` clean, and
+`python -m scripts.deploy` with no config exits 2 with a clean message and no
+traceback.
 
-### The working tree is not clean — this is expected
+Three checks encode real failures from the first hosted run rather than
+hypotheticals: the `HEAD` verb (a `GET`-only `/healthz` returned 405 to the
+pinger and let the instance sleep for 71 minutes), the exact-equality monitor
+URL match (the outage was a trailing comma that fired on schedule and 404'd
+every time), and `to_regclass('public.tickets')` (a bare `SELECT 1` reports a
+wrong-project `DATABASE_URL` as success).
 
-`scripts/deploy.py` and `tests/test_deploy_script.py` carry **uncommitted
-changes from the in-flight fix wave**. Do not revert them without reading them
-first; they are partial work toward the six items below, not stray edits. On
-resume, either let that agent finish, or read the diff and complete the wave by
-hand.
+## Process notes worth keeping
 
-## What the fix wave was asked to do
+- **A plan defect surfaced during Task 3 and was resolved rather than forced.**
+  PyGithub 2.9.1's `Requester.__postProcess` injects a synthetic `url` (the
+  request path) into any GET dict response lacking one, so the planned
+  `get_webhook_url()` could never observe an unconfigured webhook as `""`. The
+  fix requires an absolute `http(s)` scheme — no PyGithub internals, no
+  hard-coded path, and it still behaves correctly if a future PyGithub stops
+  injecting, or if GitHub returns `{"url": null}` / `{"url": ""}`.
+- **The final whole-branch review caught a Critical that no task-scoped review
+  could see** — see the open spec decision below.
 
-1. **CRITICAL — `--sync-env` can push a self-inconsistent provider config while
-   every check reports green.** `_wanted_env()` pushes `LLM_PROVIDER`, but
-   `_SYNCED_ENV_VARS` never includes `GEMINI_API_KEY`, and
-   `settings.llm_provider` defaults to `"gemini"`. An operator who fills in
-   `GROQ_API_KEY` + `GITHUB_MODELS_TOKEN` to satisfy the clobber guard (exactly
-   what README instructs) can overwrite a live `LLM_PROVIDER=groq` with
-   `gemini` while never pushing that provider's key. The service then boots,
-   answers `/healthz`, and fails every review — with all six checks PASS. Fix:
-   a guard in `sync_env()`, before any HTTP request, refusing to sync when the
-   selected provider's key is not in the synced set.
-2. **IMPORTANT —** the webhook *write* (`set_webhook_url`) sits outside any
-   `try`, so a failing PATCH renders `unexpected GithubException` with no
-   status and no next action, breaking the "every FAIL detail actionable on its
-   own" contract. Also, the generic non-404 lookup branch discards the
-   underlying status, so a 401 and a 502 read identically.
-3. **IMPORTANT —** `main()`'s `--sync-env` wiring is entirely untested. Nothing
-   exercises `main(["--sync-env"])`: not flag detection, not the early return
-   without printing the table, not the fall-through to the checklist.
-4. **IMPORTANT —** non-`httpx` exceptions escape `sync_env()` as a traceback
-   and exit 1, which the contract defines as "a check failed" — misleading any
-   wrapper script. Should become exit 2 with a terse message.
-5. **MINOR —** `_README_ANCHOR` is `README.md#deploying-to-production`, but the
-   real GitHub anchor is `#deploying-to-production-render--supabase`. It is the
-   only pointer the failure output offers.
-6. **MINOR —** the exit-code caption in `README.md`/`SETUP.md` names one cause
-   for exit 2; there are now four.
+## Still open
 
-## Resume from here
-
-1. **Check whether the fix wave landed.** `git log --oneline 350eaa4..HEAD` and
-   `git status`. If it committed, note the SHAs; if the tree is still dirty,
-   read the diff and finish the six items.
-2. **Run exactly one scoped re-review of the fix wave** —
-   `FIX_BASE = 350eaa4`, using superpowers:subagent-driven-development's
-   `scripts/review-package` and `re-review-prompt.md`. The process allows one
-   fix wave and one scoped re-review; there is no second wave.
-3. **Adjudicate any residual findings** — park with a written ruling, or stop
-   on anything load-bearing.
-4. **Then** use superpowers:finishing-a-development-branch. The base branch is
-   `master` (no `main` exists in this repo, despite git's default-branch
-   label). The user's standing preference: implementation work goes on a
-   feature branch, never committed directly to `master`.
-5. Delete `.superpowers/sdd/2026-08-07-deploy-verification-cli/` once the
-   branch is finished — git history becomes the record.
-
-## Test environment (needed on every run)
-
-Docker **is** available, but this WSL2 + Docker Desktop setup hangs on
-testcontainers' Ryuk reaper sidecar. Always run:
-
-```bash
-TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest -q
-```
-
-Plain `uv run pytest` may hang forever. Baseline at `350eaa4` is 254 passed.
-
-## A spec defect that still needs a decision
-
-The Critical above is **not** an implementation slip — the implementation
-followed the spec faithfully. The spec contradicts itself:
+### 1. A spec contradiction (needs a decision, not a fix)
 
 - §6.1 makes the required provider key a *function* of `LLM_PROVIDER`,
   including `GEMINI_API_KEY`.
-- §8 hardcodes a fixed eight-variable push list that **includes**
-  `LLM_PROVIDER` but **excludes** `GEMINI_API_KEY`.
+- §8 hardcodes an eight-variable push list that **includes** `LLM_PROVIDER` but
+  **excludes** `GEMINI_API_KEY`.
 
-The dispatched fix is the minimal code-level reconciliation (refuse to sync a
-provider whose key is not in the set). The spec still needs a real decision,
-which is the user's to make:
+Combined, `--sync-env` could overwrite a live `LLM_PROVIDER=groq` with `gemini`,
+never push that provider's key, and produce a service that boots, answers
+`/healthz`, and fails every review — with all six checks reporting green. The
+implementation followed both spec sections faithfully; the contradiction is the
+defect.
+
+**Shipped mitigation:** a guard in `sync_env()` that refuses to sync when the
+selected provider's key is not in the synced set (exit 2, before any HTTP). That
+is a correct stopgap, not a resolution. The real choice is still open:
 
 - **(a)** drop `LLM_PROVIDER` from the synced set, leaving it to `render.yaml`; or
-- **(b)** make the selected provider's key part of the synced set.
+- **(b)** add the selected provider's key to the synced set.
 
-Two smaller spec issues found by the same review, also unresolved:
+### 2. Parked residual — `_wanted_env()`'s `OSError` is outside `sync_env`'s `try`
 
-- §7.2 lists three causes for exit 2, but §10 never requires the docs to carry
-  all three — so Task 11 documented one and no test caught it. The docs-parity
-  test already reads both files; it is the natural place to pin exit-code
-  causes too.
-- §11's "no `detail` exceeding the §7.4 length budget" is unimplementable as
-  literally written, since `check_config`'s missing-key enumeration legitimately
-  exceeds it. Needs a stated exemption for enumerations before it can be a test.
+An existing-but-unreadable PEM (mode 000, root-owned, bad mount, I/O error)
+gives a raw traceback and **exit 1**, which the CLI's own contract defines as "a
+check failed" — narrowly re-opening the exit-code-contract finding under a
+different input. `check_config`'s `_private_key_available()` only calls
+`is_file()`, so the `config` check reports PASS and gives no forewarning. No
+secret leaks (the path is printed, not the key). Low frequency; deferred
+deliberately.
 
-## Deferred minors carried to merge
+Note for whoever picks it up: the original reason given for leaving it — that
+moving the call inside the `try` would reorder guard evaluation — is **wrong**.
+A `return` from inside a `try` is not intercepted by that block's own `except`,
+so the guards would still run in the same order.
 
-Recorded in the ledger and triaged by the final review as non-blocking: six
-over-length test lines (102-108 chars; ruff's E501 is unselected so nothing
-catches them), duplicated PEM-path resolution across two helpers, the health
-URL built independently in two checks, `test_env_var_names_match_the_docs`
+### 3. Smaller items, recorded and triaged as non-blocking
+
+Six over-length test lines (102–108 chars; ruff's `E501` is unselected, so
+nothing catches them), duplicated PEM-path resolution across two helpers, the
+health URL built independently in two checks, `test_env_var_names_match_the_docs`
 reading CWD-relative paths, unbounded monitor-URL enumeration in
 `check_uptime_pinger`, a stale `discover_installation_id` docstring, no
-`--help`/unknown-flag handling, and no pagination on the Render list endpoints.
+`--help`/unknown-flag handling, and no pagination on the Render list endpoints
+(fail-safe for env vars; a `>20`-service account would break
+`_find_render_service_id`, but it fails loudly).
+
+Two further spec gaps: §7.2 lists three causes for exit 2 but §10 never required
+the docs to carry them (the docs-parity test would be the natural place to pin
+that), and §11's detail-length budget is unimplementable as literally written,
+since `check_config`'s missing-key enumeration legitimately exceeds it.
+
+## Deploying this
+
+`origin/main` is the Render-connected remote — **pushing to it auto-deploys the
+live service.** Local `master` is ahead of `origin/main` by this work plus the
+spec/plan docs, so a `git push` is what actually ships it. Nothing has been
+pushed.
