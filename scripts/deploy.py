@@ -34,6 +34,7 @@ _STATUS_WIDTH = 9
 _README_ANCHOR = "README.md#deploying-to-production"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
+_RENDER_API = "https://api.render.com/v1"
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,55 @@ def check_database() -> CheckResult:
     if provisioned is None:
         return CheckResult(name, "FAIL", "connected; tickets absent -- app never booted on this DB")
     return CheckResult(name, "PASS", "connected; tickets present")
+
+
+def _render_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.render_api_key}",
+        "Accept": "application/json",
+    }
+
+
+def _unwrap(item: dict, key: str) -> dict:
+    """Render wraps list items as {"service": {...}} / {"deploy": {...}}."""
+    return item.get(key) or item
+
+
+def _find_render_service_id() -> str | None:
+    resp = httpx.get(f"{_RENDER_API}/services", headers=_render_headers(), timeout=_HTTP_TIMEOUT)
+    resp.raise_for_status()
+    for item in resp.json():
+        service = _unwrap(item, "service")
+        if service.get("name") == settings.render_service_name:
+            return service.get("id")
+    return None
+
+
+def check_render_service() -> CheckResult:
+    """Why the service is or is not serving -- health already covers whether."""
+    name = "render-service"
+    if not settings.render_api_key:
+        return CheckResult(name, "SKIPPED", "set RENDER_API_KEY to check deploy status")
+    try:
+        service_id = _find_render_service_id()
+        if service_id is None:
+            return CheckResult(name, "FAIL", f"no service named {settings.render_service_name}")
+        resp = httpx.get(
+            f"{_RENDER_API}/services/{service_id}/deploys",
+            params={"limit": 1},
+            headers=_render_headers(),
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        deploys = resp.json()
+    except httpx.HTTPError as exc:
+        return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
+    if not deploys:
+        return CheckResult(name, "FAIL", "service exists but has no deploys")
+    status = _unwrap(deploys[0], "deploy").get("status", "?")
+    if status != "live":
+        return CheckResult(name, "FAIL", f"latest deploy status: {status}")
+    return CheckResult(name, "PASS", "latest deploy live")
 
 
 def render_report(results: list[CheckResult]) -> str:

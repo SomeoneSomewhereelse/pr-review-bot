@@ -290,3 +290,66 @@ def test_check_database_failure_never_leaks_the_connection_string(monkeypatch):
     assert result.status == "FAIL"
     rendered = result.detail + repr(result) + deploy.render_report([result])
     assert SENTINEL_PASSWORD not in rendered
+
+
+RENDER_SERVICES = "https://api.render.com/v1/services"
+
+
+def _service_list(name="pr-review-engine", service_id="srv-1"):
+    return [{"service": {"id": service_id, "name": name}}]
+
+
+def _deploy_list(status):
+    return [{"deploy": {"id": "dep-1", "status": status}}]
+
+
+def test_render_service_skips_with_a_hint_when_key_unset(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "")
+    result = deploy.check_render_service()
+    assert result.status == "SKIPPED"
+    assert "RENDER_API_KEY" in result.detail
+
+
+def test_render_service_passes_when_latest_deploy_is_live(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=_deploy_list("live"))
+        )
+        result = deploy.check_render_service()
+    assert result.status == "PASS"
+
+
+def test_render_service_fails_and_names_a_non_live_status(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=_deploy_list("build_failed"))
+        )
+        result = deploy.check_render_service()
+    assert result.status == "FAIL"
+    assert "build_failed" in result.detail
+
+
+def test_render_service_fails_when_the_configured_name_is_absent(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=_service_list(name="something-else"))
+        )
+        result = deploy.check_render_service()
+    assert result.status == "FAIL"
+    assert "pr-review-engine" in result.detail
+
+
+def test_render_service_never_echoes_the_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_SUPER_SECRET")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(401, json={}))
+        result = deploy.check_render_service()
+    assert "rnd_SUPER_SECRET" not in result.detail
