@@ -53,7 +53,9 @@ def test_render_report_aligns_columns_and_summarizes():
     # Status starts at the same column on every row.
     status_columns = {line.index(s) for line, s in zip(lines[:3], ["PASS", "FAIL", "SKIPPED"])}
     assert len(status_columns) == 1
-    assert lines[-1] == "1 failed, 1 skipped -- see README.md#deploying-to-production"
+    assert lines[-1] == (
+        "1 failed, 1 skipped -- see README.md#deploying-to-production-render--supabase"
+    )
 
 
 def test_render_report_indents_continuation_lines():
@@ -203,6 +205,45 @@ def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
     result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
     assert result.status == "FAIL"
     assert "500" in result.detail
+
+
+def test_failed_webhook_write_fails_with_the_status(github_seam, monkeypatch):
+    """A failing PATCH must render an actionable, status-bearing FAIL like the
+    read path above it -- not fall through to the generic _safe() catch-all."""
+    from github import GithubException
+
+    from app import github_app
+
+    github_seam["current_url"] = "https://old.example/webhook"
+
+    def _raise(url):
+        raise GithubException(502, {"message": "boom"}, None)
+
+    monkeypatch.setattr(github_app, "set_webhook_url", _raise)
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "FAIL"
+    assert "502" in result.detail
+    assert "webhook write failed" in result.detail
+
+
+def test_installation_lookup_non_404_reports_the_underlying_status(github_seam, monkeypatch):
+    """A 401 (bad key) and a 502 (GitHub degraded) must render differently --
+    the generic RuntimeError message alone collapses both to the same string."""
+    from github import GithubException
+
+    from app import github_app
+
+    def _raise(repo):
+        try:
+            raise GithubException(401, {"message": "bad credentials"}, None)
+        except GithubException as exc:
+            raise RuntimeError("installation lookup failed") from exc
+
+    monkeypatch.setattr(github_app, "discover_installation_id", _raise)
+    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    assert result.status == "FAIL"
+    assert "401" in result.detail
+    assert github_seam["written"] == []
     assert github_seam["written"] == []
 
 
@@ -460,6 +501,29 @@ def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
     assert "1 failed" in capsys.readouterr().out
 
 
+def test_main_with_sync_env_falls_through_to_the_checklist_on_success(
+    runnable, monkeypatch, capsys
+):
+    """Spec section 8 step 7: a successful sync must not skip the post-sync
+    checklist -- it is the thing that proves the sync actually took."""
+    _stub_all_checks(monkeypatch, ["PASS"] * 4 + ["SKIPPED"] * 2)
+    monkeypatch.setattr(deploy, "sync_env", lambda: 0)
+    assert deploy.main(["--sync-env"]) == 0
+    assert "all checks passed" in capsys.readouterr().out
+
+
+def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
+    runnable, monkeypatch, capsys
+):
+    """A non-zero sync_env() must short-circuit main() before run_checks/
+    render_report ever run -- printing the table after a failed sync would
+    misleadingly suggest the sync itself is fine."""
+    _stub_all_checks(monkeypatch, ["PASS"] * 4 + ["SKIPPED"] * 2)
+    monkeypatch.setattr(deploy, "sync_env", lambda: 2)
+    assert deploy.main(["--sync-env"]) == 2
+    assert "all checks passed" not in capsys.readouterr().out
+
+
 def test_main_returns_two_without_a_target_repo(monkeypatch):
     monkeypatch.setattr(settings, "github_target_repo", "")
     monkeypatch.setattr(settings, "public_base_url", BASE)
@@ -533,6 +597,23 @@ def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys
         assert deploy.sync_env() == 2
         assert not route.called
     assert "GROQ_API_KEY" in capsys.readouterr().err
+
+
+def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
+    sync_ready, monkeypatch, capsys
+):
+    """settings.llm_provider defaults to 'gemini', but _SYNCED_ENV_VARS never
+    includes GEMINI_API_KEY -- syncing that provider would push a service that
+    boots and answers /healthz while failing every real review, with every
+    checklist check reporting green. The guard must fire before any request."""
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    with respx.mock:
+        route = respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=_service_list())
+        )
+        assert deploy.sync_env() == 2
+        assert not route.called
+    assert "GEMINI_API_KEY" in capsys.readouterr().err
 
 
 def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_ready):

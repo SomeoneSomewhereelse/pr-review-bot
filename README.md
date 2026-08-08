@@ -114,7 +114,10 @@ every problem rather than only the first:
 | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
 Exit codes: `0` everything passed or was skipped, `1` at least one check failed,
-`2` the CLI could not run at all (no `GITHUB_TARGET_REPO` or public base URL).
+`2` the CLI could not run at all — no `GITHUB_TARGET_REPO`/public base URL, no
+`RENDER_API_KEY` for `--sync-env`, `--sync-env`'s clobber guard tripping (an
+empty value, or a provider key missing from the synced set), or `--sync-env`
+crashing before it could finish.
 
 The two optional checks are skipped with a hint unless you set the matching
 operator-local key. Neither is ever set on the Render service:

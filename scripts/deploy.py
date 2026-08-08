@@ -34,7 +34,7 @@ from app.config import settings
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
-_README_ANCHOR = "README.md#deploying-to-production"
+_README_ANCHOR = "README.md#deploying-to-production-render--supabase"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
 _RENDER_API = "https://api.render.com/v1"
@@ -141,8 +141,12 @@ def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
         installation_id = github_app.discover_installation_id(repo)
     except github_app.AppNotInstalledError:
         return CheckResult(name, "FAIL", f"App not installed on {repo}; install via GitHub UI")
-    except RuntimeError:
-        return CheckResult(name, "FAIL", "installation lookup failed; check App ID / private key")
+    except RuntimeError as exc:
+        status = getattr(exc.__cause__, "status", None)
+        detail = "installation lookup failed; check App ID / private key"
+        if status is not None:
+            detail += f" ({status})"
+        return CheckResult(name, "FAIL", detail)
 
     wanted = f"{base}/webhook"
     try:
@@ -153,7 +157,12 @@ def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
         )
     if current == wanted:
         return CheckResult(name, "PASS", f"installation={installation_id}; webhook already correct")
-    github_app.set_webhook_url(wanted)
+    try:
+        github_app.set_webhook_url(wanted)
+    except GithubException as exc:
+        return CheckResult(
+            name, "FAIL", f"installation={installation_id}; webhook write failed ({exc.status})"
+        )
     if current:
         return CheckResult(
             name, "PASS", f"installation={installation_id}; webhook updated from {current}"
@@ -385,6 +394,14 @@ def sync_env() -> int:
         # Before any request, so a partial push cannot happen.
         print(f"refusing to push empty values; fix .env first: {', '.join(empty)}", file=sys.stderr)
         return 2
+    provider_key = _PROVIDER_KEYS.get(wanted["LLM_PROVIDER"])
+    if provider_key and provider_key not in wanted:
+        print(
+            f"refusing to sync LLM_PROVIDER={wanted['LLM_PROVIDER']}: {provider_key} is not "
+            f"in the synced set, so the service would run without its provider key",
+            file=sys.stderr,
+        )
+        return 2
     try:
         service_id = _find_render_service_id()
         if service_id is None:
@@ -415,9 +432,9 @@ def sync_env() -> int:
             print("env vars already in sync; no deploy triggered")
             return 0
         return _trigger_and_wait(service_id)
-    except httpx.HTTPError as exc:
+    except Exception as exc:  # noqa: BLE001 - deliberate: a crashed sync is "could not run"
         print(f"Render API error ({type(exc).__name__})", file=sys.stderr)
-        return 1
+        return 2
 
 
 def _safe(name: str, fn, *args) -> CheckResult:
