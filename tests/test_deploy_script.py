@@ -9,6 +9,8 @@ tests/test_github_app.py for why respx cannot see PyGithub traffic.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 import respx
@@ -610,3 +612,21 @@ def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
         deploy.sync_env()
     captured = capsys.readouterr()
     assert "gsk_SUPER_SECRET" not in captured.out + captured.err
+
+
+def test_synced_env_vars_matches_what_is_actually_pushed():
+    """_SYNCED_ENV_VARS is what the docs test validates against, so it must stay
+    equal to the keys _wanted_env() actually pushes -- otherwise the docs test
+    silently checks a stale list."""
+    assert set(deploy._wanted_env()) == set(deploy._SYNCED_ENV_VARS)
+
+
+@pytest.mark.parametrize("doc", ["README.md", "SETUP.md"])
+def test_env_var_names_match_the_docs(doc):
+    """README.md and SETUP.md are kept at full parity by convention; this test
+    is the mechanism behind it. A var pushed by --sync-env but undocumented
+    means nobody knows to set it; a var documented but missing from the list is
+    silently never deployed. Checks NAMES only -- wording is free to differ."""
+    text = Path(doc).read_text(encoding="utf-8")
+    missing = [name for name in deploy._SYNCED_ENV_VARS if name not in text]
+    assert not missing, f"{doc} does not mention: {missing}"

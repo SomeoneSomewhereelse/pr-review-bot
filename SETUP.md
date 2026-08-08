@@ -249,16 +249,16 @@ base64 -w0 < github-app-private-key.pem
 Copy the output and paste it into the Render dashboard's `GITHUB_APP_PRIVATE_KEY_B64`
 field (the app code will decode it at startup).
 
-### 3.4 GitHub App installation and webhook registration
+### 3.4 GitHub App installation, webhook registration, and verification
 
 1. **Install the GitHub App** on your test repo:
    - Go to https://github.com/settings/apps/<your-app-slug>
    - Click **Install App** (if not already installed)
    - Select the test repo (e.g., `<your-user>/pr-review-bot-testbed`)
 
-2. **Register the webhook URL** (one-time, after Render deployment):
-   Once Render finishes deploying, you'll have a public URL (e.g.,
-   `https://pr-review-bot.onrender.com`). Run the registration script
+2. **Verify the deployment and register the webhook** (one-time, after Render
+   deployment): Once Render finishes deploying, you'll have a public URL (e.g.,
+   `https://pr-review-bot.onrender.com`). Run `scripts/deploy.py`
    **locally, from your own machine — not inside the Render container**
    (`scripts/` is intentionally not copied into the Docker image; see
    `Dockerfile`, which only `COPY`s `app/`). Since `RENDER_EXTERNAL_URL` is an
@@ -267,26 +267,72 @@ field (the app code will decode it at startup).
    ```bash
    PUBLIC_BASE_URL=https://pr-review-bot.onrender.com uv run python -m scripts.deploy
    ```
-   This script will:
-   - Authenticate as the GitHub App (using the PEM)
-   - Confirm the installation ID
-   - Post the Render URL + `/webhook` to the GitHub App's webhook settings
-   - Return success if everything is set up correctly
+   It authenticates as the GitHub App (using the PEM), confirms the
+   installation ID, and — since it reads the current webhook URL before
+   writing — either reports it already correct or posts the Render URL +
+   `/webhook` idempotently. It prints one line per check and always runs all
+   six, so a single run surfaces every problem rather than only the first:
+
+   | Check | Verifies | Required? |
+   |---|---|---|
+   | `config` | Every setting the service needs is resolvable locally | yes |
+   | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
+   | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
+   | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
+   | `render-service` | The latest Render deploy is `live` | optional |
+   | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
+
+   Exit codes: `0` everything passed or was skipped, `1` at least one check
+   failed, `2` the CLI could not run at all (no `GITHUB_TARGET_REPO` or public
+   base URL).
+
+   The two optional checks are skipped with a hint unless you set the matching
+   operator-local key. Neither is ever set on the Render service:
+   - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
+     `render-service` and `--sync-env`.
+   - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
+   - `DATABASE_URL` enables `database`. It is normally a Render dashboard
+     secret; export it locally, temporarily, to check it.
 
 3. **Verify**: The GitHub App webhook URL setting
    (https://github.com/settings/apps/<your-app-slug> → General →
    Webhook URL) should now show your stable Render URL.
+
+4. **Deploying** (repeatable, once `RENDER_API_KEY` is set):
+   ```bash
+   PUBLIC_BASE_URL=https://pr-review-bot.onrender.com uv run python -m scripts.deploy --sync-env
+   ```
+   It pushes any of `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
+   `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, `GROQ_API_KEY`
+   and `GITHUB_MODELS_TOKEN` that differ from your local `.env`, triggers a
+   deploy, waits for it to go live (~60s), and then runs the checklist above.
+   It refuses to start if any of those eight values is empty locally, so a
+   blank `.env` entry can never overwrite a working secret on the service.
+   Only changed variables are pushed, and if nothing differs no deploy is
+   triggered. This currently requires the Groq/GitHub-Models pair regardless
+   of `LLM_PROVIDER` — a Gemini-only `.env` exits 2 here until one of those two
+   is filled in as well.
+
+   Claude Code users can run `/deploy` instead, which wraps the same CLI.
 
 ### 3.5 Keep-warm pinger (free)
 
 Both Render (free tier) and Supabase (free tier) spin down after inactivity.
 To keep them warm and ensure fast responses:
 
-1. Go to https://cron-job.org or https://uptimerobot.com (both free)
-2. Create a new job/monitor that GETs your Render URL's `/healthz` endpoint
-   every 10 minutes
+1. Go to https://uptimerobot.com (free) — cron-job.org also works, but
+   UptimeRobot is what `scripts/deploy.py`'s `uptime-pinger` check verifies
+   against.
+2. Create a new monitor that GETs your Render URL's `/healthz` endpoint.
 3. This keeps Render warm and also keeps Supabase un-paused (the dispatcher
-   polls the queue continuously, so pinging `/healthz` guarantees activity)
+   polls the queue continuously, so pinging `/healthz` guarantees activity).
+
+The monitor's URL must be exactly `https://<your-service>.onrender.com/healthz`
+— a stray trailing character (a comma pasted from prose, for instance) returns
+404 on every check while the dashboard still shows the monitor firing on
+schedule. Use an interval of **5 minutes**; anything above 10 lets Render's
+~15-minute spin-down win. UptimeRobot's free tier sends `HEAD` rather than
+`GET`, which is why `/healthz` answers both verbs.
 
 ## 4. Secrets hygiene
 

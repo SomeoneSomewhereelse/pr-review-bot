@@ -69,21 +69,83 @@ docker run -p 8000:8000 --env-file .env pr-review-engine
 
 ### Deploying to production (Render + Supabase)
 
-For a stable, production-ready deployment with a persistent webhook URL:
+The bot runs as a Docker container on Render's free tier with its durable queue
+in Supabase Postgres, kept awake by a free UptimeRobot monitor. `scripts/deploy.py`
+is the tool for both verifying and performing a deploy; it is a plain CLI and
+needs no editor, assistant, or Claude Code.
 
-1. **Set up Supabase and Render** — see the full runbook in [`SETUP.md`](SETUP.md)
-   section 3 ("Deploying to Render + Supabase").
-2. **Register the webhook** — once deployed, run, **locally from your own
-   machine** (not inside the Render container — `scripts/` isn't copied into
-   the Docker image), with the public URL passed explicitly since
-   `RENDER_EXTERNAL_URL` only exists inside Render's own container:
-   `PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy`
-   to set the stable Render URL as the GitHub App's webhook endpoint.
-3. **Keep services warm** — register Render's `/healthz` endpoint with a free
-   cron pinger (cron-job.org or UptimeRobot, ~10 min interval) to prevent
-   spin-down and keep Supabase un-paused.
+#### One-time setup
 
-The webhook URL is stable and persists across deployments (no manual edits needed).
+These four steps need a browser and cannot be automated — the first is
+*structurally* impossible, since GitHub does not permit an App to install itself.
+
+1. **Install the GitHub App on the target repo** — repo Settings → GitHub Apps.
+   A repo admin authorizes it once.
+2. **Create the Supabase project**, wait until it reports ready, and copy the
+   **Session-mode pooler** connection string (port 5432, not 6543) as
+   `DATABASE_URL`.
+3. **Create the Render service** from `render.yaml` (New + → Blueprint).
+4. **Create an UptimeRobot monitor** on `https://<your-service>.onrender.com/healthz`
+   with a **5-minute interval**. The URL must match exactly — a stray trailing
+   character 404s on every check while looking perfectly healthy in the dashboard.
+
+Full click-by-click detail for each: [`SETUP.md`](SETUP.md) §3.
+
+#### Verifying a deployment
+
+```bash
+PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy
+```
+
+Run it from your own machine, not inside the Render container — `scripts/` is not
+copied into the Docker image, and `RENDER_EXTERNAL_URL` only exists inside
+Render's own container, which is why `PUBLIC_BASE_URL` is passed explicitly here.
+
+It prints one line per check and always runs all six, so a single run surfaces
+every problem rather than only the first:
+
+| Check | Verifies | Required? |
+|---|---|---|
+| `config` | Every setting the service needs is resolvable locally | yes |
+| `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
+| `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
+| `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
+| `render-service` | The latest Render deploy is `live` | optional |
+| `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
+
+Exit codes: `0` everything passed or was skipped, `1` at least one check failed,
+`2` the CLI could not run at all (no `GITHUB_TARGET_REPO` or public base URL).
+
+The two optional checks are skipped with a hint unless you set the matching
+operator-local key. Neither is ever set on the Render service:
+
+- `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
+  `render-service` and `--sync-env`.
+- `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
+- `DATABASE_URL` enables `database`. It is normally a Render dashboard secret;
+  export it locally, temporarily, to check it.
+
+#### Deploying
+
+With `RENDER_API_KEY` set, this is a complete, repeatable deploy:
+
+```bash
+PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
+```
+
+It pushes any of `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
+`GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, `GROQ_API_KEY`
+and `GITHUB_MODELS_TOKEN` that differ from your local `.env`, triggers a deploy,
+waits for it to go live (~60s), and then runs the checklist above.
+
+It refuses to start if any of those values is empty locally, so a blank `.env`
+entry can never overwrite a working secret on the service. Only changed
+variables are pushed, and if nothing differs no deploy is triggered. It
+currently expects the Groq/GitHub-Models pair to be set regardless of
+`LLM_PROVIDER` — a Gemini-only setup will exit 2 here until one of those two
+is filled in too.
+
+Claude Code users can run `/deploy` instead, which wraps the same CLI.
 
 ## Testing
 
