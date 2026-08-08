@@ -1,10 +1,18 @@
-# Design — `/deploy` slash command
+# Design — deploy verification CLI (`scripts/deploy.py`) + `/deploy` wrapper
 
 **Date:** 2026-08-05 (design completed 2026-08-07)
 **Status:** Approved for planning
+
+> **The CLI is the deliverable.** `scripts/deploy.py` is a standalone tool that
+> anyone can run with `uv run python -m scripts.deploy`, with no Claude Code and
+> no assistant involved. `/deploy` is a thin convenience wrapper around it for
+> people who happen to use Claude Code — one of two front doors, not the main
+> one. Every design decision below is made for the CLI first; §4.2 states the
+> boundary between what it automates and what remains irreducibly manual.
+
 **Relates to:** `scripts/deploy.py` (the registration script this design
 extends), `app/github_app.py` (`discover_installation_id`, `set_webhook_url`),
-`app/queue/store.py` (`init_pool`/`_SCHEMA` — deliberately *not* reused, §7.4),
+`app/queue/store.py` (`init_pool`/`_SCHEMA` — deliberately *not* reused, §7.5),
 `app/main.py` (`/healthz`, now `GET` + `HEAD`),
 `docs/superpowers/specs/2026-08-03-supabase-hosting-migration-design.md` §9
 ("Deploy-time registration — hint only... to become a `/deploy` slash command"),
@@ -39,11 +47,16 @@ either.
 
 ## 2. Scope guardrails (hard)
 
-- **This is a verification tool, not an orchestrator.** It does not create
-  Supabase projects, Render services, GitHub Apps, or UptimeRobot monitors.
-  Every one of those has a one-time manual step documented in `SETUP.md`; this
-  command tells you which of them is currently wrong.
-- **The default invocation is safe to re-run.** Running `/deploy` performs no
+- **Not an infrastructure provisioner — but genuinely a deploy driver.** It
+  never *creates* Supabase projects, Render services, GitHub Apps, or
+  UptimeRobot monitors; each is a one-time manual step (§4.2). It does
+  *deploy to* infrastructure that already exists: `--sync-env` pushes config,
+  triggers the deploy, waits for it to go live, and verifies the result.
+- **Usable without Claude Code.** No check's output depends on an assistant
+  reading it. Every `FAIL` line is actionable on its own (§7.4), and the exit
+  code is scriptable (§7.2), so the CLI works the same in a terminal, a
+  Makefile, or CI.
+- **The default invocation is safe to re-run.** A bare run performs no
   destructive or surprising remote mutation (§6.2 is the single, narrow
   exception, and it self-reports). Anything that pushes secrets is behind an
   explicit opt-in flag (§8).
@@ -70,23 +83,28 @@ either.
 | Pinger | **UptimeRobot** (free tier: 5-min interval, simple REST API), via optional `UPTIMEROBOT_API_KEY` |
 | Render API | **Optional `check_render_service`** + an opt-in `--sync-env` mode, via optional `RENDER_API_KEY` |
 | Env sync | **Explicit `--sync-env` flag**, single-key endpoint only, then trigger a deploy and poll until `live` |
+| Primary interface | **The standalone CLI** (`python -m scripts.deploy`); `/deploy` is a wrapper, not the product |
+| Output | **Terse aligned table**, fragments not sentences; explanatory depth lives in the docs (§7.4) |
 
 ## 4. Architecture
 
 Three files carry the feature; each has one job.
 
-**`.claude/commands/deploy.md`** — the slash command. Frontmatter with a
-one-line description. Body instructs: run `uv run python -m scripts.deploy`,
-show the printed table verbatim, and on a non-zero exit help the user act on
-each `FAIL` line using the hint that line already printed. It also documents
-`--sync-env` as the follow-up when the diagnosis is config drift. **No
-verification logic lives here** — the markdown cannot be tested, so it holds
-none of the behavior.
+**`scripts/deploy.py`** — the product. All the logic, as plain testable
+Python. Keeps its existing `python -m scripts.deploy` entry point and its
+existing dependencies (`app.github_app`, `app.config`); gains `httpx` (already
+a project dependency) and `psycopg` (already a project dependency). No new
+packages. Nothing about it assumes Claude Code, an assistant, or an
+interactive terminal.
 
-**`scripts/deploy.py`** — all the logic, as plain testable Python. Keeps its
-existing `python -m scripts.deploy` entry point and its existing dependencies
-(`app.github_app`, `app.config`); gains `httpx` (already a project dependency)
-and `psycopg` (already a project dependency). No new packages.
+**`.claude/commands/deploy.md`** — a thin convenience wrapper for Claude Code
+users. Frontmatter with a one-line description. Body instructs: run
+`uv run python -m scripts.deploy`, show the printed table verbatim, and on a
+non-zero exit help the user act on each `FAIL` line using the hint that line
+already printed. It also documents `--sync-env` as the follow-up when the
+diagnosis is config drift. **No verification logic lives here** — the markdown
+cannot be tested, so it holds none of the behavior, and deleting this file
+would cost convenience but no capability.
 
 **`app/config.py`** — three new optional fields (§5).
 
@@ -101,7 +119,40 @@ class CheckResult:
 ```
 
 `detail` is the whole user experience for a failing line: it must name what is
-wrong and what to do, because the slash command has nothing else to work from.
+wrong and what to do, because a terminal user has nothing else to work from.
+
+### 4.2 Standalone use — the automation boundary
+
+The honest answer to "can someone run this and get a working deployment?" is
+**yes, after a one-time setup** — and the boundary is not arbitrary.
+
+**Fully automated by `--sync-env` (repeatable, every deploy):**
+
+| Step | Mechanism |
+|---|---|
+| Push all eight service env vars | `PUT /v1/services/{id}/env-vars/{KEY}` (§8) |
+| Trigger the deploy | `POST /v1/services/{id}/deploys` |
+| Wait until it is actually serving | poll until `live` (~55–65s measured) |
+| Discover the installation id | App JWT, `GET /repos/{repo}/installation` |
+| Point the webhook at this deployment | `PATCH /app/hook/config`, only on drift |
+| Verify all six checks | §6 |
+
+**One-time manual prerequisites** — the CLI *reports* each as a `FAIL` naming
+what is missing, but cannot perform it:
+
+| Step | Why it stays manual |
+|---|---|
+| Install the GitHub App on the target repo | **Structurally impossible to automate.** GitHub does not permit an App to install itself; a repo admin must authorize it in the GitHub UI. This is the one true hard stop. |
+| Create the Supabase project | Needs account-level credentials far broader than any check here holds; also has a wait-for-ready step no API makes reliable (§1 of the hardening spec). |
+| Create the Render service from `render.yaml` | Blueprint creation is account-level; the service must exist before `--sync-env` has anything to target. |
+| Create the UptimeRobot monitor | Account-level; and a monitor is worth creating once, deliberately, with the interval and URL the check then verifies. |
+
+Consequently the CLI has two distinct, useful modes for a non-Claude user:
+
+- **Before setup is complete** — a bare run is a diagnostic checklist that
+  names precisely which prerequisite is missing, one per line.
+- **After setup is complete** — `--sync-env` is a complete, repeatable,
+  one-command deploy.
 
 ## 5. Config
 
@@ -190,7 +241,7 @@ on a dev machine — it is a Render dashboard secret). The hint says to export
 the Supabase Session-mode pooler URL temporarily to enable the check.
 
 When set, a **raw `psycopg.connect(..., connect_timeout=10)`** — deliberately
-not `store.init_pool()` (§7.4) — then:
+not `store.init_pool()` (§7.5) — then:
 
 | Observation | Result | Detail |
 |---|---|---|
@@ -273,7 +324,41 @@ Each check function catches its own exceptions and converts them to `FAIL`.
 A complete table is the deliverable; one exploding check must not deprive the
 operator of the other five diagnoses.
 
-### 7.4 Why `check_database` bypasses the app's pool
+### 7.4 Output contract
+
+The report is read in a terminal by someone with no assistant to interpret it,
+and `README.md` carries the explanatory depth. So the output is **terse by
+contract**, not by accident:
+
+```
+config            PASS
+github-app        PASS     installation=12345678; webhook already correct
+health            FAIL     HEAD /healthz -> 405 (GET ok); pinger sends HEAD
+database          PASS     connected; tickets present
+render-service    SKIPPED  set RENDER_API_KEY to check deploy status
+uptime-pinger     FAIL     no monitor matches .../healthz
+                           found: .../healthz,
+
+2 failed, 1 skipped -- see README.md#deploying-to-production
+```
+
+Rules the implementation must hold to:
+
+- **One line per check**, three aligned columns; a `detail` may wrap to a
+  second, indented continuation line only when it must enumerate observed
+  values (as the pinger's `found:` line does).
+- **`detail` is a fragment, not a sentence** — observed fact, then the single
+  next action. No trailing periods, no prose, no emoji, no ANSI colour.
+- **Never explain *why*.** "pinger sends HEAD" is the entire justification a
+  line gets; the reasoning lives in `README.md`. A `detail` that runs past
+  roughly 70 characters is a signal the explanation belongs in the docs.
+- **`SKIPPED` names the env var and what it buys**, in that order
+  ("set `RENDER_API_KEY` to check deploy status") — enough to decide whether
+  to bother, without a doc lookup.
+- **One trailing summary line**: counts plus a section-anchored `README.md`
+  pointer. It is the only place the output refers the reader elsewhere.
+
+### 7.5 Why `check_database` bypasses the app's pool
 
 `store.init_pool()` opens a `ConnectionPool` whose first `connection()` blocks
 for `_POOL_TIMEOUT_SECONDS` (30) before raising, and its `RuntimeError`
@@ -327,10 +412,21 @@ Per-check, concretely:
 
 ## 10. Docs updates
 
+Since the CLI is the product (§4) and its output deliberately explains nothing
+(§7.4), the docs carry the entire explanatory burden. `README.md` is where
+people actually look, so it gets **full parity with `SETUP.md` §3** rather than
+a pointer.
+
+- **`README.md` → "Deploying to production (Render + Supabase)"** — expanded
+  from today's three-step summary into the complete deployment story at the
+  same depth as `SETUP.md` §3: the one-time prerequisites (§4.2's second
+  table), the repeatable `--sync-env` deploy, what each of the six checklist
+  lines means, the three exit codes, and the two optional keys with what each
+  unlocks. A reader who never opens `SETUP.md` must still be able to deploy.
 - **`SETUP.md` §3.4** — replace the bare `python -m scripts.deploy` step with
-  `/deploy`'s checklist, documenting what each line means, and the two
-  optional keys as "enable these two extra checks." Keep the existing
-  runs-locally / `PUBLIC_BASE_URL` guidance, which is still correct.
+  the checklist, documenting what each line means and the two optional keys.
+  Keep the existing runs-locally / `PUBLIC_BASE_URL` guidance, which is still
+  correct.
 - **`SETUP.md` §3.5** — note that the UptimeRobot monitor must target
   `/healthz` exactly (no trailing characters) and use an interval ≤ 10
   minutes, and that the free tier issues `HEAD`.
@@ -338,6 +434,21 @@ Per-check, concretely:
   to the existing optional-operator-tooling block; fix the now-stale "Unknown
   vars are ignored by `app/config.py`" line, since `RENDER_API_KEY` becomes a
   real field (§5).
+
+### 10.1 Keeping the two documents in sync
+
+Full parity means duplicated prose, and duplicated prose drifts. "Update both"
+is a convention, not a mechanism — so the one kind of drift that actually
+breaks a deployment gets a real guard instead.
+
+The dangerous drift is the **env-var name list**: a variable documented in one
+place but missing from `--sync-env`'s push list (silently never deployed), or
+pushed but undocumented (nobody knows to set it). `scripts/deploy.py` holds the
+authoritative tuple; §11's `test_env_var_names_match_the_docs` asserts that
+`README.md` and `SETUP.md` each mention every name in it. Prose wording may
+diverge freely; the contract may not.
+
+Both documents are updated in the same commit as any change to that tuple.
 
 ## 11. Testing
 
@@ -375,6 +486,15 @@ Cross-cutting:
 - **Secret-leak test** — a sentinel password inside `DATABASE_URL` must not
   appear in any `CheckResult`'s `detail` or `repr`, mirroring the existing
   `test_init_pool_error_never_leaks_the_connection_string`.
+- **`test_env_var_names_match_the_docs`** — reads `README.md` and `SETUP.md`
+  and asserts each mentions every name in `scripts/deploy.py`'s authoritative
+  env-var tuple (§10.1). Checks *names only*, never wording, so the docs stay
+  free to explain differently while the contract cannot silently diverge. This
+  is the mechanism behind "keep both synced."
+- **Output-contract test** — renders a fixed set of `CheckResult`s and asserts
+  the table's shape: aligned columns, no `detail` exceeding the §7.4 length
+  budget, and a trailing summary line carrying the counts and the `README.md`
+  anchor.
 - **`main()` exit codes** — `0` when all `PASS`/`SKIPPED`, `1` on any `FAIL`,
   `2` on unusable input.
 - **`--sync-env`** — asserts the single-key endpoint is used and the bulk
@@ -407,6 +527,6 @@ Every non-obvious decision here traces to
 `405` that broke keep-warm; the exact-URL pinger match (§6.6) to the
 trailing-comma monitor; `to_regclass` (§6.4) to the `NULL`-then-table
 observation that resolved the provisioning handoff; the raw-`psycopg` choice
-(§7.4) to that doc's explicit `check_database` recommendation; and the Render
+(§7.5) to that doc's explicit `check_database` recommendation; and the Render
 API surface (§6.5, §8) to its follow-up #3, including the single-key-endpoint
 constraint that protects `DATABASE_URL`.
