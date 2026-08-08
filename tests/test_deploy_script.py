@@ -421,3 +421,74 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
         respx.post(UPTIMEROBOT).mock(return_value=httpx.Response(500, json={}))
         result = deploy.check_uptime_pinger(BASE)
     assert "u_SUPER_SECRET" not in result.detail
+
+
+def _stub_all_checks(monkeypatch, statuses):
+    """Replace all six checks with constant results, in report order."""
+    names = ["config", "github-app", "health", "database", "render-service", "uptime-pinger"]
+    fns = [
+        "check_config",
+        "check_installation_and_webhook",
+        "check_health_endpoint",
+        "check_database",
+        "check_render_service",
+        "check_uptime_pinger",
+    ]
+    for fn, name, status in zip(fns, names, statuses):
+        monkeypatch.setattr(
+            deploy, fn, (lambda n, s: lambda *args: deploy.CheckResult(n, s, ""))(name, status)
+        )
+
+
+@pytest.fixture
+def runnable(monkeypatch):
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+
+
+def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
+    _stub_all_checks(monkeypatch, ["PASS"] * 4 + ["SKIPPED"] * 2)
+    assert deploy.main([]) == 0
+    assert "all checks passed" in capsys.readouterr().out
+
+
+def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
+    _stub_all_checks(monkeypatch, ["PASS", "FAIL", "PASS", "PASS", "SKIPPED", "SKIPPED"])
+    assert deploy.main([]) == 1
+    assert "1 failed" in capsys.readouterr().out
+
+
+def test_main_returns_two_without_a_target_repo(monkeypatch):
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    assert deploy.main([]) == 2
+
+
+def test_main_returns_two_without_a_base_url(monkeypatch):
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(settings, "public_base_url", "")
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    assert deploy.main([]) == 2
+
+
+def test_run_checks_reports_all_six_in_order(runnable, monkeypatch):
+    _stub_all_checks(monkeypatch, ["PASS"] * 6)
+    results = deploy.run_checks("owner/repo", BASE)
+    assert [r.name for r in results] == [
+        "config", "github-app", "health", "database", "render-service", "uptime-pinger"
+    ]
+
+
+def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, monkeypatch):
+    """A complete table is the deliverable; one broken check must not deprive
+    the operator of the other five diagnoses (spec section 7.3)."""
+    def _boom():
+        raise ValueError("unexpected")
+
+    _stub_all_checks(monkeypatch, ["PASS"] * 6)
+    monkeypatch.setattr(deploy, "check_database", _boom)
+    results = deploy.run_checks("owner/repo", BASE)
+    assert len(results) == 6
+    database = next(r for r in results if r.name == "database")
+    assert database.status == "FAIL"
+    assert "ValueError" in database.detail

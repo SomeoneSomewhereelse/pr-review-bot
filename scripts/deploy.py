@@ -17,6 +17,7 @@ explanations live in README.md.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -290,8 +291,49 @@ def render_report(results: list[CheckResult]) -> str:
     return "\n".join(lines)
 
 
+def sync_env() -> int:
+    raise NotImplementedError("implemented in the next task")
+
+
+def _safe(name: str, fn, *args) -> CheckResult:
+    """No check may abort the run: a complete table is the deliverable."""
+    try:
+        return fn(*args)
+    except Exception as exc:  # noqa: BLE001 - deliberate: any failure becomes a row
+        return CheckResult(name, "FAIL", f"unexpected {type(exc).__name__}")
+
+
+def run_checks(repo: str, base: str) -> list[CheckResult]:
+    """All six, cheapest and most foundational first, so a misconfiguration is
+    reported before the checks that would fail as a consequence of it."""
+    return [
+        _safe("config", check_config),
+        _safe("github-app", check_installation_and_webhook, repo, base),
+        _safe("health", check_health_endpoint, base),
+        _safe("database", check_database),
+        _safe("render-service", check_render_service),
+        _safe("uptime-pinger", check_uptime_pinger, base),
+    ]
+
+
 def main(argv: list[str] | None = None) -> int:
-    raise NotImplementedError("wired up in a later task")
+    args = sys.argv[1:] if argv is None else argv
+    repo = settings.github_target_repo
+    base = resolve_base_url()
+    if not repo or not base:
+        print(
+            "GITHUB_TARGET_REPO and a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) "
+            "are required",
+            file=sys.stderr,
+        )
+        return 2
+    if "--sync-env" in args:
+        exit_code = sync_env()
+        if exit_code != 0:
+            return exit_code
+    results = run_checks(repo, base)
+    print(render_report(results))
+    return 1 if any(r.status == "FAIL" for r in results) else 0
 
 
 if __name__ == "__main__":
