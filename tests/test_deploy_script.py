@@ -272,3 +272,21 @@ def test_database_distinguishes_reachable_but_unprovisioned(db, db_url, db_exec,
     result = deploy.check_database()
     assert result.status == "FAIL"
     assert "tickets" in result.detail
+
+
+SENTINEL_PASSWORD = "sentinel-pw-must-not-appear"
+
+
+def test_check_database_failure_never_leaks_the_connection_string(monkeypatch):
+    """CLAUDE.md: no secret is ever logged. database_url carries the password,
+    so the failure detail must describe the failure shape -- exception type and
+    the non-secret hostname -- and never interpolate the URL."""
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        f"postgresql://someuser:{SENTINEL_PASSWORD}@127.0.0.1:1/postgres?connect_timeout=1",
+    )
+    result = deploy.check_database()
+    assert result.status == "FAIL"
+    rendered = result.detail + repr(result) + deploy.render_report([result])
+    assert SENTINEL_PASSWORD not in rendered
