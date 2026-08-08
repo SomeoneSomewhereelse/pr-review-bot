@@ -236,3 +236,39 @@ def test_health_fails_on_a_transport_error():
         respx.get(HEALTH).mock(side_effect=httpx.ConnectError("refused"))
         result = deploy.check_health_endpoint(BASE)
     assert result.status == "FAIL"
+
+
+DEAD_DB_URL = "postgresql://u:pw@127.0.0.1:1/postgres?connect_timeout=1"
+
+
+def test_database_skips_with_a_hint_when_unset(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "")
+    result = deploy.check_database()
+    assert result.status == "SKIPPED"
+    assert "DATABASE_URL" in result.detail
+
+
+def test_database_fails_fast_when_unreachable(monkeypatch):
+    """127.0.0.1:1 refuses immediately, so this costs about a second."""
+    monkeypatch.setattr(settings, "database_url", DEAD_DB_URL)
+    result = deploy.check_database()
+    assert result.status == "FAIL"
+    assert "connect" in result.detail.lower()
+
+
+def test_database_passes_against_the_provisioned_test_database(db, db_url, monkeypatch):
+    """The `db` fixture opens the pool and creates the schema, so `tickets` exists."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    result = deploy.check_database()
+    assert result.status == "PASS"
+    assert "tickets present" in result.detail
+
+
+def test_database_distinguishes_reachable_but_unprovisioned(db, db_url, db_exec, monkeypatch):
+    """A DATABASE_URL pointing at the wrong Supabase project answers SELECT 1
+    but has no tickets table -- a setup mistake a bare SELECT 1 calls success."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE IF EXISTS tickets")
+    result = deploy.check_database()
+    assert result.status == "FAIL"
+    assert "tickets" in result.detail

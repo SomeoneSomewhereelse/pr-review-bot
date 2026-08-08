@@ -20,8 +20,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
+import psycopg
 from github import GithubException
 
 from app import github_app
@@ -31,6 +33,7 @@ _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
 _README_ANCHOR = "README.md#deploying-to-production"
 _HTTP_TIMEOUT = 10.0
+_DB_CONNECT_TIMEOUT = 10
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,31 @@ def check_health_endpoint(base: str) -> CheckResult:
             name, "FAIL", f"HEAD /healthz -> {head_status} (GET ok); pinger sends HEAD"
         )
     return CheckResult(name, "PASS", "GET + HEAD -> 200")
+
+
+def check_database() -> CheckResult:
+    """Reachability AND provisioning, via a raw connection.
+
+    Deliberately not store.init_pool(): the pool waits 30s before raising and
+    its message is written for a startup log, not a checklist. A raw connect
+    with a short timeout reports the driver's real failure in about a second.
+
+    The failure detail names the exception type and the (non-secret) hostname
+    only -- settings.database_url carries the password.
+    """
+    name = "database"
+    if not settings.database_url:
+        return CheckResult(name, "SKIPPED", "set DATABASE_URL to check the queue database")
+    host = urlsplit(settings.database_url).hostname or "?"
+    try:
+        with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+            conn.execute("SELECT 1")
+            provisioned = conn.execute("SELECT to_regclass('public.tickets')").fetchone()[0]
+    except psycopg.Error as exc:
+        return CheckResult(name, "FAIL", f"cannot connect to {host} ({type(exc).__name__})")
+    if provisioned is None:
+        return CheckResult(name, "FAIL", "connected; tickets absent -- app never booted on this DB")
+    return CheckResult(name, "PASS", "connected; tickets present")
 
 
 def render_report(results: list[CheckResult]) -> str:
