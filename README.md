@@ -142,8 +142,8 @@ It refuses to start if any of those values is empty locally, so a blank `.env`
 entry can never overwrite a working secret on the service. Only changed
 variables are pushed, and if nothing differs no deploy is triggered. It
 currently expects the Groq/GitHub-Models pair to be set regardless of
-`LLM_PROVIDER` — a Gemini-only setup will exit 2 here until one of those two
-is filled in too.
+`LLM_PROVIDER` — a Gemini-only setup will exit 2 here until **both**
+`GROQ_API_KEY` and `GITHUB_MODELS_TOKEN` are filled in too.
 
 Claude Code users can run `/deploy` instead, which wraps the same CLI.
 

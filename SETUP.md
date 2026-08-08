@@ -310,8 +310,8 @@ field (the app code will decode it at startup).
    blank `.env` entry can never overwrite a working secret on the service.
    Only changed variables are pushed, and if nothing differs no deploy is
    triggered. This currently requires the Groq/GitHub-Models pair regardless
-   of `LLM_PROVIDER` — a Gemini-only `.env` exits 2 here until one of those two
-   is filled in as well.
+   of `LLM_PROVIDER` — a Gemini-only `.env` exits 2 here until **both**
+   `GROQ_API_KEY` and `GITHUB_MODELS_TOKEN` are filled in as well.
 
    Claude Code users can run `/deploy` instead, which wraps the same CLI.
 
@@ -323,7 +323,7 @@ To keep them warm and ensure fast responses:
 1. Go to https://uptimerobot.com (free) — cron-job.org also works, but
    UptimeRobot is what `scripts/deploy.py`'s `uptime-pinger` check verifies
    against.
-2. Create a new monitor that GETs your Render URL's `/healthz` endpoint.
+2. Create a new monitor that pings your Render URL's `/healthz` endpoint.
 3. This keeps Render warm and also keeps Supabase un-paused (the dispatcher
    polls the queue continuously, so pinging `/healthz` guarantees activity).
 
