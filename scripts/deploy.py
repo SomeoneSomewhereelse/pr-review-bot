@@ -16,8 +16,10 @@ explanations live in README.md.
 
 from __future__ import annotations
 
+import base64
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -39,6 +41,28 @@ _RENDER_API = "https://api.render.com/v1"
 _UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
 # Render free instances spin down after ~15 minutes idle; 10 minutes leaves margin.
 _MAX_PINGER_INTERVAL_SECONDS = 600
+
+# The service env vars --sync-env pushes. Authoritative: tests/test_deploy_script.py
+# asserts README.md and SETUP.md each mention every name here.
+_SYNCED_ENV_VARS = (
+    "DATABASE_URL",
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY_B64",
+    "GITHUB_TARGET_REPO",
+    "GITHUB_WEBHOOK_SECRET",
+    "LLM_PROVIDER",
+    "GROQ_API_KEY",
+    "GITHUB_MODELS_TOKEN",
+)
+_DEPLOY_POLL_SECONDS = 10
+_DEPLOY_TIMEOUT_SECONDS = 300
+_DEPLOY_FAILED_STATUSES = {
+    "build_failed",
+    "update_failed",
+    "pre_deploy_failed",
+    "canceled",
+    "deactivated",
+}
 
 
 @dataclass(frozen=True)
@@ -291,8 +315,109 @@ def render_report(results: list[CheckResult]) -> str:
     return "\n".join(lines)
 
 
+def _wanted_env() -> dict[str, str]:
+    """Local values for every synced var. The PEM is base64-encoded on the fly
+    when only the file path is configured locally, since Render needs the b64 form."""
+    pem_b64 = settings.github_app_private_key_b64
+    if not pem_b64:
+        path = Path(settings.github_app_private_key_path)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        if path.is_file():
+            pem_b64 = base64.b64encode(path.read_bytes()).decode()
+    return {
+        "DATABASE_URL": settings.database_url,
+        "GITHUB_APP_ID": str(settings.github_app_id or ""),
+        "GITHUB_APP_PRIVATE_KEY_B64": pem_b64,
+        "GITHUB_TARGET_REPO": settings.github_target_repo,
+        "GITHUB_WEBHOOK_SECRET": settings.github_webhook_secret,
+        "LLM_PROVIDER": settings.llm_provider,
+        "GROQ_API_KEY": settings.groq_api_key,
+        "GITHUB_MODELS_TOKEN": settings.github_models_token,
+    }
+
+
+def _trigger_and_wait(service_id: str) -> int:
+    """Render env-var changes do not auto-deploy, so a sync that skipped this
+    would report success while the service kept serving the old values."""
+    resp = httpx.post(
+        f"{_RENDER_API}/services/{service_id}/deploys",
+        headers=_render_headers(),
+        json={},
+        timeout=_HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    deploy_id = _unwrap(resp.json(), "deploy").get("id")
+    print(f"deploy {deploy_id} triggered; waiting for live")
+    deadline = time.monotonic() + _DEPLOY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(_DEPLOY_POLL_SECONDS)
+        poll = httpx.get(
+            f"{_RENDER_API}/services/{service_id}/deploys/{deploy_id}",
+            headers=_render_headers(),
+            timeout=_HTTP_TIMEOUT,
+        )
+        poll.raise_for_status()
+        status = _unwrap(poll.json(), "deploy").get("status", "?")
+        if status == "live":
+            print("deploy live")
+            return 0
+        if status in _DEPLOY_FAILED_STATUSES:
+            print(f"deploy {status}", file=sys.stderr)
+            return 1
+    print("timed out waiting for the deploy to go live", file=sys.stderr)
+    return 1
+
+
 def sync_env() -> int:
-    raise NotImplementedError("implemented in the next task")
+    """Push local config to the Render service, then deploy and wait.
+
+    Only ever uses the single-key endpoint: the bulk
+    PUT /v1/services/{id}/env-vars replaces the entire list and would silently
+    delete every variable not in the payload, DATABASE_URL included.
+    """
+    if not settings.render_api_key:
+        print("--sync-env requires RENDER_API_KEY", file=sys.stderr)
+        return 2
+    wanted = _wanted_env()
+    empty = sorted(key for key, value in wanted.items() if not value)
+    if empty:
+        # Before any request, so a partial push cannot happen.
+        print(f"refusing to push empty values; fix .env first: {', '.join(empty)}", file=sys.stderr)
+        return 2
+    try:
+        service_id = _find_render_service_id()
+        if service_id is None:
+            print(f"no Render service named {settings.render_service_name}", file=sys.stderr)
+            return 1
+        resp = httpx.get(
+            f"{_RENDER_API}/services/{service_id}/env-vars",
+            headers=_render_headers(),
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        current = {}
+        for item in resp.json():
+            env_var = _unwrap(item, "envVar")
+            current[env_var.get("key")] = env_var.get("value")
+
+        changed = [key for key, value in wanted.items() if current.get(key) != value]
+        for key in changed:
+            put = httpx.put(
+                f"{_RENDER_API}/services/{service_id}/env-vars/{key}",
+                headers=_render_headers(),
+                json={"value": wanted[key]},
+                timeout=_HTTP_TIMEOUT,
+            )
+            put.raise_for_status()
+            print(f"pushed {key} (len {len(wanted[key])})")   # names and lengths only
+        if not changed:
+            print("env vars already in sync; no deploy triggered")
+            return 0
+        return _trigger_and_wait(service_id)
+    except httpx.HTTPError as exc:
+        print(f"Render API error ({type(exc).__name__})", file=sys.stderr)
+        return 1
 
 
 def _safe(name: str, fn, *args) -> CheckResult:

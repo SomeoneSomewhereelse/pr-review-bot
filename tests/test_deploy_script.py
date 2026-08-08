@@ -492,3 +492,121 @@ def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, 
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
     assert "ValueError" in database.detail
+
+
+@pytest.fixture
+def sync_ready(monkeypatch, tmp_path):
+    """Every value _wanted_env() reads, non-empty, plus a Render key."""
+    pem = tmp_path / "key.pem"
+    pem.write_bytes(b"-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n")
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h:5432/postgres")
+    monkeypatch.setattr(settings, "github_app_id", 999999)
+    monkeypatch.setattr(settings, "github_app_private_key_b64", "")
+    monkeypatch.setattr(settings, "github_app_private_key_path", str(pem))
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    monkeypatch.setattr(settings, "github_models_token", "ghp_x")
+    monkeypatch.setattr(deploy.time, "sleep", lambda _seconds: None)
+
+
+def _env_var_list(values: dict):
+    return [{"envVar": {"key": k, "value": v}} for k, v in values.items()]
+
+
+def test_sync_env_requires_a_render_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "")
+    assert deploy.sync_env() == 2
+
+
+def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys):
+    """A blank .env entry must never overwrite a working remote secret, and the
+    guard must fire before any request is issued."""
+    monkeypatch.setattr(settings, "groq_api_key", "")
+    with respx.mock:
+        route = respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        assert deploy.sync_env() == 2
+        assert not route.called
+    assert "GROQ_API_KEY" in capsys.readouterr().err
+
+
+def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_ready):
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        current = dict.fromkeys(deploy._SYNCED_ENV_VARS, "stale")
+        current["GITHUB_TARGET_REPO"] = "owner/repo"       # already correct
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list(current))
+        )
+        bulk = respx.put(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        single = respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "created"}})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
+            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "live"}})
+        )
+        assert deploy.sync_env() == 0
+        assert not bulk.called          # the bulk PUT would delete DATABASE_URL
+        # Seven of eight differ; GITHUB_TARGET_REPO already matched.
+        assert single.call_count == len(deploy._SYNCED_ENV_VARS) - 1
+
+
+def test_sync_env_skips_the_deploy_when_nothing_changed(sync_ready, capsys):
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list(deploy._wanted_env()))
+        )
+        triggered = respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={})
+        )
+        assert deploy.sync_env() == 0
+        assert not triggered.called
+    assert "already in sync" in capsys.readouterr().out
+
+
+def test_sync_env_fails_when_the_deploy_fails(sync_ready):
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({}))
+        )
+        respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
+            return_value=httpx.Response(200, json={"deploy": {"status": "build_failed"}})
+        )
+        assert deploy.sync_env() == 1
+
+
+def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_SUPER_SECRET")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({}))
+        )
+        respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
+            return_value=httpx.Response(200, json={"deploy": {"status": "live"}})
+        )
+        deploy.sync_env()
+    captured = capsys.readouterr()
+    assert "gsk_SUPER_SECRET" not in captured.out + captured.err
