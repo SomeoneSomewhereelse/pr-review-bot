@@ -1,35 +1,77 @@
-"""Idempotent deploy-time registration: verify the App is installed on the
-target repo and point its webhook at this deployment. Safe to run every deploy.
-Uses only the existing App JWT -- no new secrets.
+"""Deploy verification CLI for the hosted Render + Supabase deployment.
+
+Runs six independent checks and prints one aligned table. Every check runs
+regardless of earlier failures, so a single run surfaces every problem rather
+than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
+CLI could not run at all.
+
+Standalone by design: nothing here assumes Claude Code, an assistant, or an
+interactive terminal. `.claude/commands/deploy.md` is a convenience wrapper
+that holds no logic.
+
+Output is terse by contract (design spec section 7.4): details are fragments
+naming the observed fact and the next action, never the reasoning -- the
+explanations live in README.md.
 """
 
 from __future__ import annotations
 
 import os
-import sys
+from dataclasses import dataclass
+from typing import Literal
 
-from app import github_app
 from app.config import settings
 
+_NAME_WIDTH = 18
+_STATUS_WIDTH = 9
+_README_ANCHOR = "README.md#deploying-to-production"
 
-def main() -> int:
-    repo = settings.github_target_repo
+
+@dataclass(frozen=True)
+class CheckResult:
+    """One row of the report. ``detail`` is the whole user experience for a
+    failing line: it must name what is wrong and what to do, because a terminal
+    user has nothing else to work from. A newline in ``detail`` renders as an
+    indented continuation line, used only to enumerate observed values."""
+
+    name: str
+    status: Literal["PASS", "FAIL", "SKIPPED"]
+    detail: str = ""
+
+
+def resolve_base_url() -> str:
+    """This deployment's public origin, normalized exactly once.
+
+    The rstrip is not cosmetic: check_uptime_pinger compares the monitor's URL
+    by exact equality, so a trailing slash here would produce a doubled slash
+    and fail a correctly configured pinger.
+    """
     base = settings.public_base_url or os.environ.get("RENDER_EXTERNAL_URL", "")
-    if not repo or not base:
-        print(
-            "GITHUB_TARGET_REPO and a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) "
-            "are required",
-            file=sys.stderr,
+    return base.rstrip("/")
+
+
+def render_report(results: list[CheckResult]) -> str:
+    lines: list[str] = []
+    for result in results:
+        first, *rest = (result.detail or "").split("\n")
+        lines.append(
+            f"{result.name:<{_NAME_WIDTH}}{result.status:<{_STATUS_WIDTH}}{first}".rstrip()
         )
-        return 2
-    try:
-        installation_id = github_app.discover_installation_id(repo)
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    github_app.set_webhook_url(f"{base.rstrip('/')}/webhook")
-    print(f"registered: installation={installation_id} webhook={base.rstrip('/')}/webhook")
-    return 0
+        lines.extend(" " * (_NAME_WIDTH + _STATUS_WIDTH) + line for line in rest)
+    failed = sum(1 for r in results if r.status == "FAIL")
+    skipped = sum(1 for r in results if r.status == "SKIPPED")
+    lines.append("")
+    if failed:
+        lines.append(f"{failed} failed, {skipped} skipped -- see {_README_ANCHOR}")
+    elif skipped:
+        lines.append(f"all checks passed, {skipped} skipped")
+    else:
+        lines.append("all checks passed")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    raise NotImplementedError("wired up in a later task")
 
 
 if __name__ == "__main__":

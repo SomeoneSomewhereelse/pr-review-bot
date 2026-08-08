@@ -45,5 +45,12 @@ class Settings(BaseSettings):
     # behavior this setting exists to prevent.
     dispatcher_notice_sweep_batch_size: int = Field(default=20, gt=0)
 
+    # --- Optional operator tooling: read only by scripts/deploy.py on the
+    # operator's own machine. Never set on the deployed service, never added
+    # to render.yaml. Absence degrades a check to SKIPPED, never to an error.
+    uptimerobot_api_key: str = ""
+    render_api_key: str = ""
+    render_service_name: str = "pr-review-engine"
+
 
 settings = Settings()
