@@ -2,9 +2,32 @@
 
 **Date:** 2026-08-07
 **Status:** Paused at a token-budget boundary. Implementation complete and
-reviewed; one fix wave was in flight when work stopped.
-**Branch:** `feat/deploy-verification-cli` — 12 commits ahead of `master`
-(branch point `5addf5d`), HEAD `350eaa4`.
+reviewed; the final-review fix wave **landed cleanly** just after this file was
+first written (see "Update" below — it supersedes the in-flight warning).
+**Branch:** `feat/deploy-verification-cli` — 14 commits ahead of `master`
+(branch point `5addf5d`), HEAD `691a3ba`. **Working tree is clean.**
+
+## Update — the fix wave completed
+
+It finished on its own moments after the checkpoint was committed, so nothing
+was parked or lost:
+
+- **Commit `691a3ba`** — "fix(deploy): close six cross-cutting gaps from the
+  final branch review". All six items below are fixed.
+- **259 tests pass** (254 baseline + 5 new), `ruff check .` clean.
+- The working tree is clean; the "uncommitted partial work" warning below no
+  longer applies and is kept only as a record of what the pause looked like.
+
+**One honest caveat the implementer raised, which the re-review should judge:**
+item 4's broadened `except Exception` in `sync_env()` does **not** cover
+`_wanted_env()`'s own `OSError` from `read_bytes()`, because that call happens
+before the `try:` block begins. Moving it inside would reorder guard
+evaluation — the empty-value and provider guards both need `_wanted_env()`'s
+result first — so it was left as-is and reported rather than silently widened.
+That reasoning looks sound but has not been independently reviewed.
+
+**So the immediate next step is step 2 below (the scoped re-review), not
+step 1.**
 **Relates to:** `docs/superpowers/specs/2026-08-05-deploy-command-design.md`
 (the spec), `docs/superpowers/plans/2026-08-07-deploy-verification-cli.md`
 (the plan), `.superpowers/sdd/2026-08-07-deploy-verification-cli/progress.md`
