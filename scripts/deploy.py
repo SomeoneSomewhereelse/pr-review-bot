@@ -114,6 +114,7 @@ def check_config() -> CheckResult:
 
     Reports missing key NAMES only -- never a value, never a length."""
     missing: list[str] = []
+    problems: list[str] = []
     if not settings.github_app_id:
         missing.append("GITHUB_APP_ID")
     if not _private_key_available():
@@ -127,17 +128,21 @@ def check_config() -> CheckResult:
     entry = _PROVIDERS.get(settings.llm_provider)
     if entry is None:
         accepted = ", ".join(sorted(_PROVIDERS))
-        return CheckResult(
-            "config",
-            "FAIL",
+        problems.append(
             f"LLM_PROVIDER={settings.llm_provider!r} is not supported "
-            f"(expected one of: {accepted})",
+            f"(expected one of: {accepted})"
         )
-    credential = entry[0]
-    if not getattr(settings, credential.lower(), ""):
-        missing.append(credential)
+    else:
+        credential = entry[0]
+        if not getattr(settings, credential.lower(), ""):
+            missing.append(credential)
+
+    detail_lines = []
     if missing:
-        return CheckResult("config", "FAIL", "missing: " + ", ".join(missing))
+        detail_lines.append("missing: " + ", ".join(missing))
+    detail_lines.extend(problems)
+    if detail_lines:
+        return CheckResult("config", "FAIL", "\n".join(detail_lines))
     return CheckResult("config", "PASS", "")
 
 

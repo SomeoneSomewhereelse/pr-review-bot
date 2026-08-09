@@ -153,6 +153,18 @@ def test_check_config_fails_on_an_unrecognized_provider(complete_config, monkeyp
     assert "gemini" in result.detail
 
 
+def test_check_config_reports_a_bad_provider_alongside_other_missing_keys(
+    complete_config, monkeypatch
+):
+    """An unsupported provider must not mask problems already collected --
+    one run surfaces every problem, per this module's own contract."""
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "github_webhook_secret", "")
+    detail = deploy.check_config().detail
+    assert "GITHUB_WEBHOOK_SECRET" in detail
+    assert "vertex" in detail
+
+
 def test_check_config_requires_the_gemini_key_when_gemini_selected(
     complete_config, monkeypatch
 ):
