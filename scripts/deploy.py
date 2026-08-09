@@ -45,7 +45,9 @@ _MAX_PINGER_INTERVAL_SECONDS = 600
 
 # The service env vars --sync-env always pushes, regardless of provider.
 # Authoritative: tests/test_deploy_script.py asserts README.md and SETUP.md
-# each mention every name here and every _PROVIDERS name.
+# each mention every name here. (Widening that check to every _PROVIDERS name
+# too is deferred -- README.md and SETUP.md do not yet document every
+# provider's model var, and updating those docs is a later task's deliverable.)
 _ALWAYS_SYNCED = (
     "DATABASE_URL",
     "GITHUB_APP_ID",

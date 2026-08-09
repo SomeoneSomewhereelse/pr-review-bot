@@ -22,6 +22,15 @@ BASE = "https://x.onrender.com"
 HEALTH = f"{BASE}/healthz"
 
 
+@pytest.fixture(autouse=True)
+def _no_real_provider_credentials(monkeypatch):
+    """deploy.py's tests never need a real provider key, and _wanted_env now
+    reads every provider's credential -- so without this, a developer's .env
+    flows into mocked request bodies and out through any respx match failure."""
+    for name in ("gemini_api_key", "groq_api_key", "github_models_token"):
+        monkeypatch.setattr(settings, name, "")
+
+
 def test_resolve_base_url_prefers_settings_and_strips_trailing_slash(monkeypatch):
     """A trailing slash would make check_uptime_pinger's exact-URL comparison
     fail against a correctly configured monitor (spec section 7.1)."""
