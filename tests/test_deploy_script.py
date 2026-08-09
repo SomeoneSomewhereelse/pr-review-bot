@@ -62,7 +62,11 @@ def test_render_report_indents_continuation_lines():
     """A detail may wrap only to enumerate observed values; the continuation
     must align under the detail column, not the name column."""
     report = deploy.render_report(
-        [deploy.CheckResult("uptime-pinger", "FAIL", "no monitor matches /healthz\nfound: /healthz,")]
+        [
+            deploy.CheckResult(
+                "uptime-pinger", "FAIL", "no monitor matches /healthz\nfound: /healthz,"
+            )
+        ]
     )
     first, second = report.split("\n")[:2]
     assert second.startswith(" ")
@@ -150,7 +154,9 @@ def github_seam(monkeypatch):
 
     state = {"installation_id": 424242, "current_url": "", "written": []}
 
-    monkeypatch.setattr(github_app, "discover_installation_id", lambda repo: state["installation_id"])
+    monkeypatch.setattr(
+        github_app, "discover_installation_id", lambda repo: state["installation_id"]
+    )
     monkeypatch.setattr(github_app, "get_webhook_url", lambda: state["current_url"])
     monkeypatch.setattr(github_app, "set_webhook_url", lambda url: state["written"].append(url))
     return state
@@ -416,7 +422,9 @@ def test_uptime_pinger_passes_for_an_active_five_minute_monitor(monkeypatch):
     monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
     with respx.mock:
         respx.post(UPTIMEROBOT).mock(
-            return_value=httpx.Response(200, json=_monitors({"url": HEALTH, "status": 2, "interval": 300}))
+            return_value=httpx.Response(
+                200, json=_monitors({"url": HEALTH, "status": 2, "interval": 300})
+            )
         )
         result = deploy.check_uptime_pinger(BASE)
     assert result.status == "PASS"
@@ -440,7 +448,9 @@ def test_uptime_pinger_fails_when_paused(monkeypatch):
     monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
     with respx.mock:
         respx.post(UPTIMEROBOT).mock(
-            return_value=httpx.Response(200, json=_monitors({"url": HEALTH, "status": 0, "interval": 300}))
+            return_value=httpx.Response(
+                200, json=_monitors({"url": HEALTH, "status": 0, "interval": 300})
+            )
         )
         result = deploy.check_uptime_pinger(BASE)
     assert result.status == "FAIL"
@@ -451,7 +461,9 @@ def test_uptime_pinger_fails_when_the_interval_lets_the_instance_sleep(monkeypat
     monkeypatch.setattr(settings, "uptimerobot_api_key", "u_x")
     with respx.mock:
         respx.post(UPTIMEROBOT).mock(
-            return_value=httpx.Response(200, json=_monitors({"url": HEALTH, "status": 2, "interval": 1800}))
+            return_value=httpx.Response(
+                200, json=_monitors({"url": HEALTH, "status": 2, "interval": 1800})
+            )
         )
         result = deploy.check_uptime_pinger(BASE)
     assert result.status == "FAIL"
@@ -593,7 +605,9 @@ def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys
     guard must fire before any request is issued."""
     monkeypatch.setattr(settings, "groq_api_key", "")
     with respx.mock:
-        route = respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        route = respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=_service_list())
+        )
         assert deploy.sync_env() == 2
         assert not route.called
     assert "GROQ_API_KEY" in capsys.readouterr().err
@@ -711,3 +725,21 @@ def test_env_var_names_match_the_docs(doc):
     text = Path(doc).read_text(encoding="utf-8")
     missing = [name for name in deploy._SYNCED_ENV_VARS if name not in text]
     assert not missing, f"{doc} does not mention: {missing}"
+
+
+def test_main_rejects_an_unknown_flag(monkeypatch, capsys):
+    """A typo must not silently degrade to a checks-only run that reports
+    success for a sync that never happened."""
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    with pytest.raises(SystemExit) as exc:
+        deploy.main(["--sync-en"])
+    assert exc.value.code == 2
+    assert "--sync-en" in capsys.readouterr().err
+
+
+def test_main_supports_help(capsys):
+    with pytest.raises(SystemExit) as exc:
+        deploy.main(["--help"])
+    assert exc.value.code == 0
+    assert "--sync-env" in capsys.readouterr().out

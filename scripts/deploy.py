@@ -16,6 +16,7 @@ explanations live in README.md.
 
 from __future__ import annotations
 
+import argparse
 import base64
 import os
 import sys
@@ -458,8 +459,26 @@ def run_checks(repo: str, base: str) -> list[CheckResult]:
     ]
 
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="deploy",
+        allow_abbrev=False,
+        description=(
+            "Verify the hosted deployment: configuration, GitHub App installation "
+            "and webhook, health endpoint, database, Render service, and keep-warm "
+            "pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
+        ),
+    )
+    parser.add_argument(
+        "--sync-env",
+        action="store_true",
+        help="push local config to the Render service, deploy, and wait for live",
+    )
+    return parser
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     repo = settings.github_target_repo
     base = resolve_base_url()
     if not repo or not base:
@@ -469,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    if "--sync-env" in args:
+    if args.sync_env:
         exit_code = sync_env()
         if exit_code != 0:
             return exit_code
