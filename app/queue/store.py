@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS tickets (
     notice_not_before  TEXT,
     UNIQUE (repo_full_name, pr_number)
 );
+CREATE TABLE IF NOT EXISTS runtime_config (
+    id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    provider   TEXT,
+    updated_at TEXT NOT NULL
+);
 """
 
 _pool: ConnectionPool | None = None
@@ -382,3 +387,29 @@ def get_ticket(ticket_id: int) -> Ticket | None:
     with _require_pool().connection() as conn:
         row = conn.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,)).fetchone()
         return _row_to_ticket(row) if row else None
+
+
+def get_provider_override() -> str | None:
+    """The provider override in force, or None when unset.
+
+    Synchronous like every other store function -- async callers use
+    asyncio.to_thread.
+    """
+    with _require_pool().connection() as conn:
+        row = conn.execute("SELECT provider FROM runtime_config WHERE id = 1").fetchone()
+    return (row or {}).get("provider") or None
+
+
+def set_provider_override(provider: str | None, now: str) -> None:
+    """Set the override, or clear it with provider=None.
+
+    Upserts the singleton row: CHECK (id = 1) makes a second row impossible, so
+    there is never ambiguity about which row wins.
+    """
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO runtime_config (id, provider, updated_at) VALUES (1, %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, "
+            "updated_at = EXCLUDED.updated_at",
+            (provider, now),
+        )
