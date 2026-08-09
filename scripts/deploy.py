@@ -56,12 +56,18 @@ _ALWAYS_SYNCED = (
     "GITHUB_WEBHOOK_SECRET",
 )
 _DEPLOY_POLL_SECONDS = 10
-_DEPLOY_TIMEOUT_SECONDS = 300
+# A cold Docker build with a full dependency install runs well past five
+# minutes; the measured ~60s redeploys had warm layers. Too short a timeout
+# makes the FIRST deploy the most likely to report a false failure.
+_DEPLOY_TIMEOUT_SECONDS = 900
+_DEPLOY_IN_FLIGHT_STATUSES = {"created", "queued", "build_in_progress",
+                              "update_in_progress", "pre_deploy_in_progress"}
+# "canceled" is deliberately absent: it is what a superseding deploy looks
+# like, not a build failure, and is reported separately.
 _DEPLOY_FAILED_STATUSES = {
     "build_failed",
     "update_failed",
     "pre_deploy_failed",
-    "canceled",
     "deactivated",
 }
 
@@ -434,6 +440,35 @@ def _wanted_env() -> dict[str, str]:
     return wanted
 
 
+def _wait_for_in_flight(service_id: str) -> None:
+    """Block until no deploy is building.
+
+    Waits rather than adopts: a deploy that started before the env-var push may
+    have resolved its environment already, so adopting it could report "deploy
+    live" for a container still running the old config.
+    """
+    deadline = time.monotonic() + _DEPLOY_TIMEOUT_SECONDS
+    announced = False
+    while time.monotonic() < deadline:
+        resp = httpx.get(
+            f"{_RENDER_API}/services/{service_id}/deploys",
+            params={"limit": 1},
+            headers=_render_headers(),
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        deploys = resp.json()
+        if not deploys:
+            return
+        deploy_obj = _unwrap(deploys[0], "deploy")
+        if deploy_obj.get("status") not in _DEPLOY_IN_FLIGHT_STATUSES:
+            return
+        if not announced:
+            print(f"waiting for in-flight deploy {deploy_obj.get('id')} to settle")
+            announced = True
+        time.sleep(_DEPLOY_POLL_SECONDS)
+
+
 def _trigger_and_wait(service_id: str) -> int:
     """Render env-var changes do not auto-deploy, so a sync that skipped this
     would report success while the service kept serving the old values."""
@@ -447,6 +482,7 @@ def _trigger_and_wait(service_id: str) -> int:
     deploy_id = _unwrap(resp.json(), "deploy").get("id")
     print(f"deploy {deploy_id} triggered; waiting for live")
     deadline = time.monotonic() + _DEPLOY_TIMEOUT_SECONDS
+    last_status = ""
     while time.monotonic() < deadline:
         time.sleep(_DEPLOY_POLL_SECONDS)
         poll = httpx.get(
@@ -456,9 +492,19 @@ def _trigger_and_wait(service_id: str) -> int:
         )
         poll.raise_for_status()
         status = _unwrap(poll.json(), "deploy").get("status", "?")
+        if status != last_status:
+            print(f"  {status}")          # visible progress on a long build
+            last_status = status
         if status == "live":
             print("deploy live")
             return 0
+        if status == "canceled":
+            print(
+                f"deploy {deploy_id} was superseded (canceled) -- env vars WERE "
+                f"pushed and a newer deploy is running; re-run to confirm it goes live",
+                file=sys.stderr,
+            )
+            return 1
         if status in _DEPLOY_FAILED_STATUSES:
             print(f"deploy {status}", file=sys.stderr)
             return 1
@@ -538,6 +584,7 @@ def sync_env() -> int:
         if not changed:
             print("env vars already in sync; no deploy triggered")
             return 0
+        _wait_for_in_flight(service_id)
         return _trigger_and_wait(service_id)
     # deliberate: a crashed sync is "could not run"
     except Exception as exc:  # noqa: BLE001

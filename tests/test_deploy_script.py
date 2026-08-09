@@ -824,6 +824,9 @@ def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_read
         single = respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
             return_value=httpx.Response(200, json={})
         )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=[])  # nothing in flight
+        )
         respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
             return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "created"}})
         )
@@ -859,6 +862,9 @@ def test_sync_env_fails_when_the_deploy_fails(sync_ready):
         respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
             return_value=httpx.Response(200, json={})
         )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=[])  # nothing in flight
+        )
         respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
             return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}})
         )
@@ -866,6 +872,49 @@ def test_sync_env_fails_when_the_deploy_fails(sync_ready):
             return_value=httpx.Response(200, json={"deploy": {"status": "build_failed"}})
         )
         assert deploy.sync_env() == 1
+
+
+def test_canceled_is_not_treated_as_a_build_failure():
+    """Cancellation is what a superseding deploy looks like, not a failure."""
+    assert "canceled" not in deploy._DEPLOY_FAILED_STATUSES
+    assert "build_failed" in deploy._DEPLOY_FAILED_STATUSES
+
+
+def test_deploy_timeout_allows_for_a_cold_docker_build():
+    assert deploy._DEPLOY_TIMEOUT_SECONDS >= 900
+
+
+@respx.mock
+def test_trigger_and_wait_reports_a_superseded_deploy_distinctly(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_DEPLOY_POLL_SECONDS", 0)
+    respx.post("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=httpx.Response(201, json={"id": "dep-1"})
+    )
+    respx.get("https://api.render.com/v1/services/svc-1/deploys/dep-1").mock(
+        return_value=httpx.Response(200, json={"status": "canceled"})
+    )
+    code = deploy._trigger_and_wait("svc-1")
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "superseded" in err
+    assert "env vars" in err          # says what did happen, not just what failed
+
+
+@respx.mock
+def test_sync_env_waits_for_an_in_flight_deploy_before_triggering(monkeypatch):
+    """Triggering on top of a running build stacks two; waiting guarantees the
+    pushed values are in the live container."""
+    monkeypatch.setattr(deploy, "_DEPLOY_POLL_SECONDS", 0)
+    statuses = iter([
+        [{"deploy": {"id": "dep-0", "status": "build_in_progress"}}],
+        [{"deploy": {"id": "dep-0", "status": "live"}}],
+    ])
+    route = respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        side_effect=lambda request: httpx.Response(200, json=next(statuses))
+    )
+    deploy._wait_for_in_flight("svc-1")
+    assert route.call_count == 2
 
 
 def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
@@ -877,6 +926,9 @@ def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
         )
         respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
             return_value=httpx.Response(200, json={})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=[])  # nothing in flight
         )
         respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
             return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}})
