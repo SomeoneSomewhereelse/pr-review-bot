@@ -60,8 +60,13 @@ _DEPLOY_POLL_SECONDS = 10
 # minutes; the measured ~60s redeploys had warm layers. Too short a timeout
 # makes the FIRST deploy the most likely to report a false failure.
 _DEPLOY_TIMEOUT_SECONDS = 900
-_DEPLOY_IN_FLIGHT_STATUSES = {"created", "queued", "build_in_progress",
-                              "update_in_progress", "pre_deploy_in_progress"}
+_DEPLOY_IN_FLIGHT_STATUSES = {
+    "created",
+    "queued",
+    "build_in_progress",
+    "update_in_progress",
+    "pre_deploy_in_progress",
+}
 # "canceled" is deliberately absent: it is what a superseding deploy looks
 # like, not a build failure, and is reported separately.
 _DEPLOY_FAILED_STATUSES = {
@@ -70,6 +75,11 @@ _DEPLOY_FAILED_STATUSES = {
     "pre_deploy_failed",
     "deactivated",
 }
+# ~5 minutes between progress lines at the default 10s poll interval, so a
+# long in-flight wait never goes more than a few minutes without visible
+# output (SETUP.md's documented history includes a real operator mistake
+# against live infra made during an apparently-silent stretch).
+_IN_FLIGHT_PROGRESS_EVERY = 30
 
 
 @dataclass(frozen=True)
@@ -440,15 +450,23 @@ def _wanted_env() -> dict[str, str]:
     return wanted
 
 
-def _wait_for_in_flight(service_id: str) -> None:
-    """Block until no deploy is building.
+def _wait_for_in_flight(service_id: str) -> bool:
+    """Block until no deploy is building, or the timeout runs out.
 
     Waits rather than adopts: a deploy that started before the env-var push may
     have resolved its environment already, so adopting it could report "deploy
     live" for a container still running the old config.
+
+    Returns True once settled (or nothing was building), False on timeout. The
+    timeout path is deliberately a refusal, not a quiet return: a caller that
+    ignored the return value and triggered anyway would stack a second deploy
+    on one still building -- the exact collision this function exists to
+    prevent. Do not "simplify" this back to a bare return.
     """
     deadline = time.monotonic() + _DEPLOY_TIMEOUT_SECONDS
     announced = False
+    polls = 0
+    deploy_id = None
     while time.monotonic() < deadline:
         resp = httpx.get(
             f"{_RENDER_API}/services/{service_id}/deploys",
@@ -459,14 +477,24 @@ def _wait_for_in_flight(service_id: str) -> None:
         resp.raise_for_status()
         deploys = resp.json()
         if not deploys:
-            return
+            return True
         deploy_obj = _unwrap(deploys[0], "deploy")
+        deploy_id = deploy_obj.get("id")
         if deploy_obj.get("status") not in _DEPLOY_IN_FLIGHT_STATUSES:
-            return
+            return True
         if not announced:
-            print(f"waiting for in-flight deploy {deploy_obj.get('id')} to settle")
+            print(f"waiting for in-flight deploy {deploy_id} to settle")
             announced = True
+        elif polls % _IN_FLIGHT_PROGRESS_EVERY == 0:
+            print(f"  still waiting for in-flight deploy {deploy_id} to settle")
+        polls += 1
         time.sleep(_DEPLOY_POLL_SECONDS)
+    print(
+        f"timed out waiting for in-flight deploy {deploy_id} to settle -- refusing to "
+        f"stack a second deploy on top of it; re-run once it finishes",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _trigger_and_wait(service_id: str) -> int:
@@ -584,7 +612,8 @@ def sync_env() -> int:
         if not changed:
             print("env vars already in sync; no deploy triggered")
             return 0
-        _wait_for_in_flight(service_id)
+        if not _wait_for_in_flight(service_id):
+            return 1
         return _trigger_and_wait(service_id)
     # deliberate: a crashed sync is "could not run"
     except Exception as exc:  # noqa: BLE001
@@ -631,7 +660,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sync-env",
         action="store_true",
-        help="push local config to the Render service, deploy, and wait for live",
+        help=(
+            "push local config to the Render service, deploy, and wait for live "
+            "(worst case ~30 minutes: up to 900s waiting out an in-flight deploy, "
+            "then up to 900s for the newly triggered one)"
+        ),
     )
     return parser
 

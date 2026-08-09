@@ -917,6 +917,70 @@ def test_sync_env_waits_for_an_in_flight_deploy_before_triggering(monkeypatch):
     assert route.call_count == 2
 
 
+def test_sync_env_triggers_a_fresh_deploy_after_the_in_flight_one_settles(sync_ready):
+    """The real property under review: observe an in-flight deploy, wait for it
+    to settle, then issue a BRAND-NEW trigger -- never adopt the one observed.
+    If the code adopted dep-old instead, it would poll GET .../deploys/dep-old,
+    which is not mocked here, and sync_env would return 2, not 0."""
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({}))
+        )
+        respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        in_flight = iter([
+            [{"deploy": {"id": "dep-old", "status": "build_in_progress"}}],
+            [{"deploy": {"id": "dep-old", "status": "live"}}],
+        ])
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            side_effect=lambda request: httpx.Response(200, json=next(in_flight))
+        )
+        new_deploy = {"deploy": {"id": "dep-new", "status": "created"}}
+        trigger = respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json=new_deploy)
+        )
+        poll_new = respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-new").mock(
+            return_value=httpx.Response(200, json={"deploy": {"id": "dep-new", "status": "live"}})
+        )
+        assert deploy.sync_env() == 0
+        assert trigger.called
+        assert poll_new.called          # polled the NEW id, not the observed dep-old
+
+
+def test_sync_env_times_out_waiting_for_in_flight_and_refuses_to_trigger(
+    sync_ready, monkeypatch, capsys
+):
+    """The regression this fix round exists for: a timed-out wait must not
+    silently fall through into triggering a second deploy on top of one still
+    building. The assertion on the POST route's call_count is the one that
+    would have caught it."""
+    monkeypatch.setattr(deploy, "_DEPLOY_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(deploy, "_DEPLOY_POLL_SECONDS", 0)
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({}))
+        )
+        respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        stuck = [{"deploy": {"id": "dep-stuck", "status": "build_in_progress"}}]
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=stuck)
+        )
+        trigger = respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-new"}})
+        )
+        code = deploy.sync_env()
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "timed out" in err
+    assert "in-flight" in err
+    assert trigger.call_count == 0
+
+
 def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
     monkeypatch.setattr(settings, "groq_api_key", "gsk_SUPER_SECRET")
     with respx.mock:
