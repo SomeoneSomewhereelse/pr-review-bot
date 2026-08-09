@@ -14,7 +14,7 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 
 - **Backend**: FastAPI (async), managed with `uv`.
 - **GitHub**: PyGitHub with **GitHub App** auth (JWT → short-lived installation token).
-- **AI**: `LLMProvider` seam with four adapters — `vertex`/`gemini`
+- **AI**: `LLMProvider` seam with three adapters — `gemini`
   (`google-genai` SDK), `groq` (OpenAI-compatible, live primary), `github_models`
   (OpenAI-compatible via the user's GitHub account, live cross-vendor demo).
   Selected via `LLM_PROVIDER` env var.
@@ -53,6 +53,11 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 - **`gemini-flash-latest`** instead of `gemini-2.5-flash` — the brief's model is
   deprecated/removed. The alias is pinnable to a dated version via env for demo
   reproducibility.
+- **`vertex` adapter removed** — Vertex AI requires an attached payment card,
+  which the no-card constraint rules out (see SETUP.md §2), so it was never
+  live-runnable and its tests could only ever be mocked. `SPEC.md` still records
+  it as the brief's default; `cost.md` keeps the $300-trial-credit costing as
+  the evaluation record.
 
 ## Cost
 

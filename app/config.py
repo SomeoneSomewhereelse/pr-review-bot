@@ -14,15 +14,13 @@ class Settings(BaseSettings):
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
     llm_provider: str = "gemini"
-    # ``llm_model`` is consumed by the google-genai family (vertex/gemini) only.
+    # ``llm_model`` is consumed by the gemini (google-genai) provider only.
     # Groq is a different model family (Llama, via a different vendor), so it
     # gets its own var — a single shared LLM_MODEL became ambiguous the moment
     # a second provider family entered the picture (see CLAUDE.md task 8 / PR
     # report for the reasoning).
     llm_model: str = "gemini-flash-latest"
 
-    google_cloud_project: str = ""
-    google_cloud_location: str = "us-central1"
     gemini_api_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"

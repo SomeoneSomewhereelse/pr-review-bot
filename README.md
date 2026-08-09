@@ -204,9 +204,11 @@ the full history of runs and timings.
 
 ## Known limitations (deviations from `SPEC.md`, all deliberate)
 
-- **Vertex AI**: implemented per spec, covered by mocked tests only — **never
-  live-verified**. Requires GCP billing, which this project's setup
-  deliberately avoids.
+- **Vertex AI**: evaluated and **removed**. It requires an attached payment
+  card, which this project's no-card constraint rules out, so it was never
+  live-runnable here. The adapter existed under mocked tests only and was
+  deleted rather than carried as a fourth code path no test could exercise for
+  real. `SPEC.md` still records it as the brief's default provider.
 - **Gemini (AI-Studio)**: implemented and was live-verified initially, but the
   API key's underlying Google account got an automated **Trust & Safety
   access flag** (`403 PERMISSION_DENIED`) partway through development —

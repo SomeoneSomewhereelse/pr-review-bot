@@ -42,8 +42,9 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
 
 - **Deviation from the original plan (GCP/Vertex):** Vertex AI requires a
   billing account (card) to enable. The user declined to add one, so no GCP
-  project was created and Vertex is **not configured** (code path exists per
-  SPEC.md's architecture, covered by mocked tests only, untested live).
+  project was created and Vertex is **not configured** (the adapter was
+  implemented, then removed — see `CLAUDE.md`'s "Substitutions from the
+  brief").
 - **Deviation from the original plan (Gemini):** initially set up with a free
   AI-Studio key (`GEMINI_API_KEY`) and `LLM_PROVIDER=gemini`, implemented at
   build step 4. Live verification then failed: `403 PERMISSION_DENIED — Your

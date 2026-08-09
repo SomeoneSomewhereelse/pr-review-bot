@@ -16,7 +16,6 @@ from __future__ import annotations
 # quota tied to the user's GitHub account, not a metered pay-per-token API
 # (no billing relationship exists to estimate a real per-token rate from).
 _RATES: dict[tuple[str, str], tuple[float, float]] = {
-    ("vertex", "gemini-flash-latest"): (0.30, 2.50),
     ("gemini", "gemini-flash-latest"): (0.30, 2.50),
     ("groq", "llama-3.3-70b-versatile"): (0.59, 0.79),
     ("github_models", "openai/gpt-4o-mini"): (0.0, 0.0),

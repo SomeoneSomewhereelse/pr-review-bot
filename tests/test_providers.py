@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.providers import pricing
 from app.providers.factory import get_provider
-from app.providers.google_genai import GeminiProvider, VertexProvider
+from app.providers.google_genai import GeminiProvider
 from app.providers.validate import validate_and_repair
 
 
@@ -58,33 +58,6 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
     fake_generate.assert_awaited_once()
     _, kwargs = fake_generate.call_args
     assert kwargs["model"] == settings.llm_model
-
-
-@pytest.mark.asyncio
-async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
-    captured_client_kwargs = {}
-
-    def fake_client_ctor(**kwargs):
-        captured_client_kwargs.update(kwargs)
-        return SimpleNamespace(
-            aio=SimpleNamespace(
-                models=SimpleNamespace(
-                    generate_content=AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"}), 3, 2))
-                )
-            )
-        )
-
-    monkeypatch.setattr("app.providers.google_genai.genai.Client", fake_client_ctor)
-    monkeypatch.setattr(settings, "google_cloud_project", "my-project")
-    monkeypatch.setattr(settings, "google_cloud_location", "us-central1")
-
-    provider = VertexProvider()
-    result = await provider.complete("system prompt", "user prompt", Greeting)
-
-    assert result.parsed == Greeting(message="hi")
-    assert captured_client_kwargs["vertexai"] is True
-    assert captured_client_kwargs["project"] == "my-project"
-    assert captured_client_kwargs["location"] == "us-central1"
 
 
 @pytest.mark.asyncio
@@ -131,14 +104,14 @@ def test_factory_selects_gemini(monkeypatch):
     assert isinstance(get_provider(), GeminiProvider)
 
 
-def test_factory_selects_vertex(monkeypatch):
-    # Vertex client construction resolves ADC when project/location are
-    # unset, so give it explicit values (as a real deployment would via env
-    # vars) rather than exercising ADC discovery in a unit test.
+def test_factory_rejects_retired_vertex_provider(monkeypatch):
+    """Vertex was evaluated and removed (requires a payment card). A stale
+    LLM_PROVIDER=vertex must fail loudly, naming the accepted values."""
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "google_cloud_project", "my-project")
-    monkeypatch.setattr(settings, "google_cloud_location", "us-central1")
-    assert isinstance(get_provider(), VertexProvider)
+    with pytest.raises(ValueError) as exc:
+        get_provider()
+    assert "vertex" in str(exc.value)
+    assert "'gemini', 'groq', or 'github_models'" in str(exc.value)
 
 
 def test_factory_selects_groq(monkeypatch):

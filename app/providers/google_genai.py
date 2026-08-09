@@ -1,19 +1,16 @@
-"""Two ``google-genai`` client adapters: Vertex and Gemini (AI-Studio).
+"""The ``google-genai`` client adapter for Gemini (AI-Studio).
 
-Per SPEC.md section 4, these are otherwise identical calls against one SDK —
-only client construction differs (``vertexai=True, project=..., location=...``
-vs ``api_key=...``). Both implement ``LLMProvider.complete()``: call
-``client.aio.models.generate_content(...)`` with a JSON-schema response
-config, then parse+validate the raw text against ``schema`` locally (rather
-than trusting the SDK's own ``response.parsed`` field) so that
-``validate.py``'s repair-retry logic has one single, provider-agnostic
-notion of "validation failed" that doesn't depend on SDK-internal behavior.
+Per SPEC.md section 4 this calls ``client.aio.models.generate_content(...)``
+with a JSON-schema response config, then parses+validates the raw text against
+``schema`` locally (rather than trusting the SDK's own ``response.parsed``
+field) so that ``validate.py``'s repair-retry logic has one single,
+provider-agnostic notion of "validation failed" that doesn't depend on
+SDK-internal behavior.
 
-Deviation from SPEC.md (see CLAUDE.md / task brief): in this environment
-``vertex`` is implemented per-spec but not live-runnable (no GCP project, no
-billing, no ADC) — it is covered by mocked tests only. ``gemini`` is the
-actually-live provider, verified for real in
-``scripts/manual_verify_step4.py``.
+Deviation from SPEC.md (see CLAUDE.md's "Substitutions from the brief"): the
+``vertex`` adapter that once lived here was removed. Vertex AI requires an
+attached payment card, which this project's no-card constraint rules out, so it
+was never live-runnable here and could only ever be covered by mocked tests.
 """
 
 from __future__ import annotations
@@ -70,24 +67,6 @@ async def _complete(
         tokens_out=tokens_out,
         parsed=_parse(raw_text, schema),
     )
-
-
-class VertexProvider:
-    """``vertex`` (SPEC's default). Not live-verified in this environment —
-    no GCP project/billing/ADC configured — but implemented per SPEC/SDK and
-    covered by mocked tests.
-    """
-
-    def __init__(self) -> None:
-        self._client = genai.Client(
-            vertexai=True,
-            project=settings.google_cloud_project,
-            location=settings.google_cloud_location,
-        )
-        self._model = settings.llm_model
-
-    async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        return await _complete(self._client, self._model, system, user, schema)
 
 
 class GeminiProvider:
