@@ -31,6 +31,7 @@ from app.formatting import (
     format_schedule_notice,
 )
 from app.orchestrator import ReviewRateLimited, attempt_review
+from app.providers.active import active_provider
 from app.queue import store
 
 logger = logging.getLogger(__name__)
@@ -132,10 +133,11 @@ async def process_next_due(now: datetime) -> StepResult:
         except Exception:  # noqa: BLE001 - a stale note is cosmetic; must not block the review
             logger.exception("failed to clear schedule notice for ticket %s", ticket.id)
 
-    # Gate on the CURRENT provider (settings.llm_provider), not the provider
-    # recorded on the ticket at enqueue time — attempt_review always runs
-    # against whatever provider is active now, so that's what can be blocked.
-    provider = settings.llm_provider
+    # Gate on the ACTIVE provider (the DB override when set, else the
+    # env-configured default), not the provider recorded on the ticket at
+    # enqueue time — attempt_review always runs against whatever provider is
+    # active now, so that's what can be blocked.
+    provider = active_provider()
     blocked = _blocked_until.get(provider)
     if blocked is not None and now < blocked:
         await asyncio.to_thread(

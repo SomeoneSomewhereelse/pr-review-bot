@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, Response
 
 from app.config import settings
 from app.hmac_verify import verify_signature
+from app.providers.active import active_provider
 from app.queue import store
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ async def _enqueue_from_payload(payload: dict) -> None:
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         head_sha=head_sha,
-        provider=settings.llm_provider,
+        provider=active_provider(),
         now=datetime.now(timezone.utc).isoformat(),
     )
 

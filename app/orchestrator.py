@@ -22,6 +22,7 @@ from app import github_app
 from app.config import settings
 from app.diff_utils import annotate_and_cap
 from app.formatting import format_comment
+from app.providers.active import active_provider
 from app.providers.base import RateLimited
 from app.providers.pricing import estimate_cost_usd
 from app.specialists.performance import run_performance_specialist
@@ -40,9 +41,10 @@ def _active_model() -> str:
     why a single shared var became ambiguous once more than one provider
     family entered the picture).
     """
-    if settings.llm_provider == "groq":
+    provider = active_provider()
+    if provider == "groq":
         return settings.groq_model
-    if settings.llm_provider == "github_models":
+    if provider == "github_models":
         return settings.github_models_model
     return settings.llm_model
 
@@ -99,7 +101,7 @@ async def attempt_review(
     total_tokens_out = sum(r.tokens_out for r in results)
     total_elapsed_ms = int((time.monotonic() - started) * 1000)
 
-    provider = settings.llm_provider
+    provider = active_provider()
     model = _active_model()
     est_cost_usd = estimate_cost_usd(provider, model, total_tokens_in, total_tokens_out)
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from app.config import settings
+from app.providers import active
 from app.queue import store
 
 T0 = "2026-01-01T12:00:00+00:00"
@@ -69,3 +71,28 @@ def test_an_empty_provider_string_reads_as_no_override(db_exec):
 
 def test_override_defaults_to_none():
     assert store.get_provider_override() is None
+
+
+@pytest.fixture(autouse=True)
+def _clean_cache():
+    active.reset_override_cache()
+    yield
+    active.reset_override_cache()
+
+
+def test_active_provider_falls_back_to_the_env_value(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    assert active.active_provider() == "gemini"
+
+
+def test_active_provider_prefers_the_cached_override(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    active.set_override_cache("groq")
+    assert active.active_provider() == "groq"
+
+
+def test_clearing_the_cache_returns_to_the_env_value(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    active.set_override_cache("groq")
+    active.set_override_cache(None)
+    assert active.active_provider() == "gemini"

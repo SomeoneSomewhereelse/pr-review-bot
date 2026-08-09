@@ -6,7 +6,7 @@ which class to instantiate.
 
 from __future__ import annotations
 
-from app.config import settings
+from app.providers.active import active_provider
 from app.providers.base import LLMProvider
 from app.providers.github_models import GitHubModelsProvider
 from app.providers.google_genai import GeminiProvider
@@ -14,7 +14,7 @@ from app.providers.groq import GroqProvider
 
 
 def get_provider() -> LLMProvider:
-    provider = settings.llm_provider
+    provider = active_provider()
 
     if provider == "gemini":
         return GeminiProvider()
