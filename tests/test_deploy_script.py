@@ -570,13 +570,17 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
 
 
 def _stub_all_checks(monkeypatch, statuses):
-    """Replace all six checks with constant results, in report order."""
-    names = ["config", "github-app", "health", "database", "render-service", "uptime-pinger"]
+    """Replace all seven checks with constant results, in report order."""
+    names = [
+        "config", "github-app", "health", "database", "provider",
+        "render-service", "uptime-pinger",
+    ]
     fns = [
         "check_config",
         "check_installation_and_webhook",
         "check_health_endpoint",
         "check_database",
+        "check_provider",
         "check_render_service",
         "check_uptime_pinger",
     ]
@@ -593,13 +597,15 @@ def runnable(monkeypatch):
 
 
 def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS"] * 4 + ["SKIPPED"] * 2)
+    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 2)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
 
 def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS", "FAIL", "PASS", "PASS", "SKIPPED", "SKIPPED"])
+    _stub_all_checks(
+        monkeypatch, ["PASS", "FAIL", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"]
+    )
     assert deploy.main([]) == 1
     assert "1 failed" in capsys.readouterr().out
 
@@ -609,7 +615,7 @@ def test_main_with_sync_env_falls_through_to_the_checklist_on_success(
 ):
     """Spec section 8 step 7: a successful sync must not skip the post-sync
     checklist -- it is the thing that proves the sync actually took."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 4 + ["SKIPPED"] * 2)
+    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 2)
     monkeypatch.setattr(deploy, "sync_env", lambda: 0)
     assert deploy.main(["--sync-env"]) == 0
     assert "all checks passed" in capsys.readouterr().out
@@ -621,7 +627,7 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     """A non-zero sync_env() must short-circuit main() before run_checks/
     render_report ever run -- printing the table after a failed sync would
     misleadingly suggest the sync itself is fine."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 4 + ["SKIPPED"] * 2)
+    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 2)
     monkeypatch.setattr(deploy, "sync_env", lambda: 2)
     assert deploy.main(["--sync-env"]) == 2
     assert "all checks passed" not in capsys.readouterr().out
@@ -640,24 +646,25 @@ def test_main_returns_two_without_a_base_url(monkeypatch):
     assert deploy.main([]) == 2
 
 
-def test_run_checks_reports_all_six_in_order(runnable, monkeypatch):
-    _stub_all_checks(monkeypatch, ["PASS"] * 6)
+def test_run_checks_reports_all_seven_in_order(runnable, monkeypatch):
+    _stub_all_checks(monkeypatch, ["PASS"] * 7)
     results = deploy.run_checks("owner/repo", BASE)
     assert [r.name for r in results] == [
-        "config", "github-app", "health", "database", "render-service", "uptime-pinger"
+        "config", "github-app", "health", "database", "provider",
+        "render-service", "uptime-pinger",
     ]
 
 
 def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, monkeypatch):
     """A complete table is the deliverable; one broken check must not deprive
-    the operator of the other five diagnoses (spec section 7.3)."""
+    the operator of the other six diagnoses (spec section 7.3)."""
     def _boom():
         raise ValueError("unexpected")
 
-    _stub_all_checks(monkeypatch, ["PASS"] * 6)
+    _stub_all_checks(monkeypatch, ["PASS"] * 7)
     monkeypatch.setattr(deploy, "check_database", _boom)
     results = deploy.run_checks("owner/repo", BASE)
-    assert len(results) == 6
+    assert len(results) == 7
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
     assert "ValueError" in database.detail
@@ -933,3 +940,90 @@ def test_check_render_service_skips_rather_than_calling_out(monkeypatch):
     it can never reach api.render.com from a default test run."""
     result = deploy.check_render_service()
     assert result.status == "SKIPPED"
+
+
+@pytest.fixture
+def override_seam(complete_config, monkeypatch):
+    """check_provider needs a DATABASE_URL to resolve at all (it SKIPs without
+    one), and complete_config does not set it. Stubs the store seam so these
+    stay offline."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.store, "init_pool", lambda: None)
+    return monkeypatch
+
+
+def test_check_provider_reports_the_env_value_when_no_override(override_seam):
+    override_seam.setattr(deploy.store, "get_provider_override", lambda: None)
+    result = deploy.check_provider()
+    assert result.status == "PASS"
+    assert "groq" in result.detail
+    assert "env" in result.detail
+
+
+def test_check_provider_reports_a_satisfied_override(override_seam, monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    monkeypatch.setattr(deploy.store, "get_provider_override", lambda: "groq")
+    result = deploy.check_provider()
+    assert result.status == "PASS"
+    assert "groq" in result.detail
+    assert "override" in result.detail
+
+
+def test_check_provider_fails_when_the_overrides_credential_is_missing(
+    override_seam, monkeypatch
+):
+    """Green rows on a service failing every review is the exact failure this
+    check exists to prevent."""
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
+    monkeypatch.setattr(settings, "groq_api_key", "")
+    monkeypatch.setattr(deploy.store, "get_provider_override", lambda: "groq")
+    result = deploy.check_provider()
+    assert result.status == "FAIL"
+    assert "GROQ_API_KEY" in result.detail
+
+
+def test_check_provider_skips_without_a_database_url(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "")
+    assert deploy.check_provider().status == "SKIPPED"
+
+
+def test_run_checks_includes_the_provider_row(monkeypatch):
+    monkeypatch.setattr(deploy, "check_provider",
+                        lambda: deploy.CheckResult("provider", "PASS", ""))
+    # fn -> the row name it reports as, mirroring _stub_all_checks above.
+    for fn, row in (
+        ("check_config", "config"),
+        ("check_installation_and_webhook", "github-app"),
+        ("check_health_endpoint", "health"),
+        ("check_database", "database"),
+        ("check_render_service", "render-service"),
+        ("check_uptime_pinger", "uptime-pinger"),
+    ):
+        monkeypatch.setattr(deploy, fn,
+                            lambda *a, _n=row: deploy.CheckResult(_n, "PASS", ""))
+    names = [r.name for r in deploy.run_checks("owner/repo", BASE)]
+    assert "provider" in names
+    assert names.index("provider") > names.index("database")
+
+
+def test_sync_env_refuses_when_an_override_would_mask_the_push(
+    complete_config, monkeypatch, capsys
+):
+    """--sync-env would otherwise report a provider change that silently does
+    nothing, because the override wins at runtime."""
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy.store, "get_provider_override", lambda: "groq")
+    monkeypatch.setattr(deploy.store, "init_pool", lambda: None)
+    called = []
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
+    code = deploy.sync_env()
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "groq" in err and "set_provider" in err
+    assert called == []

@@ -1,6 +1,6 @@
 """Deploy verification CLI for the hosted Render + Supabase deployment.
 
-Runs six independent checks and prints one aligned table. Every check runs
+Runs seven independent checks and prints one aligned table. Every check runs
 regardless of earlier failures, so a single run surfaces every problem rather
 than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
 CLI could not run at all.
@@ -32,6 +32,7 @@ from github import GithubException
 
 from app import github_app
 from app.config import settings
+from app.queue import store
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
@@ -253,6 +254,41 @@ def check_database() -> CheckResult:
     return CheckResult(name, "PASS", "connected; tickets present")
 
 
+def _resolved_provider() -> tuple[str, str | None]:
+    """(active provider, override or None). The override wins at runtime, so
+    the CLI must resolve exactly as the dispatcher does."""
+    store.init_pool()
+    override = store.get_provider_override()
+    return (override or settings.llm_provider), override
+
+
+def check_provider() -> CheckResult:
+    """Which provider will actually run, and whether its credential exists.
+
+    Without this, a DB override makes every other check's provider assumption
+    unverifiable: the service could run a provider whose key was never checked.
+    """
+    name = "provider"
+    if not settings.database_url:
+        return CheckResult(name, "SKIPPED", "set DATABASE_URL to resolve the override")
+    try:
+        provider, override = _resolved_provider()
+    # deliberate: a DB problem is database's row to report, not ours
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name, "SKIPPED", f"could not read the override ({type(exc).__name__})")
+    source = f"DB override; env={settings.llm_provider}" if override else "env"
+    entry = _PROVIDERS.get(provider)
+    if entry is None:
+        accepted = ", ".join(sorted(_PROVIDERS))
+        return CheckResult(
+            name, "FAIL", f"{provider} ({source}) is not supported (expected: {accepted})"
+        )
+    credential = entry[0]
+    if not getattr(settings, credential.lower(), ""):
+        return CheckResult(name, "FAIL", f"{provider} ({source}) -- {credential} missing")
+    return CheckResult(name, "PASS", f"{provider} ({source})")
+
+
 def _render_headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {settings.render_api_key}",
@@ -436,6 +472,21 @@ def sync_env() -> int:
             file=sys.stderr,
         )
         return 2
+    if settings.database_url:
+        try:
+            store.init_pool()
+            override = store.get_provider_override()
+        except Exception:  # noqa: BLE001
+            # deliberate: the provider check reports DB trouble
+            override = None
+        if override and override != settings.llm_provider:
+            print(
+                f"refusing to sync: a DB provider override ({override}) is active and "
+                f"wins over the LLM_PROVIDER={settings.llm_provider} being pushed. "
+                f"Clear it first: uv run python scripts/set_provider.py --clear",
+                file=sys.stderr,
+            )
+            return 2
     wanted = _wanted_env()
     empty = sorted(key for key, value in wanted.items() if not value)
     if empty:
@@ -493,13 +544,14 @@ def _safe(name: str, fn, *args) -> CheckResult:
 
 
 def run_checks(repo: str, base: str) -> list[CheckResult]:
-    """All six, cheapest and most foundational first, so a misconfiguration is
-    reported before the checks that would fail as a consequence of it."""
+    """All seven, cheapest and most foundational first, so a misconfiguration
+    is reported before the checks that would fail as a consequence of it."""
     return [
         _safe("config", check_config),
         _safe("github-app", check_installation_and_webhook, repo, base),
         _safe("health", check_health_endpoint, base),
         _safe("database", check_database),
+        _safe("provider", check_provider),
         _safe("render-service", check_render_service),
         _safe("uptime-pinger", check_uptime_pinger, base),
     ]
@@ -514,8 +566,8 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
         description=(
             "Verify the hosted deployment: configuration, GitHub App installation "
-            "and webhook, health endpoint, database, Render service, and keep-warm "
-            "pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
+            "and webhook, health endpoint, database, active provider, Render service, "
+            "and keep-warm pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
         ),
     )
     parser.add_argument(
