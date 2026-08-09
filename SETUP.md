@@ -323,13 +323,19 @@ field (the app code will decode it at startup).
    always pushes `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
    `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, and `LLM_PROVIDER`, plus the
    **selected provider's** credential and model var — for example
-   `LLM_PROVIDER=groq` pushes `GROQ_API_KEY` and `GROQ_MODEL`, and leaves
-   `GEMINI_API_KEY`/`LLM_MODEL` and `GITHUB_MODELS_TOKEN`/`GITHUB_MODELS_MODEL`
-   alone unless one of those happens to have a local value too (pushed
-   opportunistically, never required). It refuses to start (exit 2) if any
-   wanted value is empty locally, so a blank `.env` entry can never overwrite
-   a working secret on the service; only changed variables are pushed, and if
-   nothing differs no deploy is triggered.
+   `LLM_PROVIDER=groq` pushes `GROQ_API_KEY` and `GROQ_MODEL`. Beyond that,
+   only a **credential** belonging to a different provider is ever pushed
+   opportunistically — if `GEMINI_API_KEY` or `GITHUB_MODELS_TOKEN` happens to
+   have a local value, it goes along even though `groq` is selected, so a
+   later dashboard-side provider switch has something to work with. Their
+   **model vars** do not get the same treatment: `LLM_MODEL` and
+   `GITHUB_MODELS_MODEL` are pushed only when that provider is the one
+   selected. A local `LLM_MODEL` sitting next to `LLM_PROVIDER=groq` is not
+   enough to have it pushed — `--sync-env` never sends a non-selected
+   provider's model var, regardless of what's set locally. It refuses to
+   start (exit 2) if any wanted value is empty locally, so a blank `.env`
+   entry can never overwrite a working secret on the service; only changed
+   variables are pushed, and if nothing differs no deploy is triggered.
 
    If a DB override is active and disagrees with the `LLM_PROVIDER` you're
    about to push, `--sync-env` refuses (exit 2) — pushing would be pointless,
