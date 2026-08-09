@@ -743,3 +743,17 @@ def test_main_supports_help(capsys):
         deploy.main(["--help"])
     assert exc.value.code == 0
     assert "--sync-env" in capsys.readouterr().out
+
+
+def test_operator_api_keys_are_blank_by_default():
+    """A test that forgets to monkeypatch these must hit no live API. Task 2
+    overwrote a live Render env var because this guard did not exist."""
+    assert settings.render_api_key == ""
+    assert settings.uptimerobot_api_key == ""
+
+
+def test_check_render_service_skips_rather_than_calling_out(monkeypatch):
+    """With the keys quarantined, the Render check degrades to SKIPPED --
+    it can never reach api.render.com from a default test run."""
+    result = deploy.check_render_service()
+    assert result.status == "SKIPPED"

@@ -91,3 +91,28 @@ def db_query(db_url):
             return conn.execute(sql, params).fetchall()
 
     return _query
+
+
+# Operator-tooling credentials are read only by scripts/deploy.py, and they
+# point at REAL infrastructure. A test that forgets to monkeypatch them runs
+# against production: during this plan's Task 2 exactly that happened, and a
+# live Render service had GITHUB_TARGET_REPO overwritten with a dummy value.
+# Same reasoning as the DATABASE_URL guard above -- default to inert, and make
+# reaching a live API something a test has to ask for by name.
+_LIVE_OPERATOR_KEYS = ("render_api_key", "uptimerobot_api_key")
+
+
+@pytest.fixture(autouse=True)
+def _quarantine_operator_apis(request, monkeypatch):
+    if "live_operator_apis_allowed" in request.fixturenames:
+        return
+    for name in _LIVE_OPERATOR_KEYS:
+        monkeypatch.setattr(settings, name, "")
+
+
+@pytest.fixture
+def live_operator_apis_allowed():
+    """Opt out of the quarantine. Requesting this fixture is a deliberate
+    statement that the test mocks its own transport (respx) or genuinely
+    intends a live call."""
+    return True
