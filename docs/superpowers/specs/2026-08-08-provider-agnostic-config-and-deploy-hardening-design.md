@@ -30,36 +30,39 @@ failure, and a 300s timeout is too short for a cold Docker build.
 
 ## 2. Decision 1 — one provider table, three consumers
 
-`.env.example` already expresses the intended contract: all four providers
+`.env.example` already expresses the intended contract: every supported provider
 listed, each with its own credential and model variable, all empty, and
 `LLM_PROVIDER` selecting one. `--sync-env` and `render.yaml` are the two places
 that break it.
 
 Today three planes disagree about what a provider is:
 
-| plane | providers known | model vars |
+| plane | credentials known | model vars |
 | --- | --- | --- |
-| `.env.example` | 4 — vertex, gemini, groq, github_models | all 4 |
-| `_PROVIDER_KEYS` (`scripts/deploy.py:93`) | 3 — vertex absent | none |
-| `render.yaml` | 2 credentials; `LLM_PROVIDER` hardcoded to `groq` | none |
+| `.env.example` | all 3 (post-§2.4) | all 3 |
+| `_PROVIDER_KEYS` (`scripts/deploy.py:93`) | all 3 | none |
+| `render.yaml` | 2 — `GEMINI_API_KEY` absent; `LLM_PROVIDER` hardcoded to `groq` | none |
 
-Replace `_PROVIDER_KEYS` with a single table:
+Replace `_PROVIDER_KEYS` with a single table carrying both halves:
 
 ```python
 # provider -> (credential env var, model env var)
 _PROVIDERS = {
-    "vertex":        ("GOOGLE_CLOUD_PROJECT", "LLM_MODEL"),
-    "gemini":        ("GEMINI_API_KEY",       "LLM_MODEL"),
-    "groq":          ("GROQ_API_KEY",         "GROQ_MODEL"),
-    "github_models": ("GITHUB_MODELS_TOKEN",  "GITHUB_MODELS_MODEL"),
+    "gemini":        ("GEMINI_API_KEY",      "LLM_MODEL"),
+    "groq":          ("GROQ_API_KEY",        "GROQ_MODEL"),
+    "github_models": ("GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL"),
 }
 ```
 
+This is the one table `check_config`, `--sync-env`, and `set_provider.py` all
+read, so a provider cannot be known to one and unknown to another.
+
 ### 2.1 `check_config`
 
-Requires the selected provider's credential, vertex included. Today
-`_PROVIDER_KEYS.get("vertex")` returns `None`, so a vertex configuration
-requires nothing and passes with nothing verified.
+Requires the selected provider's credential. An `LLM_PROVIDER` value absent from
+`_PROVIDERS` is itself a FAIL, naming the accepted values — today an
+unrecognized provider contributes no requirement and passes with nothing
+verified, which after §2.4 includes the now-removed `vertex`.
 
 `check_config` validates the **environment-configured** provider even when a DB
 override (§3) is active and working. This is intentional, not an oversight to be
@@ -90,14 +93,7 @@ becomes unnecessary and is deleted.
 so clearing a credential locally does not remove it from the service. Documented,
 not fixed.
 
-### 2.3 vertex and `--sync-env`
-
-`--sync-env` refuses when the selected provider is `vertex`, with a message
-stating why: vertex authenticates through ADC / service-account credentials that
-cannot be pushed as a plain environment variable. Checked but not syncable —
-stated rather than half-implemented.
-
-### 2.4 `render.yaml`
+### 2.3 `render.yaml`
 
 Every provider credential and model variable is declared `sync: false`, and
 `LLM_PROVIDER` changes from `value: groq` to `sync: false`.
@@ -106,6 +102,53 @@ Every provider credential and model variable is declared `sync: false`, and
 while every other is `sync: false`. That makes two writers for one key, and the
 blueprint is the one that wins on a re-sync. `sync: false` means "declared, the
 operator supplies it" — exactly the opt-in shape wanted.
+
+### 2.4 Retire `vertex` from code and configuration
+
+Vertex AI was evaluated and **rejected**: it requires an attached payment card,
+violating the project's no-card constraint. It was never live-runnable here — no
+GCP project, no billing, no ADC — and its adapter exists only under mocked
+tests. Carrying a fourth provider through the table above, the sync set, the
+override validation, and `render.yaml` costs real complexity for a path that
+cannot be exercised.
+
+**Removed from code and configuration:**
+
+| file | change |
+| --- | --- |
+| `app/providers/google_genai.py` | delete `VertexProvider`; module docstring keeps one sentence on why it is gone. `_complete` and `GeminiProvider` are untouched — they share the SDK, not the client construction |
+| `app/providers/factory.py` | delete the `vertex` branch and its import; update the `ValueError` message's accepted-values list |
+| `app/providers/pricing.py:19` | delete the `("vertex", "gemini-flash-latest")` rate-table entry |
+| `app/config.py:24-25` | delete `google_cloud_project` and `google_cloud_location` |
+| `app/config.py:17`, `app/orchestrator.py:39` | `llm_model` comments drop "the google-genai family (vertex/gemini)" for gemini alone |
+| `.env.example:26,29-31,47` | delete `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_LOCATION` and the vertex stanza; `LLM_PROVIDER`'s accepted-values comment loses `vertex` |
+| `tests/test_providers.py:64,134` | delete `test_vertex_provider_parses_valid_structured_output` and `test_factory_selects_vertex`; add a test that `get_provider()` rejects `"vertex"` with the accepted-values message, so the retirement is asserted rather than merely absent |
+
+`render.yaml` needs no vertex change — it never declared the GCP variables.
+
+**Documentation keeps the evaluation and the rejection.** Two claims must be
+reworded, because they currently defend the gap by pointing at code that will no
+longer exist:
+
+- `README.md:207` — "implemented per spec, covered by mocked tests only" becomes
+  implemented, then removed, with the no-card reason.
+- `SETUP.md:43-45` — "code path exists per spec" becomes the same.
+
+Everything else stays as written:
+
+- `SPEC.md:15,167,78` still name Vertex the **default** provider and describe the
+  two-client module. That is the brief's design; the deviation is recorded where
+  deviations already live — `CLAUDE.md`'s "Substitutions from the brief" section
+  gains the retirement alongside the existing SDK and model-alias entries.
+- `cost.md:46`'s $300-trial-credit line stays intact as part of the evaluation
+  record, marked as the option that was costed and declined.
+
+**Consequence to accept deliberately:** this converts the project's position on
+Vertex from "implemented per spec but never run" to "implemented, evaluated,
+removed for a stated constraint." That is a visible change in what the codebase
+demonstrates against a brief that names Vertex as default. It is the intended
+trade — a documented rejection with reasoning, rather than a fourth code path
+that no test can ever exercise for real.
 
 ## 3. Decision 1b — DB-backed provider override
 
@@ -173,10 +216,9 @@ raises must be caught and logged, never allowed to abort a review.
 
 ### 3.4 `scripts/set_provider.py`
 
-A plain CLI: `uv run python scripts/set_provider.py groq`, and `--clear`. A
-slash command may wrap it but holds no logic — the same split as `deploy.py` and
-`.claude/commands/deploy.md`. A demo that hard-depends on Claude to show
-provider-agnosticism cannot be run without Claude.
+A plain CLI: `uv run python scripts/set_provider.py groq`, and `--clear`. A tool,
+not a slash command — the demonstrator runs it directly, and a demo that proves
+provider-agnosticism must not itself depend on Claude being present.
 
 It validates only that the name is a key of `_PROVIDERS`. It runs locally and
 cannot know whether that provider's credential exists **on the service** — the
@@ -388,10 +430,15 @@ override when set, and observes a change made behind the cache after a refresh.
 the override, not `settings.llm_provider`.
 
 **Provider table:** `check_config` requires the selected provider's credential
-for each of the four providers, including vertex; ignores other providers'
-credentials; `--sync-env` pushes the selected provider's credential *and* model
-variable; a Groq-only `.env` is never asked for a Gemini key; `--sync-env`
-refuses under `vertex`.
+for each of the three providers, and FAILs on a value absent from `_PROVIDERS`;
+ignores other providers' credentials; `--sync-env` pushes the selected
+provider's credential *and* model variable; a Groq-only `.env` is never asked
+for a Gemini key.
+
+**Vertex retirement:** `get_provider()` rejects `"vertex"` with the
+accepted-values message; `settings` no longer carries `google_cloud_project` or
+`google_cloud_location`; the docs-parity test does not find `GOOGLE_CLOUD_*` in
+`.env.example`.
 
 **Private key:** absent → FAIL naming the env var; present but `chmod 000` →
 FAIL naming *unreadable* specifically, not "missing"; b64 set → PASS without
@@ -435,3 +482,7 @@ Not verified here, and not to be trusted on the strength of this document:
 - Merging `app/github_app.py`'s PEM loading with the CLI's (§4).
 - Building or publishing container images (§5.3).
 - The three non-absorbed review items (§6).
+- Rewriting `SPEC.md`'s Vertex-as-default design (§2.4). The brief's design
+  stands as written; the retirement is recorded as a deviation in `CLAUDE.md`,
+  where the SDK and model-alias deviations already live.
+- Removing the `google-genai` dependency — `gemini` still uses it (§2.4).
