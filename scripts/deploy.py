@@ -462,6 +462,9 @@ def run_checks(repo: str, base: str) -> list[CheckResult]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deploy",
+        # Without this, argparse treats --sync-en as an abbreviation of
+        # --sync-env and RUNS the sync. Not hypothetical: it fired a real
+        # deploy against live infrastructure during development.
         allow_abbrev=False,
         description=(
             "Verify the hosted deployment: configuration, GitHub App installation "
