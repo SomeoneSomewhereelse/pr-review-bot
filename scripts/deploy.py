@@ -43,17 +43,15 @@ _UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
 # Render free instances spin down after ~15 minutes idle; 10 minutes leaves margin.
 _MAX_PINGER_INTERVAL_SECONDS = 600
 
-# The service env vars --sync-env pushes. Authoritative: tests/test_deploy_script.py
-# asserts README.md and SETUP.md each mention every name here.
-_SYNCED_ENV_VARS = (
+# The service env vars --sync-env always pushes, regardless of provider.
+# Authoritative: tests/test_deploy_script.py asserts README.md and SETUP.md
+# each mention every name here and every _PROVIDERS name.
+_ALWAYS_SYNCED = (
     "DATABASE_URL",
     "GITHUB_APP_ID",
     "GITHUB_APP_PRIVATE_KEY_B64",
     "GITHUB_TARGET_REPO",
     "GITHUB_WEBHOOK_SECRET",
-    "LLM_PROVIDER",
-    "GROQ_API_KEY",
-    "GITHUB_MODELS_TOKEN",
 )
 _DEPLOY_POLL_SECONDS = 10
 _DEPLOY_TIMEOUT_SECONDS = 300
@@ -342,8 +340,13 @@ def render_report(results: list[CheckResult]) -> str:
 
 
 def _wanted_env() -> dict[str, str]:
-    """Local values for every synced var. The PEM is base64-encoded on the fly
-    when only the file path is configured locally, since Render needs the b64 form."""
+    """Local values for every var --sync-env will push.
+
+    Keys depend on the selected provider: the five always-synced vars, plus
+    LLM_PROVIDER, plus the selected provider's credential and model var. Any
+    other provider's credential is included only when it has a local value --
+    an opt-in .env lists the others empty, and must never be asked to fill them.
+    """
     pem_b64 = settings.github_app_private_key_b64
     if not pem_b64:
         path = Path(settings.github_app_private_key_path)
@@ -351,16 +354,24 @@ def _wanted_env() -> dict[str, str]:
             path = Path.cwd() / path
         if path.is_file():
             pem_b64 = base64.b64encode(path.read_bytes()).decode()
-    return {
+    wanted = {
         "DATABASE_URL": settings.database_url,
         "GITHUB_APP_ID": str(settings.github_app_id or ""),
         "GITHUB_APP_PRIVATE_KEY_B64": pem_b64,
         "GITHUB_TARGET_REPO": settings.github_target_repo,
         "GITHUB_WEBHOOK_SECRET": settings.github_webhook_secret,
         "LLM_PROVIDER": settings.llm_provider,
-        "GROQ_API_KEY": settings.groq_api_key,
-        "GITHUB_MODELS_TOKEN": settings.github_models_token,
     }
+    entry = _PROVIDERS.get(settings.llm_provider)
+    if entry is not None:
+        credential, model_var = entry
+        wanted[credential] = getattr(settings, credential.lower(), "")
+        wanted[model_var] = getattr(settings, model_var.lower(), "")
+    for other_credential, _ in _PROVIDERS.values():
+        value = getattr(settings, other_credential.lower(), "")
+        if value and other_credential not in wanted:
+            wanted[other_credential] = value
+    return wanted
 
 
 def _trigger_and_wait(service_id: str) -> int:
@@ -405,18 +416,22 @@ def sync_env() -> int:
     if not settings.render_api_key:
         print("--sync-env requires RENDER_API_KEY", file=sys.stderr)
         return 2
+    if settings.llm_provider not in _PROVIDERS:
+        accepted = ", ".join(sorted(_PROVIDERS))
+        print(
+            f"refusing to sync LLM_PROVIDER={settings.llm_provider!r}: "
+            f"not a supported provider (expected one of: {accepted})",
+            file=sys.stderr,
+        )
+        return 2
     wanted = _wanted_env()
     empty = sorted(key for key, value in wanted.items() if not value)
     if empty:
-        # Before any request, so a partial push cannot happen.
-        print(f"refusing to push empty values; fix .env first: {', '.join(empty)}", file=sys.stderr)
-        return 2
-    entry = _PROVIDERS.get(wanted["LLM_PROVIDER"])
-    provider_key = entry[0] if entry else None
-    if provider_key and provider_key not in wanted:
+        # Before any request, so a partial push cannot happen. Only the keys
+        # this provider actually needs are in `wanted`, so this can never name
+        # another provider's credential.
         print(
-            f"refusing to sync LLM_PROVIDER={wanted['LLM_PROVIDER']}: {provider_key} is not "
-            f"in the synced set, so the service would run without its provider key",
+            f"refusing to push empty values; fix .env first: {', '.join(empty)}",
             file=sys.stderr,
         )
         return 2

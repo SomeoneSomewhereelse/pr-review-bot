@@ -16,9 +16,17 @@ services:
         sync: false
       - key: GITHUB_TARGET_REPO
         sync: false
-      - key: GITHUB_MODELS_TOKEN
+      - key: LLM_PROVIDER
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: LLM_MODEL
         sync: false
       - key: GROQ_API_KEY
         sync: false
-      - key: LLM_PROVIDER
-        value: groq
+      - key: GROQ_MODEL
+        sync: false
+      - key: GITHUB_MODELS_TOKEN
+        sync: false
+      - key: GITHUB_MODELS_MODEL
+        sync: false

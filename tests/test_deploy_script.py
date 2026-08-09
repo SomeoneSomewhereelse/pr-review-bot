@@ -613,6 +613,70 @@ def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, 
 
 
 @pytest.fixture
+def gemini_only_config(complete_config, monkeypatch):
+    """A first-time user's .env: LLM_PROVIDER at its 'gemini' default, with the
+    other providers' keys listed but empty."""
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
+    monkeypatch.setattr(settings, "groq_api_key", "")
+    monkeypatch.setattr(settings, "github_models_token", "")
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    return None
+
+
+def test_wanted_env_pushes_the_selected_providers_credential_and_model(
+    gemini_only_config, monkeypatch
+):
+    monkeypatch.setattr(settings, "llm_model", "gemini-flash-latest")
+    wanted = deploy._wanted_env()
+    assert wanted["GEMINI_API_KEY"] == "gk_x"
+    assert wanted["LLM_MODEL"] == "gemini-flash-latest"
+    assert wanted["LLM_PROVIDER"] == "gemini"
+
+
+def test_wanted_env_omits_unset_credentials_of_other_providers(gemini_only_config):
+    """A Groq-only or Gemini-only .env must never be asked for another
+    provider's key -- the whole point of opt-in provider config."""
+    wanted = deploy._wanted_env()
+    assert "GROQ_API_KEY" not in wanted
+    assert "GITHUB_MODELS_TOKEN" not in wanted
+
+
+def test_wanted_env_includes_other_credentials_that_are_set(
+    gemini_only_config, monkeypatch
+):
+    """Pushed when locally filled, so a later dashboard-side switch works."""
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    assert deploy._wanted_env()["GROQ_API_KEY"] == "gsk_x"
+
+
+def test_sync_env_does_not_demand_other_providers_keys(
+    gemini_only_config, monkeypatch, capsys
+):
+    """The regression this task exists for: the default config could not sync
+    at all, and the error named two providers the user never chose."""
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: None)
+    code = deploy.sync_env()
+    err = capsys.readouterr().err
+    assert "GROQ_API_KEY" not in err
+    assert "GITHUB_MODELS_TOKEN" not in err
+    assert code == 1          # got past the guards, failed on the missing service
+
+
+def test_sync_env_refuses_when_the_selected_credential_is_empty(
+    gemini_only_config, monkeypatch, capsys
+):
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+    called = []
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
+    code = deploy.sync_env()
+    assert code == 2
+    assert "GEMINI_API_KEY" in capsys.readouterr().err
+    assert called == []       # refused before any HTTP
+
+
+@pytest.fixture
 def sync_ready(monkeypatch, tmp_path):
     """Every value _wanted_env() reads, non-empty, plus a Render key."""
     pem = tmp_path / "key.pem"
@@ -656,11 +720,12 @@ def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys
 def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
     sync_ready, monkeypatch, capsys
 ):
-    """settings.llm_provider defaults to 'gemini', but _SYNCED_ENV_VARS never
-    includes GEMINI_API_KEY -- syncing that provider would push a service that
-    boots and answers /healthz while failing every real review, with every
+    """settings.llm_provider defaults to 'gemini'; if the selected provider's
+    own credential is empty locally, syncing would push a service that boots
+    and answers /healthz while failing every real review, with every
     checklist check reporting green. The guard must fire before any request."""
     monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
     with respx.mock:
         route = respx.get(RENDER_SERVICES).mock(
             return_value=httpx.Response(200, json=_service_list())
@@ -673,8 +738,9 @@ def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
 def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_ready):
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
-        current = dict.fromkeys(deploy._SYNCED_ENV_VARS, "stale")
-        current["GITHUB_TARGET_REPO"] = "owner/repo"       # already correct
+        wanted = deploy._wanted_env()
+        current = dict.fromkeys(wanted, "stale")
+        current["GITHUB_TARGET_REPO"] = wanted["GITHUB_TARGET_REPO"]       # already correct
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
         )
@@ -692,8 +758,8 @@ def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_read
         )
         assert deploy.sync_env() == 0
         assert not bulk.called          # the bulk PUT would delete DATABASE_URL
-        # Seven of eight differ; GITHUB_TARGET_REPO already matched.
-        assert single.call_count == len(deploy._SYNCED_ENV_VARS) - 1
+        # All but GITHUB_TARGET_REPO differ.
+        assert single.call_count == len(wanted) - 1
 
 
 def test_sync_env_skips_the_deploy_when_nothing_changed(sync_ready, capsys):
@@ -749,21 +815,24 @@ def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
     assert "gsk_SUPER_SECRET" not in captured.out + captured.err
 
 
-def test_synced_env_vars_matches_what_is_actually_pushed():
-    """_SYNCED_ENV_VARS is what the docs test validates against, so it must stay
-    equal to the keys _wanted_env() actually pushes -- otherwise the docs test
-    silently checks a stale list."""
-    assert set(deploy._wanted_env()) == set(deploy._SYNCED_ENV_VARS)
+def test_wanted_env_is_always_a_superset_of_the_always_synced_names():
+    """_ALWAYS_SYNCED is what the docs test validates against, so _wanted_env()
+    must always include it regardless of the selected provider -- otherwise the
+    docs test would silently stop covering vars that are actually pushed. Unlike
+    the old fixed eight-name set, exact equality no longer holds: _wanted_env()
+    also carries LLM_PROVIDER, the selected provider's credential and model var,
+    and any other provider's credential that happens to be set locally."""
+    assert set(deploy._ALWAYS_SYNCED) <= set(deploy._wanted_env())
 
 
 @pytest.mark.parametrize("doc", ["README.md", "SETUP.md"])
 def test_env_var_names_match_the_docs(doc):
     """README.md and SETUP.md are kept at full parity by convention; this test
-    is the mechanism behind it. A var pushed by --sync-env but undocumented
-    means nobody knows to set it; a var documented but missing from the list is
-    silently never deployed. Checks NAMES only -- wording is free to differ."""
+    is the mechanism behind it. A var always pushed by --sync-env but
+    undocumented means nobody knows to set it. Checks NAMES only -- wording is
+    free to differ."""
     text = Path(doc).read_text(encoding="utf-8")
-    missing = [name for name in deploy._SYNCED_ENV_VARS if name not in text]
+    missing = [name for name in deploy._ALWAYS_SYNCED if name not in text]
     assert not missing, f"{doc} does not mention: {missing}"
 
 
