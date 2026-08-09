@@ -917,6 +917,27 @@ def test_sync_env_waits_for_an_in_flight_deploy_before_triggering(monkeypatch):
     assert route.call_count == 2
 
 
+@respx.mock
+def test_wait_for_in_flight_prints_periodic_progress_during_a_long_wait(monkeypatch, capsys):
+    """The initial announcement and the timeout message are covered elsewhere;
+    this covers the periodic line in between so a long real wait is never
+    silent for more than _IN_FLIGHT_PROGRESS_EVERY polls."""
+    monkeypatch.setattr(deploy, "_DEPLOY_POLL_SECONDS", 0)
+    monkeypatch.setattr(deploy, "_IN_FLIGHT_PROGRESS_EVERY", 2)
+    statuses = iter([
+        [{"deploy": {"id": "dep-0", "status": "build_in_progress"}}],
+        [{"deploy": {"id": "dep-0", "status": "build_in_progress"}}],
+        [{"deploy": {"id": "dep-0", "status": "build_in_progress"}}],
+        [{"deploy": {"id": "dep-0", "status": "live"}}],
+    ])
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        side_effect=lambda request: httpx.Response(200, json=next(statuses))
+    )
+    assert deploy._wait_for_in_flight("svc-1") is True
+    out = capsys.readouterr().out
+    assert out.count("still waiting for in-flight deploy") >= 1
+
+
 def test_sync_env_triggers_a_fresh_deploy_after_the_in_flight_one_settles(sync_ready):
     """The real property under review: observe an in-flight deploy, wait for it
     to settle, then issue a BRAND-NEW trigger -- never adopt the one observed.
