@@ -141,12 +141,16 @@ class AppNotInstalledError(RuntimeError):
 def discover_installation_id(repo_full_name: str) -> int:
     """Return the installation id for the App on `repo_full_name` (App JWT).
 
-    Raises RuntimeError with an actionable message if the App is not installed
-    -- GitHub does not permit an App to install itself; a repo admin must
-    authorize it once in the GitHub UI. Only a 404 is interpreted as "not
-    installed" -- any other status (e.g. a 401 from a malformed
-    GITHUB_APP_PRIVATE_KEY_B64, or a transient 5xx) is a genuine auth/API
-    error and must not be misdiagnosed as a missing installation.
+    Raises `AppNotInstalledError` (with an actionable message) if the App is
+    not installed -- GitHub does not permit an App to install itself; a repo
+    admin must authorize it once in the GitHub UI. Only a 404 is interpreted
+    this way -- any other status (e.g. a 401 from a malformed
+    GITHUB_APP_PRIVATE_KEY_B64, or a transient 5xx) raises a plain
+    RuntimeError instead, so a genuine auth/API error is never misdiagnosed as
+    a missing installation. `AppNotInstalledError` subclasses RuntimeError, so
+    a caller that only catches RuntimeError still sees both cases, but one
+    that wants to branch on "not installed" specifically (as
+    check_installation_and_webhook does) can catch the narrower type first.
 
     Uses the raw requester (``GET /repos/{repo}/installation``) rather than a
     typed PyGithub method: the installed PyGithub version's ``Repository``

@@ -101,8 +101,8 @@ Run it from your own machine, not inside the Render container — `scripts/` is 
 copied into the Docker image, and `RENDER_EXTERNAL_URL` only exists inside
 Render's own container, which is why `PUBLIC_BASE_URL` is passed explicitly here.
 
-It prints one line per check and always runs all six, so a single run surfaces
-every problem rather than only the first:
+It prints one line per check and always runs all seven, so a single run
+surfaces every problem rather than only the first:
 
 | Check | Verifies | Required? |
 |---|---|---|
@@ -110,23 +110,35 @@ every problem rather than only the first:
 | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
 | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
-| `render-service` | The latest Render deploy is `live` | optional |
+| `provider` | The provider that will actually run — `LLM_PROVIDER`, or an active **DB override** — has its credential set | optional |
+| `render-service` | The latest Render deploy is `live`, and (when a commit is comparable) matches local `HEAD` | optional |
 | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
-Exit codes: `0` everything passed or was skipped, `1` at least one check failed,
-`2` the CLI could not run at all — no `GITHUB_TARGET_REPO`/public base URL, no
-`RENDER_API_KEY` for `--sync-env`, `--sync-env`'s clobber guard tripping (an
-empty value, or a provider key missing from the synced set), or `--sync-env`
-crashing before it could finish.
+A **DB override** is a provider swap written straight into the
+`runtime_config` table by `scripts/set_provider.py` (see "Switching providers
+without a redeploy" below) — it wins over `LLM_PROVIDER` at runtime with no
+restart and no redeploy, so `provider` resolves and checks whichever one is
+actually active, not just the env var.
 
-The two optional checks are skipped with a hint unless you set the matching
-operator-local key. Neither is ever set on the Render service:
+| Exit | Meaning |
+| --- | --- |
+| 0 | every check passed (skipped checks do not fail the run) |
+| 1 | at least one check failed |
+| 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, or an active DB override that would mask the push) |
+
+In short: exit 0 means trust the table as-is, exit 1 means read the table for
+what to fix, exit 2 means the run never really started.
+
+Four checks are skipped with a hint unless you set the matching
+operator-local key. None of these keys is ever set on the Render service
+itself:
 
 - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
   `render-service` and `--sync-env`.
 - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
-- `DATABASE_URL` enables `database`. It is normally a Render dashboard secret;
-  export it locally, temporarily, to check it.
+- `DATABASE_URL` enables both `database` and `provider` (the override lives
+  in the same database). It is normally a Render dashboard secret; export it
+  locally, temporarily, to check either.
 
 #### Deploying
 
@@ -136,19 +148,65 @@ With `RENDER_API_KEY` set, this is a complete, repeatable deploy:
 PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
 ```
 
-It pushes any of `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
-`GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, `GROQ_API_KEY`
-and `GITHUB_MODELS_TOKEN` that differ from your local `.env`, triggers a deploy,
-waits for it to go live (~60s), and then runs the checklist above.
+The push set is **provider-derived**, not a fixed list: it always pushes
+`DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
+`GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, and `LLM_PROVIDER`, plus the
+**selected provider's** credential and model var — e.g. `LLM_PROVIDER=groq`
+pushes `GROQ_API_KEY` and `GROQ_MODEL`, not `GEMINI_API_KEY`/`LLM_MODEL` or
+`GITHUB_MODELS_TOKEN`/`GITHUB_MODELS_MODEL`. Any *other* provider's
+credential is pushed too, but only if you happen to have it set locally —
+an unselected provider's key is never demanded. It refuses to start (exit 2)
+if any wanted value is empty locally, so a blank `.env` entry can never
+overwrite a working secret on the service; only changed variables are
+pushed, and if nothing differs no deploy is triggered.
 
-It refuses to start if any of those values is empty locally, so a blank `.env`
-entry can never overwrite a working secret on the service. Only changed
-variables are pushed, and if nothing differs no deploy is triggered. It
-currently expects the Groq/GitHub-Models pair to be set regardless of
-`LLM_PROVIDER` — a Gemini-only setup will exit 2 here until **both**
-`GROQ_API_KEY` and `GITHUB_MODELS_TOKEN` are filled in too.
+If a **DB override** (see below) is active and disagrees with the
+`LLM_PROVIDER` being pushed, `--sync-env` refuses (exit 2) rather than push a
+value the override would silently ignore at runtime — clear it first with
+`uv run python scripts/set_provider.py --clear`.
+
+Before triggering anything, it waits for any deploy already in progress to
+settle (it never stacks a second deploy on top of one still building) —
+worst case that's up to 900s waiting for the in-flight one, plus up to 900s
+for the one it triggers itself, so **budget up to ~30 minutes** in the rare
+worst case; a warm redeploy with nothing already in flight has taken well
+under a minute in practice.
 
 Claude Code users can run `/deploy` instead, which wraps the same CLI.
+
+#### Switching providers without a redeploy
+
+```bash
+uv run python scripts/set_provider.py groq       # set the override
+uv run python scripts/set_provider.py --clear     # remove it
+```
+
+This writes a provider override to the `runtime_config` table and takes
+effect on the **next ticket the dispatcher claims** — no restart, no
+redeploy. It writes to whatever `DATABASE_URL` currently resolves to, so
+running it against a local `.env` sets a **local** override only; nothing
+reaches production unless your local `DATABASE_URL` happens to be the
+production one. `scripts/deploy.py`'s `provider` check is the safety net: it
+resolves the override the same way the dispatcher does and confirms the
+resulting provider actually has its credential available.
+
+#### Deploying an image, when the Render service has no connected repo
+
+Render **always builds on Render** — from a connected GitHub repo, or by
+pulling a pre-built image from a container registry. It never uploads your
+local working tree. For a service configured against a registry image rather
+than a repo:
+
+1. Build locally: `docker build -t ghcr.io/<you>/pr-review-engine:<tag> .`
+2. Push it: `docker push ghcr.io/<you>/pr-review-engine:<tag>`
+3. Point the Render service at that image and tag (dashboard → Settings).
+4. Run `--sync-env` as above to push config and trigger a deploy against it.
+
+`render-service` reports whichever artifact is actually live — a commit sha
+for a repo-connected service, or the image ref for an image-backed one — and
+only compares against local `HEAD` when a commit is present; an image-backed
+deploy reports `PASS` with "no local comparison possible" rather than a
+guessed-at mismatch.
 
 ## Testing
 

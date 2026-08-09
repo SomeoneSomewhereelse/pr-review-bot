@@ -1131,15 +1131,29 @@ def test_wanted_env_is_always_a_superset_of_the_always_synced_names():
     assert set(deploy._ALWAYS_SYNCED) <= set(deploy._wanted_env())
 
 
-@pytest.mark.parametrize("doc", ["README.md", "SETUP.md"])
-def test_env_var_names_match_the_docs(doc):
-    """README.md and SETUP.md are kept at full parity by convention; this test
-    is the mechanism behind it. A var always pushed by --sync-env but
-    undocumented means nobody knows to set it. Checks NAMES only -- wording is
-    free to differ."""
-    text = Path(doc).read_text(encoding="utf-8")
-    missing = [name for name in deploy._ALWAYS_SYNCED if name not in text]
-    assert not missing, f"{doc} does not mention: {missing}"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_env_var_names_match_the_docs():
+    """Every name --sync-env can push must be documented, or an operator has no
+    way to know what the service needs."""
+    readme = (_REPO_ROOT / "README.md").read_text()
+    setup = (_REPO_ROOT / "SETUP.md").read_text()
+    names = set(deploy._ALWAYS_SYNCED) | {"LLM_PROVIDER"}
+    for credential, model_var in deploy._PROVIDERS.values():
+        names.add(credential)
+        names.add(model_var)
+    for name in sorted(names):
+        assert name in readme, f"{name} missing from README.md"
+        assert name in setup, f"{name} missing from SETUP.md"
+
+
+def test_exit_codes_are_documented():
+    """Spec section 7.2 lists three causes for exit 2; the docs must carry
+    them, or the contract exists only in the code."""
+    for doc in ("README.md", "SETUP.md"):
+        text = (_REPO_ROOT / doc).read_text()
+        assert "exit 0" in text and "exit 1" in text and "exit 2" in text
 
 
 def test_main_rejects_an_unknown_flag(monkeypatch, capsys):

@@ -492,9 +492,15 @@ Cross-cutting:
   free to explain differently while the contract cannot silently diverge. This
   is the mechanism behind "keep both synced."
 - **Output-contract test** — renders a fixed set of `CheckResult`s and asserts
-  the table's shape: aligned columns, no `detail` exceeding the §7.4 length
-  budget, and a trailing summary line carrying the counts and the `README.md`
-  anchor.
+  the table's shape: aligned columns, no *line* within a `detail` exceeding
+  the §7.4 length budget, and a trailing summary line carrying the counts and
+  the `README.md` anchor. The budget is **per line, not per detail**: a
+  `detail` may wrap to a second, indented continuation line to enumerate
+  observed values (`CheckResult`'s own docstring already says this), and both
+  `check_config`'s missing-key enumeration and the newline-continuation cases
+  added by later tasks (`render-service`'s dirty-tree message,
+  `uptime-pinger`'s `found:` list) legitimately exceed the budget when the
+  whole multi-line `detail` is measured as one string.
 - **`main()` exit codes** — `0` when all `PASS`/`SKIPPED`, `1` on any `FAIL`,
   `2` on unusable input.
 - **`--sync-env`** — asserts the single-key endpoint is used and the bulk
