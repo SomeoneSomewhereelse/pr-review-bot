@@ -329,6 +329,28 @@ def _unwrap(item: dict, key: str) -> dict:
     return item.get(key) or item
 
 
+def _local_head() -> tuple[str, bool] | None:
+    """(short HEAD sha, working tree is dirty), or None outside a git repo.
+
+    Uses subprocess rather than a dependency: the CLI must run from a plain
+    checkout with no extra installs.
+    """
+    import subprocess
+
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip()
+        dirty = bool(subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (head, dirty) if head else None
+
+
 def _find_render_service_id() -> str | None:
     resp = httpx.get(f"{_RENDER_API}/services", headers=_render_headers(), timeout=_HTTP_TIMEOUT)
     resp.raise_for_status()
@@ -360,10 +382,45 @@ def check_render_service() -> CheckResult:
         return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
     if not deploys:
         return CheckResult(name, "FAIL", "service exists but has no deploys")
-    status = _unwrap(deploys[0], "deploy").get("status", "?")
+    deploy_obj = _unwrap(deploys[0], "deploy")
+    status = deploy_obj.get("status", "?")
     if status != "live":
         return CheckResult(name, "FAIL", f"latest deploy status: {status}")
-    return CheckResult(name, "PASS", "latest deploy live")
+
+    deploy_id = deploy_obj.get("id", "?")
+    commit = (deploy_obj.get("commit") or {}).get("id") or ""
+    image = (deploy_obj.get("image") or {}).get("ref") or ""
+
+    if image:
+        return CheckResult(
+            name, "PASS",
+            f"live: {deploy_id} @ {image}\n(image-backed; no local comparison possible)",
+        )
+    if not commit:
+        # Assumption 4 is unverified -- degrade rather than invent a failure.
+        return CheckResult(name, "PASS", f"live: {deploy_id}")
+
+    local = _local_head()
+    if local is None:
+        return CheckResult(
+            name, "PASS", f"live: {deploy_id} @ {commit[:7]} (no git checkout here)"
+        )
+    head, dirty = local
+    # Compare on a common short prefix: Render returns a full sha, `git
+    # rev-parse --short` a 7-char one, so a direct == would always differ.
+    if commit[:7] != head[:7]:
+        return CheckResult(
+            name, "FAIL",
+            f"live: {deploy_id} @ {commit[:7]}, but local HEAD is {head}\n"
+            f"push, or re-run --sync-env, to deploy what you have",
+        )
+    if dirty:
+        return CheckResult(
+            name, "FAIL",
+            f"live: {deploy_id} @ {commit[:7]} (local HEAD matches, tree dirty\n"
+            f"-- uncommitted changes cannot be in any build)",
+        )
+    return CheckResult(name, "PASS", f"live: {deploy_id} @ {commit[:7]}")
 
 
 def check_uptime_pinger(base: str) -> CheckResult:

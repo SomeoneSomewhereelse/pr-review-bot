@@ -495,6 +495,101 @@ def test_render_service_never_echoes_the_api_key(monkeypatch):
     assert "rnd_SUPER_SECRET" not in result.detail
 
 
+def _deploys_response(deploy_obj):
+    return httpx.Response(200, json=[{"deploy": deploy_obj}])
+
+
+@respx.mock
+def test_render_service_reports_the_live_commit(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", False))
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=_deploys_response(
+            {"id": "dep-abc", "status": "live", "commit": {"id": "4e39cdaffffffff"}}
+        )
+    )
+    result = deploy.check_render_service()
+    assert result.status == "PASS"
+    assert "4e39cda" in result.detail
+
+
+@respx.mock
+def test_render_service_fails_when_local_head_is_not_deployed(monkeypatch):
+    """The never-push operator's trap: changes that never reached the build."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy, "_local_head", lambda: ("1b10b18", False))
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=_deploys_response(
+            {"id": "dep-abc", "status": "live", "commit": {"id": "4e39cda"}}
+        )
+    )
+    result = deploy.check_render_service()
+    assert result.status == "FAIL"
+    assert "4e39cda" in result.detail and "1b10b18" in result.detail
+
+
+@respx.mock
+def test_render_service_fails_on_a_dirty_working_tree(monkeypatch):
+    """Uncommitted changes can be in no build, by construction."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", True))
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=_deploys_response(
+            {"id": "dep-abc", "status": "live", "commit": {"id": "4e39cda"}}
+        )
+    )
+    result = deploy.check_render_service()
+    assert result.status == "FAIL"
+    assert "dirty" in result.detail
+
+
+@respx.mock
+def test_render_service_reports_an_image_without_claiming_verification(monkeypatch):
+    """No local comparison is possible, and the row must not imply one."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", False))
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=_deploys_response(
+            {"id": "dep-abc", "status": "live", "image": {"ref": "ghcr.io/you/pr-review:v3"}}
+        )
+    )
+    result = deploy.check_render_service()
+    assert result.status == "PASS"
+    assert "ghcr.io/you/pr-review:v3" in result.detail
+    assert "no local comparison" in result.detail
+
+
+@respx.mock
+def test_render_service_degrades_when_render_reports_no_artifact(monkeypatch):
+    """Assumption 4 is unverified: a missing field must never produce a FAIL."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", False))
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=_deploys_response({"id": "dep-abc", "status": "live"})
+    )
+    assert deploy.check_render_service().status == "PASS"
+
+
+@respx.mock
+def test_render_service_skips_the_comparison_outside_a_git_repo(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy, "_local_head", lambda: None)
+    respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
+        return_value=_deploys_response(
+            {"id": "dep-abc", "status": "live", "commit": {"id": "4e39cda"}}
+        )
+    )
+    result = deploy.check_render_service()
+    assert result.status == "PASS"
+    assert "no git" in result.detail
+
+
 UPTIMEROBOT = "https://api.uptimerobot.com/v2/getMonitors"
 
 
