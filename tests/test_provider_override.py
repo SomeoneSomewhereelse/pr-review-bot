@@ -2,6 +2,15 @@
 service swap providers without a redeploy.
 
 Uses the shared Postgres test harness (``db`` from tests/conftest.py).
+
+Note on ordering: ``test_override_defaults_to_none`` is declared *last*, not
+first. This repo runs plain ``pytest`` with no ordering/randomization plugin,
+so collection is strictly top-to-bottom -- if that test were declared first
+it would always run before any test that sets an override, and could never
+catch a regression where the ``db`` fixture stops truncating
+``runtime_config`` between tests. Declaring it last means several preceding
+tests have already written to the table, so a missing TRUNCATE surfaces as a
+real failure on a plain ``pytest tests/test_provider_override.py`` run.
 """
 from __future__ import annotations
 
@@ -17,10 +26,6 @@ T1 = "2026-01-01T12:00:01+00:00"
 @pytest.fixture(autouse=True)
 def _temp_db(db):
     yield
-
-
-def test_override_defaults_to_none():
-    assert store.get_provider_override() is None
 
 
 def test_set_then_get_returns_the_override():
@@ -50,3 +55,17 @@ def test_a_second_row_is_rejected(db_exec):
             "VALUES (2, 'gemini', %s)",
             (T1,),
         )
+
+
+def test_an_empty_provider_string_reads_as_no_override(db_exec):
+    """The `or None` collapses '' to None -- a blank row must not be treated
+    as an override of the empty-string provider."""
+    db_exec(
+        "INSERT INTO runtime_config (id, provider, updated_at) VALUES (1, '', %s)",
+        (T0,),
+    )
+    assert store.get_provider_override() is None
+
+
+def test_override_defaults_to_none():
+    assert store.get_provider_override() is None
