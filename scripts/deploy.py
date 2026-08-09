@@ -32,7 +32,6 @@ from github import GithubException
 
 from app import github_app
 from app.config import settings
-from app.queue import store
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
@@ -256,9 +255,22 @@ def check_database() -> CheckResult:
 
 def _resolved_provider() -> tuple[str, str | None]:
     """(active provider, override or None). The override wins at runtime, so
-    the CLI must resolve exactly as the dispatcher does."""
-    store.init_pool()
-    override = store.get_provider_override()
+    the CLI must resolve exactly as the dispatcher does.
+
+    Reads via a raw short-timeout connection rather than store.init_pool(),
+    for the same reason check_database does: the pool blocks 30s before
+    raising, which is a startup-log behaviour, not a checklist one -- and this
+    is a one-shot CLI, not a long-lived service amortising that cost.
+
+    A bare psycopg.connect (unlike the store's pool) does not set
+    row_factory=dict_row, so the row -- if any -- comes back as a tuple, and
+    an empty-string override normalizes to None exactly as
+    store.get_provider_override() does, so the CLI and the dispatcher can
+    never disagree about whether an override is active.
+    """
+    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+        row = conn.execute("SELECT provider FROM runtime_config WHERE id = 1").fetchone()
+    override = (row[0] if row else None) or None
     return (override or settings.llm_provider), override
 
 
@@ -474,10 +486,9 @@ def sync_env() -> int:
         return 2
     if settings.database_url:
         try:
-            store.init_pool()
-            override = store.get_provider_override()
+            _, override = _resolved_provider()
+        # deliberate: the provider check reports DB trouble
         except Exception:  # noqa: BLE001
-            # deliberate: the provider check reports DB trouble
             override = None
         if override and override != settings.llm_provider:
             print(

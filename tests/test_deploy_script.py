@@ -942,18 +942,58 @@ def test_check_render_service_skips_rather_than_calling_out(monkeypatch):
     assert result.status == "SKIPPED"
 
 
+class _FakeCursor:
+    """Stands in for the cursor psycopg.Connection.execute() returns."""
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+
+    def fetchone(self):
+        if isinstance(self._outcome, BaseException):
+            raise self._outcome
+        return self._outcome
+
+
+class _FakeConn:
+    """A context-manager connection whose .execute().fetchone() is scripted --
+    _resolved_provider() reads via a raw psycopg.connect(), not the store's
+    pool, so the seam to fake is psycopg.connect itself."""
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+
+    def execute(self, *_args, **_kwargs):
+        return _FakeCursor(self._outcome)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc_info):
+        return False
+
+
 @pytest.fixture
 def override_seam(complete_config, monkeypatch):
-    """check_provider needs a DATABASE_URL to resolve at all (it SKIPs without
-    one), and complete_config does not set it. Stubs the store seam so these
-    stay offline."""
+    """check_provider (and sync_env's masking guard) resolve the override via
+    a raw, short-timeout psycopg.connect() -- mirroring why check_database
+    avoids store.init_pool()'s 30s pool timeout in a one-shot CLI. This fakes
+    that connection so tests stay offline; call the fixture with the row
+    fetchone() should return (a 1-tuple, or None for no row), or with an
+    exception instance to simulate a query failure (e.g. a missing table).
+
+    complete_config does not set a DATABASE_URL, so this also supplies one --
+    without it check_provider SKIPs before ever reaching psycopg.connect."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
-    monkeypatch.setattr(deploy.store, "init_pool", lambda: None)
-    return monkeypatch
+
+    def _set(outcome):
+        monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(outcome))
+
+    _set(None)
+    return _set
 
 
 def test_check_provider_reports_the_env_value_when_no_override(override_seam):
-    override_seam.setattr(deploy.store, "get_provider_override", lambda: None)
+    override_seam(None)
     result = deploy.check_provider()
     assert result.status == "PASS"
     assert "groq" in result.detail
@@ -964,7 +1004,7 @@ def test_check_provider_reports_a_satisfied_override(override_seam, monkeypatch)
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
-    monkeypatch.setattr(deploy.store, "get_provider_override", lambda: "groq")
+    override_seam(("groq",))
     result = deploy.check_provider()
     assert result.status == "PASS"
     assert "groq" in result.detail
@@ -979,10 +1019,32 @@ def test_check_provider_fails_when_the_overrides_credential_is_missing(
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
     monkeypatch.setattr(settings, "groq_api_key", "")
-    monkeypatch.setattr(deploy.store, "get_provider_override", lambda: "groq")
+    override_seam(("groq",))
     result = deploy.check_provider()
     assert result.status == "FAIL"
     assert "GROQ_API_KEY" in result.detail
+
+
+def test_check_provider_treats_an_empty_string_override_as_no_override(override_seam):
+    """store.get_provider_override() collapses '' to None
+    (tests/test_provider_override.py::test_an_empty_provider_string_reads_as_no_override
+    pins this). The raw read here must match, or the CLI and the dispatcher
+    would disagree about whether an override is active."""
+    override_seam(("",))
+    result = deploy.check_provider()
+    assert result.status == "PASS"
+    assert "groq" in result.detail          # complete_config's env value, not ""
+    assert "env" in result.detail
+    assert "override" not in result.detail
+
+
+def test_check_provider_skips_when_the_override_read_raises(override_seam):
+    """A database the app has never booted against has no runtime_config
+    table yet -- the query raises. That is `database`'s row to report, not
+    provider's, so this must SKIP rather than blow up."""
+    override_seam(RuntimeError("relation \"runtime_config\" does not exist"))
+    result = deploy.check_provider()
+    assert result.status == "SKIPPED"
 
 
 def test_check_provider_skips_without_a_database_url(complete_config, monkeypatch):
@@ -1018,8 +1080,8 @@ def test_sync_env_refuses_when_an_override_would_mask_the_push(
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy.store, "get_provider_override", lambda: "groq")
-    monkeypatch.setattr(deploy.store, "init_pool", lambda: None)
+    # Same seam check_provider reads through -- no pool, no real connection.
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("groq", "groq"))
     called = []
     monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
     code = deploy.sync_env()
