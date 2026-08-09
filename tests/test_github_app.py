@@ -26,7 +26,12 @@ ISSUE_API_URL = f"{REPO_API_URL}/issues/{PR_NUMBER}"
 
 
 def _repo_json():
-    return {"id": 1, "name": "pr-review-bot-testbed", "full_name": REPO_FULL_NAME, "url": REPO_API_URL}
+    return {
+        "id": 1,
+        "name": "pr-review-bot-testbed",
+        "full_name": REPO_FULL_NAME,
+        "url": REPO_API_URL,
+    }
 
 
 def _pull_json():
@@ -164,7 +169,9 @@ def test_upsert_comment_creates_when_no_marker_comment_exists(fake_transport, mo
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_create_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_create_capture)
+    )
 
     result = github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nfindings here")
 
@@ -203,7 +210,9 @@ def test_upsert_comment_edits_existing_marker_comment_in_place(fake_transport, m
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     result = github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nnew findings")
 
@@ -213,7 +222,9 @@ def test_upsert_comment_edits_existing_marker_comment_in_place(fake_transport, m
     assert result.id == 333
 
 
-def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(fake_transport, monkeypatch):
+def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(
+    fake_transport, monkeypatch
+):
     edited = {}
     existing_body = (
         f"{github_app.COMMENT_MARKER}\n## Review\ngood findings\n\n"
@@ -233,11 +244,15 @@ def test_append_review_footnote_edits_marker_and_replaces_prior_footnote(fake_tr
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     footnote = f"{github_app.FAIL_NOTE_START}\n> new failure note\n{github_app.FAIL_NOTE_END}"
     github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
@@ -279,11 +294,15 @@ def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_tran
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     footnote = f"{github_app.FAIL_NOTE_START}\n> new failure note\n{github_app.FAIL_NOTE_END}"
     github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
@@ -297,14 +316,22 @@ def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_tran
     assert edited["body"].count(github_app.FAIL_NOTE_START) == 2  # stray + new trailing one
 
 
-def test_append_review_footnote_creates_marker_comment_when_none_exists(fake_transport, monkeypatch):
+def test_append_review_footnote_creates_marker_comment_when_none_exists(
+    fake_transport, monkeypatch
+):
     created = {}
     fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
     fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
-        [{"id": 111, "body": "human comment, no marker", "user": {"login": "someone", "type": "User"}}],
+        [
+            {
+                "id": 111,
+                "body": "human comment, no marker",
+                "user": {"login": "someone", "type": "User"},
+            }
+        ],
     )
 
     def send_with_create_capture(request, **kwargs):
@@ -316,7 +343,9 @@ def test_append_review_footnote_creates_marker_comment_when_none_exists(fake_tra
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_create_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_create_capture)
+    )
 
     footnote = f"{github_app.FAIL_NOTE_START}\n> failure note\n{github_app.FAIL_NOTE_END}"
     github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
@@ -345,7 +374,9 @@ def test_upsert_comment_skips_human_comment_containing_the_marker(fake_transport
             body = json.loads(request.body)
             created["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 777, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 201
+                request,
+                {"id": 777, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                201,
             )
         return fake_transport.send(request, **kwargs)
 
@@ -363,8 +394,12 @@ def test_upsert_comment_edits_by_id_when_comment_id_given(fake_transport, monkey
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/comments/333",
-        {"id": 333, "body": f"{github_app.COMMENT_MARKER}\nold", "user": {"login": "bot", "type": "Bot"},
-         "url": f"{REPO_API_URL}/issues/comments/333"},
+        {
+            "id": 333,
+            "body": f"{github_app.COMMENT_MARKER}\nold",
+            "user": {"login": "bot", "type": "Bot"},
+            "url": f"{REPO_API_URL}/issues/comments/333",
+        },
     )
 
     def send(request, **kwargs):
@@ -374,7 +409,9 @@ def test_upsert_comment_edits_by_id_when_comment_id_given(fake_transport, monkey
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
@@ -393,8 +430,14 @@ def test_upsert_comment_falls_back_to_scan_when_comment_id_deleted(fake_transpor
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
-        [{"id": 333, "body": f"{github_app.COMMENT_MARKER}\nold", "user": {"login": "bot", "type": "Bot"},
-          "url": f"{REPO_API_URL}/issues/comments/333"}],
+        [
+            {
+                "id": 333,
+                "body": f"{github_app.COMMENT_MARKER}\nold",
+                "user": {"login": "bot", "type": "Bot"},
+                "url": f"{REPO_API_URL}/issues/comments/333",
+            }
+        ],
     )
 
     def send(request, **kwargs):
@@ -428,11 +471,15 @@ def test_append_schedule_notice_edits_marker_and_adds_note(fake_transport, monke
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     note = (
         f"{github_app.SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~14:00 UTC\n"
@@ -465,11 +512,15 @@ def test_append_schedule_notice_replaces_prior_schedule_note(fake_transport, mon
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     note = (
         f"{github_app.SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~14:00 UTC\n"
@@ -507,11 +558,15 @@ def test_upsert_comment_full_overwrite_removes_stale_schedule_note(fake_transpor
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "## Review\nnew findings")
 
@@ -546,11 +601,15 @@ def test_strip_existing_footnote_removes_schedule_note_when_writing_fail_note(
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     footnote = f"{github_app.FAIL_NOTE_START}\n> failure note\n{github_app.FAIL_NOTE_END}"
     github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
@@ -581,11 +640,15 @@ def test_clear_schedule_notice_strips_note_and_edits(fake_transport, monkeypatch
             body = json.loads(request.body)
             edited["body"] = body["body"]
             return fake_transport._build_response(
-                request, {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}}, 200
+                request,
+                {"id": 333, "body": body["body"], "user": {"login": "bot", "type": "Bot"}},
+                200,
             )
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_with_patch_capture)
+    )
 
     result = github_app.clear_schedule_notice(REPO_FULL_NAME, PR_NUMBER)
 
@@ -610,7 +673,9 @@ def test_clear_schedule_notice_is_noop_when_no_footnote_present(fake_transport, 
             raise AssertionError("must not edit when there is no footnote to strip")
         return fake_transport.send(request, **kwargs)
 
-    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", staticmethod(send_that_forbids_patch))
+    monkeypatch.setattr(
+        requests.adapters.HTTPAdapter, "send", staticmethod(send_that_forbids_patch)
+    )
 
     result = github_app.clear_schedule_notice(REPO_FULL_NAME, PR_NUMBER)
     assert result.id == 333
@@ -622,7 +687,13 @@ def test_clear_schedule_notice_returns_none_when_no_bot_comment_exists(fake_tran
     fake_transport.route(
         "GET",
         f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
-        [{"id": 111, "body": "human comment, no marker", "user": {"login": "someone", "type": "User"}}],
+        [
+            {
+                "id": 111,
+                "body": "human comment, no marker",
+                "user": {"login": "someone", "type": "User"},
+            }
+        ],
     )
 
     result = github_app.clear_schedule_notice(REPO_FULL_NAME, PR_NUMBER)

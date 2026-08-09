@@ -326,7 +326,8 @@ def test_enqueue_push_within_cooldown_escalates_level(monkeypatch, db_exec):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
     tid = _enqueue(sha="sha1")
-    _make_done(db_exec, tid, last_reviewed_at=T0, level=1)   # last review T0, already at level 1 (eff=600s)
+    # last review T0, already at level 1 (eff=600s)
+    _make_done(db_exec, tid, last_reviewed_at=T0, level=1)
     store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T_400
     )
@@ -388,7 +389,8 @@ def test_finalize_non_dirty_leaves_nonzero_cooldown_level(db_exec):
     store.finalize_review(tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=9)
     t = store.get_ticket(tid)
     assert t.status == "done"
-    assert t.cooldown_level == 3   # non-dirty -> ELSE keeps the existing level, ignores the passed 9
+    # non-dirty -> ELSE keeps the existing level, ignores the passed 9
+    assert t.cooldown_level == 3
 
 
 def test_new_ticket_has_notice_not_before_none():
@@ -396,7 +398,9 @@ def test_new_ticket_has_notice_not_before_none():
     assert store.get_ticket(tid).notice_not_before is None
 
 
-def _seed_deferred_with_review(db_exec, tid, not_before, notice_not_before=None, last_reviewed_at=T0):
+def _seed_deferred_with_review(
+    db_exec, tid, not_before, notice_not_before=None, last_reviewed_at=T0
+):
     db_exec(
         "UPDATE tickets SET status='deferred', not_before=%s, notice_not_before=%s, "
         "last_reviewed_at=%s WHERE id=%s",

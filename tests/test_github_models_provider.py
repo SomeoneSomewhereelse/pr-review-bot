@@ -90,7 +90,9 @@ async def test_github_models_provider_returns_none_parsed_on_malformed_json(monk
 
 @pytest.mark.asyncio
 async def test_github_models_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
-    fake_create = AsyncMock(return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1))
+    fake_create = AsyncMock(
+        return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1)
+    )
     monkeypatch.setattr(
         "app.providers.github_models.AsyncOpenAI",
         lambda **kwargs: SimpleNamespace(

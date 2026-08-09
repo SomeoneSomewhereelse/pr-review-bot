@@ -71,12 +71,18 @@ def _render_section(spec: SpecialistResult) -> str:
     emoji = config["emoji"]
 
     if spec.status == "failed":
-        return f"### ❌ {spec.name} check failed\n> `{spec.error}` — other checks completed normally.\n"
+        return (
+            f"### ❌ {spec.name} check failed\n"
+            f"> `{spec.error}` — other checks completed normally.\n"
+        )
 
     if not spec.findings:
         return f"### {emoji} {spec.name} — ✅ no findings\n"
 
-    header = f"### {emoji} {spec.name} — {len(spec.findings)} finding{'s' if len(spec.findings) != 1 else ''}\n"
+    header = (
+        f"### {emoji} {spec.name} — {len(spec.findings)} finding"
+        f"{'s' if len(spec.findings) != 1 else ''}\n"
+    )
     columns = config["columns"]
     col_headers = " | ".join(label for _, label, _ in columns)
     col_sep = " | ".join("---" for _ in columns)

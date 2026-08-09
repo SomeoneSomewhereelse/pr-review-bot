@@ -238,7 +238,8 @@ def claim_next_due(now: str) -> Ticket | None:
             WHERE id = (
                 SELECT id FROM tickets
                 WHERE status = 'pending'
-                   OR (status IN ('deferred','retrying') AND not_before IS NOT NULL AND not_before <= %s)
+                   OR (status IN ('deferred','retrying') AND not_before IS NOT NULL
+                       AND not_before <= %s)
                 ORDER BY enqueued_at ASC, id ASC
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
@@ -254,7 +255,8 @@ def defer_rate_limited(ticket_id: int, not_before: str, now: str) -> None:
     """Per-provider rate-limit deferral. Does NOT count toward the hard stop."""
     with _require_pool().connection() as conn:
         conn.execute(
-            "UPDATE tickets SET status = 'deferred', not_before = %s, updated_at = %s WHERE id = %s",
+            "UPDATE tickets SET status = 'deferred', not_before = %s, "
+            "updated_at = %s WHERE id = %s",
             (not_before, now, ticket_id),
         )
 
@@ -295,7 +297,8 @@ def finalize_review(
               status             = CASE WHEN rereview_requested = 1 THEN 'deferred' ELSE 'done' END,
               not_before         = CASE WHEN rereview_requested = 1 THEN %(rnb)s ELSE NULL END,
               attempts           = CASE WHEN rereview_requested = 1 THEN 0 ELSE attempts END,
-              cooldown_level     = CASE WHEN rereview_requested = 1 THEN %(new_level)s ELSE cooldown_level END,
+              cooldown_level     = CASE WHEN rereview_requested = 1
+                                        THEN %(new_level)s ELSE cooldown_level END,
               rereview_requested = 0,
               updated_at         = %(now)s
             WHERE id = %(id)s

@@ -58,7 +58,9 @@ async def validate_and_repair(
     tokens_out = first.tokens_out + second.tokens_out
 
     if second.parsed is not None:
-        return ValidatedResult(ok=True, parsed=second.parsed, tokens_in=tokens_in, tokens_out=tokens_out)
+        return ValidatedResult(
+            ok=True, parsed=second.parsed, tokens_in=tokens_in, tokens_out=tokens_out
+        )
 
     return ValidatedResult(
         ok=False,

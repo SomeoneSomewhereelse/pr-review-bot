@@ -60,7 +60,9 @@ def main() -> None:
     assert result.tokens_in > 0, "expected non-zero real prompt token usage"
     assert result.tokens_out > 0, "expected non-zero real completion token usage"
 
-    cost = estimate_cost_usd("github_models", settings.github_models_model, result.tokens_in, result.tokens_out)
+    cost = estimate_cost_usd(
+        "github_models", settings.github_models_model, result.tokens_in, result.tokens_out
+    )
     print(f"estimated cost: ${cost:.6f}")
 
     print(

@@ -44,7 +44,10 @@ def main() -> None:
     print("Proving this is an installation token, not gh's personal user token ...")
     try:
         gh.get_user().login
-        print("  UNEXPECTED: GET /user succeeded — this looks like a personal token, not an App installation token.")
+        print(
+            "  UNEXPECTED: GET /user succeeded — this looks like a personal token, "
+            "not an App installation token."
+        )
         raise SystemExit(1)
     except GithubException as e:
         print(

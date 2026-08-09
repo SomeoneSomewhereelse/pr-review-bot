@@ -46,7 +46,9 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
     fake_generate = AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"}), 42, 7))
     monkeypatch.setattr(
         "app.providers.google_genai.genai.Client",
-        lambda **kwargs: SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))),
+        lambda **kwargs: SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
+        ),
     )
 
     provider = GeminiProvider()
@@ -65,7 +67,9 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
     fake_generate = AsyncMock(return_value=_fake_response("not json at all", 10, 1))
     monkeypatch.setattr(
         "app.providers.google_genai.genai.Client",
-        lambda **kwargs: SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))),
+        lambda **kwargs: SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
+        ),
     )
 
     provider = GeminiProvider()
@@ -78,10 +82,14 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
-    fake_generate = AsyncMock(return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1))
+    fake_generate = AsyncMock(
+        return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1)
+    )
     monkeypatch.setattr(
         "app.providers.google_genai.genai.Client",
-        lambda **kwargs: SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))),
+        lambda **kwargs: SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
+        ),
     )
 
     provider = GeminiProvider()
@@ -158,7 +166,16 @@ class FakeProvider:
 async def test_validate_and_repair_succeeds_on_first_try():
     from app.providers.base import LLMResponse
 
-    provider = FakeProvider([LLMResponse(raw_text='{"message": "hi"}', tokens_in=5, tokens_out=2, parsed=Greeting(message="hi"))])
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                raw_text='{"message": "hi"}',
+                tokens_in=5,
+                tokens_out=2,
+                parsed=Greeting(message="hi"),
+            )
+        ]
+    )
 
     result = await validate_and_repair(provider, "sys", "usr", Greeting)
 
@@ -176,7 +193,12 @@ async def test_validate_and_repair_retries_once_then_succeeds():
     provider = FakeProvider(
         [
             LLMResponse(raw_text="garbage", tokens_in=10, tokens_out=1, parsed=None),
-            LLMResponse(raw_text='{"message": "fixed"}', tokens_in=8, tokens_out=3, parsed=Greeting(message="fixed")),
+            LLMResponse(
+                raw_text='{"message": "fixed"}',
+                tokens_in=8,
+                tokens_out=3,
+                parsed=Greeting(message="fixed"),
+            ),
         ]
     )
 
@@ -219,7 +241,9 @@ async def test_validate_and_repair_fails_after_repair_also_fails():
 
 
 def test_estimate_cost_usd_gemini_flash():
-    cost = pricing.estimate_cost_usd("gemini", "gemini-flash-latest", tokens_in=4_000, tokens_out=500)
+    cost = pricing.estimate_cost_usd(
+        "gemini", "gemini-flash-latest", tokens_in=4_000, tokens_out=500
+    )
     # 4000/1e6 * 0.30 + 500/1e6 * 2.50
     assert cost == pytest.approx(0.0012 + 0.00125)
 
@@ -230,7 +254,9 @@ def test_estimate_cost_usd_unknown_model_raises():
 
 
 def test_estimate_cost_usd_groq_llama():
-    cost = pricing.estimate_cost_usd("groq", "llama-3.3-70b-versatile", tokens_in=4_000, tokens_out=500)
+    cost = pricing.estimate_cost_usd(
+        "groq", "llama-3.3-70b-versatile", tokens_in=4_000, tokens_out=500
+    )
     # 4000/1e6 * 0.59 + 500/1e6 * 0.79
     assert cost == pytest.approx(0.00236 + 0.000395)
 
@@ -241,5 +267,7 @@ def test_estimate_cost_usd_groq_unknown_model_raises():
 
 
 def test_estimate_cost_usd_github_models_is_free():
-    cost = pricing.estimate_cost_usd("github_models", "openai/gpt-4o-mini", tokens_in=4_000, tokens_out=500)
+    cost = pricing.estimate_cost_usd(
+        "github_models", "openai/gpt-4o-mini", tokens_in=4_000, tokens_out=500
+    )
     assert cost == 0.0

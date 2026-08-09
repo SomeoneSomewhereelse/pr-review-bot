@@ -63,7 +63,10 @@ def main() -> None:
     cost = estimate_cost_usd("gemini", settings.llm_model, result.tokens_in, result.tokens_out)
     print(f"estimated cost: ${cost:.6f}")
 
-    print("\nSUCCESS: live Gemini structured-output call verified end-to-end through validate_and_repair().")
+    print(
+        "\nSUCCESS: live Gemini structured-output call verified "
+        "end-to-end through validate_and_repair()."
+    )
 
 
 if __name__ == "__main__":

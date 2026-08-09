@@ -14,7 +14,9 @@ from app.specialists.schemas import SpecialistResult
 
 
 def _ok(name):
-    return SpecialistResult(name=name, status="ok", findings=[], elapsed_ms=1, tokens_in=1, tokens_out=1)
+    return SpecialistResult(
+        name=name, status="ok", findings=[], elapsed_ms=1, tokens_in=1, tokens_out=1
+    )
 
 
 @pytest.fixture(autouse=True)

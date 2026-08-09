@@ -47,7 +47,9 @@ async def _complete(
         response_schema=schema,
     )
     try:
-        response = await client.aio.models.generate_content(model=model, contents=user, config=config)
+        response = await client.aio.models.generate_content(
+            model=model, contents=user, config=config
+        )
     except Exception as exc:  # noqa: BLE001 - re-raised unless it's a 429
         rl = rate_limited_or_none(
             exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds

@@ -93,7 +93,9 @@ async def attempt_review(
     results = [
         outcome
         if isinstance(outcome, SpecialistResult)
-        else SpecialistResult(name=name, status="failed", findings=[], error=str(outcome), elapsed_ms=0)
+        else SpecialistResult(
+            name=name, status="failed", findings=[], error=str(outcome), elapsed_ms=0
+        )
         for name, outcome in zip(_SPECIALIST_NAMES, raw_results)
     ]
 

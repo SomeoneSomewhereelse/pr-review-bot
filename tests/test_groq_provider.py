@@ -72,7 +72,9 @@ async def test_groq_provider_returns_none_parsed_on_malformed_json(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_groq_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
-    fake_create = AsyncMock(return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1))
+    fake_create = AsyncMock(
+        return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1)
+    )
     monkeypatch.setattr(
         "app.providers.groq.AsyncGroq",
         lambda **kwargs: SimpleNamespace(

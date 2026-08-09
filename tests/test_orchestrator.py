@@ -117,7 +117,9 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     import app.orchestrator as orchestrator
 
     monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
-    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: SimpleNamespace(id=1))
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment", lambda *a, **k: SimpleNamespace(id=1)
+    )
 
     async def ok(name):
         async def _inner(annotated_diff):
