@@ -24,6 +24,6 @@ def get_provider() -> LLMProvider:
         return GitHubModelsProvider()
 
     raise ValueError(
-        f"Unknown LLM_PROVIDER: {provider!r} "
+        f"Unknown provider: {provider!r} "
         "(expected 'gemini', 'groq', or 'github_models')"
     )

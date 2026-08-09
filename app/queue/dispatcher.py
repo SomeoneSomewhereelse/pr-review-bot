@@ -31,6 +31,7 @@ from app.formatting import (
     format_schedule_notice,
 )
 from app.orchestrator import ReviewRateLimited, attempt_review
+from app.providers import active
 from app.providers.active import active_provider
 from app.queue import store
 
@@ -122,6 +123,15 @@ async def process_next_due(now: datetime) -> StepResult:
     ticket = await asyncio.to_thread(store.claim_next_due, now.isoformat())
     if ticket is None:
         return StepResult(action="idle")
+
+    # Refresh the provider override once per claimed ticket, not once per idle
+    # tick. A failure here must never abort a review: active_provider() falls
+    # back to settings.llm_provider whenever the cache is empty or stale.
+    try:
+        override = await asyncio.to_thread(store.get_provider_override)
+        active.set_override_cache(override)
+    except Exception:  # noqa: BLE001 - deliberate: degrade to the env provider
+        logger.exception("failed to refresh the provider override; using LLM_PROVIDER")
 
     if ticket.notice_not_before is not None:
         try:

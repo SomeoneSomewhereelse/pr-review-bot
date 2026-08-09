@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.config import settings
+from app.providers import active
 from app.queue import dispatcher, store
 import app.orchestrator as orchestrator
 
@@ -21,8 +22,10 @@ NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 def _env(db, monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "groq")
     dispatcher.reset_blocked_until()
+    active.reset_override_cache()
     yield
     dispatcher.reset_blocked_until()
+    active.reset_override_cache()
 
 
 def _enqueue(pr, now=NOW):
@@ -697,3 +700,46 @@ async def test_post_pending_notices_per_ticket_failure_does_not_block_others(mon
     assert set(calls) == {82, 83}                            # both attempted
     assert store.get_ticket(tid1).notice_not_before is None  # failed post -> marker not set
     assert store.get_ticket(tid2).notice_not_before == future.isoformat()
+
+
+async def test_claimed_ticket_runs_against_the_db_override(monkeypatch):
+    """The behavioral guarantee: a mid-session override changes which provider
+    actually runs, with no restart and no redeploy."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    store.set_provider_override("groq", NOW.isoformat())
+    seen = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        from app.providers.active import active_provider
+        seen.append(active_provider())
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+    _enqueue(1)
+    await dispatcher.process_next_due(NOW)
+    assert seen == ["groq"]
+
+
+async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch):
+    """Fail-safe: an unreachable override must degrade to the configured
+    provider, never abort the review."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(store, "get_provider_override", boom)
+    seen = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        from app.providers.active import active_provider
+        seen.append(active_provider())
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+    _enqueue(1)
+    result = await dispatcher.process_next_due(NOW)
+    assert seen == ["gemini"]
+    assert result.action == "ran"
