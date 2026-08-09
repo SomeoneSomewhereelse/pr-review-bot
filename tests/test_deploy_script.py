@@ -135,6 +135,34 @@ def test_check_config_ignores_provider_keys_for_other_providers(complete_config,
     assert deploy.check_config().status == "PASS"
 
 
+def test_providers_table_covers_every_supported_provider():
+    """One table, read by check_config, --sync-env and set_provider.py, so a
+    provider cannot be known to one consumer and unknown to another."""
+    assert set(deploy._PROVIDERS) == {"gemini", "groq", "github_models"}
+    for credential, model_var in deploy._PROVIDERS.values():
+        assert credential and model_var
+
+
+def test_check_config_fails_on_an_unrecognized_provider(complete_config, monkeypatch):
+    """An unrecognized value used to contribute no requirement and pass with
+    nothing verified -- which after the vertex retirement includes 'vertex'."""
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "vertex" in result.detail
+    assert "gemini" in result.detail
+
+
+def test_check_config_requires_the_gemini_key_when_gemini_selected(
+    complete_config, monkeypatch
+):
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GEMINI_API_KEY" in result.detail
+
+
 def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", "")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_SUPER_SECRET_VALUE")

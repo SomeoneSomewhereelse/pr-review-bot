@@ -89,12 +89,14 @@ def resolve_base_url() -> str:
     return base.rstrip("/")
 
 
-# The provider key each LLM_PROVIDER value requires. An unrecognized provider
-# contributes no requirement rather than a false failure.
-_PROVIDER_KEYS = {
-    "groq": "GROQ_API_KEY",
-    "github_models": "GITHUB_MODELS_TOKEN",
-    "gemini": "GEMINI_API_KEY",
+# The credential and model env var each LLM_PROVIDER value requires. This is the
+# single source of truth: check_config, --sync-env and scripts/set_provider.py
+# all read it, so a provider cannot be known to one and unknown to another.
+# provider -> (credential env var, model env var)
+_PROVIDERS = {
+    "gemini": ("GEMINI_API_KEY", "LLM_MODEL"),
+    "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
+    "github_models": ("GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL"),
 }
 
 
@@ -122,9 +124,18 @@ def check_config() -> CheckResult:
         missing.append("GITHUB_TARGET_REPO")
     if not resolve_base_url():
         missing.append("PUBLIC_BASE_URL or RENDER_EXTERNAL_URL")
-    provider_key = _PROVIDER_KEYS.get(settings.llm_provider)
-    if provider_key and not getattr(settings, provider_key.lower(), ""):
-        missing.append(provider_key)
+    entry = _PROVIDERS.get(settings.llm_provider)
+    if entry is None:
+        accepted = ", ".join(sorted(_PROVIDERS))
+        return CheckResult(
+            "config",
+            "FAIL",
+            f"LLM_PROVIDER={settings.llm_provider!r} is not supported "
+            f"(expected one of: {accepted})",
+        )
+    credential = entry[0]
+    if not getattr(settings, credential.lower(), ""):
+        missing.append(credential)
     if missing:
         return CheckResult("config", "FAIL", "missing: " + ", ".join(missing))
     return CheckResult("config", "PASS", "")
@@ -395,7 +406,8 @@ def sync_env() -> int:
         # Before any request, so a partial push cannot happen.
         print(f"refusing to push empty values; fix .env first: {', '.join(empty)}", file=sys.stderr)
         return 2
-    provider_key = _PROVIDER_KEYS.get(wanted["LLM_PROVIDER"])
+    entry = _PROVIDERS.get(wanted["LLM_PROVIDER"])
+    provider_key = entry[0] if entry else None
     if provider_key and provider_key not in wanted:
         print(
             f"refusing to sync LLM_PROVIDER={wanted['LLM_PROVIDER']}: {provider_key} is not "
