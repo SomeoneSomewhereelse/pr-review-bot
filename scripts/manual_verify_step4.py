@@ -2,9 +2,10 @@
 
 Not part of the pytest suite (CI never runs this) — it depends on a real,
 live call to the Gemini AI-Studio API using the real GEMINI_API_KEY from
-`.env`. This is the ACTUALLY LIVE provider in this environment (Vertex is
-not configured — no GCP project/billing/ADC — and is covered by mocked
-tests only, see tests/test_providers.py).
+`.env`. This is the ACTUALLY LIVE provider in this environment — Vertex was
+evaluated and removed (it requires an attached payment card, which this
+project's no-card constraint rules out; see CLAUDE.md's "Substitutions from
+the brief").
 
 Run it directly:
 

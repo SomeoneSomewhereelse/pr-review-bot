@@ -7,7 +7,7 @@ of truth for cost calculations.
 from __future__ import annotations
 
 # USD per 1M tokens: (rate_in, rate_out), keyed by (provider, model).
-# Vertex and Gemini share the same underlying model + rate (see cost.md).
+# gemini/gemini-flash-latest: AI-Studio's per-token rate (see cost.md).
 # groq/llama-3.3-70b-versatile: taken from Groq's live /openai/v1/models
 # response (`pricing.prompt` / `pricing.completion`, USD per token) on
 # 2026-07-23 — $0.59 / $0.79 per 1M tokens. Representative; verify at build
