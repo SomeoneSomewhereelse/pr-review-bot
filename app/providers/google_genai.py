@@ -50,7 +50,8 @@ async def _complete(
         response = await client.aio.models.generate_content(
             model=model, contents=user, config=config
         )
-    except Exception as exc:  # noqa: BLE001 - re-raised unless it's a 429
+    # re-raised unless it's a 429
+    except Exception as exc:  # noqa: BLE001
         rl = rate_limited_or_none(
             exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds
         )

@@ -477,7 +477,8 @@ def sync_env() -> int:
             print("env vars already in sync; no deploy triggered")
             return 0
         return _trigger_and_wait(service_id)
-    except Exception as exc:  # noqa: BLE001 - deliberate: a crashed sync is "could not run"
+    # deliberate: a crashed sync is "could not run"
+    except Exception as exc:  # noqa: BLE001
         print(f"Render API error ({type(exc).__name__})", file=sys.stderr)
         return 2
 
@@ -486,7 +487,8 @@ def _safe(name: str, fn, *args) -> CheckResult:
     """No check may abort the run: a complete table is the deliverable."""
     try:
         return fn(*args)
-    except Exception as exc:  # noqa: BLE001 - deliberate: any failure becomes a row
+    # deliberate: any failure becomes a row
+    except Exception as exc:  # noqa: BLE001
         return CheckResult(name, "FAIL", f"unexpected {type(exc).__name__}")
 
 

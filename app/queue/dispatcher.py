@@ -109,7 +109,8 @@ async def post_pending_notices(now: datetime) -> int:
                 store.mark_notice_posted, ticket.id, ticket.not_before
             )
             posted += 1
-        except Exception:  # noqa: BLE001 - one ticket's failure must not block the rest
+        # one ticket's failure must not block the rest
+        except Exception:  # noqa: BLE001
             logger.exception("failed to post schedule notice for ticket %s", ticket.id)
     return posted
 
@@ -130,7 +131,8 @@ async def process_next_due(now: datetime) -> StepResult:
     try:
         override = await asyncio.to_thread(store.get_provider_override)
         active.set_override_cache(override)
-    except Exception:  # noqa: BLE001 - deliberate: degrade to the env provider
+    # deliberate: degrade to the env provider
+    except Exception:  # noqa: BLE001
         logger.exception("failed to refresh the provider override; using LLM_PROVIDER")
 
     if ticket.notice_not_before is not None:
@@ -140,7 +142,8 @@ async def process_next_due(now: datetime) -> StepResult:
                 ticket.repo_full_name, ticket.pr_number, ticket.comment_id,
             )
             await asyncio.to_thread(store.clear_notice, ticket.id)
-        except Exception:  # noqa: BLE001 - a stale note is cosmetic; must not block the review
+        # a stale note is cosmetic; must not block the review
+        except Exception:  # noqa: BLE001
             logger.exception("failed to clear schedule notice for ticket %s", ticket.id)
 
     # Gate on the ACTIVE provider (the DB override when set, else the
@@ -167,7 +170,8 @@ async def process_next_due(now: datetime) -> StepResult:
         outcome = await attempt_review(
             ticket.repo_full_name, ticket.pr_number, comment_id=ticket.comment_id
         )
-    except Exception as exc:  # noqa: BLE001 - hard failure: back off per-ticket, hard-stop at the cap
+    # hard failure: back off per-ticket, hard-stop at the cap
+    except Exception as exc:  # noqa: BLE001
         logger.exception("review attempt failed for ticket %s", ticket.id)
         next_attempt = ticket.attempts + 1
         if next_attempt >= settings.dispatcher_max_failure_attempts:
@@ -190,7 +194,8 @@ async def process_next_due(now: datetime) -> StepResult:
                         format_failure(ticket.pr_number, next_attempt),
                         ticket.comment_id,
                     )
-            except Exception:  # noqa: BLE001 - couldn't post the notice; don't strand as terminal
+            # couldn't post the notice; don't strand as terminal
+            except Exception:  # noqa: BLE001
                 logger.exception("failed to post terminal failure notice for ticket %s", ticket.id)
                 notice_post_ceiling = (
                     settings.dispatcher_max_failure_attempts
@@ -281,12 +286,14 @@ async def run_forever() -> None:
             await process_next_due(datetime.now(timezone.utc))
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - the dispatcher must never die on one ticket
+        # the dispatcher must never die on one ticket
+        except Exception:  # noqa: BLE001
             logger.exception("dispatcher step failed")
         try:
             await post_pending_notices(datetime.now(timezone.utc))
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - notice sweep failure must not stop the loop
+        # notice sweep failure must not stop the loop
+        except Exception:  # noqa: BLE001
             logger.exception("notice sweep failed")
         await asyncio.sleep(settings.dispatcher_idle_sleep_seconds)

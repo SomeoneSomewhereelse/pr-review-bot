@@ -82,7 +82,8 @@ async def run_specialist(
         )
     except RateLimited:
         raise  # must reach the orchestrator so it can defer, not render a failed row
-    except Exception as exc:  # noqa: BLE001 - a specialist must never crash the orchestrator
+    # a specialist must never crash the orchestrator
+    except Exception as exc:  # noqa: BLE001
         return SpecialistResult(
             name=name,
             status="failed",
