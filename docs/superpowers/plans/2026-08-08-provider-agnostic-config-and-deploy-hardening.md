@@ -316,6 +316,10 @@ Add `import argparse` at the top of `scripts/deploy.py`, then replace `main`:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deploy",
+        # Without this, argparse treats --sync-en as an abbreviation of
+        # --sync-env and RUNS the sync. That is not hypothetical: it fired a
+        # real deploy against live infrastructure during this task.
+        allow_abbrev=False,
         description=(
             "Verify the hosted deployment: configuration, GitHub App installation "
             "and webhook, health endpoint, database, Render service, and keep-warm "
@@ -391,6 +395,137 @@ git commit -m "fix(deploy): parse args with argparse; enforce E501 at 100
 A typo like --sync-en silently ran checks only and reported success for a sync
 that never happened. CLAUDE.md documented line-length 100 but E501 was never
 selected, so it was unenforced.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BhcpvrVNCucAkhLCz857Ue"
+```
+
+---
+
+### Task 2b: Quarantine live operator APIs in tests
+
+**Files:**
+- Modify: `tests/conftest.py`
+- Test: `tests/test_deploy_script.py`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: an autouse fixture in `tests/conftest.py` that blanks
+  `settings.render_api_key` and `settings.uptimerobot_api_key` for every test,
+  plus `live_operator_apis_allowed` — the explicit opt-in fixture a test must
+  request before either key is readable.
+
+**Why this task exists.** During Task 2 a test reached the real Render API with
+the operator's real `RENDER_API_KEY` and overwrote `GITHUB_TARGET_REPO` on the
+live service with a dummy value, triggering a failed deploy. The trigger was an
+argparse abbreviation, which is now fixed — but the *property* that made it
+damaging is still there: any test that forgets to monkeypatch
+`settings.render_api_key` runs against production.
+
+`tests/conftest.py` already carries exactly this kind of guard for the database:
+it refuses a `DATABASE_URL` that does not look local, "solely so an accidentally
+-exported DATABASE_URL pointing at a real Supabase database can never get
+truncated by a test run". This extends that same reasoning to the operator APIs.
+
+Tasks 10, 11, and 12 all add tests around the Render code paths, so this lands
+before them.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/test_deploy_script.py`:
+
+```python
+def test_operator_api_keys_are_blank_by_default():
+    """A test that forgets to monkeypatch these must hit no live API. Task 2
+    overwrote a live Render env var because this guard did not exist."""
+    assert settings.render_api_key == ""
+    assert settings.uptimerobot_api_key == ""
+
+
+def test_check_render_service_skips_rather_than_calling_out(monkeypatch):
+    """With the keys quarantined, the Render check degrades to SKIPPED --
+    it can never reach api.render.com from a default test run."""
+    result = deploy.check_render_service()
+    assert result.status == "SKIPPED"
+```
+
+- [ ] **Step 2: Run them to make sure they fail**
+
+Run: `TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest tests/test_deploy_script.py -k "blank_by_default or skips_rather" -v`
+
+Expected: FAIL — a developer `.env` supplies real values, so `settings.render_api_key` is a real key and `check_render_service` would attempt a live call.
+
+If both tests happen to pass on a machine whose `.env` has no keys, that is not
+proof: temporarily export `RENDER_API_KEY=dummy` and confirm the first test
+fails. The guard must hold regardless of the local `.env`.
+
+- [ ] **Step 3: Add the guard**
+
+Append to `tests/conftest.py`:
+
+```python
+# Operator-tooling credentials are read only by scripts/deploy.py, and they
+# point at REAL infrastructure. A test that forgets to monkeypatch them runs
+# against production: during this plan's Task 2 exactly that happened, and a
+# live Render service had GITHUB_TARGET_REPO overwritten with a dummy value.
+# Same reasoning as the DATABASE_URL guard above -- default to inert, and make
+# reaching a live API something a test has to ask for by name.
+_LIVE_OPERATOR_KEYS = ("render_api_key", "uptimerobot_api_key")
+
+
+@pytest.fixture(autouse=True)
+def _quarantine_operator_apis(request, monkeypatch):
+    if "live_operator_apis_allowed" in request.fixturenames:
+        return
+    for name in _LIVE_OPERATOR_KEYS:
+        monkeypatch.setattr(settings, name, "")
+
+
+@pytest.fixture
+def live_operator_apis_allowed():
+    """Opt out of the quarantine. Requesting this fixture is a deliberate
+    statement that the test mocks its own transport (respx) or genuinely
+    intends a live call."""
+    return True
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest tests/test_deploy_script.py -k "blank_by_default or skips_rather" -v`
+Expected: PASS.
+
+- [ ] **Step 5: Repair the tests the guard breaks**
+
+Existing tests that monkeypatch `settings.render_api_key` to a dummy still work
+— the autouse fixture runs first and the test's own `monkeypatch.setattr` wins.
+Tests that relied on a *real* key would now SKIP.
+
+Run the full suite: `TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest -q`
+
+For each failure, fix it by setting the key explicitly in that test (the
+respx-mocked Render tests already do this). Do **not** hand out
+`live_operator_apis_allowed` to make a failure go away — that fixture exists for
+tests that deliberately want the real thing, and no test in this suite should.
+
+- [ ] **Step 6: Prove the guard bites**
+
+Temporarily comment out the `monkeypatch.setattr` loop in
+`_quarantine_operator_apis`, then run:
+`TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest tests/test_deploy_script.py -k blank_by_default -v`
+
+Expected on a machine with a real `.env`: **FAIL**. Restore the loop and confirm
+it passes. If it passed with the guard disabled, the test is not proving
+anything — say so in your report rather than committing.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tests/conftest.py tests/test_deploy_script.py
+git commit -m "test: quarantine live operator API keys by default
+
+A test that forgot to monkeypatch render_api_key reached the real Render API
+and overwrote a live env var. Same reasoning as the existing DATABASE_URL
+guard: default to inert, and make reaching a live API an explicit opt-in.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01BhcpvrVNCucAkhLCz857Ue"
