@@ -192,6 +192,48 @@ def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
 
 
 @pytest.fixture
+def unreadable_pem(complete_config):
+    """chmod 000 -- root reads anything, so this cannot be tested as root."""
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses file permissions; cannot test an unreadable PEM")
+    complete_config.chmod(0o000)
+    yield complete_config
+    complete_config.chmod(0o600)
+
+
+def test_check_config_fails_on_an_unreadable_pem(unreadable_pem):
+    """is_file() said yes while read_bytes() raised, so config passed and the
+    failure surfaced later as a traceback."""
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "unreadable" in result.detail
+
+
+def test_check_config_distinguishes_unreadable_from_missing(unreadable_pem):
+    """Different problems need different actions: fix permissions vs create a
+    key. Reporting both as 'missing' sends the operator to the wrong fix."""
+    detail = deploy.check_config().detail
+    assert "GITHUB_APP_PRIVATE_KEY_B64 or _PATH" not in detail
+
+
+def test_check_config_reports_a_missing_pem_as_missing(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_private_key_path", "/nope/absent.pem")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GITHUB_APP_PRIVATE_KEY_B64 or _PATH" in result.detail
+
+
+def test_check_config_uses_b64_without_touching_the_filesystem(
+    complete_config, monkeypatch
+):
+    monkeypatch.setattr(settings, "github_app_private_key_b64", "Zm9v")
+    monkeypatch.setattr(settings, "github_app_private_key_path", "/nope/absent.pem")
+    assert deploy.check_config().status == "PASS"
+
+
+@pytest.fixture
 def github_seam(monkeypatch):
     """Monkeypatch the github_app boundary and record webhook writes.
 
@@ -711,6 +753,22 @@ def _env_var_list(values: dict):
 def test_sync_env_requires_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     assert deploy.sync_env() == 2
+
+
+def test_sync_env_exits_2_on_an_unreadable_pem_without_a_traceback(
+    unreadable_pem, monkeypatch, capsys
+):
+    """The parked residual: _wanted_env's OSError sat outside sync_env's try."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    called = []
+    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
+    code = deploy.sync_env()
+    assert code == 2
+    assert "GITHUB_APP_PRIVATE_KEY_B64" in capsys.readouterr().err
+    assert called == []
 
 
 def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys):

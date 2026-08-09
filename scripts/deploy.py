@@ -100,13 +100,26 @@ _PROVIDERS = {
 }
 
 
-def _private_key_available() -> bool:
+def _private_key_b64() -> tuple[str, str]:
+    """The PEM in the base64 form Render needs, plus a problem string
+    ("" when usable).
+
+    Reads rather than stats: an existing-but-unreadable PEM must not report as
+    available, because check_config would pass while _wanted_env raised on the
+    same file. Returning the problem instead of raising keeps the CLI's exit
+    contract intact -- a config problem is a FAIL row, not a traceback.
+    """
     if settings.github_app_private_key_b64:
-        return True
+        return settings.github_app_private_key_b64, ""
     path = Path(settings.github_app_private_key_path)
     if not path.is_absolute():
         path = Path.cwd() / path
-    return path.is_file()
+    try:
+        return base64.b64encode(path.read_bytes()).decode(), ""
+    except FileNotFoundError:
+        return "", "GITHUB_APP_PRIVATE_KEY_B64 or _PATH"
+    except OSError as exc:
+        return "", f"unreadable PEM {path} ({type(exc).__name__})"
 
 
 def check_config() -> CheckResult:
@@ -117,8 +130,11 @@ def check_config() -> CheckResult:
     problems: list[str] = []
     if not settings.github_app_id:
         missing.append("GITHUB_APP_ID")
-    if not _private_key_available():
-        missing.append("GITHUB_APP_PRIVATE_KEY_B64 or _PATH")
+    key_b64, key_problem = _private_key_b64()
+    if key_problem and key_problem.startswith("unreadable"):
+        problems.append(key_problem)
+    elif key_problem:
+        missing.append(key_problem)
     if not settings.github_webhook_secret:
         missing.append("GITHUB_WEBHOOK_SECRET")
     if not settings.github_target_repo:
@@ -349,13 +365,7 @@ def _wanted_env() -> dict[str, str]:
     other provider's credential is included only when it has a local value --
     an opt-in .env lists the others empty, and must never be asked to fill them.
     """
-    pem_b64 = settings.github_app_private_key_b64
-    if not pem_b64:
-        path = Path(settings.github_app_private_key_path)
-        if not path.is_absolute():
-            path = Path.cwd() / path
-        if path.is_file():
-            pem_b64 = base64.b64encode(path.read_bytes()).decode()
+    pem_b64, _ = _private_key_b64()
     wanted = {
         "DATABASE_URL": settings.database_url,
         "GITHUB_APP_ID": str(settings.github_app_id or ""),
