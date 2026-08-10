@@ -190,11 +190,13 @@ reaches production unless your local `DATABASE_URL` happens to be the
 production one. `scripts/deploy.py`'s `provider` check resolves the override
 the same way the dispatcher does and confirms the resulting provider's
 credential is set — but only in **your local `.env`**, not on the deployed
-service. A typo'd provider name still surfaces as a `FAIL`, and a provider
-whose key was never pushed to Render is now caught automatically by
-`provider-live` (set `RENDER_API_KEY` to enable it) rather than only
-surfacing as a failed review. To push a missing credential, run
-`--sync-env` (see "Deploying" above).
+service. `scripts/set_provider.py` itself now verifies the target provider's
+credential against Render before writing the override (when `RENDER_API_KEY`
+is set), and refuses by default if it's missing or differs from your local
+`.env` — pass `--force` to write anyway. If your local `DATABASE_URL` isn't
+the one Render's service actually reads (e.g. you're testing against a local
+database), this verification is skipped automatically, since the write
+cannot affect production either way.
 
 #### Deploying an image, when the Render service has no connected repo
 

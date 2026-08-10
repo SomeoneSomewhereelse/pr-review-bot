@@ -398,15 +398,18 @@ production one. The override takes effect on the **next ticket the
 dispatcher claims** — no restart, no redeploy, which is what makes it useful
 for a live provider-swap demo (build step 7's `demo_provider_swap.py`
 predates this and used two `uvicorn` restarts instead; a follow-up spec
-rewrite is tracked but deferred). `scripts/deploy.py`'s `provider` check
-resolves the override exactly the way the dispatcher does and confirms the
-resulting provider's credential is set — but that check reads **your local
-`.env`**, not the deployed service, so it cannot tell you whether the
-credential was ever pushed to Render. A typo'd provider name still surfaces
-as a `FAIL`; a provider that is merely under-provisioned on the service (key
-present locally, never synced) will report `PASS` here and then fail every
-real review. Run `--sync-env` (§3.4 above) to actually get the credential
-onto the service — that is the only thing that closes this gap.
+rewrite is tracked but deferred).
+
+Before writing a non-cleared override, `set_provider.py` verifies the target
+provider's credential against the live Render service — when `RENDER_API_KEY`
+is set, and only when the local `DATABASE_URL` is actually the one Render
+reads (if it isn't, e.g. you're testing against a local database, the write
+cannot affect production and verification is skipped automatically). It
+refuses by default (exit 2) if the credential is missing on Render or differs
+from your local `.env` value; pass `--force` to write the override anyway.
+`scripts/deploy.py`'s `provider-live` check is the read-only counterpart to
+this guard, and both are built on the same `GET
+/v1/services/{id}/env-vars` call.
 
 ### 3.7 Deploying an image, for a service with no connected repo
 
