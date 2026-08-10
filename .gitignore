@@ -23,3 +23,6 @@ scripts/seed_bulk_demo_pr.py
 queue.db
 queue.db-wal
 queue.db-shm
+
+# Local git worktrees (superpowers subagent-driven-development scratch)
+.worktrees/
