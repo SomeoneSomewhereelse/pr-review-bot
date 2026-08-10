@@ -131,9 +131,10 @@ async def process_next_due(now: datetime) -> StepResult:
     try:
         override = await asyncio.to_thread(store.get_provider_override)
         active.set_override_cache(override)
-    # deliberate: degrade to the env provider
+    # deliberate: degrade to the env provider rather than keep a stale cache
     except Exception:  # noqa: BLE001
         logger.exception("failed to refresh the provider override; using LLM_PROVIDER")
+        active.set_override_cache(None)
 
     if ticket.notice_not_before is not None:
         try:

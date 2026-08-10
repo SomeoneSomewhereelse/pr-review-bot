@@ -723,9 +723,14 @@ async def test_claimed_ticket_runs_against_the_db_override(monkeypatch):
 
 async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch):
     """Fail-safe: an unreachable override must degrade to the configured
-    provider, never abort the review."""
+    provider, never abort the review, and never keep serving a stale cached
+    override from a previous successful refresh."""
     _stub_comments(monkeypatch)
     monkeypatch.setattr(settings, "llm_provider", "gemini")
+    # A prior successful refresh cached a DIFFERENT provider. If the failure
+    # handler merely logged and left the cache alone, active_provider() would
+    # keep returning "groq" forever -- this is what catches that.
+    active.set_override_cache("groq")
 
     def boom():
         raise RuntimeError("db down")
