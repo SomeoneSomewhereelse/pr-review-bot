@@ -904,6 +904,35 @@ def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
     assert "GEMINI_API_KEY" in capsys.readouterr().err
 
 
+def test_sync_env_reports_a_partial_push_as_exit_one_not_could_not_run(
+    sync_ready, capsys
+):
+    """Once one PUT has actually landed on the service, a later failure is a
+    PARTIAL push, not a failure to start -- it must exit 1 and name what was
+    already pushed, never exit 2's 'could not run at all', which would leave
+    an operator thinking the half-configured service is untouched."""
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        wanted = deploy._wanted_env()
+        current = dict.fromkeys(wanted, "stale")
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list(current))
+        )
+        first_key, second_key = list(wanted)[:2]
+        respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/{first_key}").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/{second_key}").mock(
+            side_effect=httpx.ConnectError("boom")
+        )
+        code = deploy.sync_env()
+    err = capsys.readouterr().err
+    assert code == 1
+    assert first_key in err            # names what was actually pushed
+    assert second_key not in err       # never claims the failed one landed
+    assert "partial" in err.lower()
+
+
 def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_ready):
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))

@@ -632,9 +632,10 @@ def sync_env() -> int:
     wanted = _wanted_env()
     empty = sorted(key for key, value in wanted.items() if not value)
     if empty:
-        # Before any request, so a partial push cannot happen. Only the keys
-        # this provider actually needs are in `wanted`, so this can never name
-        # another provider's credential.
+        # This guard alone runs before any HTTP request, so refusing here
+        # can never leave a partial push behind. Only the keys this provider
+        # actually needs are in `wanted`, so this can never name another
+        # provider's credential.
         print(
             f"refusing to push empty values; fix .env first: {', '.join(empty)}",
             file=sys.stderr,
@@ -655,9 +656,21 @@ def sync_env() -> int:
         for item in resp.json():
             env_var = _unwrap(item, "envVar")
             current[env_var.get("key")] = env_var.get("value")
-
         changed = [key for key, value in wanted.items() if current.get(key) != value]
-        for key in changed:
+    # deliberate: nothing has been pushed yet, so a crashed lookup really is
+    # "could not run at all"
+    except Exception as exc:  # noqa: BLE001
+        print(f"Render API error ({type(exc).__name__})", file=sys.stderr)
+        return 2
+
+    # Tracks which keys have actually been written to the service. Once this
+    # is non-empty, a later failure is a PARTIAL push, not a failure to
+    # start -- it must be reported as exit 1 (with the pushed names), never
+    # exit 2, or an operator would read "never really started" and walk away
+    # from a service that is now half-configured.
+    pushed: list[str] = []
+    for key in changed:
+        try:
             put = httpx.put(
                 f"{_RENDER_API}/services/{service_id}/env-vars/{key}",
                 headers=_render_headers(),
@@ -665,17 +678,39 @@ def sync_env() -> int:
                 timeout=_HTTP_TIMEOUT,
             )
             put.raise_for_status()
-            print(f"pushed {key} (len {len(wanted[key])})")   # names and lengths only
-        if not changed:
-            print("env vars already in sync; no deploy triggered")
-            return 0
+        except Exception as exc:  # noqa: BLE001
+            if pushed:
+                return _report_partial_push(pushed, exc)
+            # deliberate: no push has succeeded yet, so this is still
+            # "could not run at all"
+            print(f"Render API error ({type(exc).__name__})", file=sys.stderr)
+            return 2
+        pushed.append(key)
+        print(f"pushed {key} (len {len(wanted[key])})")   # names and lengths only
+    if not changed:
+        print("env vars already in sync; no deploy triggered")
+        return 0
+    try:
         if not _wait_for_in_flight(service_id):
             return 1
         return _trigger_and_wait(service_id)
-    # deliberate: a crashed sync is "could not run"
+    # deliberate: every key in `pushed` is already live on the service, so a
+    # failure past this point is a partial push, not a failure to start
     except Exception as exc:  # noqa: BLE001
-        print(f"Render API error ({type(exc).__name__})", file=sys.stderr)
-        return 2
+        return _report_partial_push(pushed, exc)
+
+
+def _report_partial_push(pushed: list[str], exc: BaseException) -> int:
+    """Exit 1, naming (never valuing) the vars that made it to the service
+    before ``exc`` -- the operator's next step is to fix the problem and
+    re-run --sync-env, not to assume nothing happened."""
+    print(
+        f"partial push: {', '.join(pushed)} already pushed to the service "
+        f"before a {type(exc).__name__}; fix the problem and re-run --sync-env "
+        "to finish (this is NOT \"could not run\" -- some vars already changed)",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _safe(name: str, fn, *args) -> CheckResult:
