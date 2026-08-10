@@ -57,8 +57,8 @@ def _verify_render_credential(provider: str) -> tuple[bool, str]:
 
     if env_vars.get("DATABASE_URL") != settings.database_url:
         return True, (
-            "local DATABASE_URL does not match the Render service's; "
-            "this override has no effect on production -- skipping live verification"
+            "could not confirm this DATABASE_URL is the one the Render service reads "
+            "-- skipping live verification"
         )
 
     credential, _ = _PROVIDERS[provider]

@@ -95,6 +95,23 @@ def test_sets_the_override_without_a_render_api_key(capsys):
     assert "could not verify against Render" in capsys.readouterr().out
 
 
+def test_degrades_to_a_warning_when_no_service_matches_the_configured_name(
+    monkeypatch, capsys
+):
+    """render_service_name doesn't match anything Render returns --
+    _find_render_service_id() degrades to None. Like the missing-key case,
+    this must warn and still let the write proceed, never block it."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "no-such-service")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        code = set_provider.main(["groq"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert store.get_provider_override() == "groq"
+    assert "no service named" in out
+
+
 def test_refuses_when_the_credential_is_missing_on_render(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
@@ -128,6 +145,7 @@ def test_force_writes_the_override_despite_a_missing_credential(monkeypatch, db_
 
 def test_refuses_when_the_credential_differs_from_local_env(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_local")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -146,6 +164,7 @@ def test_refuses_when_the_credential_differs_from_local_env(monkeypatch, db_url,
 
 def test_proceeds_when_the_credential_matches_local_env(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_match")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -162,6 +181,7 @@ def test_proceeds_when_the_credential_matches_local_env(monkeypatch, db_url, cap
 
 def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_local")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -186,6 +206,7 @@ def test_proceeds_without_refusal_when_local_database_url_does_not_match_render(
     points at a local/test database -- this write cannot affect production,
     so it must not be refused no matter what Render's credentials look like."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
     monkeypatch.setattr(settings, "groq_api_key", "")  # would refuse if compared
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
@@ -197,7 +218,7 @@ def test_proceeds_without_refusal_when_local_database_url_does_not_match_render(
         code = set_provider.main(["groq"])
     assert code == 0
     assert store.get_provider_override() == "groq"
-    assert "does not match" in capsys.readouterr().out
+    assert "could not confirm this DATABASE_URL" in capsys.readouterr().out
 
 
 def test_clear_never_calls_the_render_verification(monkeypatch):

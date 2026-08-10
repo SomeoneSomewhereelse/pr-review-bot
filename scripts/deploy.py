@@ -349,7 +349,12 @@ def check_provider_live() -> CheckResult:
         return CheckResult(
             name, "SKIPPED", f"could not resolve the active provider ({type(exc).__name__})"
         )
-    source = f"DB override; env={settings.llm_provider}" if override else "env"
+    if override:
+        source = f"DB override; env={settings.llm_provider}"
+    elif not settings.database_url:
+        source = "env; no DATABASE_URL to check for an override"
+    else:
+        source = "env"
     entry = _PROVIDERS.get(provider)
     if entry is None:
         # check_config / check_provider already FAIL on an unsupported name;

@@ -190,7 +190,10 @@ reaches production unless your local `DATABASE_URL` happens to be the
 production one. `scripts/deploy.py`'s `provider` check resolves the override
 the same way the dispatcher does and confirms the resulting provider's
 credential is set — but only in **your local `.env`**, not on the deployed
-service. `scripts/set_provider.py` itself now verifies the target provider's
+service. `scripts/deploy.py`'s `provider-live` check is the read-only
+counterpart to this guard: it verifies the resolved provider's credential
+against the live Render service itself, not just your local `.env`.
+`scripts/set_provider.py` itself now verifies the target provider's
 credential against Render before writing the override (when `RENDER_API_KEY`
 is set), and refuses by default if it's missing or differs from your local
 `.env` — pass `--force` to write anyway. If your local `DATABASE_URL` isn't

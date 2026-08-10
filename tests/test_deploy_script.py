@@ -1392,7 +1392,7 @@ def test_provider_live_passes_for_the_plain_env_provider_without_a_database_url(
         result = deploy.check_provider_live()
     assert result.status == "PASS"
     assert "groq" in result.detail
-    assert "env" in result.detail
+    assert "no DATABASE_URL to check for an override" in result.detail
 
 
 def test_provider_live_fails_when_the_overrides_credential_is_missing_on_render(
@@ -1430,6 +1430,9 @@ def test_provider_live_never_leaks_a_fetched_value(override_seam, monkeypatch):
         )
         result = deploy.check_provider_live()
     assert "gsk_SUPER_SECRET" not in result.detail
+    # DATABASE_URL was set and read (no override active) -- distinct from the
+    # no-DATABASE_URL fallback case, which says so explicitly.
+    assert result.detail.endswith("(env) -- GROQ_API_KEY present on Render")
 
 
 def test_run_checks_includes_the_provider_live_row(monkeypatch):
