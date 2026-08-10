@@ -8,7 +8,7 @@ forward from the original build order to have a working live LLM path).
 
 Run it directly:
 
-    uv run python scripts/manual_verify_groq.py
+    uv run python -m scripts.manual_verify_groq
 
 It proves, against the real Groq API, through the real validate-repair
 layer:

@@ -19,7 +19,7 @@ step) — the milestone step explicitly calls for a fresh PR, not reusing one.
 
 Run it directly:
 
-    uv run python scripts/seed_demo_pr.py
+    uv run python -m scripts.seed_demo_pr
 
 Prints the opened PR's URL on success. Never prints any secret.
 """

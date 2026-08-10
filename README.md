@@ -252,7 +252,7 @@ CI. Each is self-contained and prints what it's proving:
 1. Ensure the Render service is deployed and `/healthz` returns 200.
 2. The GitHub App's webhook URL is already the stable Render URL — no per-run
    update needed (`uv run python -m scripts.deploy` sets it once).
-3. `uv run python scripts/seed_demo_pr.py` — opens a real PR with a
+3. `uv run python -m scripts.seed_demo_pr` — opens a real PR with a
    hardcoded credential, an N+1 query, and a magic number planted in
    `fixtures/bad_code/`.
 4. The bot comment appears on the PR within the 15-second target, naming all

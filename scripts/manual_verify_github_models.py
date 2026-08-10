@@ -9,7 +9,7 @@ from both Gemini (Google, account-blocked) and Groq (Llama).
 
 Run it directly:
 
-    uv run python scripts/manual_verify_github_models.py
+    uv run python -m scripts.manual_verify_github_models
 
 It proves, against the real GitHub Models API, through the real
 validate-repair layer:

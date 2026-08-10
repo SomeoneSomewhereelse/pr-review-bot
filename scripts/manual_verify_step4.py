@@ -9,7 +9,7 @@ the brief").
 
 Run it directly:
 
-    uv run python scripts/manual_verify_step4.py
+    uv run python -m scripts.manual_verify_step4
 
 It proves, against the real Gemini API, through the real validate-repair
 layer:

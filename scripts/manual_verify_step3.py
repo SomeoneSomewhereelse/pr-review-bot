@@ -6,7 +6,7 @@ real PR on the configured test repo (GITHUB_TARGET_REPO).
 
 Run it directly:
 
-    uv run python scripts/manual_verify_step3.py [owner/repo] [pr_number]
+    uv run python -m scripts.manual_verify_step3 [owner/repo] [pr_number]
 
 It proves, against real GitHub:
   1. Authentication as the GitHub App installation (not `gh`'s user token).

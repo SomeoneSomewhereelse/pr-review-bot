@@ -319,7 +319,7 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
   (`ruff` + `pytest` layers 1–6) is green on the PR.
 - The deployed Render URL is set as the GitHub App webhook; a manual GitHub
   "Redeliver" of a `pull_request` event produces a comment.
-- **Live rehearsal**: `python scripts/seed_demo_pr.py` opens a PR with the three
+- **Live rehearsal**: `uv run python -m scripts.seed_demo_pr` opens a PR with the three
   planted issues; the bot comment appears within 15s naming the hardcoded credential,
   the N+1 query, and the magic number; footer shows runtime + cost; provider swap
   (`LLM_PROVIDER=groq`) still produces a valid comment.
