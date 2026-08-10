@@ -310,3 +310,12 @@ confirm the relevant test fails, revert.
   "whatever `DATABASE_URL` currently is" property from `check_provider()`
   (accepted in the 2026-08-08 spec); the gate is scoped to the write guard in
   `set_provider.py`, where a wrong refusal actually costs something.
+- **Consolidating the Render-API and provider-resolution access code across
+  scripts into a shared internal module.** This work adds a third consumer of
+  a Render env-var fetch and a third path resolving the active provider,
+  which is real, growing duplication — but the three planes involved (local
+  `.env`, Render's live env, the DB override) encode genuinely different
+  facts on purpose (§2.1 of the 2026-08-08 spec), so the fix is consolidating
+  *access code*, not collapsing the data into one source of truth. Raised
+  during review of this spec; deliberately deferred to its own follow-up
+  design session rather than widening this diff.
