@@ -123,22 +123,73 @@ done. It gains a pre-write check that can refuse.
 
 ### 4.1 `_verify_render_credential(provider: str) -> tuple[bool, str]`
 
-Returns `(ok_to_proceed, message)`. Never returns, prints, or logs the fetched
-value — only presence/absence and an in-memory equality result.
+Returns `(ok_to_proceed, message)`. Never returns, prints, or logs a fetched
+value — only presence/absence and in-memory equality results.
+
+```python
+def _verify_render_credential(provider: str) -> tuple[bool, str]:
+    if not settings.render_api_key:
+        return True, ("could not verify against Render (no RENDER_API_KEY); "
+                       "setting override without live verification")
+    try:
+        service_id = _find_render_service_id()
+        if service_id is None:
+            return True, (f"could not verify against Render (no service named "
+                           f"{settings.render_service_name}); setting override "
+                           "without live verification")
+        env_vars = _render_env_vars(service_id)
+    # deliberate: inability to verify degrades to a warning, never a refusal
+    except Exception as exc:  # noqa: BLE001
+        return True, (f"could not verify against Render ({type(exc).__name__}); "
+                       "setting override without live verification")
+
+    if env_vars.get("DATABASE_URL") != settings.database_url:
+        return True, ("local DATABASE_URL does not match the Render service's; "
+                       "this override has no effect on production -- skipping "
+                       "live verification")
+
+    credential, _ = _PROVIDERS[provider]
+    live_value = env_vars.get(credential) or ""
+    local_value = getattr(settings, credential.lower(), "")
+    if not live_value:
+        return False, (f"{credential} is missing on the Render service; the "
+                        "override would fail every review immediately. Push it "
+                        "first (uv run python -m scripts.deploy --sync-env) or "
+                        "pass --force")
+    if not local_value:
+        return True, f"{credential} present on Render (no local value to compare)"
+    if live_value != local_value:
+        return False, (f"{credential} on Render differs from your local .env "
+                        "value; the running service may use an unexpected key. "
+                        "Sync first, or pass --force")
+    return True, f"{credential} verified on Render (matches local .env)"
+```
 
 | condition | result |
 | --- | --- |
-| no `RENDER_API_KEY` | `(True, "could not verify against Render (no RENDER_API_KEY); setting override without live verification")` |
-| Render API/service-lookup error | `(True, "could not verify against Render ({exc type}); setting override without live verification")` |
-| credential missing/empty on Render | `(False, "{credential} is missing on the Render service; the override would fail every review immediately. Push it first (uv run python -m scripts.deploy --sync-env) or pass --force")` |
-| credential present on Render, local `.env` has no value to compare | `(True, "{credential} present on Render (no local value to compare)")` |
-| credential present on Render, differs from local `.env` | `(False, "{credential} on Render differs from your local .env value; the running service may use an unexpected key. Sync first, or pass --force")` |
-| credential present and matches local `.env` | `(True, "{credential} verified on Render (matches local .env)")` |
+| no `RENDER_API_KEY` | inability to verify — proceed with a warning |
+| Render API/service-lookup error | inability to verify — proceed with a warning |
+| local `DATABASE_URL` does not match Render's live `DATABASE_URL` | **not applicable** — this write cannot affect production, so verification is skipped outright (no warning tone; this is the expected shape of local testing, not a degraded state) |
+| credential missing/empty on Render | real problem found — refuse by default |
+| credential present, no local value to compare | fine — nothing to compare against |
+| credential present, differs from local `.env` | real problem found — refuse by default |
+| credential present, matches | verified — proceed |
 
-The first two rows are **inability to verify** — proceed with a warning,
-matching this CLI's SKIPPED-on-absent-key convention everywhere else (see §5
-for why `RENDER_API_KEY` is not made mandatory here). The middle two are
-**verification found a real problem** — refuse by default.
+The `DATABASE_URL` comparison costs no extra request: `_render_env_vars()`
+already returns the service's *entire* env-var set, `DATABASE_URL` included,
+so this reuses the one fetch that the credential check needs anyway. This is
+what makes §5's "having a non-empty `RENDER_API_KEY` should not blindly use
+it if not necessary" requirement possible without a second round trip.
+
+**Only `set_provider.py` gets this DB-match gate.** `check_provider_live()` in
+`deploy.py` (§2) does not — it is a read-only report, and `check_provider()`
+already resolves an override from "whatever `DATABASE_URL` currently is"
+without distinguishing local from production (an accepted property of the
+existing, previously-shipped design, per the linked 2026-08-08 spec §3.5).
+Gating the *write* guard here is what matters: a report row that's slightly
+off when pointed at a local dev database is informational noise; a refused
+write that blocks legitimate local testing is friction. `set_provider.py`
+is where the friction lives, so that's where the fix goes.
 
 ### 4.2 `main()` changes
 
@@ -173,14 +224,17 @@ So it stays optional, degrading to a warning — consistent with `RENDER_API_KEY
 `UPTIMEROBOT_API_KEY`, and `DATABASE_URL` all behaving the same way elsewhere
 in this CLI.
 
-**Accepted edge case, not a design change:** an operator with `RENDER_API_KEY`
-set globally but intentionally pointing `DATABASE_URL` at a local database for
-testing will still have this check query *production* Render, and could get
-refused for a purely local override that was never going to reach production
-anyway. This is consistent with `check_database` and `check_provider` already
-treating "whatever `DATABASE_URL` currently resolves to" without distinguishing
-local from prod — and `--force` covers it. Worth one line in `SETUP.md` (§7),
-not a behavior change.
+**The local-testing edge case from the first draft of this design is closed,
+not merely accepted:** an operator with `RENDER_API_KEY` set globally but
+intentionally pointing `DATABASE_URL` at a local database for testing no
+longer risks a refusal. `_verify_render_credential()` (§4.1) compares the
+local `DATABASE_URL` against Render's live one — reusing the same env-var
+fetch the credential check needs anyway, no extra request — and skips
+verification outright when they differ, since a write to a different database
+cannot affect production regardless of what Render's credentials look like. A
+non-empty `RENDER_API_KEY` is therefore never used unnecessarily: it is
+consulted only when the write is actually going to affect the service that
+key belongs to.
 
 ## 6. Secrets hygiene invariant
 
@@ -203,8 +257,9 @@ and never passed to a function that might log it.**
   pushed to Render will report PASS here and then fail every real review...").
   That paragraph is updated to say the gap is now caught automatically by
   `provider-live`, rather than only by prose.
-- `SETUP.md` §3.6 gains: the `--force` flag, and the local-testing edge case
-  from §5.
+- `SETUP.md` §3.6 gains: the `--force` flag, and a note that pointing
+  `DATABASE_URL` at a local database for testing automatically skips live
+  verification (§5) — no key configuration needed to avoid it.
 
 ## 8. Testing
 
@@ -225,16 +280,21 @@ never contain a fetched value (only the boolean-derived PASS/FAIL text).
 
 **`set_provider.py`:** existing tests stay green unchanged (no
 `RENDER_API_KEY` in their environment → skip-with-warning path, proceeds
-exactly as today). New cases: `RENDER_API_KEY` set, credential missing on
-Render → exit 2, override not written; same, with `--force` → exit 0, override
-written, warning printed; credential present and matches local `.env` → exit
-0, no warning; credential present and differs → exit 2 without `--force`, exit
-0 with it; `--clear` never invokes `_verify_render_credential()` (assert via a
-call-count check or monkeypatch spy).
+exactly as today). New cases: `RENDER_API_KEY` set and local `DATABASE_URL`
+matches Render's → credential missing on Render gives exit 2, override not
+written; same, with `--force` → exit 0, override written, warning printed;
+credential present and matches local `.env` → exit 0, no warning; credential
+present and differs → exit 2 without `--force`, exit 0 with it. **`RENDER_API_KEY`
+set but local `DATABASE_URL` does not match Render's** → proceeds without
+refusal regardless of what Render's credentials look like (this is the case
+that closes §5's edge case — assert the override is written and no `--force`
+was needed). `--clear` never invokes `_verify_render_credential()` (assert via
+a call-count check or monkeypatch spy).
 
-**Mutation check:** on the `--force` bypass condition and on the
-value-equality comparison in `_verify_render_credential()` — deliberately
-break each, confirm the relevant test fails, revert.
+**Mutation check:** on the `--force` bypass condition, on the
+`DATABASE_URL`-match comparison, and on the credential value-equality
+comparison in `_verify_render_credential()` — deliberately break each,
+confirm the relevant test fails, revert.
 
 ## 9. Out of scope
 
@@ -245,5 +305,8 @@ break each, confirm the relevant test fails, revert.
   extraction, which is a pure refactor.
 - Auto-triggering `--sync-env` from either script on a failed/refused check —
   both report and name the command; neither invokes it.
-- Detecting whether a local `DATABASE_URL` used by `set_provider.py` is the
-  same database Render's service reads (§5's accepted edge case).
+- Applying the `DATABASE_URL`-match gate (§4.1, §5) to `check_provider_live()`
+  in `deploy.py` — that check is read-only and already inherits the same
+  "whatever `DATABASE_URL` currently is" property from `check_provider()`
+  (accepted in the 2026-08-08 spec); the gate is scoped to the write guard in
+  `set_provider.py`, where a wrong refusal actually costs something.
