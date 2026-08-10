@@ -75,8 +75,11 @@ and one documented trigger is **hitting repeated 429s / testing many models
 back-to-back without backoff**, which is exactly what happened during
 troubleshooting here. The only documented fix is attaching GCP billing, which
 this project's setup deliberately avoids (see SETUP.md) — so once flagged, a
-provider is effectively lost for the rest of the demo. **Rules to avoid
-repeating this:**
+provider is effectively lost for the rest of the demo. (**Update, 2026-08-10:**
+a later API key update resolved this specific block — see SETUP.md §2 — but
+that doesn't change the rule below; a flag is still a real risk that this
+discipline exists to avoid, not something to rely on being reversible.)
+**Rules to avoid repeating this:**
 
 - **Never loop/burst live calls across many models or keys** to "see what
   sticks." One deliberate, single live call per real verification need.

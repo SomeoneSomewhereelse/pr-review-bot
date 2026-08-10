@@ -272,17 +272,12 @@ the full history of runs and timings.
   live-runnable here. The adapter existed under mocked tests only and was
   deleted rather than carried as a fourth code path no test could exercise for
   real. `SPEC.md` still records it as the brief's default provider.
-- **Gemini (AI-Studio)**: implemented and live-verified initially, then the
-  API key's underlying Google account got an automated **Trust & Safety
-  access flag** (`403 PERMISSION_DENIED`) partway through development —
-  confirmed, via Google's own AI Developer Forum, to be account-level.
-  Fresh keys under multiple different Google accounts were all blocked at
-  the time. **Re-verified live and working again as of 2026-08-10** with an
-  updated API key (`scripts/manual_verify_step4.py`: real structured output,
-  non-zero token usage) — whatever tripped the flag on the earlier key/account
-  is not reproduced here. `scripts/demo_provider_swap.py`'s description of a
-  graceful Gemini failure reflects the earlier, blocked key and has not been
-  re-run against the current one.
+- **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
+  2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
+  non-zero token usage). See `SETUP.md` for the account-access history this
+  project worked through earlier. `scripts/demo_provider_swap.py`'s
+  description of a graceful Gemini failure predates this and hasn't been
+  re-run against the current key.
 - **Groq is the primary live provider** (`LLM_PROVIDER=groq`,
   `llama-3.3-70b-versatile`) — pulled forward from a later build step
   specifically to have a working live path.

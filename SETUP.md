@@ -38,7 +38,7 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   - **Client ID** — not used by this project at all. Easy to grab by mistake,
     since it sits on the same page.
 
-## 2. LLM provider — Groq (live), not Vertex, Gemini currently blocked
+## 2. LLM provider — Groq (live), not Vertex; Gemini blocked, then resolved
 
 - **Deviation from the original plan (GCP/Vertex):** Vertex AI requires a
   billing account (card) to enable. The user declined to add one, so no GCP
@@ -63,6 +63,14 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   avoids). **Gemini is not expected to become usable without that trade-off**;
   cross-vendor provider-agnosticism is demonstrated via Groq instead, and
   other AI providers may be evaluated later to strengthen that story.
+  **Resolved, 2026-08-10:** the API key was updated (new key, same or a
+  different Google account — not investigated further) and
+  `scripts/manual_verify_step4.py` now succeeds live: real structured output,
+  non-zero token usage, no `403`. Whatever specifically tripped the flag on
+  the earlier key isn't reproduced here, and wasn't chased further — per
+  `CLAUDE.md`'s testing-hygiene rule, this was one deliberate call, not a
+  root-cause investigation. Groq remains the provider used for the live demo
+  regardless of this; Gemini being usable again doesn't change that choice.
 - **Build step 7 (provider-swap demo, `scripts/demo_provider_swap.py`):**
   since Gemini genuinely fails live, the swap demo turned this into a real
   (not simulated) proof of two things at once: (1) `LLM_PROVIDER` is a true
@@ -89,14 +97,17 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   support Groq's `json_schema` constrained decoding — verified live).
 - The model-choice question for Gemini/Vertex (which flash generation, given
   free-tier rate caps) is explicitly deferred — `LLM_MODEL` stays at
-  `gemini-flash-latest` for now, to be revisited once the account access issue
-  is resolved.
+  `gemini-flash-latest` for now. The account-access issue is resolved (above),
+  but this question hasn't been revisited since; still open.
 
 ## 2b. Third provider — GitHub Models (added post-step-8, real cross-vendor demo)
 
 The user wanted a second genuinely-live cross-vendor provider (beyond Groq)
-to demonstrate at showcase time, since Gemini isn't expected to come back.
-Researched free-tier options with a hard constraint: RPM low enough to risk
+to demonstrate at showcase time — at the point this decision was made,
+Gemini was not expected to come back (see above; it has since been
+re-verified working, but that finding came later and didn't change this
+provider's rationale). Researched free-tier options with a hard constraint:
+RPM low enough to risk
 the 15s target given 3 concurrent specialist calls per review, or a card
 requirement, both disqualify a candidate.
 
