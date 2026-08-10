@@ -20,6 +20,7 @@ import pytest
 from app.config import settings
 from app.providers import active
 from app.queue import store
+from scripts.deploy import _resolved_provider
 
 T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"
@@ -67,6 +68,39 @@ def test_an_empty_provider_string_reads_as_no_override(db_exec):
         (T0,),
     )
     assert store.get_provider_override() is None
+
+
+def test_resolved_provider_matches_the_store_across_row_states(db_exec):
+    """There are two implementations of "what is the override": the store's
+    pooled, dict_row read (used by the dispatcher) and scripts/deploy.py's
+    raw-connection read (used by the CLI's `provider` check and the
+    --sync-env masking guard). Their equivalence was previously asserted only
+    in a docstring -- if the two ever disagreed, the CLI could report a
+    provider check nothing like what the dispatcher is actually running.
+    Runs both against the same rows: no row, a set provider, NULL, and an
+    empty string."""
+
+    def resolved() -> str | None:
+        return _resolved_provider()[1]
+
+    # no row at all
+    assert store.get_provider_override() is None
+    assert resolved() is None
+
+    # a set provider
+    store.set_provider_override("groq", T0)
+    assert store.get_provider_override() == "groq"
+    assert resolved() == "groq"
+
+    # NULL
+    db_exec("UPDATE runtime_config SET provider = NULL WHERE id = 1")
+    assert store.get_provider_override() is None
+    assert resolved() is None
+
+    # empty string
+    db_exec("UPDATE runtime_config SET provider = '' WHERE id = 1")
+    assert store.get_provider_override() is None
+    assert resolved() is None
 
 
 def test_override_defaults_to_none():
