@@ -700,7 +700,8 @@ def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
 
 def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
     _stub_all_checks(
-        monkeypatch, ["PASS", "FAIL", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"]
+        monkeypatch,
+        ["PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"],
     )
     assert deploy.main([]) == 1
     assert "1 failed" in capsys.readouterr().out
@@ -1458,6 +1459,7 @@ def test_run_checks_includes_the_provider_row(monkeypatch):
         ("check_installation_and_webhook", "github-app"),
         ("check_health_endpoint", "health"),
         ("check_database", "database"),
+        ("check_provider_live", "provider-live"),
         ("check_render_service", "render-service"),
         ("check_uptime_pinger", "uptime-pinger"),
     ):
