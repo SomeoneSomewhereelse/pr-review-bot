@@ -186,7 +186,6 @@ Fire, back-to-back:
 1. `uv run python -m scripts.seed_demo_pr --bulk` (or the chosen variant
    invocation) → **PR-3**
 2. Same → **PR-4**
-3. Same → **PR-5**
 
 Expected, from the refill math above (starting near a full ~12,000-token
 bucket, ~10,500 tokens/review, ~1,800 tokens refilled per ~9s dispatcher
@@ -197,18 +196,22 @@ cycle) — narrate this as "roughly," not an exact guarantee:
   a ~10,500 need → a real 429 → `RateLimited` → the whole ticket deferred →
   **plain placeholder comment** (`format_placeholder`) — no prior good
   review exists for this PR, so there's nothing to preserve.
-- PR-5 very likely **also fails** the same way (~3,300 + 1,800 ≈ 5,100 vs.
-  ~10,500) — a second placeholder, which is fine: more than one deferred
-  ticket makes the point more clearly, not less.
-- Since each review's own demand (~10,500) stays under the 12,000 **absolute**
-  cap, both deferred tickets are guaranteed to succeed once enough real time
+- Since that review's own demand (~10,500) stays under the 12,000 **absolute**
+  cap, the deferred ticket is guaranteed to succeed once enough real time
   passes (unlike a review sized at or above the full cap, which could never
   recover) — narrate this distinction explicitly, since it's the actual
   engineering guarantee being demonstrated, not just "it retries."
-- Wait for the automatic retries (dispatcher polls every
-  `dispatcher_idle_sleep_seconds` = 1s; each deferred ticket's `not_before`
+- Wait for the automatic retry (dispatcher polls every
+  `dispatcher_idle_sleep_seconds` = 1s; the deferred ticket's `not_before`
   comes from Groq's real `Retry-After`) — no manual intervention. Once due,
-  placeholders get replaced with real reviews.
+  the placeholder gets replaced with a real review.
+
+**If PR-4 doesn't trip a 429** (the bucket had more headroom than expected —
+this project's estimates have been wrong in this direction before), fire a
+third PR immediately rather than re-deriving the math again: three reviews'
+worth of demand against a 12,000 cap is a strictly stronger guarantee than
+two, and the segment's narration already treats the exact split as "roughly"
+one success then a failure, not a hard promise.
 
 ### 5. Wrap-up (~1 min)
 
