@@ -241,11 +241,11 @@ CI. Each is self-contained and prints what it's proving:
 | Script | Proves |
 |---|---|
 | `scripts/manual_verify_step3.py` | GitHub App auth, diff fetch, comment upsert (edit-in-place) against a real PR |
-| `scripts/manual_verify_step4.py` | Gemini provider through the validate-repair layer (⚠️ currently fails — see below) |
+| `scripts/manual_verify_step4.py` | Gemini provider through the validate-repair layer |
 | `scripts/manual_verify_groq.py` | Groq provider through the validate-repair layer |
 | `scripts/manual_verify_github_models.py` | GitHub Models provider through the validate-repair layer |
 | `scripts/seed_demo_pr.py` | Opens a real PR with planted issues (`fixtures/bad_code/`) on the test repo |
-| `scripts/demo_provider_swap.py` | `LLM_PROVIDER` is a genuine runtime seam: Groq succeeds, Gemini fails gracefully, comment renders either way |
+| `scripts/demo_provider_swap.py` | `LLM_PROVIDER` is a genuine runtime seam — see below for this script's current expected behavior |
 
 ### Live end-to-end rehearsal
 
@@ -272,13 +272,17 @@ the full history of runs and timings.
   live-runnable here. The adapter existed under mocked tests only and was
   deleted rather than carried as a fourth code path no test could exercise for
   real. `SPEC.md` still records it as the brief's default provider.
-- **Gemini (AI-Studio)**: implemented and was live-verified initially, but the
+- **Gemini (AI-Studio)**: implemented and live-verified initially, then the
   API key's underlying Google account got an automated **Trust & Safety
   access flag** (`403 PERMISSION_DENIED`) partway through development —
-  confirmed, via Google's own AI Developer Forum, to be account-level and
-  fixable only by attaching billing. Tried fresh keys under multiple
-  different Google accounts; all blocked. **Gemini is not expected to work
-  live in this environment without that trade-off.**
+  confirmed, via Google's own AI Developer Forum, to be account-level.
+  Fresh keys under multiple different Google accounts were all blocked at
+  the time. **Re-verified live and working again as of 2026-08-10** with an
+  updated API key (`scripts/manual_verify_step4.py`: real structured output,
+  non-zero token usage) — whatever tripped the flag on the earlier key/account
+  is not reproduced here. `scripts/demo_provider_swap.py`'s description of a
+  graceful Gemini failure reflects the earlier, blocked key and has not been
+  re-run against the current one.
 - **Groq is the primary live provider** (`LLM_PROVIDER=groq`,
   `llama-3.3-70b-versatile`) — pulled forward from a later build step
   specifically to have a working live path.
