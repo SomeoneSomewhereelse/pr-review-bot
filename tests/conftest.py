@@ -108,6 +108,16 @@ def _quarantine_operator_apis(request, monkeypatch):
         return
     for name in _LIVE_OPERATOR_KEYS:
         monkeypatch.setattr(settings, name, "")
+    # settings.database_url defaults to whatever this working copy's real
+    # .env points at (a Supabase pooler host in this repo). scripts/deploy.py
+    # now opens raw psycopg connections against it (check_database,
+    # check_provider, --sync-env's masking guard) and scripts/set_provider.py
+    # WRITES to it -- a test that forgets to request the `db` fixture must
+    # not be able to reach that real database by accident. The `db` fixture
+    # (tests/conftest.py) sets settings.database_url explicitly and runs
+    # after this autouse fixture within the same test, so it always wins;
+    # verified by running the full suite after this change.
+    monkeypatch.setattr(settings, "database_url", "")
 
 
 @pytest.fixture

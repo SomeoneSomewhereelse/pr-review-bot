@@ -775,6 +775,10 @@ def gemini_only_config(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "github_models_token", "")
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    # database_url is a dummy, unreachable host -- stub psycopg.connect so the
+    # masking guard's "no override" outcome is deterministic rather than an
+    # accident of DNS failure (tests must never open a real DB connection).
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
     return None
 
 
@@ -846,6 +850,10 @@ def sync_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
     monkeypatch.setattr(settings, "github_models_token", "ghp_x")
     monkeypatch.setattr(deploy.time, "sleep", lambda _seconds: None)
+    # database_url is a dummy, unreachable host -- stub psycopg.connect so the
+    # masking guard's "no override" outcome is deterministic rather than an
+    # accident of DNS failure (tests must never open a real DB connection).
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
 
 
 def _env_var_list(values: dict):
