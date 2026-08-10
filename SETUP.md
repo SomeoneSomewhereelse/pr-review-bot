@@ -340,7 +340,7 @@ field (the app code will decode it at startup).
    If a DB override is active and disagrees with the `LLM_PROVIDER` you're
    about to push, `--sync-env` refuses (exit 2) — pushing would be pointless,
    since the override wins at runtime anyway. Clear it first:
-   `uv run python scripts/set_provider.py --clear` (§3.6).
+   `uv run python -m scripts.set_provider --clear` (§3.6).
 
    Before it triggers anything, it waits for any deploy already in progress
    to settle (it never stacks a second deploy on top of one still building)
@@ -374,8 +374,8 @@ schedule. Use an interval of **5 minutes**; anything above 10 lets Render's
 ### 3.6 Switching providers live: `scripts/set_provider.py`
 
 ```bash
-uv run python scripts/set_provider.py groq       # set the override
-uv run python scripts/set_provider.py --clear    # remove it
+uv run python -m scripts.set_provider groq       # set the override
+uv run python -m scripts.set_provider --clear    # remove it
 ```
 
 This writes a row to the `runtime_config` table in whatever database
@@ -386,11 +386,15 @@ production one. The override takes effect on the **next ticket the
 dispatcher claims** — no restart, no redeploy, which is what makes it useful
 for a live provider-swap demo (build step 7's `demo_provider_swap.py`
 predates this and used two `uvicorn` restarts instead; a follow-up spec
-rewrite is tracked but deferred). `scripts/deploy.py`'s `provider` check is
-the safety net: it resolves the override the same way the dispatcher does and
-confirms the resulting provider actually has its credential available, so a
-typo'd or under-provisioned override surfaces as a `FAIL` rather than a
-silent outage.
+rewrite is tracked but deferred). `scripts/deploy.py`'s `provider` check
+resolves the override exactly the way the dispatcher does and confirms the
+resulting provider's credential is set — but that check reads **your local
+`.env`**, not the deployed service, so it cannot tell you whether the
+credential was ever pushed to Render. A typo'd provider name still surfaces
+as a `FAIL`; a provider that is merely under-provisioned on the service (key
+present locally, never synced) will report `PASS` here and then fail every
+real review. Run `--sync-env` (§3.4 above) to actually get the credential
+onto the service — that is the only thing that closes this gap.
 
 ### 3.7 Deploying an image, for a service with no connected repo
 

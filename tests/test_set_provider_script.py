@@ -2,10 +2,16 @@
 Postgres test harness -- it writes to the same table the service reads."""
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from app.queue import store
 from scripts import set_provider
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +43,24 @@ def test_rejects_an_unsupported_provider(capsys):
 def test_requires_a_provider_or_clear(capsys):
     assert set_provider.main([]) == 2
     assert "provider" in capsys.readouterr().err
+
+
+def test_entry_point_runs_as_a_documented_module_invocation():
+    """`uv run python scripts/set_provider.py` (the form the docs used to
+    show) raises ModuleNotFoundError: No module named 'app' before main() ever
+    runs, because `python scripts/x.py` puts scripts/ on sys.path[0] rather
+    than the repo root, and nothing installs `app` into the venv. Every other
+    test in this module calls main() in-process, which is exactly why that
+    was never caught. --help needs no database and exits before any DB code
+    runs, so this does not depend on the `db` fixture actually doing anything."""
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.set_provider", "--help"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_rejects_an_abbreviated_flag(capsys):

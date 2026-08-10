@@ -1,7 +1,7 @@
 """Set or clear the DB-backed provider override.
 
-    uv run python scripts/set_provider.py groq
-    uv run python scripts/set_provider.py --clear
+    uv run python -m scripts.set_provider groq
+    uv run python -m scripts.set_provider --clear
 
 The override takes effect on the next claimed ticket -- no restart, no redeploy.
 It writes to whatever DATABASE_URL points at, so against a local .env this sets

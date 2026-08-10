@@ -163,7 +163,7 @@ pushed, and if nothing differs no deploy is triggered.
 If a **DB override** (see below) is active and disagrees with the
 `LLM_PROVIDER` being pushed, `--sync-env` refuses (exit 2) rather than push a
 value the override would silently ignore at runtime — clear it first with
-`uv run python scripts/set_provider.py --clear`.
+`uv run python -m scripts.set_provider --clear`.
 
 Before triggering anything, it waits for any deploy already in progress to
 settle (it never stacks a second deploy on top of one still building) —
@@ -177,8 +177,8 @@ Claude Code users can run `/deploy` instead, which wraps the same CLI.
 #### Switching providers without a redeploy
 
 ```bash
-uv run python scripts/set_provider.py groq       # set the override
-uv run python scripts/set_provider.py --clear     # remove it
+uv run python -m scripts.set_provider groq       # set the override
+uv run python -m scripts.set_provider --clear     # remove it
 ```
 
 This writes a provider override to the `runtime_config` table and takes
@@ -186,9 +186,14 @@ effect on the **next ticket the dispatcher claims** — no restart, no
 redeploy. It writes to whatever `DATABASE_URL` currently resolves to, so
 running it against a local `.env` sets a **local** override only; nothing
 reaches production unless your local `DATABASE_URL` happens to be the
-production one. `scripts/deploy.py`'s `provider` check is the safety net: it
-resolves the override the same way the dispatcher does and confirms the
-resulting provider actually has its credential available.
+production one. `scripts/deploy.py`'s `provider` check resolves the override
+the same way the dispatcher does and confirms the resulting provider's
+credential is set — but only in **your local `.env`**, not on the deployed
+service. A typo'd provider name still surfaces as a `FAIL`, but a provider
+whose key was never pushed to Render will report `PASS` here and then fail
+every real review. To be sure a credential actually exists on the service,
+run `--sync-env` (see "Deploying" above), which is what actually gets it
+there.
 
 #### Deploying an image, when the Render service has no connected repo
 

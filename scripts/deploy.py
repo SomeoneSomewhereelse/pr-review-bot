@@ -625,7 +625,7 @@ def sync_env() -> int:
             print(
                 f"refusing to sync: a DB provider override ({override}) is active and "
                 f"wins over the LLM_PROVIDER={settings.llm_provider} being pushed. "
-                f"Clear it first: uv run python scripts/set_provider.py --clear",
+                "Clear it first: uv run python -m scripts.set_provider --clear",
                 file=sys.stderr,
             )
             return 2
