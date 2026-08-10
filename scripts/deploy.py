@@ -1,6 +1,6 @@
 """Deploy verification CLI for the hosted Render + Supabase deployment.
 
-Runs seven independent checks and prints one aligned table. Every check runs
+Runs eight independent checks and prints one aligned table. Every check runs
 regardless of earlier failures, so a single run surfaces every problem rather
 than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
 CLI could not run at all.
@@ -315,6 +315,59 @@ def check_provider() -> CheckResult:
     if not getattr(settings, credential.lower(), ""):
         return CheckResult(name, "FAIL", f"{provider} ({source}) -- {credential} missing")
     return CheckResult(name, "PASS", f"{provider} ({source})")
+
+
+def _resolved_provider_or_env() -> tuple[str, str | None]:
+    """Like _resolved_provider(), but usable without DATABASE_URL: without a
+    database there is no override to check, so this falls back to the
+    env-configured provider instead of requiring a connection. Used by
+    check_provider_live(), which -- unlike check_provider() -- must answer
+    "what's actually running" even when there's no override to resolve.
+    """
+    if not settings.database_url:
+        return settings.llm_provider, None
+    return _resolved_provider()
+
+
+def check_provider_live() -> CheckResult:
+    """Whether the actively-resolved provider's credential is genuinely
+    present on the live Render service -- not just locally.
+
+    `provider` validates the local `.env`; this is the check that would have
+    caught the demo-rehearsal failure where a DB override named a provider
+    whose key was never pushed to Render.
+    """
+    name = "provider-live"
+    if not settings.render_api_key:
+        return CheckResult(
+            name, "SKIPPED", "set RENDER_API_KEY to verify credentials against the live service"
+        )
+    try:
+        provider, override = _resolved_provider_or_env()
+    # deliberate: a DB problem is provider's/database's row to report, not ours
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name, "SKIPPED", f"could not resolve the active provider ({type(exc).__name__})"
+        )
+    source = f"DB override; env={settings.llm_provider}" if override else "env"
+    entry = _PROVIDERS.get(provider)
+    if entry is None:
+        # check_config / check_provider already FAIL on an unsupported name;
+        # there is no credential key to look up without a table entry.
+        return CheckResult(name, "SKIPPED", f"{provider} ({source}) is not a supported provider")
+    credential = entry[0]
+    try:
+        service_id = _find_render_service_id()
+        if service_id is None:
+            return CheckResult(name, "FAIL", f"no service named {settings.render_service_name}")
+        live_value = _render_env_vars(service_id).get(credential) or ""
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
+    if not live_value:
+        return CheckResult(
+            name, "FAIL", f"{provider} ({source}) -- {credential} not present on Render"
+        )
+    return CheckResult(name, "PASS", f"{provider} ({source}) -- {credential} present on Render")
 
 
 def _render_headers() -> dict[str, str]:
@@ -736,7 +789,7 @@ def _safe(name: str, fn, *args) -> CheckResult:
 
 
 def run_checks(repo: str, base: str) -> list[CheckResult]:
-    """All seven, cheapest and most foundational first, so a misconfiguration
+    """All eight, cheapest and most foundational first, so a misconfiguration
     is reported before the checks that would fail as a consequence of it."""
     return [
         _safe("config", check_config),
@@ -744,6 +797,7 @@ def run_checks(repo: str, base: str) -> list[CheckResult]:
         _safe("health", check_health_endpoint, base),
         _safe("database", check_database),
         _safe("provider", check_provider),
+        _safe("provider-live", check_provider_live),
         _safe("render-service", check_render_service),
         _safe("uptime-pinger", check_uptime_pinger, base),
     ]
@@ -758,7 +812,8 @@ def build_parser() -> argparse.ArgumentParser:
         allow_abbrev=False,
         description=(
             "Verify the hosted deployment: configuration, GitHub App installation "
-            "and webhook, health endpoint, database, active provider, Render service, "
+            "and webhook, health endpoint, database, active provider, whether that "
+            "provider's credential is actually live on Render, Render service, "
             "and keep-warm pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
         ),
     )

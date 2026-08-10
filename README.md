@@ -101,7 +101,7 @@ Run it from your own machine, not inside the Render container — `scripts/` is 
 copied into the Docker image, and `RENDER_EXTERNAL_URL` only exists inside
 Render's own container, which is why `PUBLIC_BASE_URL` is passed explicitly here.
 
-It prints one line per check and always runs all seven, so a single run
+It prints one line per check and always runs all eight, so a single run
 surfaces every problem rather than only the first:
 
 | Check | Verifies | Required? |
@@ -111,6 +111,7 @@ surfaces every problem rather than only the first:
 | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
 | `provider` | The provider that will actually run — `LLM_PROVIDER`, or an active **DB override** — has its credential set | optional |
+| `provider-live` | The actively-resolved provider's credential (env or DB override) is present on the deployed Render service — not just locally | optional |
 | `render-service` | The latest Render deploy is `live`, and (when a commit is comparable) matches local `HEAD` | optional |
 | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
@@ -129,12 +130,12 @@ actually active, not just the env var.
 In short: exit 0 means trust the table as-is, exit 1 means read the table for
 what to fix, exit 2 means the run never really started.
 
-Four checks are skipped with a hint unless you set the matching
+Five checks are skipped with a hint unless you set the matching
 operator-local key. None of these keys is ever set on the Render service
 itself:
 
 - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
-  `render-service` and `--sync-env`.
+  `render-service`, `provider-live`, and `--sync-env`.
 - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
 - `DATABASE_URL` enables both `database` and `provider` (the override lives
   in the same database). It is normally a Render dashboard secret; export it
@@ -189,11 +190,11 @@ reaches production unless your local `DATABASE_URL` happens to be the
 production one. `scripts/deploy.py`'s `provider` check resolves the override
 the same way the dispatcher does and confirms the resulting provider's
 credential is set — but only in **your local `.env`**, not on the deployed
-service. A typo'd provider name still surfaces as a `FAIL`, but a provider
-whose key was never pushed to Render will report `PASS` here and then fail
-every real review. To be sure a credential actually exists on the service,
-run `--sync-env` (see "Deploying" above), which is what actually gets it
-there.
+service. A typo'd provider name still surfaces as a `FAIL`, and a provider
+whose key was never pushed to Render is now caught automatically by
+`provider-live` (set `RENDER_API_KEY` to enable it) rather than only
+surfacing as a failed review. To push a missing credential, run
+`--sync-env` (see "Deploying" above).
 
 #### Deploying an image, when the Render service has no connected repo
 

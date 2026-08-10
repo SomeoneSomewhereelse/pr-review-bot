@@ -283,7 +283,7 @@ field (the app code will decode it at startup).
    installation ID, and — since it reads the current webhook URL before
    writing — either reports it already correct or posts the Render URL +
    `/webhook` idempotently. It prints one line per check and always runs all
-   seven, so a single run surfaces every problem rather than only the first:
+   eight, so a single run surfaces every problem rather than only the first:
 
    | Check | Verifies | Required? |
    |---|---|---|
@@ -292,6 +292,7 @@ field (the app code will decode it at startup).
    | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
    | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
    | `provider` | The provider that will actually run — `LLM_PROVIDER`, or an active **DB override** — has its credential set | optional |
+   | `provider-live` | The actively-resolved provider's credential (env or DB override) is present on the deployed Render service — not just locally | optional |
    | `render-service` | The latest Render deploy is `live`, and (when a commit is comparable) matches local `HEAD` | optional |
    | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
@@ -312,11 +313,11 @@ field (the app code will decode it at startup).
    means the printed table has at least one `FAIL` row to act on, and exit 2
    means the run itself never got far enough to produce a trustworthy table.
 
-   Four checks are skipped with a hint unless you set the matching
+   Five checks are skipped with a hint unless you set the matching
    operator-local key. None of these keys is ever set on the Render service
    itself:
    - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
-     `render-service` and `--sync-env`.
+     `render-service`, `provider-live`, and `--sync-env`.
    - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
    - `DATABASE_URL` enables both `database` and `provider` (the override
      lives in the same database). It is normally a Render dashboard secret;
