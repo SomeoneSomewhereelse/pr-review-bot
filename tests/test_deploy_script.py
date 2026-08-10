@@ -860,6 +860,16 @@ def _env_var_list(values: dict):
     return [{"envVar": {"key": k, "value": v}} for k, v in values.items()]
 
 
+def test_render_env_vars_unwraps_the_service_env_list(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    with respx.mock:
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({"A": "1", "B": "2"}))
+        )
+        result = deploy._render_env_vars("srv-1")
+    assert result == {"A": "1", "B": "2"}
+
+
 def test_sync_env_requires_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     assert deploy.sync_env() == 2

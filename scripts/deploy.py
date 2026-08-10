@@ -597,6 +597,28 @@ def _trigger_and_wait(service_id: str) -> int:
     return 1
 
 
+def _render_env_vars(service_id: str) -> dict[str, str]:
+    """The service's live env-vars, key -> value.
+
+    Callers must reduce a returned value to a boolean or an equality result
+    immediately -- never store it beyond that computation, print it, or pass
+    it to anything that might log it. See CLAUDE.md's "no secret is ever
+    logged" and docs/superpowers/specs/
+    2026-08-10-provider-live-credential-verification-design.md section 6.
+    """
+    resp = httpx.get(
+        f"{_RENDER_API}/services/{service_id}/env-vars",
+        headers=_render_headers(),
+        timeout=_HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    current: dict[str, str] = {}
+    for item in resp.json():
+        env_var = _unwrap(item, "envVar")
+        current[env_var.get("key")] = env_var.get("value")
+    return current
+
+
 def sync_env() -> int:
     """Push local config to the Render service, then deploy and wait.
 
@@ -646,16 +668,7 @@ def sync_env() -> int:
         if service_id is None:
             print(f"no Render service named {settings.render_service_name}", file=sys.stderr)
             return 1
-        resp = httpx.get(
-            f"{_RENDER_API}/services/{service_id}/env-vars",
-            headers=_render_headers(),
-            timeout=_HTTP_TIMEOUT,
-        )
-        resp.raise_for_status()
-        current = {}
-        for item in resp.json():
-            env_var = _unwrap(item, "envVar")
-            current[env_var.get("key")] = env_var.get("value")
+        current = _render_env_vars(service_id)
         changed = [key for key, value in wanted.items() if current.get(key) != value]
     # deliberate: nothing has been pushed yet, so a crashed lookup really is
     # "could not run at all"
