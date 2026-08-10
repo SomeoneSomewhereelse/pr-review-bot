@@ -1,16 +1,14 @@
 # Demo plan — Zoom screen-share, course grading presentation
 
-Date: 2026-08-03 (rewritten 2026-08-10)
-Status: Draft, re-validated against the now-live Render + Supabase deployment
-and the DB-backed provider override. **Not yet rehearsed against the real
-hosted service** — Segment C's sizing in particular is a re-derived estimate,
-not a measurement (see "Open items / risks" and the new-fixture prerequisite
-below).
+Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10)
+Status: **Rehearsed against the real hosted service.** Every segment below
+has run for real at least once, post-fixes. Numbers are measured, not
+estimated, unless explicitly marked otherwise.
 
-**Supersedes:** the original 2026-08-03 version in full. That version assumed
-a local `uvicorn` + Cloudflare quick tunnel that no longer exists, and a
-5-PR-burst design for Segment C that was tried for real (per
-`docs/2026-08-05-first-hosted-run-findings.md`) and did not trip a 429.
+**Supersedes:** the original 2026-08-03 version in full, and the
+2026-08-10 rewrite's Segment C sizing (which was a re-derived estimate at
+the time — see the rehearsal findings below for what changed after actually
+running it).
 
 ## Purpose
 
@@ -20,112 +18,164 @@ moments (the bot actually reviewing PRs) are **live against the real GitHub
 webhook path, no recorded fallback** — the "failure" beats below are
 *engineered into the plan on purpose*, not things we're hoping don't happen.
 
-## Environment facts established during this rewrite (2026-08-10)
+## Rehearsal findings (2026-08-10) — read before running this plan again
 
-- **Hosting is Render + Supabase, live right now.** Confirmed via a plain
-  `GET https://pr-review-engine.onrender.com/healthz` → `200 {"status":"ok"}`
-  (no auth, no write). Local `uvicorn` + Cloudflare quick tunnel is retired
-  entirely — there is no local process to start and no per-session webhook
-  URL to re-paste.
-- **`gh` and `uv` are native Linux binaries** in this environment now (not
-  Windows paths through WSL) — a side effect of the hosting-migration work,
-  not something this plan needs to manage.
-- **Provider switching is a DB write, not a redeploy.** `scripts/set_provider.py`
-  writes to a `runtime_config` table in the same Supabase Postgres the
-  dispatcher reads; the override takes effect on the **next ticket claimed**
-  — no restart, no redeploy, no ~60-90s wait. This replaces both the original
-  plan's "restart `uvicorn`" step and the interim "Render redeploy" timing
-  recorded in the first hosted run — that measurement (`groq → github_models`:
-  65.5s) predates this feature and no longer applies.
-- **A `/deploy` skill and `scripts/deploy.py` CLI now exist** for verification
-  (`config`, `github-app`, `health`, `database`, `provider`, `render-service`,
-  `uptime-pinger` checks) and for pushing config (`--sync-env`). Running it
-  can **write** the GitHub App's webhook URL if it's found to be wrong — worth
-  knowing before running it casually; it is not needed for this plan's
-  choreography, only for pre-call verification (see the checklist).
-- **Vertex is deleted from code**, not just undemonstrated. Irrelevant to this
-  plan (we never used it), noted only so nobody goes looking for it.
-- **GitHub Models is still a valid provider value in code** — the
-  `_PROVIDERS` table (`scripts/deploy.py`) still lists it. The real external
-  API's July 30, 2026 retirement is untouched by any of this project's
-  changes, so Segment B's premise still holds.
-- **Corrected Groq ground truth (one live header probe, this session):**
+Four real, load-bearing issues surfaced during rehearsal, none of which were
+visible from reading the code alone:
 
-  ```
-  x-ratelimit-limit-tokens:     12000   (per-minute, continuously refilling)
-  x-ratelimit-remaining-tokens: 11958   (after one trivial call)
-  x-ratelimit-reset-tokens:     210ms   (refill is smooth, not a fixed-block reset)
-  x-ratelimit-limit-requests:   1000    (this is a per-DAY bucket, confirmed by
-                                          its own reset-time math — not a second
-                                          per-minute constraint to worry about)
-  ```
+### 1. The deployed service was 61 commits stale — this blocked the entire premise of Segment B
 
-  The bucket refills continuously at **~200 tokens/sec**. This is why the
-  original plan's design (a time-spaced burst of small reviews) failed for
-  real: **`docs/2026-08-05-first-hosted-run-findings.md` fired 4 new PRs plus
-  a resync exactly once and measured ~26.5K tokens over ~90s with zero
-  `429`s** — with ~9s between serially-dispatched reviews, ~1,800 tokens
-  refill between each one, comfortably outrunning ~5,250-token reviews
-  spaced that far apart. **Do not repeat that design.**
-- **Gemini is the wrong tool for the quota-exhaustion beat.** Its documented
-  failure mode is a **403 `PERMISSION_DENIED`** (an account-level Trust &
-  Safety flag), not a 429. `app/providers/google_genai.py` only converts an
-  exception to `RateLimited` when `rate_limited_or_none()` recognizes a real
-  429 — a 403 falls through to the generic exception path, which
-  `run_specialist` turns into `status="failed"`. Using Gemini here would
-  reproduce **Segment B's** failure shape (3 failed rows), not this
-  segment's (deferred → placeholder → auto-heal).
-- **The fix: concurrency, not elapsed time.** All 3 specialists in one review
-  fire together via `asyncio.gather` — faster than any refill can matter.
-  Sizing one review's *total* demand near, but under, the 12,000-token
-  absolute cap makes a single review's own burst do the work that a
-  time-spaced burst of small reviews cannot. See Segment C below.
-- `attempt_review`'s atomic rate-limit behavior is unchanged: a `RateLimited`
-  specialist defers the *whole* ticket with no comment posted; any other
-  failure (dead endpoint, network error) is caught inside `run_specialist`
-  and still produces a **completed** review with failed rows. This is why
-  Segment B uses a fresh PR, not the happy-path one — reviewing an
-  already-good PR with a fully dead provider would overwrite its good
-  comment with an all-failed one (not gated by the "preserve a good review"
-  guard, which only fires on the rate-limit and terminal-hard-stop paths).
+`render.yaml`'s service builds from a separate GitHub remote
+(`SomeoneSomewhereelse/pr-review-bot`, this project's own repo — not the
+testbed repo), and that remote's `main` had not been pushed to since Aug 7.
+The DB-backed provider-override feature, Vertex's retirement, and all the
+deploy-hardening work existed only in the local working tree. First symptom:
+setting the override to `github_models` and opening a PR still got reviewed
+by `groq` — the deployed code simply didn't have the feature.
+**Fix:** `git push origin master:main` (a clean fast-forward, 61 commits,
+zero conflicts) → Render auto-deployed. **New standing checklist item:
+confirm local `HEAD` matches `origin/main` before rehearsing or presenting
+— don't assume "committed locally" means "live."**
+
+### 2. Groq's SDK was silently retrying 429s, hiding them from the app entirely
+
+`AsyncGroq` defaults to `max_retries=2`. A 429 got retried internally by the
+SDK, with backoff, before `app/providers/groq.py`'s `except Exception` clause
+ever ran — so the app's own `RateLimited`/defer/placeholder path (the actual
+thing Segment C exists to demonstrate) never fired, no matter how the load
+was sized. Confirmed live: a review that should have hit the cap ran in
+43.1s instead of the normal ~5s (silent retry-and-succeed), with `zero`
+`429`s surfacing anywhere. **Fixed** (commit `6397cfc`, deployed):
+`AsyncGroq(api_key=..., max_retries=0)` — the app's own durable queue
+already owns retry/backoff (durable across a restart, visible via a
+placeholder), so a second, hidden retry layer underneath it was actively
+counterproductive, not just redundant. Gemini's SDK does **not** have this
+problem — `google-genai`'s `retry_args()` defaults to
+`stop_after_attempt(1)` ("never retry") when `http_options.retry_options` is
+unset, which `GeminiProvider` never sets.
+
+### 2b. Segment C's token-sizing estimate was accurate — the fix above was the actual blocker, not the math
+
+Once the fix was deployed, the padded fixture behaved almost exactly as
+designed: **10,664 measured tokens/review** against an estimate of ~10,712 —
+well within noise. Two oversized PRs fired back-to-back: the first
+succeeded normally (5.6s), the second hit a real `429` and showed the
+`"⏳ Queued behind rate limit"` placeholder, then healed automatically once
+due. **The original Segment C design (§4 below) is confirmed correct as
+written — it just needed the SDK fix to actually manifest.**
+
+### 3. Groq's request-count bucket refills far slower than its token bucket — a real scheduling risk
+
+A live header probe earlier this session measured `x-ratelimit-limit-requests:
+1000`, and its own reset-time math implies a refill rate of about one request
+slot every **86.4 seconds** (1000 ÷ 86,400s/day) — versus the token bucket's
+~200 tokens/**second**. A single rehearsal session firing dozens of review
+cycles within about an hour depletes this slow bucket even while the token
+bucket (the one Segment C targets) stays healthy. Confirmed live: after the
+Segment C burst above, a **separate, later** review hit this different
+limit — `Retry-After` of roughly 30 minutes, which `format_placeholder`'s own
+wording heuristic correctly rendered as `"⏳ Daily model quota reached"`
+rather than the short-wait message. **This is a real risk for the actual
+graded call, not just this rehearsal**: if the requests-bucket is already
+depleted from rehearsing right before going live, the happy path or Segment
+B — neither of which is *designed* to hit a rate limit — could hit this one
+unpredictably. **New standing checklist item: don't rehearse heavily in the
+hour immediately before the real call.**
+
+**Confirmed live, and worse than "just wait it out":** this same deferred
+ticket's own scheduled retry fired exactly on time (09:56 UTC, per
+`updated_at`) and **hit the limit again**, pushing its own ETA later —
+10:41 UTC, not resolved. `attempts` stayed `0` (rate-limit defers don't
+increment the hard-failure attempts counter), so nothing was stuck or
+broken — the account-wide resource genuinely hadn't recovered enough yet,
+likely compounded by every atomic-discarded retry still burning real
+request-quota on whichever of its 3 concurrent specialist calls happened to
+succeed before the overall review was thrown away for being rate-limited.
+**A rate-limited ticket's wait is not guaranteed to shrink on retry under
+sustained account-wide load — it can grow.** This is a real risk to know
+about, not just a rehearsal artifact: don't promise a live audience "this
+will heal in a few seconds" as a hard guarantee if the account has been
+under heavy use.
+
+### 4. Segment B's "push → immediate heal" framing was wrong — the cooldown beat isn't a separate bonus, it's what actually happens
+
+`finalize_review` runs for **any** completed review, success or failure —
+confirmed live: the deliberately-failed `github_models` review still set
+`last_reviewed_at` and escalated `cooldown_level`. A push-triggered
+re-review of that same PR therefore lands inside the 300s cooldown window
+and gets **deferred with a schedule footnote**, not re-run immediately — the
+exact same mechanic the original plan awkwardly staged as a separate "bonus"
+demo on PR-1. **The 2026-08-10 rewrite's "bonus" step is deleted below —
+Segment B's own re-review naturally demonstrates it, for free, with no
+extra PR needed.** Confirmed live end-to-end: PR-12 deferred with
+`"🔄 Re-review scheduled ~08:15 UTC"`, then — once due — the **same comment**
+updated in place with real `groq` findings (3.0s, $0.0034), footnote gone.
+
+### 5. Gemini was ruled out for the quota beat for two different reasons, in sequence
+
+First (documented, unresolved as of the 2026-08-10 rewrite): Gemini's
+account-level block meant it failed with `403`, not `429` — wrong failure
+shape for this segment regardless of sizing. That block **was independently
+resolved this same session** (see `README.md`/`SETUP.md`, 2026-08-10) via an
+updated API key. Once working, it was tried anyway for Segment C, twice —
+first with the small default fixture (2 concurrent reviews, ~5,139
+tokens/review), then with the oversized bulk fixture (2 concurrent reviews,
+~13,416 tokens/review). **Neither tripped a 429.** This key's real limits
+are evidently well above whatever figure was expected going in. A real,
+separate gap surfaced along the way: switching the DB override to `gemini`
+initially failed with `"No API key was provided"` — `GEMINI_API_KEY` had
+never been pushed to Render (`render.yaml` declares it `sync: false`,
+operator-supplied, and no prior deploy had ever used Gemini live). Both
+`check_config` (env-provider-only, by design) and `provider` (checks the
+override's credential **locally**, not on the deployed service) reported
+`PASS` regardless — exactly the gap `docs/superpowers/specs/2026-08-08-provider-agnostic-config-and-deploy-hardening-design.md`
+§3.5 already documents as a known limitation, not a bug that slipped past a
+check meant to catch it. Fixed by running `--sync-env` (which opportunistically
+pushes any locally-set provider credential, not just the selected one).
+**Conclusion: Groq (post-fix) remains the quota-exhaustion provider. Gemini
+is confirmed live and working again, but is not a useful tool for this
+specific segment with this account's current limits.**
+
+## Environment facts
+
+- **Hosting is Render + Supabase**, confirmed live at
+  `https://pr-review-engine.onrender.com/healthz`. Local `uvicorn` +
+  Cloudflare quick tunnel is retired entirely.
+- **`gh` and `uv` are native Linux binaries** in this environment.
+- **Provider switching is a DB write** (`scripts/set_provider.py` →
+  `runtime_config` table), effective on the **next ticket claimed** — no
+  restart, no redeploy. Confirmed live, repeatedly, once the service itself
+  was up to date (see Finding 1).
+- **`scripts/deploy.py` / `/deploy`** verifies `config`, `github-app`,
+  `health`, `database`, `provider`, `render-service`, `uptime-pinger`, and
+  `--sync-env` pushes config + redeploys. `github-app` can **write** a
+  corrected webhook URL; `--sync-env` genuinely pushes secrets and triggers a
+  real deploy (both confirmed live this session, deliberately).
+- **Vertex is deleted from code.** **GitHub Models is still a valid provider
+  value in code** — the real external API's July 30, 2026 retirement is
+  unrelated to any of this project's own changes, so Segment B's premise
+  holds (confirmed live: real `410 github_models_retirement_brownout`
+  error).
+- **Groq ground truth, live-measured:** `12,000` token/min cap, continuous
+  refill (~200 tokens/sec); `1,000` requests/day cap, continuous refill
+  (~1 slot/86.4s) — see Findings 2-3 above for why both matter differently.
 - The escalating re-review cooldown (`dispatcher_rereview_cooldown_seconds`,
-  default 300s) is **not** part of `render.yaml`'s env var list or
-  `--sync-env`'s push set — it's not on the deploy CLI's config surface at
-  all. Lowering it for the demo (so the cooldown-footnote beat visibly
-  resolves within the segment, not just appears) would need a manual edit in
-  Render's dashboard, outside any of this project's tooling.
-- **This is now a real, shared, already-used service.** The testbed repo may
-  already carry PRs/comments from the hosting-migration work's own
-  rehearsals (Aug 5-8). Check for leftover open PRs before choosing a
-  rehearsal time, so the live demo isn't confused by stale state, and be
-  aware today's Groq daily quota (1,000 RPD) may already be partially spent
-  by any prior testing.
+  default 300s) is not on `render.yaml`'s env list or `--sync-env`'s push
+  set — not adjustable via this project's tooling, only Render's dashboard
+  directly.
+- **The testbed repo is shared** with this project's own development work.
+  9 leftover PRs from earlier hosting-migration rehearsals were closed at
+  the start of this rehearsal (2026-08-10).
 
-## Prerequisite: a new padded fixture (not yet built)
+## Prerequisite fixture — built and confirmed
 
-Segment C (below) needs a diff sized to load **~3,000 tokens of content per
-specialist call** (~12,000 characters — comfortably under
-`diff_utils.annotate_and_cap`'s 24,000-char/6,000-token truncation ceiling,
-so no truncation-marker side effects). The current
-`fixtures/bad_code/billing_report.py` is ~1,800 characters — far too small.
+`fixtures/demo_bulk_bad_code/billing_report_bulk.py` +
+`scripts/seed_bulk_demo_pr.py` (both git-ignored — demo-only scaffolding,
+not part of the graded feature set). Measured live at **10,664 tokens/review**
+against Groq (estimate was 10,712) and **13,416 tokens/review** against
+Gemini (different tokenizer/model, not independently targeted).
 
-**This is real code work, not a config change**, and is not done yet:
-
-- A new fixture (e.g. `fixtures/bad_code_bulk/billing_report_bulk.py`),
-  separate from the happy-path fixture so Segments 2 and 3 stay unaffected —
-  padded toward ~12,000 characters with plausible (if repetitive) billing/
-  reporting code, not obvious filler, since it may be shown on screen.
-- A seed-script variant (a flag on `scripts/seed_demo_pr.py`, or a small
-  sibling script) that copies this fixture instead of the default one.
-- One live rehearsal to confirm the actual per-call token cost this diff
-  produces — the ~3,000-token target is derived from `diff_utils`' rough
-  4-chars/token heuristic plus a measured system-prompt overhead, **not**
-  measured directly against this specific padded content. Given this
-  project's history of estimates needing correction against real headers and
-  real bursts, treat the character count as a starting point to adjust after
-  one real run, not a guarantee.
-
-## Segment plan (~14 min total)
+## Segment plan (~13 min total)
 
 ### 1. Architecture overview (~2 min)
 
@@ -135,139 +185,111 @@ annotate → 3 concurrent specialists → merge (atomic on rate-limit, never
 partial otherwise) → upsert PR comment. Mention Render + Supabase as the
 production home. No live action needed yet.
 
-### 2. Happy path (~3 min) — establishes the baseline
+### 2. Happy path (~2 min) — establishes the baseline
 
 - Provider: `groq` (confirm via `uv run python -m scripts.set_provider --clear`
-  beforehand, so there's no leftover override from earlier testing).
-- `uv run python -m scripts.seed_demo_pr` → opens **PR-1** with the planted
-  `fixtures/bad_code/billing_report.py` issues (hardcoded credential, N+1
-  query, magic number).
-- Narrate while waiting (~9.2s measured against the real hosted service, per
-  `docs/2026-08-05-first-hosted-run-findings.md`): webhook → 202 → dispatcher
-  claims the ticket → 3 specialists run concurrently → comment posts.
-- Show the resulting comment: real findings across Security/Performance/
-  Code Quality, footer with runtime/tokens/cost.
+  beforehand).
+- `uv run python -m scripts.seed_demo_pr` → opens a PR with the planted
+  `fixtures/bad_code/billing_report.py` issues.
+- **Measured live: 4.9s, real findings across all three specialists, $0.0034.**
+- Show the resulting comment.
 
-### 3. Segment B — a real vendor died overnight, plus a bonus cooldown reveal (~5 min)
+### 3. Segment B — a real vendor died overnight, and self-heals on its own schedule (~5 min)
 
-- **Set the DB override:** `uv run python -m scripts.set_provider github_models`
-  — takes effect on the next claimed ticket, no restart, no redeploy.
-- `uv run python -m scripts.seed_demo_pr` → opens **PR-2** (a fresh PR, not
-  PR-1 — see the atomic-behavior note above for why).
-- Live result: all 3 specialists fail against the dead endpoint → comment
-  posts immediately with 3 failed rows (a *completed* review, not a
-  deferred one — no dispatcher-level retry involved) → narrate: this is
-  GitHub's actual July 30, 2026 retirement, not a staged failure — link to
-  `github.blog/changelog/2026-07-30-github-models-is-now-retired`.
-- **Clear the override:** `uv run python -m scripts.set_provider --clear`
-  (falls back to `.env`'s `LLM_PROVIDER=groq`) — again, instant.
-- Trigger a re-review of PR-2: push a trivial follow-up commit to its branch
-  (`synchronize` event) — keep the branch checked out
-  (`gh pr checkout <PR-2 number>` in a scratch dir), since
-  `scripts.seed_demo_pr`'s clone is discarded after each run.
-- Live result: the same comment (same marker) edits in place with real
-  findings from `groq` — the provider seam surviving a full vendor outage,
-  demonstrated with no restart anywhere in this segment.
-- **Bonus, same segment:** shortly after PR-1's happy-path review completed
-  (well inside the 300s cooldown window), push a trivial follow-up commit to
-  **PR-1**'s branch too. Expected: the ticket goes `deferred` with
-  `not_before` ~5 minutes out — the escalating re-review cooldown, not a
-  quota effect — and a **self-cleaning schedule footnote** is appended to
-  PR-1's existing good comment rather than overwriting it. Narrate that this
-  will self-heal in ~5 minutes without any action; given the cooldown isn't
-  on the deploy CLI's config surface (see above), don't wait for it live
-  unless the Render dashboard value was manually lowered beforehand.
+- **Set the DB override:** `uv run python -m scripts.set_provider github_models`.
+- `uv run python -m scripts.seed_demo_pr` → opens a **fresh** PR (not the
+  happy-path one — a fully dead provider's failure still finalizes the
+  review and would overwrite a good comment with an all-failed one).
+- **Measured live:** comment posts immediately (no dispatcher retry — a
+  *completed* review with 3 failed rows) showing the real error:
+  `Error code: 410 - {'error': {'code': 'github_models_retirement_brownout', ...}}`
+  — narrate that this is GitHub's actual retirement, not a staged failure.
+- **Clear the override:** `uv run python -m scripts.set_provider --clear`.
+- Push a trivial follow-up commit to the same PR's branch (`gh pr checkout`
+  into a scratch clone, since `seed_demo_pr`'s own clone is discarded).
+- **Measured live: this does NOT immediately re-review.** The failed review
+  already finalized and started the escalating cooldown, so the push lands
+  inside the 300s window and gets deferred with a schedule footnote:
+  `"🔄 Re-review scheduled ~<time>"`. Narrate this explicitly as the
+  self-cleaning re-review cooldown protecting against redundant work on
+  rapid pushes — not a quota effect, and not a mistake in the demo.
+- **Once due** (confirmed live, ~5 min later): the same comment (same
+  marker) updates in place with real `groq` findings, footnote gone. If the
+  live time budget doesn't comfortably fit a 5-minute wait, narrate the
+  mechanism and move on rather than sitting through it — the mechanism
+  itself, not the wait, is the point.
 
-### 4. Segment C — quota exhaustion + auto-recovery (~4-5 min)
+### 4. Segment C — quota exhaustion + auto-recovery (~4 min)
 
-Requires the new padded fixture (see prerequisite above). Still on `groq`.
-Fire, back-to-back:
+Still on `groq`. Fire, back-to-back:
 
-1. `uv run python -m scripts.seed_demo_pr --bulk` (or the chosen variant
-   invocation) → **PR-3**
-2. Same → **PR-4**
+1. `uv run python -m scripts.seed_bulk_demo_pr` → PR A
+2. Same → PR B
 
-Expected, from the refill math above (starting near a full ~12,000-token
-bucket, ~10,500 tokens/review, ~1,800 tokens refilled per ~9s dispatcher
-cycle) — narrate this as "roughly," not an exact guarantee:
+**Confirmed live (2026-08-10, post-fix):**
 
-- PR-3 likely **succeeds** (~12,000 → ~1,500 remaining).
-- PR-4 very likely **fails**: ~1,500 + 1,800 refill ≈ 3,300 available against
-  a ~10,500 need → a real 429 → `RateLimited` → the whole ticket deferred →
-  **plain placeholder comment** (`format_placeholder`) — no prior good
-  review exists for this PR, so there's nothing to preserve.
-- Since that review's own demand (~10,500) stays under the 12,000 **absolute**
-  cap, the deferred ticket is guaranteed to succeed once enough real time
-  passes (unlike a review sized at or above the full cap, which could never
-  recover) — narrate this distinction explicitly, since it's the actual
-  engineering guarantee being demonstrated, not just "it retries."
-- Wait for the automatic retry (dispatcher polls every
-  `dispatcher_idle_sleep_seconds` = 1s; the deferred ticket's `not_before`
-  comes from Groq's real `Retry-After`) — no manual intervention. Once due,
-  the placeholder gets replaced with a real review.
+- PR A succeeded normally (5.6s, 10,664 tokens).
+- PR B hit a real `429` → `RateLimited` → deferred → placeholder:
+  `"⏳ Queued behind rate limit — review will appear shortly."`
+- PR B healed automatically ~8 seconds later, no manual action.
+- Narrate the guarantee explicitly: this review's own demand (~10,664)
+  stays under the 12,000 absolute cap, so recovery is *guaranteed* once
+  enough real time passes — unlike a review sized at or above the full cap,
+  which could never recover. That distinction is the actual engineering
+  point, not just "it retries."
 
-**If PR-4 doesn't trip a 429** (the bucket had more headroom than expected —
-this project's estimates have been wrong in this direction before), fire a
-third PR immediately rather than re-deriving the math again: three reviews'
-worth of demand against a 12,000 cap is a strictly stronger guarantee than
-two, and the segment's narration already treats the exact split as "roughly"
-one success then a failure, not a hard promise.
+**If a PR doesn't trip a 429** (headroom can vary — see Finding 3 on the
+slower-refilling requests bucket also being able to shift timing), fire a
+third immediately rather than re-deriving the math: three reviews' demand
+against a 12,000 cap is strictly stronger than two.
 
 ### 5. Wrap-up (~1 min)
 
 - Cost model: `cost.md`'s ~$8-10/mo at brief scale, demo ran at $0
-  (Groq + Render + Supabase free tiers).
-- What's not live: Vertex — evaluated and removed from the codebase entirely
-  (no-card constraint), not merely mocked-and-untested.
+  (Groq + Render + Supabase free tiers). Real measured costs this rehearsal:
+  $0.0034 (happy path) to $0.0073 (oversized Segment C review).
+- What's not live: Vertex — evaluated and removed from the codebase entirely.
 - One-line callout: GitHub Models' retirement happened *during this
   project's life*, and the architecture absorbed it with a single DB write
   and no code change or redeploy.
 
 ## Pre-call / pre-rehearsal checklist
 
-1. `curl https://pr-review-engine.onrender.com/healthz` → `200`. If not,
-   check Render's dashboard for a stalled deploy before doing anything else.
-2. Confirm the UptimeRobot monitor is active (keeps both Render and Supabase
-   warm) — a cold instance's first response can blow the 15s target.
-3. `uv run python -m scripts.set_provider --clear` — ensure no stale DB
-   override survives from earlier testing; every segment's resting state
-   assumes `.env`'s `LLM_PROVIDER=groq` on the service.
-4. Check the testbed repo for leftover open PRs/comments from earlier
-   rehearsals (this project's own hosting-migration work already used this
-   repo) — close or ignore anything that would confuse the live narration.
-5. Optionally run `/deploy` (or `uv run python -m scripts.deploy` with
-   `PUBLIC_BASE_URL` set) for a full health/config/webhook check — note it
-   can **write** a corrected webhook URL if one is found wrong; know that
-   before running it minutes before going live.
-6. Confirm today's Groq usage headroom is reasonable (no way to check
-   remaining daily quota without a live call; if in doubt, budget for
-   Segment C possibly behaving a bit differently than described, not for it
-   failing outright — the daily cap is 1,000 requests, not something a
-   handful of demo reviews meaningfully threatens).
-7. Confirm `gh auth status` shows the account that owns `GITHUB_TARGET_REPO`.
+1. **Confirm local `HEAD` matches `origin/main`** (`git log origin/main..HEAD`
+   should be empty) — push first if not. This is now the single most
+   important step; everything else assumes the deployed code actually has
+   the features this plan depends on (Finding 1).
+2. `curl https://pr-review-engine.onrender.com/healthz` → `200`.
+3. Confirm the UptimeRobot monitor is active.
+4. `uv run python -m scripts.set_provider --clear` — no stale DB override.
+5. Check the testbed repo for leftover open PRs from earlier rehearsals;
+   close anything that would confuse the live narration.
+6. If switching to a provider that has never been deployed live before
+   (e.g. testing Gemini), confirm its credential is actually on Render —
+   `--sync-env` pushes it opportunistically; a locally-set-only credential
+   will pass every check and then fail every real review (Finding 5).
+7. **Don't rehearse heavily in the hour before the real call** — Groq's
+   requests-bucket refills slowly enough (~1 slot/86s) that a rehearsal
+   session can deplete it in a way that only recovers over tens of minutes,
+   risking an unrelated long defer in a segment that isn't supposed to
+   demonstrate one (Finding 3).
+8. Confirm `gh auth status` shows the account that owns `GITHUB_TARGET_REPO`.
 
 ## Open items / risks accepted
 
-- **Segment C's sizing is a re-derived estimate, not a measurement** — the
-  ~10,500-tokens/review, ~12,000-character fixture numbers come from
-  `diff_utils`'s rough heuristic plus one measured single-call sample, not a
-  direct measurement of the new padded fixture. One live rehearsal, after
-  the fixture and seed-script variant exist, is what actually confirms this
-  — not this document. This project has twice needed to correct a
-  quota-sizing estimate against real behavior already (the original 12K-TPM
-  read was directionally right but missed the continuous-refill dynamic);
-  budget rehearsal time accordingly rather than trusting this on the first
-  try.
-- No recorded fallback for any segment, by explicit choice — a live failure
-  during the actual call has no on-the-spot recovery.
-- The GitHub Models failure mode (Segment B) depends on it staying dead
-  between now and the call date — extremely likely, given it's a confirmed
-  permanent retirement, not a transient outage.
-- The cooldown-footnote beat's "self-heals in ~5 minutes" claim is
-  unverified within this segment's own time budget unless
-  `dispatcher_rereview_cooldown_seconds` is manually lowered on Render
-  outside any tooling this project has for that — decide before the call
-  whether to do that edit or just narrate without waiting.
-- The testbed repo is shared with this project's own development work now
-  (not exclusively a demo fixture), so its state (open PRs, consumed daily
-  quota) can drift between rehearsals for reasons unrelated to this plan.
+- No recorded fallback for any segment, by explicit choice.
+- GitHub Models' failure mode depends on it staying dead between now and
+  the call date — extremely likely, given it's a confirmed permanent
+  retirement.
+- Segment B's cooldown-heal wait (~5 min) may not fit comfortably in a live
+  time budget; the fallback is narrating the mechanism without waiting for
+  it to resolve on screen.
+- The testbed repo and Groq's daily request budget are both shared,
+  cross-session state — either can drift for reasons unrelated to this
+  plan between the last rehearsal and the real call.
+- A rate-limited ticket's auto-heal is not a bounded-time guarantee under
+  sustained load — confirmed live, one ticket's own scheduled retry pushed
+  its ETA later (09:56 UTC → 10:41 UTC) instead of resolving. Segment C's
+  own burst is sized to recover quickly in isolation, but if the account is
+  already depleted going into it (e.g. from over-rehearsing beforehand,
+  per the checklist item above), don't guarantee a fast on-screen heal.
