@@ -15,6 +15,10 @@ __pycache__/
 memory.md
 auth-link.txt
 
+# Zoom-demo-only scaffolding (not part of the graded/documented feature set)
+fixtures/demo_bulk_bad_code/
+scripts/seed_bulk_demo_pr.py
+
 # Durable queue database
 queue.db
 queue.db-wal
