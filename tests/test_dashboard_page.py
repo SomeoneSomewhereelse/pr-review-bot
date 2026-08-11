@@ -1,8 +1,6 @@
 """Tests for GET /dashboard — the static HTML page shell."""
 from __future__ import annotations
 
-import re
-
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
@@ -113,8 +111,7 @@ async def test_dashboard_page_anchors_popups_to_their_button():
 async def test_dashboard_page_has_how_it_works_section():
     """The explainer section: heading, all step copy in both languages, the
     parallel-group container and its mini-cards, and the arrow connector's
-    RTL-mirror (wide screens only) / rotation (narrow screens, unconditional)
-    rules."""
+    (unconditional) downward rotation."""
     client = await _client()
     resp = await client.get("/dashboard")
     body = resp.text
@@ -128,37 +125,34 @@ async def test_dashboard_page_has_how_it_works_section():
     assert "hiw-parallel-group" in body
     assert "hiw-mini-card" in body
     assert "hiw-arrow" in body
-    assert "scaleX(-1)" in body
     assert "rotate(90deg)" in body
 
 
-async def test_dashboard_how_it_works_flow_breakpoint_matches_arrow_breakpoints():
-    """The .hiw-flow row/column breakpoint and the arrow RTL-mirror/rotation
-    breakpoints must all agree on the same boundary, on opposite sides of it
-    (e.g. max-width: 1000px paired with min-width: 1001px) — otherwise the
-    row layout can turn on at a viewport narrower than the flow's own
-    min-width floors require, breaking mid-flow (see design spec, Layout)."""
+async def test_dashboard_how_it_works_flow_is_always_vertical():
+    """The flow is a fixed vertical stack at every screen size (both desktop
+    and phone) — no row layout, no breakpoint, and therefore no RTL-mirror
+    rule for the arrow (a downward arrow doesn't flip with reading
+    direction). This was a deliberate simplification after the horizontal
+    row layout kept causing width/wrapping bugs (mini-card overflow, the
+    flow's own min-width exceeding its breakpoint, etc.)."""
     client = await _client()
     resp = await client.get("/dashboard")
     body = resp.text
-
-    flow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-flow"
-    arrow_wide_re = r"@media \(min-width: (\d+)px\) \{\s*\[dir=\"rtl\"\] \.hiw-arrow"
-    arrow_narrow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-arrow svg"
-
-    flow_break = int(re.search(flow_re, body).group(1))
-    arrow_wide = int(re.search(arrow_wide_re, body).group(1))
-    arrow_narrow = int(re.search(arrow_narrow_re, body).group(1))
-
-    assert arrow_wide == flow_break + 1
-    assert arrow_narrow == flow_break
+    assert ".hiw-flow {\n    display: flex;\n    flex-direction: column;" in body
+    assert ".hiw-parallel-cards {\n    display: flex;\n    flex-direction: column;" in body
+    # these were the how-it-works section's own breakpoints; none should
+    # remain now that the flow is unconditionally vertical
+    assert "max-width: 1000px" not in body
+    assert "max-width: 760px" not in body
+    assert "min-width: 1001px" not in body
+    assert "scaleX(-1)" not in body
 
 
 async def test_dashboard_page_uses_a_thicker_svg_arrow_not_a_unicode_glyph():
     """The connector was a thin Unicode "→" glyph; it's now a bolder inline
     SVG (stroke-based, colored via currentColor from .hiw-arrow's own
-    `color`), so the RTL-mirror/rotation transforms must target the svg
-    element rather than a ::before pseudo-element's text content."""
+    `color`), so the rotation transform must target the svg element rather
+    than a ::before pseudo-element's text content."""
     client = await _client()
     resp = await client.get("/dashboard")
     body = resp.text
@@ -169,12 +163,14 @@ async def test_dashboard_page_uses_a_thicker_svg_arrow_not_a_unicode_glyph():
     assert '.hiw-arrow::before { content: "→"' not in body
 
 
-async def test_dashboard_page_mini_cards_can_shrink_to_fit_their_group():
-    """.hiw-mini-card must set min-width: 0 -- without it, flexbox's
-    automatic content-based minimum stops the three specialist mini-cards
-    from shrinking to fit .hiw-parallel-group on desktop, so they overflow
-    to the right and get covered by the next card in the flow."""
+async def test_dashboard_page_mini_cards_have_min_width_zero():
+    """.hiw-mini-card keeps min-width: 0 as defensive flex hygiene -- the
+    original failure mode (flexbox's automatic content-based minimum
+    stopping the cards from shrinking to fit .hiw-parallel-group) no longer
+    applies now that the flow is always vertical, but the property is
+    harmless to keep and cheap to guard against a future regression back to
+    a row layout."""
     client = await _client()
     resp = await client.get("/dashboard")
     body = resp.text
-    assert ".hiw-mini-card {\n    flex: 1;\n    min-width: 0;" in body
+    assert ".hiw-mini-card {\n    min-width: 0;" in body
