@@ -1,0 +1,174 @@
+# Design: Ops/Demo Dashboard
+
+Date: 2026-08-11
+
+## Purpose
+
+A single web page, served by the existing FastAPI app, that serves two
+audiences at once:
+
+- **Demo/presentation**: pull it up live while triggering a real PR review
+  and watch it update — proof the system works, without narrating raw logs.
+- **Ops**: at any other time, a glance at queue depth, recent review outcomes,
+  and provider health (including rate-limit backoff).
+
+No auth (nothing sensitive is shown — repo/PR identifiers, timing, token
+counts, and estimated cost). No new Python dependency and no CDN script —
+plain server-rendered HTML with a small inline vanilla-JS polling loop.
+
+## Problem: review results aren't persisted today
+
+`orchestrator.attempt_review()` builds a `ReviewResult` (per-specialist
+findings, timing, tokens, `est_cost_usd`), renders it to Markdown via
+`format_comment()`, posts it to GitHub, and then discards it — nothing is
+kept server-side. The `tickets` table (`app/queue/store.py`) tracks queue
+*lifecycle* (status, attempts, `last_reviewed_at`) but not review *content*
+or *cost*. A dashboard needs both, so this design adds persistence for the
+first time.
+
+## Architecture
+
+```
+orchestrator.attempt_review()
+  └─ after upsert_comment() succeeds:
+       store.record_review(repo_full_name, pr_number, review_result, comment_id)
+            └─ INSERT into new `reviews` table (fire-and-forget-safe: failure
+               to record must never fail the review itself — see Error handling)
+
+app/dashboard.py  (new module)
+  GET /dashboard       → HTML shell + inline <script> (polling loop)
+  GET /api/dashboard   → JSON: { stats, queue, reviews[] }
+       stats:  totals across `reviews` (count, sum est_cost_usd, avg elapsed_ms)
+       queue:  counts from `tickets` grouped by status + per-provider
+               backoff read from app.queue.dispatcher's in-memory
+               `_blocked_until` (exposed via a small `dispatcher.backoff_status()`
+               getter — no new persistence needed for this part)
+       reviews: last 50 rows from `reviews`, newest first, findings included
+```
+
+`app/dashboard.py` knows nothing about LLM providers or GitHub — it only
+reads `store` and `dispatcher`, matching the existing "formatting knows
+nothing about LLMs" separation.
+
+## Data model
+
+New table in `app/queue/store.py`'s `_SCHEMA` (same file that owns `tickets`,
+since both are queue-adjacent persistence, both created via the same
+`CREATE TABLE IF NOT EXISTS` migration-on-startup pattern):
+
+```sql
+CREATE TABLE IF NOT EXISTS reviews (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    repo_full_name  TEXT    NOT NULL,
+    pr_number       INTEGER NOT NULL,
+    provider        TEXT    NOT NULL,
+    model           TEXT    NOT NULL,
+    comment_id      BIGINT,
+    created_at      TEXT    NOT NULL,   -- ISO-8601 UTC, same convention as tickets
+    total_elapsed_ms   INTEGER NOT NULL,
+    total_tokens_in    INTEGER NOT NULL,
+    total_tokens_out   INTEGER NOT NULL,
+    est_cost_usd       DOUBLE PRECISION NOT NULL,
+    results         JSONB   NOT NULL    -- serialized list[SpecialistResult], findings included
+);
+CREATE INDEX IF NOT EXISTS reviews_created_at_idx ON reviews (created_at DESC);
+```
+
+`store.record_review(repo_full_name, pr_number, review: ReviewResult, comment_id: int | None) -> None`
+— synchronous like the rest of `store.py`; the caller wraps it in
+`asyncio.to_thread`, same convention as every other store call.
+
+`store.dashboard_reviews(limit: int = 50) -> list[dict]` and
+`store.dashboard_queue_counts() -> dict[str, int]` — read helpers, plain SQL,
+no new abstraction beyond what `store.py` already does for `tickets`.
+
+No retention/pruning logic. At brief scale (20 PRs/day) `reviews` grows by
+~20 rows/day; not worth the complexity of a cleanup job for a demo project.
+
+## API response shape
+
+```json
+{
+  "stats": {
+    "total_reviews": 42,
+    "total_cost_usd": 0.0834,
+    "avg_elapsed_ms": 8120
+  },
+  "queue": {
+    "by_status": {"queued": 1, "running": 0, "done": 40, "deferred": 1},
+    "backoff": {"gemini": null, "groq": "2026-08-11T14:32:00Z"}
+  },
+  "reviews": [
+    {
+      "repo": "org/repo", "pr_number": 57, "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "created_at": "2026-08-11T14:20:03Z",
+      "elapsed_ms": 7900, "tokens_in": 3200, "tokens_out": 540,
+      "est_cost_usd": 0.0021,
+      "comment_url": "https://github.com/org/repo/pull/57#issuecomment-123",
+      "specialists": [
+        {"name": "Security", "status": "ok", "findings": [ /* SecurityFinding dicts */ ]},
+        {"name": "Performance", "status": "ok", "findings": [...]},
+        {"name": "Code Quality", "status": "failed", "error": "..."}
+      ]
+    }
+  ]
+}
+```
+
+`comment_url` is constructed from `repo_full_name` + `pr_number` +
+`comment_id` (`.../pull/{n}#issuecomment-{id}`) — no extra GitHub API call.
+
+## Page layout
+
+- **Stat tiles** (top row): total reviews, total est. cost, avg review time,
+  queue depth by status, active provider + backoff-until (if any).
+- **Review list** (reverse-chronological, capped at 50): one row per review —
+  PR #, repo, provider/model, a status icon per specialist (✓ ok / ✗ failed),
+  timing, tokens, cost, timestamp, a link to the GitHub comment. Clicking a
+  row expands it to show that review's actual findings, grouped by
+  specialist, each tagged with its severity/impact/category field.
+- **Auto-refresh**: inline `<script>` polls `GET /api/dashboard` every 4s and
+  re-renders the list + tiles. No diffing — just replace the DOM; at 50 rows
+  this is cheap. An expanded row's open/closed state is tracked by PR number
+  in a JS `Set` so a refresh doesn't collapse whatever the viewer had open.
+
+## Error handling
+
+- `record_review()` is called from `attempt_review()` *after* `upsert_comment`
+  succeeds, wrapped in try/except with `logger.exception` on failure — a
+  failed insert must never fail the review or retry it (the PR comment is
+  already posted; the review is done from the user's perspective). This
+  mirrors the project's existing rule that one failure must never blank
+  something that already succeeded.
+- `GET /api/dashboard` wraps its store calls in try/except; on a Postgres
+  error it returns `200` with an explicit `"error": "data unavailable"` field
+  per section instead of a 500, and the page renders a visible "data
+  unavailable" banner in place of that section — same partial-failure-visible
+  philosophy as the PR comment itself, applied to the dashboard.
+
+## Testing
+
+Following the existing deterministic test-layer pattern (`pytest`, no live
+network):
+
+- `store.record_review()` + `store.dashboard_reviews()` / `dashboard_queue_counts()`
+  round-trip against the `testcontainers`-backed Postgres already used for
+  `tickets` tests.
+- `orchestrator.attempt_review()` test asserting `record_review` is called
+  once per completed review, and that a `record_review` exception doesn't
+  propagate or affect the returned `ReviewCompleted`.
+- `GET /api/dashboard` via `httpx.AsyncClient` against a seeded test DB,
+  asserting the JSON shape above, including the degraded-`"error"` case with
+  a monkeypatched store failure.
+- `GET /dashboard` smoke test asserting 200 + the polling `<script>` is
+  present.
+- `dispatcher.backoff_status()` unit test.
+
+## Out of scope (YAGNI)
+
+- Auth/access control (explicitly not needed per purpose).
+- WebSocket/SSE push (polling is sufficient for a demo).
+- Historical charts/time-series graphs beyond the current stat tiles.
+- Pruning/retention policy for the `reviews` table.
+- A separate frontend framework/build step.
