@@ -99,7 +99,7 @@ def test_degrades_to_a_warning_when_no_service_matches_the_configured_name(
     monkeypatch, capsys
 ):
     """render_service_name doesn't match anything Render returns --
-    _find_render_service_id() degrades to None. Like the missing-key case,
+    _render.find_service_id() degrades to None. Like the missing-key case,
     this must warn and still let the write proceed, never block it."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "no-such-service")
