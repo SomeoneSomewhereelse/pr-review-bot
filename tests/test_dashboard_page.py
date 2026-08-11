@@ -106,3 +106,25 @@ async def test_dashboard_page_anchors_popups_to_their_button():
     assert "getBoundingClientRect" in body
     assert "openPopup(\"themePopupBackdrop\", event.currentTarget)" in body
     assert "openPopup(\"langPopupBackdrop\", event.currentTarget)" in body
+
+
+async def test_dashboard_page_has_how_it_works_section():
+    """The explainer section: heading, all step copy in both languages, the
+    parallel-group container and its mini-cards, and the arrow connector's
+    RTL-mirror (wide screens only) / rotation (narrow screens, unconditional)
+    rules."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert 'id="howItWorks"' in body
+    assert "hiw_heading" in body
+    assert "How it works" in body
+    assert "איך זה עובד" in body
+    assert "hiw_parallel_label" in body
+    assert "3 specialists review in parallel" in body
+    assert "3 מומחים בודקים במקביל" in body
+    assert "hiw-parallel-group" in body
+    assert "hiw-mini-card" in body
+    assert "hiw-arrow" in body
+    assert "scaleX(-1)" in body
+    assert "rotate(90deg)" in body

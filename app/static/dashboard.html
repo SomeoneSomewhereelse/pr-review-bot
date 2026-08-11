@@ -182,6 +182,85 @@
   .status-ok { color: var(--ok); }
   .status-failed { color: var(--fail); }
   a.comment-link { color: var(--accent); text-decoration: none; }
+  .how-it-works {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 1.25rem 1rem;
+    margin-top: 1.5rem;
+  }
+  .how-it-works h2 { font-size: 1.1rem; margin: 0 0 1rem; }
+  .hiw-flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  @media (max-width: 760px) {
+    .hiw-flow { flex-direction: column; }
+  }
+  .hiw-step {
+    flex: 1;
+    min-width: 140px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 0.75rem;
+    text-align: center;
+  }
+  .hiw-icon { font-size: 1.6rem; }
+  .hiw-title { font-weight: 600; font-size: 0.9rem; margin-top: 0.3rem; }
+  .hiw-desc { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; }
+  .hiw-arrow {
+    align-self: center;
+    flex: 0 0 auto;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+  }
+  .hiw-arrow::before { content: "→"; display: inline-block; }
+  @media (min-width: 761px) {
+    [dir="rtl"] .hiw-arrow::before { transform: scaleX(-1); }
+  }
+  @media (max-width: 760px) {
+    .hiw-arrow::before { transform: rotate(90deg); }
+  }
+  .hiw-parallel-group {
+    flex: 1.6;
+    min-width: 220px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 0.6rem;
+    padding: 0.75rem;
+  }
+  .hiw-parallel-label {
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+    color: var(--accent);
+  }
+  .hiw-parallel-cards {
+    display: flex;
+    gap: 0.5rem;
+  }
+  @media (max-width: 760px) {
+    .hiw-parallel-cards { flex-direction: column; }
+  }
+  .hiw-mini-card {
+    flex: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    text-align: center;
+  }
+  .hiw-mini-card .hiw-icon { font-size: 1.3rem; }
+  .hiw-mini-card .hiw-title { font-size: 0.85rem; }
+  .hiw-mini-card .hiw-desc { font-size: 0.75rem; }
 </style>
 </head>
 <body>
@@ -216,6 +295,55 @@
     <section id="errorBanner" hidden></section>
     <section id="stats" class="stats-grid"></section>
     <section id="reviews"></section>
+    <section id="howItWorks" class="how-it-works">
+      <h2 data-i18n="hiw_heading"></h2>
+      <div class="hiw-flow">
+        <div class="hiw-step">
+          <div class="hiw-icon">🔔</div>
+          <div class="hiw-title" data-i18n="hiw_step1_title"></div>
+          <div class="hiw-desc" data-i18n="hiw_step1_desc"></div>
+        </div>
+        <div class="hiw-arrow" aria-hidden="true"></div>
+        <div class="hiw-step">
+          <div class="hiw-icon">📄</div>
+          <div class="hiw-title" data-i18n="hiw_step2_title"></div>
+          <div class="hiw-desc" data-i18n="hiw_step2_desc"></div>
+        </div>
+        <div class="hiw-arrow" aria-hidden="true"></div>
+        <div class="hiw-parallel-group">
+          <div class="hiw-parallel-label" data-i18n="hiw_parallel_label"></div>
+          <div class="hiw-parallel-cards">
+            <div class="hiw-mini-card">
+              <div class="hiw-icon">🔒</div>
+              <div class="hiw-title" data-i18n="sp_name_security"></div>
+              <div class="hiw-desc" data-i18n="hiw_step3_desc"></div>
+            </div>
+            <div class="hiw-mini-card">
+              <div class="hiw-icon">⚡</div>
+              <div class="hiw-title" data-i18n="sp_name_performance"></div>
+              <div class="hiw-desc" data-i18n="hiw_step3_desc"></div>
+            </div>
+            <div class="hiw-mini-card">
+              <div class="hiw-icon">🧹</div>
+              <div class="hiw-title" data-i18n="sp_name_quality"></div>
+              <div class="hiw-desc" data-i18n="hiw_step3_desc"></div>
+            </div>
+          </div>
+        </div>
+        <div class="hiw-arrow" aria-hidden="true"></div>
+        <div class="hiw-step">
+          <div class="hiw-icon">🧩</div>
+          <div class="hiw-title" data-i18n="hiw_step4_title"></div>
+          <div class="hiw-desc" data-i18n="hiw_step4_desc"></div>
+        </div>
+        <div class="hiw-arrow" aria-hidden="true"></div>
+        <div class="hiw-step">
+          <div class="hiw-icon">💬</div>
+          <div class="hiw-title" data-i18n="hiw_step5_title"></div>
+          <div class="hiw-desc" data-i18n="hiw_step5_desc"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -246,6 +374,17 @@
         sp_name_quality: "Code Quality",
         sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
         backoff_none: "none",
+        hiw_heading: "How it works",
+        hiw_step1_title: "PR opened or updated",
+        hiw_step1_desc: "A pull request is opened, reopened, or pushed to.",
+        hiw_step2_title: "Diff fetched",
+        hiw_step2_desc: "The bot fetches the changed code and annotates it with file:line references.",
+        hiw_parallel_label: "3 specialists review in parallel",
+        hiw_step3_desc: "Reviews the diff independently.",
+        hiw_step4_title: "Findings merged",
+        hiw_step4_desc: "Results from all three specialists are combined into one report — even if one fails, the others still show.",
+        hiw_step5_title: "Comment posted",
+        hiw_step5_desc: "A single comment appears on the PR with every finding.",
       },
       he: {
         dashboard_title: "מנוע בדיקת קוד — לוח בקרה",
@@ -273,6 +412,17 @@
         sp_name_quality: "איכות קוד",
         sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
         backoff_none: "אין",
+        hiw_heading: "איך זה עובד",
+        hiw_step1_title: "PR נפתח או עודכן",
+        hiw_step1_desc: "בקשת משיכה (PR) נפתחת, נפתחת מחדש, או מתעדכנת בקוד.",
+        hiw_step2_title: "שליפת ה-diff",
+        hiw_step2_desc: "הבוט שולף את הקוד שהשתנה ומסמן אותו לפי קובץ ומספר שורה.",
+        hiw_parallel_label: "3 מומחים בודקים במקביל",
+        hiw_step3_desc: "בודק את ה-diff באופן עצמאי.",
+        hiw_step4_title: "איחוד הממצאים",
+        hiw_step4_desc: "התוצאות משלושת המומחים מאוחדות לדוח אחד — גם אם אחד נכשל, האחרים עדיין מוצגים.",
+        hiw_step5_title: "פרסום תגובה",
+        hiw_step5_desc: "תגובה אחת מתפרסמת ב-PR עם כל הממצאים.",
       },
     };
 
