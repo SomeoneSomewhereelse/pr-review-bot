@@ -133,6 +133,48 @@ No retention/pruning logic. At brief scale (20 PRs/day) `reviews` grows by
   this is cheap. An expanded row's open/closed state is tracked by PR number
   in a JS `Set` so a refresh doesn't collapse whatever the viewer had open.
 
+## Theming, internationalization & responsive design
+
+No frontend framework. Considered Tailwind v4 and rejected it: v4 dropped
+the old CDN prototype script in favor of a real build (PostCSS/Vite), which
+this repo has never needed (`uv`-only, no frontend tooling anywhere) and
+would contradict the no-CDN, hand-rolled-JS decision already made for the
+page itself. Plain CSS custom properties + logical properties cover
+everything this page needs.
+
+- **Theme (light / dark / system)**: two token sets defined as CSS custom
+  properties on `:root` and `:root[data-theme="dark"]`; `system` is the
+  absence of `data-theme` (falls through to a `prefers-color-scheme: dark`
+  media query redefining the same variables). Palette is calm/professional
+  in both modes — muted blues/grays, no saturated primaries; status colors
+  (ok/failed, severity tags) are defined as tokens too, so they stay legible
+  and consistent across both themes rather than being hardcoded per mode.
+  Choice persists in `localStorage`; default is `system`.
+- **Language (English / עברית)**: a small static JS object mapping string
+  keys to `{en, he}` values for every piece of UI chrome this page owns —
+  button labels, stat-tile labels, specialist names, status words, severity
+  tags, column headers. Per the earlier decision, LLM-generated finding text
+  (descriptions, fix suggestions) is never translated — it renders as-is
+  regardless of language, since translating it would need extra LLM calls
+  the demo doesn't need. Choice persists in `localStorage`; default is
+  English.
+- **RTL**: selecting עברית sets `dir="rtl"` on `<html>`; all layout CSS uses
+  logical properties (`margin-inline-start/end`, `padding-inline`,
+  `text-align: start`) instead of physical `left`/`right`, so the stat-tile
+  grid, review rows, expand chevrons, and both popups mirror automatically
+  with no separate RTL stylesheet.
+- **Header controls**: theme button and language button sit side by side at
+  the top of the page. Each always shows an icon plus the current selection
+  (e.g. "🌙 Dark", "עברית 🇮🇱") and opens a small centered popup on click.
+  Both popups use the same radio-group pattern — Light / Dark / System for
+  theme, English 🇺🇸 / עברית 🇮🇱 for language — for visual consistency; only
+  one popup is open at a time.
+- **Mobile**: stat tiles go from a 4-across grid to 2-across (~900px) to
+  1-across (~500px); the review list switches from table-like rows to
+  stacked cards (label above value) below ~640px; both popups are centered
+  modals sized to viewport at every breakpoint rather than a separate
+  mobile-only sheet variant.
+
 ## Error handling
 
 - `record_review()` is called from `attempt_review()` *after* `upsert_comment`
@@ -162,8 +204,15 @@ network):
   asserting the JSON shape above, including the degraded-`"error"` case with
   a monkeypatched store failure.
 - `GET /dashboard` smoke test asserting 200 + the polling `<script>` is
-  present.
+  present, `dir="rtl"`/`dir="ltr"` toggling markup exists, and both the
+  theme and language controls render.
 - `dispatcher.backoff_status()` unit test.
+- Theme/language logic (token switching, `localStorage` persistence, RTL
+  attribute toggling) is plain DOM/JS on a static page with no server round
+  trip — covered by manually exercising it in a browser (light/dark/system,
+  English/Hebrew, mobile widths) rather than a pytest suite, consistent with
+  "For UI or frontend changes ... use the feature in a browser" in this
+  project's own conventions.
 
 ## Out of scope (YAGNI)
 
@@ -171,4 +220,7 @@ network):
 - WebSocket/SSE push (polling is sufficient for a demo).
 - Historical charts/time-series graphs beyond the current stat tiles.
 - Pruning/retention policy for the `reviews` table.
-- A separate frontend framework/build step.
+- A separate frontend framework/build step (Tailwind or otherwise).
+- Translating LLM-generated finding text (descriptions/fix suggestions) —
+  UI chrome only.
+- Languages beyond English/Hebrew; themes beyond light/dark/system.
