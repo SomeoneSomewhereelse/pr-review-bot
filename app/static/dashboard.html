@@ -107,6 +107,69 @@
   }
   main { max-width: 1100px; margin: 0 auto; padding: 1rem 1rem 2.5rem; }
   h1 { font-size: 1.3rem; margin: 0.5rem 0 1rem; }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+  @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 500px) { .stats-grid { grid-template-columns: 1fr; } }
+  .stat-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 0.85rem 1rem;
+  }
+  .stat-tile .stat-label { color: var(--text-muted); font-size: 0.8rem; }
+  .stat-tile .stat-value { font-size: 1.4rem; font-weight: 600; margin-top: 0.15rem; }
+  #errorBanner {
+    background: var(--surface-2);
+    border: 1px solid var(--fail);
+    color: var(--fail);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 1rem;
+  }
+  .review-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    margin-bottom: 0.6rem;
+    overflow: hidden;
+  }
+  .review-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1rem;
+    cursor: pointer;
+  }
+  .review-row .field { font-size: 0.85rem; }
+  .review-row .field .field-value { font-weight: 500; }
+  @media (max-width: 640px) {
+    .review-row { flex-direction: column; align-items: stretch; }
+    .review-row .field { display: flex; justify-content: space-between; width: 100%; }
+    .review-row .field .field-label { color: var(--text-muted); }
+  }
+  .review-row .chevron {
+    margin-inline-start: auto;
+    display: inline-block;
+    transition: transform 0.15s ease;
+  }
+  .review-row[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+  .review-findings { display: none; border-top: 1px solid var(--border); padding: 0.75rem 1rem; }
+  .review-card.expanded .review-findings { display: block; }
+  .finding-group h3 { font-size: 0.85rem; margin: 0.5rem 0 0.25rem; }
+  .finding { font-size: 0.85rem; padding: 0.35rem 0; border-bottom: 1px dashed var(--border); }
+  .finding:last-child { border-bottom: none; }
+  .sev-critical { color: var(--sev-critical); font-weight: 600; }
+  .sev-high { color: var(--sev-high); font-weight: 600; }
+  .sev-medium { color: var(--sev-medium); font-weight: 600; }
+  .status-ok { color: var(--ok); }
+  .status-failed { color: var(--fail); }
+  a.comment-link { color: var(--accent); text-decoration: none; }
 </style>
 </head>
 <body>
@@ -153,6 +216,21 @@
         theme_popup_title: "Theme",
         lang_popup_title: "Language",
         loading: "Loading…",
+        stat_total_reviews: "Total reviews",
+        stat_total_cost: "Total est. cost",
+        stat_avg_time: "Avg. review time",
+        stat_queue: "Queue",
+        stat_provider_backoff: "Provider backoff",
+        error_banner: "Live data is unavailable right now.",
+        empty_reviews: "No reviews yet.",
+        q_pending: "Pending", q_running: "Running", q_deferred: "Deferred",
+        q_retrying: "Retrying", q_done: "Done", q_failed: "Failed",
+        col_pr: "PR", col_repo: "Repository", col_provider: "Provider / Model",
+        col_time: "Elapsed", col_tokens: "Tokens", col_cost: "Est. cost",
+        col_when: "When", col_comment: "View comment",
+        sp_ok: "OK", sp_failed: "Failed",
+        sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
+        backoff_none: "none",
       },
       he: {
         dashboard_title: "מנוע בדיקת קוד — לוח בקרה",
@@ -162,6 +240,21 @@
         theme_popup_title: "עיצוב",
         lang_popup_title: "שפה",
         loading: "טוען…",
+        stat_total_reviews: "סה\"כ בדיקות",
+        stat_total_cost: "עלות משוערת כוללת",
+        stat_avg_time: "זמן בדיקה ממוצע",
+        stat_queue: "תור",
+        stat_provider_backoff: "חסימת ספק",
+        error_banner: "המידע החי אינו זמין כרגע.",
+        empty_reviews: "אין עדיין בדיקות.",
+        q_pending: "מחכה", q_running: "רץ", q_deferred: "נדחה",
+        q_retrying: "מנסה שוב", q_done: "הושלם", q_failed: "נכשל",
+        col_pr: "מספר PR", col_repo: "מאגר", col_provider: "ספק / מודל",
+        col_time: "זמן", col_tokens: "טוקנים", col_cost: "עלות משוערת",
+        col_when: "מתי", col_comment: "צפייה בתגובה",
+        sp_ok: "תקין", sp_failed: "נכשל",
+        sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
+        backoff_none: "אין",
       },
     };
 
@@ -197,6 +290,126 @@
       document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
       document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
       applyTheme(currentTheme); // refresh theme button label in the new language
+      refreshDashboard();
+    }
+
+    const POLL_INTERVAL_MS = 4000;
+    const expandedPrs = new Set();
+
+    function renderStats(stats, queue) {
+      const el = document.getElementById("stats");
+      if (stats.error || queue.error) {
+        el.innerHTML = "";
+        return;
+      }
+      const tiles = [
+        [t("stat_total_reviews"), String(stats.total_reviews)],
+        [t("stat_total_cost"), `$${stats.total_cost_usd.toFixed(4)}`],
+        [t("stat_avg_time"), `${(stats.avg_elapsed_ms / 1000).toFixed(1)}s`],
+        [t("stat_queue"), Object.entries(queue.by_status || {})
+          .map(([status, count]) => `${t("q_" + status)}: ${count}`).join(" · ")],
+        [t("stat_provider_backoff"), Object.entries(queue.backoff || {})
+          .filter(([, until]) => until)
+          .map(([provider, until]) => `${provider} → ${new Date(until).toLocaleTimeString()}`)
+          .join(", ") || t("backoff_none")],
+      ];
+      el.innerHTML = tiles.map(([label, value]) => `
+        <div class="stat-tile">
+          <div class="stat-label">${label}</div>
+          <div class="stat-value">${value}</div>
+        </div>
+      `).join("");
+    }
+
+    function findingRows(specialist) {
+      if (specialist.status === "failed") {
+        return `<div class="finding">${specialist.error || ""}</div>`;
+      }
+      if (!specialist.findings || !specialist.findings.length) {
+        return `<div class="finding">${t("empty_reviews")}</div>`;
+      }
+      return specialist.findings.map((finding) => {
+        const parts = [];
+        if (finding.severity) {
+          parts.push(`<span class="sev-${finding.severity}">${t("sev_" + finding.severity)}</span>`);
+        }
+        if (finding.estimated_impact) parts.push(finding.estimated_impact);
+        if (finding.category) parts.push(finding.category);
+        if (finding.type) parts.push(finding.type);
+        if (finding.file) parts.push(`${finding.file}:${finding.line ?? "?"}`);
+        const text = finding.description || finding.issue || finding.suggestion || "";
+        const fix = finding.fix || finding.refactoring_suggestion || "";
+        return `<div class="finding">${parts.join(" · ")} — ${text}${fix ? ` → ${fix}` : ""}</div>`;
+      }).join("");
+    }
+
+    function renderReviews(reviews) {
+      const el = document.getElementById("reviews");
+      if (reviews.error) {
+        el.innerHTML = "";
+        return;
+      }
+      if (!reviews.length) {
+        el.innerHTML = `<p>${t("empty_reviews")}</p>`;
+        return;
+      }
+      el.innerHTML = reviews.map((review) => {
+        const key = `${review.repo}#${review.pr_number}#${review.created_at}`;
+        const isExpanded = expandedPrs.has(key);
+        const statuses = review.specialists.map((s) =>
+          `<span class="status-${s.status}">${s.name}: ${s.status === "ok" ? t("sp_ok") : t("sp_failed")}</span>`
+        ).join(" · ");
+        const findings = review.specialists.map((s) => `
+          <div class="finding-group">
+            <h3>${s.name}</h3>
+            ${findingRows(s)}
+          </div>
+        `).join("");
+        return `
+          <div class="review-card${isExpanded ? " expanded" : ""}" data-key="${key}">
+            <div class="review-row" role="button" tabindex="0" aria-expanded="${isExpanded}">
+              <span class="field"><span class="field-label">${t("col_pr")}: </span><span class="field-value">#${review.pr_number}</span></span>
+              <span class="field"><span class="field-label">${t("col_repo")}: </span><span class="field-value">${review.repo}</span></span>
+              <span class="field"><span class="field-label">${t("col_provider")}: </span><span class="field-value">${review.provider}/${review.model}</span></span>
+              <span class="field"><span class="field-label">${t("col_time")}: </span><span class="field-value">${(review.elapsed_ms / 1000).toFixed(1)}s</span></span>
+              <span class="field"><span class="field-label">${t("col_tokens")}: </span><span class="field-value">${review.tokens_in}/${review.tokens_out}</span></span>
+              <span class="field"><span class="field-label">${t("col_cost")}: </span><span class="field-value">$${review.est_cost_usd.toFixed(4)}</span></span>
+              <span class="field"><span class="field-label">${t("col_when")}: </span><span class="field-value">${new Date(review.created_at).toLocaleString()}</span></span>
+              <span class="field">${statuses}</span>
+              ${review.comment_url ? `<a class="comment-link field" href="${review.comment_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${t("col_comment")}</a>` : ""}
+              <span class="chevron">▾</span>
+            </div>
+            <div class="review-findings">${findings}</div>
+          </div>
+        `;
+      }).join("");
+
+      el.querySelectorAll(".review-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          const card = row.closest(".review-card");
+          const key = card.getAttribute("data-key");
+          const nowExpanded = !card.classList.contains("expanded");
+          card.classList.toggle("expanded", nowExpanded);
+          row.setAttribute("aria-expanded", String(nowExpanded));
+          if (nowExpanded) expandedPrs.add(key); else expandedPrs.delete(key);
+        });
+      });
+    }
+
+    async function refreshDashboard() {
+      const banner = document.getElementById("errorBanner");
+      try {
+        const response = await fetch("/api/dashboard");
+        const data = await response.json();
+        const hasError = data.stats.error || data.queue.by_status.error || data.reviews.error;
+        banner.hidden = !hasError;
+        if (hasError) banner.textContent = t("error_banner");
+        renderStats(data.stats, data.queue);
+        renderReviews(data.reviews);
+      } catch (err) {
+        banner.hidden = false;
+        banner.textContent = t("error_banner");
+      }
     }
 
     function openPopup(id) {
@@ -232,6 +445,7 @@
     });
 
     applyLanguage(currentLang);
+    setInterval(refreshDashboard, POLL_INTERVAL_MS);
   </script>
 </body>
 </html>

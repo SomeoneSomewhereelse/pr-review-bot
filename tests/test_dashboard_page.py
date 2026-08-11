@@ -23,3 +23,13 @@ async def test_dashboard_page_serves_html_with_theme_and_language_controls():
     assert 'name="lang"' in body
     assert "עברית" in body
     assert 'dir="ltr"' in body
+
+
+async def test_dashboard_page_includes_polling_and_rendering_hooks():
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert "/api/dashboard" in body
+    assert "setInterval" in body
+    assert "renderReviews" in body
+    assert "renderStats" in body
