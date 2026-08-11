@@ -145,3 +145,80 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     monkeypatch.setattr(settings, "github_models_model", "openai/gpt-4o-mini")
     result = await orchestrator.run_review("owner/repo", 1)
     assert result.model == "openai/gpt-4o-mini"
+
+
+async def test_run_review_records_the_completed_review(monkeypatch):
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment",
+        lambda repo, pr, body, comment_id=None: SimpleNamespace(id=111),
+    )
+
+    async def fake_security(annotated_diff):
+        return _ok_result("Security")
+
+    async def fake_performance(annotated_diff):
+        return _ok_result("Performance")
+
+    async def fake_quality(annotated_diff):
+        return _ok_result("Code Quality")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    recorded = {}
+
+    def fake_record_review(repo_full_name, pr_number, review, comment_id, now):
+        recorded["repo_full_name"] = repo_full_name
+        recorded["pr_number"] = pr_number
+        recorded["review"] = review
+        recorded["comment_id"] = comment_id
+        recorded["now"] = now
+
+    monkeypatch.setattr(orchestrator.store, "record_review", fake_record_review)
+
+    result = await orchestrator.run_review("owner/repo", 99)
+
+    assert recorded["repo_full_name"] == "owner/repo"
+    assert recorded["pr_number"] == 99
+    assert recorded["review"] is result
+    assert recorded["comment_id"] == 111
+    assert recorded["now"]  # a non-empty ISO timestamp string
+
+
+async def test_run_review_survives_record_review_raising(monkeypatch):
+    """A dashboard-persistence failure must never fail an otherwise-successful
+    review — the PR comment is already posted by this point."""
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment",
+        lambda repo, pr, body, comment_id=None: SimpleNamespace(id=111),
+    )
+
+    async def fake_security(annotated_diff):
+        return _ok_result("Security")
+
+    async def fake_performance(annotated_diff):
+        return _ok_result("Performance")
+
+    async def fake_quality(annotated_diff):
+        return _ok_result("Code Quality")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(orchestrator.store, "record_review", boom)
+
+    result = await orchestrator.run_review("owner/repo", 99)  # must not raise
+    assert result.pr_number == 99

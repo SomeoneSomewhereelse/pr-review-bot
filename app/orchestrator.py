@@ -15,8 +15,10 @@ requirement — "partial failure is always visible").
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from app import github_app
 from app.config import settings
@@ -25,10 +27,13 @@ from app.formatting import format_comment
 from app.providers.active import active_provider
 from app.providers.base import RateLimited
 from app.providers.pricing import estimate_cost_usd
+from app.queue import store
 from app.specialists.performance import run_performance_specialist
 from app.specialists.quality import run_quality_specialist
 from app.specialists.schemas import ReviewResult, SpecialistResult
 from app.specialists.security import run_security_specialist
+
+logger = logging.getLogger(__name__)
 
 _SPECIALIST_NAMES = ("Security", "Performance", "Code Quality")
 
@@ -122,6 +127,21 @@ async def attempt_review(
     posted = await asyncio.to_thread(
         github_app.upsert_comment, repo_full_name, pr_number, body, comment_id
     )
+    try:
+        await asyncio.to_thread(
+            store.record_review,
+            repo_full_name,
+            pr_number,
+            review_result,
+            posted.id,
+            datetime.now(timezone.utc).isoformat(),
+        )
+    # a dashboard-persistence failure must never fail an already-posted review
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "failed to record review for the dashboard (repo=%s pr=%s)",
+            repo_full_name, pr_number,
+        )
     return ReviewCompleted(review=review_result, comment_id=posted.id)
 
 
