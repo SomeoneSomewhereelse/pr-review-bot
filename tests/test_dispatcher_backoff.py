@@ -35,3 +35,18 @@ def test_jitter_is_added_on_top():
 def test_jitter_seam_returns_zero_when_disabled(monkeypatch):
     monkeypatch.setattr(settings, "dispatcher_backoff_jitter_seconds", 0.0)
     assert dispatcher._jitter() == 0.0
+
+
+def test_backoff_status_empty_when_nothing_blocked():
+    dispatcher.reset_blocked_until()
+    assert dispatcher.backoff_status() == {}
+
+
+def test_backoff_status_reports_blocked_providers():
+    from datetime import datetime, timezone
+
+    dispatcher.reset_blocked_until()
+    until = datetime(2026, 8, 11, 14, 32, tzinfo=timezone.utc)
+    dispatcher._blocked_until["groq"] = until
+    assert dispatcher.backoff_status() == {"groq": "2026-08-11T14:32:00+00:00"}
+    dispatcher.reset_blocked_until()

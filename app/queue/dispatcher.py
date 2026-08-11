@@ -69,6 +69,13 @@ def reset_blocked_until() -> None:
     _blocked_until.clear()
 
 
+def backoff_status() -> dict[str, str]:
+    """Snapshot of the in-memory per-provider rate-limit gate, for the
+    dashboard. Only providers currently blocked appear; the caller fills in
+    a default for every other known provider."""
+    return {provider: until.isoformat() for provider, until in _blocked_until.items()}
+
+
 def _has_visible_review(ticket: store.Ticket) -> bool:
     """True when a prior successful review is already on the PR (worth preserving
     over a placeholder or a bare failure notice). Set only by finalize_review."""
