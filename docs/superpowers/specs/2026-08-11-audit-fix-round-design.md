@@ -2,13 +2,13 @@
 
 **Status:** Approved
 **Source:** `docs/2026-08-11-full-project-review-security-performance-quality.md`
-**Scope:** All 12 findings from the security/performance/code-quality audit — 8 code changes, 3 doc-only notes, 1 explicitly skipped item.
+**Scope:** All 12 findings from the security/performance/code-quality audit — 9 code changes, 3 doc-only notes.
 
 ## Overview
 
-The audit found no high/critical issues. This design fixes every medium/low finding, adds small hardening for two info-level items, and documents (without changing) three items the audit itself judged correct-as-is. One item (fixtures/bad_code/billing_report.py) is explicitly out of scope per user decision — it's a deliberate demo fixture and editing it risks breaking `scripts/seed_demo_pr.py`'s expectations.
+The audit found no high/critical issues. This design fixes every medium/low finding, adds small hardening for two info-level items, and documents (without changing) three items the audit itself judged correct-as-is.
 
-Landing: one branch, one commit per finding (9 commits total — see Commit Plan). Testing bar: best-effort — new/updated tests only where a fix changes observable behavior; pure refactors (the provider de-dup) rely on existing adapter tests continuing to pass unchanged.
+Landing: one branch, one commit per finding (10 commits total — see Commit Plan). Testing bar: best-effort — new/updated tests only where a fix changes observable behavior; pure refactors (the provider de-dup) rely on existing adapter tests continuing to pass unchanged.
 
 ## 1. Security fixes
 
@@ -50,7 +50,13 @@ if not settings.github_webhook_secret:
 
 No new setting, no default change — `Settings.github_webhook_secret` keeps its `""` default so tests that don't need a real secret aren't forced to set one; only startup enforces non-emptiness.
 
-### 1.3 Dockerfile non-root user (was: Security #4, low)
+### 1.3 Soften the planted secret in fixtures/bad_code/billing_report.py (was: Security #3, info)
+
+**Files:** `fixtures/bad_code/billing_report.py`, `fixtures/demo_bulk_bad_code/billing_report_bulk.py` (identical duplicated constant)
+
+Replace the Stripe-shaped value `"sk_live_51Hj9aQqX7ZkTmvW2nP8sR3fA6bC0dE4gH"` with an unambiguously synthetic one, e.g. `"FAKE-DEMO-KEY-fA6bC0dE4gH-DO-NOT-ROTATE"`, and soften the `# Rotated quarterly.` comment (which reads as if the key is real) to `# Synthetic demo credential — planted for the security specialist to flag; not a real key.` in both files. No test depends on the exact string (verified via grep), so this is a safe drop-in edit — the security specialist still has an obvious hardcoded-secret finding to catch, just no longer shaped exactly like a real Stripe live key.
+
+### 1.4 Dockerfile non-root user (was: Security #4, low)
 
 **File:** `Dockerfile`
 
@@ -63,11 +69,11 @@ USER appuser
 
 Placed after all `COPY`/`RUN pip install`/build steps so file ownership from build layers isn't disturbed; if any `RUN` step needs root after this point, none currently do.
 
-### 1.4 Dashboard no-auth rationale — doc-only note (was: Security #5, info)
+### 1.5 Dashboard no-auth rationale — doc-only note (was: Security #5, info)
 
-**File:** `SPEC.md`, wherever the dashboard's no-auth decision is currently documented (per the most recent commit "docs: document dashboard routes/table and correct spec's no-auth rationale")
+**File:** `docs/superpowers/specs/2026-08-11-ops-dashboard-design.md`, Purpose section — this is where the no-auth rationale actually lives (already amended once by commit d2fb0ed to mention findings-text exposure; SPEC.md only references this doc, it doesn't restate the rationale itself).
 
-Add one sentence confirming the rationale was re-checked against the fact that `/api/dashboard` now also exposes raw `findings` text (LLM/diff-derived), not just aggregate stats — and that this was a deliberate, not overlooked, tradeoff.
+Add one sentence confirming the rationale was re-checked in the 2026-08-11 audit and still holds: the dashboard's exposure of raw findings text (file paths, line numbers, LLM-written descriptions) was already a known, deliberate tradeoff before this audit, not something the audit surfaced for the first time.
 
 ## 2. Performance fixes
 
@@ -193,13 +199,14 @@ KNOWN_PROVIDERS = ("gemini", "groq", "github_models")
 
 1. `fix(formatting): escape Markdown table syntax in LLM finding text` (§1.1)
 2. `fix(config): fail startup on empty GITHUB_WEBHOOK_SECRET` (§1.2)
-3. `fix(docker): run container as non-root user` (§1.3)
-4. `docs(spec): confirm dashboard no-auth rationale covers findings text` (§1.4)
-5. `fix(providers): add explicit request timeout to all three LLM clients` (§2.1)
-6. `perf(providers): cache provider client instances in factory` (§2.2)
-7. `perf(dashboard): serve dashboard.html from memory instead of per-request disk read` (§2.3 + §2.4 doc note)
-8. `refactor(providers): share parse_or_none and translate_rate_limit across adapters` (§3.1 + §3.2 — kept as one commit since both touch the same three files identically)
-9. `fix(queue): persist mark_failed's error column; dedupe KNOWN_PROVIDERS constant` (§3.3 + §3.4 — kept as one commit, both small store/dashboard cleanups)
+3. `fix(fixtures): soften planted secret to an unambiguously synthetic value` (§1.3)
+4. `fix(docker): run container as non-root user` (§1.4)
+5. `docs: confirm dashboard no-auth rationale still covers findings text` (§1.5)
+6. `fix(providers): add explicit request timeout to all three LLM clients` (§2.1)
+7. `perf(providers): cache provider client instances in factory` (§2.2)
+8. `perf(dashboard): serve dashboard.html from memory instead of per-request disk read` (§2.3 + §2.4 doc note)
+9. `refactor(providers): share parse_or_none and translate_rate_limit across adapters` (§3.1 + §3.2 — kept as one commit since both touch the same three files identically)
+10. `fix(queue): persist mark_failed's error column; dedupe KNOWN_PROVIDERS constant` (§3.3 + §3.4 — kept as one commit, both small store/dashboard cleanups)
 
 ## Testing
 
@@ -212,7 +219,4 @@ Best-effort, per user decision — no blanket new-test mandate:
 - §3.1, §3.2 (de-dup refactor): existing per-adapter tests must continue to pass unchanged — this is the test bar for a pure refactor.
 - §3.3 (mark_failed persistence): add one test that `error` survives a `mark_failed` → re-read round trip — new observable behavior.
 - §3.4 (constant de-dup): no new test — existing dashboard tests should pass unchanged.
-
-## Out of scope
-
-- `fixtures/bad_code/billing_report.py` (Security #3, info) — explicitly skipped per user decision; deliberate demo fixture, edits risk breaking `scripts/seed_demo_pr.py`.
+- §1.3 (fixture secret): no new test — no test asserts the exact string (verified via grep across `scripts/` and `tests/`), so this is a content-only edit.
