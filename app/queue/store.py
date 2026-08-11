@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from app.config import settings
+from app.specialists.schemas import ReviewResult
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
@@ -41,6 +43,21 @@ CREATE TABLE IF NOT EXISTS runtime_config (
     provider   TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS reviews (
+    id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    repo_full_name     TEXT    NOT NULL,
+    pr_number          INTEGER NOT NULL,
+    provider           TEXT    NOT NULL,
+    model              TEXT    NOT NULL,
+    comment_id         BIGINT,
+    created_at         TEXT    NOT NULL,
+    total_elapsed_ms   INTEGER NOT NULL,
+    total_tokens_in    INTEGER NOT NULL,
+    total_tokens_out   INTEGER NOT NULL,
+    est_cost_usd       DOUBLE PRECISION NOT NULL,
+    results            JSONB   NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reviews_created_at_idx ON reviews (created_at DESC);
 """
 
 _pool: ConnectionPool | None = None
@@ -329,6 +346,94 @@ def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
         conn.execute(
             "UPDATE tickets SET status = 'failed', updated_at = %s WHERE id = %s", (now, ticket_id)
         )
+
+
+def record_review(
+    repo_full_name: str,
+    pr_number: int,
+    review: ReviewResult,
+    comment_id: int | None,
+    now: str,
+) -> None:
+    """Persist a completed review for the dashboard (insert-only).
+
+    Callers must never let a failure here affect the review itself — the PR
+    comment is already posted by the time this is called.
+    """
+    results = Jsonb([r.model_dump() for r in review.results])
+    with _require_pool().connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO reviews
+              (repo_full_name, pr_number, provider, model, comment_id, created_at,
+               total_elapsed_ms, total_tokens_in, total_tokens_out, est_cost_usd, results)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                repo_full_name, pr_number, review.provider, review.model, comment_id, now,
+                review.total_elapsed_ms, review.total_tokens_in, review.total_tokens_out,
+                review.est_cost_usd, results,
+            ),
+        )
+
+
+_TICKET_STATUSES = ("pending", "running", "deferred", "retrying", "done", "failed")
+
+
+def dashboard_stats() -> dict:
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(est_cost_usd), 0) AS cost, "
+            "COALESCE(AVG(total_elapsed_ms), 0) AS avg_ms FROM reviews"
+        ).fetchone()
+    return {
+        "total_reviews": int(row["n"]),
+        "total_cost_usd": round(float(row["cost"]), 4),
+        "avg_elapsed_ms": int(row["avg_ms"]),
+    }
+
+
+def dashboard_queue_counts() -> dict[str, int]:
+    counts = {status: 0 for status in _TICKET_STATUSES}
+    with _require_pool().connection() as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM tickets GROUP BY status"
+        ).fetchall()
+    for row in rows:
+        counts[row["status"]] = int(row["n"])
+    return counts
+
+
+def dashboard_reviews(limit: int = 50) -> list[dict]:
+    with _require_pool().connection() as conn:
+        rows = conn.execute(
+            "SELECT repo_full_name, pr_number, provider, model, comment_id, created_at, "
+            "total_elapsed_ms, total_tokens_in, total_tokens_out, est_cost_usd, results "
+            "FROM reviews ORDER BY created_at DESC LIMIT %s",
+            (limit,),
+        ).fetchall()
+    reviews = []
+    for row in rows:
+        comment_url = None
+        if row["comment_id"] is not None:
+            comment_url = (
+                f"https://github.com/{row['repo_full_name']}/pull/"
+                f"{row['pr_number']}#issuecomment-{row['comment_id']}"
+            )
+        reviews.append({
+            "repo": row["repo_full_name"],
+            "pr_number": row["pr_number"],
+            "provider": row["provider"],
+            "model": row["model"],
+            "created_at": row["created_at"],
+            "elapsed_ms": row["total_elapsed_ms"],
+            "tokens_in": row["total_tokens_in"],
+            "tokens_out": row["total_tokens_out"],
+            "est_cost_usd": row["est_cost_usd"],
+            "comment_url": comment_url,
+            "specialists": row["results"],
+        })
+    return reviews
 
 
 def tickets_needing_notice(now: str) -> list[Ticket]:
