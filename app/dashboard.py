@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.queue import dispatcher, store
 
@@ -22,6 +23,7 @@ _REVIEWS_LIMIT = 50
 # has no shared constant for this list, and the dashboard has no other
 # reason to depend on it.
 _KNOWN_PROVIDERS = ("gemini", "groq", "github_models")
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 def build_dashboard_payload() -> dict:
@@ -57,3 +59,9 @@ def build_dashboard_payload() -> dict:
 async def api_dashboard() -> JSONResponse:
     payload = await asyncio.to_thread(build_dashboard_payload)
     return JSONResponse(payload)
+
+
+@router.get("/dashboard")
+async def dashboard_page() -> HTMLResponse:
+    html = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
+    return HTMLResponse(html)
