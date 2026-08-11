@@ -134,8 +134,11 @@ No retention/pruning logic. At brief scale (20 PRs/day) `reviews` grows by
 - **Review list** (reverse-chronological, capped at 50): one row per review —
   PR #, repo, provider/model, a status icon per specialist (✓ ok / ✗ failed),
   timing, tokens, cost, timestamp, a link to the GitHub comment. Clicking a
-  row expands it to show that review's actual findings, grouped by
-  specialist, each tagged with its severity/impact/category field.
+  row (or pressing Enter/Space while it's focused — it's a keyboard-operable
+  `role="button"`) expands it to show that review's actual findings, grouped
+  by specialist, each tagged with its severity/impact/category field. Every
+  finding field interpolated into the row is HTML-escaped before insertion
+  (`esc()`) — it's LLM-generated text and must never be trusted as markup.
 - **Auto-refresh**: inline `<script>` polls `GET /api/dashboard` every 4s and
   re-renders the list + tiles. No diffing — just replace the DOM; at 50 rows
   this is cheap. An expanded row's open/closed state is tracked by PR number
@@ -173,15 +176,37 @@ everything this page needs.
   with no separate RTL stylesheet.
 - **Header controls**: theme button and language button sit side by side at
   the top of the page. Each always shows an icon plus the current selection
-  (e.g. "🌙 Dark", "עברית 🇮🇱") and opens a small centered popup on click.
-  Both popups use the same radio-group pattern — Light / Dark / System for
-  theme, English 🇺🇸 / עברית 🇮🇱 for language — for visual consistency; only
-  one popup is open at a time.
+  (e.g. "🌙 Dark", "עברית 🇮🇱") and opens a small popup on click. Both popups
+  use the same radio-group pattern — Light / Dark / System for theme,
+  English 🇺🇸 / עברית 🇮🇱 for language — for visual consistency; only one
+  popup is open at a time.
+  **Revised 2026-08-11 (mobile-quirk pass):** popups are no longer centered
+  on screen — they're anchored next to whichever button opened them
+  (positioned via `getBoundingClientRect()`, clamped so they never run off
+  the viewport, and mirrored to the button's other side under `dir="rtl"`).
+  Centering was the original choice here but read as disconnected from the
+  triggering button on a phone; anchoring is the corrected behavior. The
+  header itself also gained `flex-wrap` so a long label (e.g. a Hebrew theme
+  name next to a language name) wraps to a second line instead of
+  overflowing or clipping.
 - **Mobile**: stat tiles go from a 4-across grid to 2-across (~900px) to
   1-across (~500px); the review list switches from table-like rows to
-  stacked cards (label above value) below ~640px; both popups are centered
-  modals sized to viewport at every breakpoint rather than a separate
-  mobile-only sheet variant.
+  stacked cards (label above value) below ~640px.
+  **Revised 2026-08-11 (mobile-quirk pass):** two more mobile-specific fixes
+  beyond the original design:
+  - The Queue and Provider-backoff stat tiles originally rendered every
+    status/provider as one run-on string joined with " · " — at narrow
+    widths the browser wrapped it mid-sentence, so unrelated statuses could
+    visually land on the same line by coincidence. They now render as
+    individual chip elements (`.tile-chip`), so wrapping happens between
+    whole chips, never mid-value.
+  - The review row's expand chevron was a flex item relying on
+    `margin-inline-start: auto` to sit at the row's end; on the mobile
+    column layout (`align-items: stretch`) it got stretched into an
+    orphan full-width line below the row's fields instead of sitting next
+    to them. It's now absolutely positioned in the row's corner
+    (`inset-inline-end`), which is stable at every breakpoint instead of
+    needing a separate mobile-only rule.
 
 ## Error handling
 
@@ -221,6 +246,20 @@ network):
   English/Hebrew, mobile widths) rather than a pytest suite, consistent with
   "For UI or frontend changes ... use the feature in a browser" in this
   project's own conventions.
+
+**Added since the initial build**, all as `pytest` string assertions over
+the served HTML (same convention as above — no JS test runner in this repo):
+- `esc()` exists and is actually applied to `specialist.error`/finding text
+  before `innerHTML` interpolation (the escaping fix).
+- Specialist display names resolve through `STRINGS`/`SPECIALIST_KEY`, not
+  the raw English literal (the translated-names fix).
+- The queue/backoff stat tiles build `.tile-chip` elements rather than a
+  `.join(" · ")`/`.join(", ")` run-on string (the mobile chip-wrapping fix).
+- The popups are positioned via `positionPopup()`/`getBoundingClientRect()`
+  and wired to `event.currentTarget` on open (the anchored-popup fix).
+- `renderStats`'s degrade-guard dereferences `queue.by_status?.error`, not a
+  non-existent top-level `queue.error` (a bug caught in Task 6's own review
+  loop before merge, not a later fix).
 
 ## Out of scope (YAGNI)
 
