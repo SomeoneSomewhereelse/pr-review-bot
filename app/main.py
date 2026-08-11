@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from app import github_app
 from app.config import settings
+from app.dashboard import router as dashboard_router
 from app.queue import dispatcher, store
 from app.webhook import router as webhook_router
 
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="pr-review-engine", lifespan=lifespan)
 app.include_router(webhook_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/healthz")
