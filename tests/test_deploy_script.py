@@ -502,7 +502,7 @@ def _deploys_response(deploy_obj):
 @respx.mock
 def test_render_service_reports_the_live_commit(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: "svc-1")
     monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", False))
     respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
         return_value=_deploys_response(
@@ -518,7 +518,7 @@ def test_render_service_reports_the_live_commit(monkeypatch):
 def test_render_service_fails_when_local_head_is_not_deployed(monkeypatch):
     """The never-push operator's trap: changes that never reached the build."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: "svc-1")
     monkeypatch.setattr(deploy, "_local_head", lambda: ("1b10b18", False))
     respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
         return_value=_deploys_response(
@@ -534,7 +534,7 @@ def test_render_service_fails_when_local_head_is_not_deployed(monkeypatch):
 def test_render_service_fails_on_a_dirty_working_tree(monkeypatch):
     """Uncommitted changes can be in no build, by construction."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: "svc-1")
     monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", True))
     respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
         return_value=_deploys_response(
@@ -550,7 +550,7 @@ def test_render_service_fails_on_a_dirty_working_tree(monkeypatch):
 def test_render_service_reports_an_image_without_claiming_verification(monkeypatch):
     """No local comparison is possible, and the row must not imply one."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: "svc-1")
     monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", False))
     respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
         return_value=_deploys_response(
@@ -567,7 +567,7 @@ def test_render_service_reports_an_image_without_claiming_verification(monkeypat
 def test_render_service_degrades_when_render_reports_no_artifact(monkeypatch):
     """Assumption 4 is unverified: a missing field must never produce a FAIL."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: "svc-1")
     monkeypatch.setattr(deploy, "_local_head", lambda: ("4e39cda", False))
     respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
         return_value=_deploys_response({"id": "dep-abc", "status": "live"})
@@ -578,7 +578,7 @@ def test_render_service_degrades_when_render_reports_no_artifact(monkeypatch):
 @respx.mock
 def test_render_service_skips_the_comparison_outside_a_git_repo(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: "svc-1")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: "svc-1")
     monkeypatch.setattr(deploy, "_local_head", lambda: None)
     respx.get("https://api.render.com/v1/services/svc-1/deploys").mock(
         return_value=_deploys_response(
@@ -815,7 +815,7 @@ def test_sync_env_does_not_demand_other_providers_keys(
 ):
     """The regression this task exists for: the default config could not sync
     at all, and the error named two providers the user never chose."""
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: None)
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
     code = deploy.sync_env()
     err = capsys.readouterr().err
     assert "GROQ_API_KEY" not in err
@@ -828,7 +828,7 @@ def test_sync_env_refuses_when_the_selected_credential_is_empty(
 ):
     monkeypatch.setattr(settings, "gemini_api_key", "")
     called = []
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
     code = deploy.sync_env()
     assert code == 2
     assert "GEMINI_API_KEY" in capsys.readouterr().err
@@ -862,16 +862,6 @@ def _env_var_list(values: dict):
     return [{"envVar": {"key": k, "value": v}} for k, v in values.items()]
 
 
-def test_render_env_vars_unwraps_the_service_env_list(monkeypatch):
-    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    with respx.mock:
-        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
-            return_value=httpx.Response(200, json=_env_var_list({"A": "1", "B": "2"}))
-        )
-        result = deploy._render_env_vars("srv-1")
-    assert result == {"A": "1", "B": "2"}
-
-
 def test_sync_env_requires_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     assert deploy.sync_env() == 2
@@ -886,7 +876,7 @@ def test_sync_env_exits_2_on_an_unreadable_pem_without_a_traceback(
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
     called = []
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
     code = deploy.sync_env()
     assert code == 2
     assert "GITHUB_APP_PRIVATE_KEY_B64" in capsys.readouterr().err
@@ -1485,7 +1475,7 @@ def test_sync_env_refuses_when_an_override_would_mask_the_push(
     # Same seam check_provider reads through -- no pool, no real connection.
     monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("groq", "groq"))
     called = []
-    monkeypatch.setattr(deploy, "_find_render_service_id", lambda: called.append(1))
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
     code = deploy.sync_env()
     assert code == 2
     err = capsys.readouterr().err

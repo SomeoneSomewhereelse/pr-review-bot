@@ -32,13 +32,13 @@ from github import GithubException
 
 from app import github_app
 from app.config import settings
+from scripts import _render
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
 _README_ANCHOR = "README.md#deploying-to-production-render--supabase"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
-_RENDER_API = "https://api.render.com/v1"
 _UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
 # Render free instances spin down after ~15 minutes idle; 10 minutes leaves margin.
 _MAX_PINGER_INTERVAL_SECONDS = 600
@@ -362,10 +362,10 @@ def check_provider_live() -> CheckResult:
         return CheckResult(name, "SKIPPED", f"{provider} ({source}) is not a supported provider")
     credential = entry[0]
     try:
-        service_id = _find_render_service_id()
+        service_id = _render.find_service_id()
         if service_id is None:
             return CheckResult(name, "FAIL", f"no service named {settings.render_service_name}")
-        live_value = _render_env_vars(service_id).get(credential) or ""
+        live_value = _render.env_vars(service_id).get(credential) or ""
     except Exception as exc:  # noqa: BLE001
         return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
     if not live_value:
@@ -373,18 +373,6 @@ def check_provider_live() -> CheckResult:
             name, "FAIL", f"{provider} ({source}) -- {credential} not present on Render"
         )
     return CheckResult(name, "PASS", f"{provider} ({source}) -- {credential} present on Render")
-
-
-def _render_headers() -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {settings.render_api_key}",
-        "Accept": "application/json",
-    }
-
-
-def _unwrap(item: dict, key: str) -> dict:
-    """Render wraps list items as {"service": {...}} / {"deploy": {...}}."""
-    return item.get(key) or item
 
 
 def _local_head() -> tuple[str, bool] | None:
@@ -409,29 +397,19 @@ def _local_head() -> tuple[str, bool] | None:
     return (head, dirty) if head else None
 
 
-def _find_render_service_id() -> str | None:
-    resp = httpx.get(f"{_RENDER_API}/services", headers=_render_headers(), timeout=_HTTP_TIMEOUT)
-    resp.raise_for_status()
-    for item in resp.json():
-        service = _unwrap(item, "service")
-        if service.get("name") == settings.render_service_name:
-            return service.get("id")
-    return None
-
-
 def check_render_service() -> CheckResult:
     """Why the service is or is not serving -- health already covers whether."""
     name = "render-service"
     if not settings.render_api_key:
         return CheckResult(name, "SKIPPED", "set RENDER_API_KEY to check deploy status")
     try:
-        service_id = _find_render_service_id()
+        service_id = _render.find_service_id()
         if service_id is None:
             return CheckResult(name, "FAIL", f"no service named {settings.render_service_name}")
         resp = httpx.get(
-            f"{_RENDER_API}/services/{service_id}/deploys",
+            f"{_render.RENDER_API}/services/{service_id}/deploys",
             params={"limit": 1},
-            headers=_render_headers(),
+            headers=_render.headers(),
             timeout=_HTTP_TIMEOUT,
         )
         resp.raise_for_status()
@@ -440,7 +418,7 @@ def check_render_service() -> CheckResult:
         return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
     if not deploys:
         return CheckResult(name, "FAIL", "service exists but has no deploys")
-    deploy_obj = _unwrap(deploys[0], "deploy")
+    deploy_obj = _render.unwrap(deploys[0], "deploy")
     status = deploy_obj.get("status", "?")
     if status != "live":
         return CheckResult(name, "FAIL", f"latest deploy status: {status}")
@@ -584,16 +562,16 @@ def _wait_for_in_flight(service_id: str) -> bool:
     deploy_id = None
     while time.monotonic() < deadline:
         resp = httpx.get(
-            f"{_RENDER_API}/services/{service_id}/deploys",
+            f"{_render.RENDER_API}/services/{service_id}/deploys",
             params={"limit": 1},
-            headers=_render_headers(),
+            headers=_render.headers(),
             timeout=_HTTP_TIMEOUT,
         )
         resp.raise_for_status()
         deploys = resp.json()
         if not deploys:
             return True
-        deploy_obj = _unwrap(deploys[0], "deploy")
+        deploy_obj = _render.unwrap(deploys[0], "deploy")
         deploy_id = deploy_obj.get("id")
         if deploy_obj.get("status") not in _DEPLOY_IN_FLIGHT_STATUSES:
             return True
@@ -616,25 +594,25 @@ def _trigger_and_wait(service_id: str) -> int:
     """Render env-var changes do not auto-deploy, so a sync that skipped this
     would report success while the service kept serving the old values."""
     resp = httpx.post(
-        f"{_RENDER_API}/services/{service_id}/deploys",
-        headers=_render_headers(),
+        f"{_render.RENDER_API}/services/{service_id}/deploys",
+        headers=_render.headers(),
         json={},
         timeout=_HTTP_TIMEOUT,
     )
     resp.raise_for_status()
-    deploy_id = _unwrap(resp.json(), "deploy").get("id")
+    deploy_id = _render.unwrap(resp.json(), "deploy").get("id")
     print(f"deploy {deploy_id} triggered; waiting for live")
     deadline = time.monotonic() + _DEPLOY_TIMEOUT_SECONDS
     last_status = ""
     while time.monotonic() < deadline:
         time.sleep(_DEPLOY_POLL_SECONDS)
         poll = httpx.get(
-            f"{_RENDER_API}/services/{service_id}/deploys/{deploy_id}",
-            headers=_render_headers(),
+            f"{_render.RENDER_API}/services/{service_id}/deploys/{deploy_id}",
+            headers=_render.headers(),
             timeout=_HTTP_TIMEOUT,
         )
         poll.raise_for_status()
-        status = _unwrap(poll.json(), "deploy").get("status", "?")
+        status = _render.unwrap(poll.json(), "deploy").get("status", "?")
         if status != last_status:
             print(f"  {status}")          # visible progress on a long build
             last_status = status
@@ -653,28 +631,6 @@ def _trigger_and_wait(service_id: str) -> int:
             return 1
     print("timed out waiting for the deploy to go live", file=sys.stderr)
     return 1
-
-
-def _render_env_vars(service_id: str) -> dict[str, str]:
-    """The service's live env-vars, key -> value.
-
-    Callers must reduce a returned value to a boolean or an equality result
-    immediately -- never store it beyond that computation, print it, or pass
-    it to anything that might log it. See CLAUDE.md's "no secret is ever
-    logged" and docs/superpowers/specs/
-    2026-08-10-provider-live-credential-verification-design.md section 6.
-    """
-    resp = httpx.get(
-        f"{_RENDER_API}/services/{service_id}/env-vars",
-        headers=_render_headers(),
-        timeout=_HTTP_TIMEOUT,
-    )
-    resp.raise_for_status()
-    current: dict[str, str] = {}
-    for item in resp.json():
-        env_var = _unwrap(item, "envVar")
-        current[env_var.get("key")] = env_var.get("value")
-    return current
 
 
 def sync_env() -> int:
@@ -722,11 +678,11 @@ def sync_env() -> int:
         )
         return 2
     try:
-        service_id = _find_render_service_id()
+        service_id = _render.find_service_id()
         if service_id is None:
             print(f"no Render service named {settings.render_service_name}", file=sys.stderr)
             return 1
-        current = _render_env_vars(service_id)
+        current = _render.env_vars(service_id)
         changed = [key for key, value in wanted.items() if current.get(key) != value]
     # deliberate: nothing has been pushed yet, so a crashed lookup really is
     # "could not run at all"
@@ -743,8 +699,8 @@ def sync_env() -> int:
     for key in changed:
         try:
             put = httpx.put(
-                f"{_RENDER_API}/services/{service_id}/env-vars/{key}",
-                headers=_render_headers(),
+                f"{_render.RENDER_API}/services/{service_id}/env-vars/{key}",
+                headers=_render.headers(),
                 json={"value": wanted[key]},
                 timeout=_HTTP_TIMEOUT,
             )
