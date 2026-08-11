@@ -1,6 +1,8 @@
 """Tests for GET /dashboard — the static HTML page shell."""
 from __future__ import annotations
 
+import re
+
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
@@ -128,3 +130,25 @@ async def test_dashboard_page_has_how_it_works_section():
     assert "hiw-arrow" in body
     assert "scaleX(-1)" in body
     assert "rotate(90deg)" in body
+
+
+async def test_dashboard_how_it_works_flow_breakpoint_matches_arrow_breakpoints():
+    """The .hiw-flow row/column breakpoint and the arrow RTL-mirror/rotation
+    breakpoints must all agree on the same boundary, on opposite sides of it
+    (e.g. max-width: 1000px paired with min-width: 1001px) — otherwise the
+    row layout can turn on at a viewport narrower than the flow's own
+    min-width floors require, breaking mid-flow (see design spec, Layout)."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+
+    flow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-flow"
+    arrow_wide_re = r"@media \(min-width: (\d+)px\) \{\s*\[dir=\"rtl\"\] \.hiw-arrow"
+    arrow_narrow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-arrow::before"
+
+    flow_break = int(re.search(flow_re, body).group(1))
+    arrow_wide = int(re.search(arrow_wide_re, body).group(1))
+    arrow_narrow = int(re.search(arrow_narrow_re, body).group(1))
+
+    assert arrow_wide == flow_break + 1
+    assert arrow_narrow == flow_break

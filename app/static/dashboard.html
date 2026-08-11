@@ -195,7 +195,7 @@
     flex-wrap: wrap;
     gap: 0.75rem;
   }
-  @media (max-width: 760px) {
+  @media (max-width: 1000px) {
     .hiw-flow { flex-direction: column; }
   }
   .hiw-step {
@@ -221,11 +221,18 @@
     color: var(--text-muted);
     font-size: 1.2rem;
   }
+  /* The RTL-mirror rule and the mobile-rotation rule below must stay in
+     separate, mutually exclusive media queries. If the RTL-mirror rule were
+     ever made unconditional or shared a query with the rotation rule, its
+     higher specificity ([dir="rtl"] .hiw-arrow::before) would win over the
+     rotation rule even at narrow RTL viewports, breaking the mobile arrow's
+     direction — the same bug class already hit once on the review-list
+     expand chevron. */
   .hiw-arrow::before { content: "→"; display: inline-block; }
-  @media (min-width: 761px) {
+  @media (min-width: 1001px) {
     [dir="rtl"] .hiw-arrow::before { transform: scaleX(-1); }
   }
-  @media (max-width: 760px) {
+  @media (max-width: 1000px) {
     .hiw-arrow::before { transform: rotate(90deg); }
   }
   .hiw-parallel-group {
@@ -299,13 +306,13 @@
       <h2 data-i18n="hiw_heading"></h2>
       <div class="hiw-flow">
         <div class="hiw-step">
-          <div class="hiw-icon">🔔</div>
+          <div class="hiw-icon" aria-hidden="true">🔔</div>
           <div class="hiw-title" data-i18n="hiw_step1_title"></div>
           <div class="hiw-desc" data-i18n="hiw_step1_desc"></div>
         </div>
         <div class="hiw-arrow" aria-hidden="true"></div>
         <div class="hiw-step">
-          <div class="hiw-icon">📄</div>
+          <div class="hiw-icon" aria-hidden="true">📄</div>
           <div class="hiw-title" data-i18n="hiw_step2_title"></div>
           <div class="hiw-desc" data-i18n="hiw_step2_desc"></div>
         </div>
@@ -314,17 +321,17 @@
           <div class="hiw-parallel-label" data-i18n="hiw_parallel_label"></div>
           <div class="hiw-parallel-cards">
             <div class="hiw-mini-card">
-              <div class="hiw-icon">🔒</div>
+              <div class="hiw-icon" aria-hidden="true">🔒</div>
               <div class="hiw-title" data-i18n="sp_name_security"></div>
               <div class="hiw-desc" data-i18n="hiw_step3_desc"></div>
             </div>
             <div class="hiw-mini-card">
-              <div class="hiw-icon">⚡</div>
+              <div class="hiw-icon" aria-hidden="true">⚡</div>
               <div class="hiw-title" data-i18n="sp_name_performance"></div>
               <div class="hiw-desc" data-i18n="hiw_step3_desc"></div>
             </div>
             <div class="hiw-mini-card">
-              <div class="hiw-icon">🧹</div>
+              <div class="hiw-icon" aria-hidden="true">🧹</div>
               <div class="hiw-title" data-i18n="sp_name_quality"></div>
               <div class="hiw-desc" data-i18n="hiw_step3_desc"></div>
             </div>
@@ -332,13 +339,13 @@
         </div>
         <div class="hiw-arrow" aria-hidden="true"></div>
         <div class="hiw-step">
-          <div class="hiw-icon">🧩</div>
+          <div class="hiw-icon" aria-hidden="true">🧩</div>
           <div class="hiw-title" data-i18n="hiw_step4_title"></div>
           <div class="hiw-desc" data-i18n="hiw_step4_desc"></div>
         </div>
         <div class="hiw-arrow" aria-hidden="true"></div>
         <div class="hiw-step">
-          <div class="hiw-icon">💬</div>
+          <div class="hiw-icon" aria-hidden="true">💬</div>
           <div class="hiw-title" data-i18n="hiw_step5_title"></div>
           <div class="hiw-desc" data-i18n="hiw_step5_desc"></div>
         </div>

@@ -49,15 +49,21 @@ and distinct from the dashboard's own `stat_*`/`col_*`/`q_*` keys).
 
 ## Layout
 
-- **Wide screens (≥760px):** a horizontal flex row of 5 "slots" — step 1,
+- **Wide screens (≥1000px):** a horizontal flex row of 5 "slots" — step 1,
   step 2, the parallel group, step 4, step 5 — connected by arrow
   connectors. The parallel group is itself a small bordered/tinted
-  container holding the 3 specialist mini-cards side-by-side.
-- **Narrow screens (<760px):** the same flex row becomes a vertical
+  container holding the 3 specialist mini-cards side-by-side. (This
+  breakpoint was corrected from an original ≥760px intent — the row's own
+  `min-width` floors on `.hiw-step`/`.hiw-parallel-group` plus gaps/arrows
+  add up to ~966px minimum, so 760px was never actually achievable; the
+  row layout now turns on only once the viewport can actually fit it.)
+- **Narrow screens (<1000px):** the same flex row becomes a vertical
   column (steps stacked top-to-bottom); the parallel group's 3 mini-cards
-  also stack vertically inside their container. Same breakpoint drives
-  both the outer flow and the inner group — no need for two separate
-  breakpoints for a decorative section.
+  also stack vertically inside their container below 760px. The outer
+  flow and inner group intentionally use different breakpoints here: the
+  outer flow's breakpoint had to move to 1000px to fix the row's minimum-
+  width overflow, but the inner group's 3 mini-cards stack fine down to
+  760px on their own, so its breakpoint stayed put.
 - **Connectors:** a single arrow glyph between each adjacent slot (including
   one arrow into the parallel group and one arrow out of it — never three
   individual branching lines to/from each specialist card, which would need
