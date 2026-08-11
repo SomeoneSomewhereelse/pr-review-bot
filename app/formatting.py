@@ -62,8 +62,14 @@ _SECTION_CONFIG: dict[str, dict] = {
 }
 
 
+def _escape_cell(value: object) -> str:
+    """Neutralize Markdown table syntax in LLM-generated, PR-diff-derived text."""
+    text = str(value)
+    return text.replace("|", "\\|").replace("`", "'").replace("\n", " ")
+
+
 def _file_line(finding: dict) -> str:
-    return f"`{finding.get('file', '?')}:{finding.get('line', '?')}`"
+    return f"`{_escape_cell(finding.get('file', '?'))}:{finding.get('line', '?')}`"
 
 
 def _render_section(spec: SpecialistResult) -> str:
@@ -91,11 +97,11 @@ def _render_section(spec: SpecialistResult) -> str:
         cells = []
         for key, _label, fmt in columns:
             if key == "_file_line":
-                value = _file_line(finding)
-            else:
-                raw = finding.get(key, "")
-                value = fmt(raw) if fmt else raw
-            cells.append(str(value))
+                cells.append(_file_line(finding))
+                continue
+            raw = finding.get(key, "")
+            value = fmt(raw) if fmt else raw
+            cells.append(_escape_cell(value))
         rows.append("| " + " | ".join(cells) + " |")
 
     table = f"| {col_headers} |\n| {col_sep} |\n" + "\n".join(rows)
