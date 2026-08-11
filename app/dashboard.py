@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.providers.base import KNOWN_PROVIDERS
 from app.queue import dispatcher, store
@@ -62,3 +62,8 @@ async def api_dashboard() -> JSONResponse:
 @router.get("/dashboard")
 async def dashboard_page() -> HTMLResponse:
     return HTMLResponse(_DASHBOARD_HTML)
+
+
+@router.get("/")
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/dashboard")

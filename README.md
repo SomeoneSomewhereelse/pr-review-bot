@@ -59,6 +59,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 - `GET /healthz` → `200`
 - `POST /webhook` → `401` (bad/missing signature), `200` (replayed delivery),
   or `202` (accepted, review runs in the background)
+- `GET /` → redirects to `/dashboard`
 - `GET /dashboard` → the live ops/demo page — light/dark/system theme,
   English/Hebrew with RTL, auto-refreshing review history and queue stats
 - `GET /api/dashboard` → JSON backing endpoint for the dashboard above

@@ -11,6 +11,13 @@ async def _client() -> AsyncClient:
     return AsyncClient(transport=transport, base_url="http://test")
 
 
+async def test_root_redirects_to_dashboard():
+    client = await _client()
+    resp = await client.get("/", follow_redirects=False)
+    assert resp.status_code in (302, 303, 307, 308)
+    assert resp.headers["location"] == "/dashboard"
+
+
 async def test_dashboard_page_serves_html_with_theme_and_language_controls():
     client = await _client()
     resp = await client.get("/dashboard")
