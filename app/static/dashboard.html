@@ -58,6 +58,7 @@
   }
   header.topbar {
     display: flex;
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.5rem;
     padding: 0.75rem 1rem;
@@ -79,20 +80,19 @@
   .popup-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(15, 20, 25, 0.35);
+    background: transparent;
     display: none;
-    align-items: center;
-    justify-content: center;
     z-index: 10;
   }
-  .popup-backdrop.open { display: flex; }
+  .popup-backdrop.open { display: block; }
   .popup {
+    position: absolute;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 0.75rem;
     padding: 1rem 1.25rem;
     min-width: 220px;
-    max-width: 90vw;
+    max-width: min(90vw, 320px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   }
   .popup h2 { margin: 0 0 0.75rem; font-size: 1rem; }
@@ -123,6 +123,14 @@
   }
   .stat-tile .stat-label { color: var(--text-muted); font-size: 0.8rem; }
   .stat-tile .stat-value { font-size: 1.4rem; font-weight: 600; margin-top: 0.15rem; }
+  .stat-tile .tile-chip-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem; }
+  .stat-tile .tile-chip {
+    background: var(--surface-2);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.45rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
   #errorBanner {
     background: var(--surface-2);
     border: 1px solid var(--fail);
@@ -139,11 +147,13 @@
     overflow: hidden;
   }
   .review-row {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 0.75rem;
     padding: 0.7rem 1rem;
+    padding-inline-end: 2.25rem;
     cursor: pointer;
   }
   .review-row .field { font-size: 0.85rem; }
@@ -154,7 +164,9 @@
     .review-row .field .field-label { color: var(--text-muted); }
   }
   .review-row .chevron {
-    margin-inline-start: auto;
+    position: absolute;
+    top: 0.75rem;
+    inset-inline-end: 1rem;
     display: inline-block;
     transition: transform 0.15s ease;
   }
@@ -320,21 +332,28 @@
         el.innerHTML = "";
         return;
       }
+      const queueChips = Object.entries(queue.by_status || {})
+        .map(([status, count]) => `<span class="tile-chip">${t("q_" + status)}: ${count}</span>`)
+        .join("");
+      const backoffEntries = Object.entries(queue.backoff || {}).filter(([, until]) => until);
+      const backoffChips = backoffEntries.length
+        ? backoffEntries
+            .map(([provider, until]) =>
+              `<span class="tile-chip">${esc(provider)} → ${new Date(until).toLocaleTimeString()}</span>`
+            )
+            .join("")
+        : `<span class="tile-chip">${t("backoff_none")}</span>`;
       const tiles = [
-        [t("stat_total_reviews"), String(stats.total_reviews)],
-        [t("stat_total_cost"), `$${stats.total_cost_usd.toFixed(4)}`],
-        [t("stat_avg_time"), `${(stats.avg_elapsed_ms / 1000).toFixed(1)}s`],
-        [t("stat_queue"), Object.entries(queue.by_status || {})
-          .map(([status, count]) => `${t("q_" + status)}: ${count}`).join(" · ")],
-        [t("stat_provider_backoff"), Object.entries(queue.backoff || {})
-          .filter(([, until]) => until)
-          .map(([provider, until]) => `${provider} → ${new Date(until).toLocaleTimeString()}`)
-          .join(", ") || t("backoff_none")],
+        [t("stat_total_reviews"), `<div class="stat-value">${stats.total_reviews}</div>`],
+        [t("stat_total_cost"), `<div class="stat-value">$${stats.total_cost_usd.toFixed(4)}</div>`],
+        [t("stat_avg_time"), `<div class="stat-value">${(stats.avg_elapsed_ms / 1000).toFixed(1)}s</div>`],
+        [t("stat_queue"), `<div class="tile-chip-list">${queueChips}</div>`],
+        [t("stat_provider_backoff"), `<div class="tile-chip-list">${backoffChips}</div>`],
       ];
-      el.innerHTML = tiles.map(([label, value]) => `
+      el.innerHTML = tiles.map(([label, valueHtml]) => `
         <div class="stat-tile">
           <div class="stat-label">${label}</div>
-          <div class="stat-value">${value}</div>
+          ${valueHtml}
         </div>
       `).join("");
     }
@@ -438,17 +457,38 @@
       }
     }
 
-    function openPopup(id) {
+    function positionPopup(popup, anchorBtn) {
+      const margin = 8;
+      const rect = anchorBtn.getBoundingClientRect();
+      const isRtl = document.documentElement.getAttribute("dir") === "rtl";
+      popup.style.top = `${rect.bottom + margin}px`;
+      popup.style.left = "auto";
+      popup.style.right = "auto";
+      const popupWidth = popup.offsetWidth;
+      if (isRtl) {
+        const maxRight = window.innerWidth - popupWidth - margin;
+        const right = Math.min(Math.max(window.innerWidth - rect.right, margin), maxRight);
+        popup.style.right = `${right}px`;
+      } else {
+        const maxLeft = window.innerWidth - popupWidth - margin;
+        const left = Math.max(margin, Math.min(rect.left, maxLeft));
+        popup.style.left = `${left}px`;
+      }
+    }
+
+    function openPopup(id, anchorBtn) {
       closeAllPopups();
-      document.getElementById(id).classList.add("open");
+      const backdrop = document.getElementById(id);
+      backdrop.classList.add("open");
+      positionPopup(backdrop.querySelector(".popup"), anchorBtn);
     }
 
     function closeAllPopups() {
       document.querySelectorAll(".popup-backdrop").forEach((el) => el.classList.remove("open"));
     }
 
-    document.getElementById("themeToggleBtn").addEventListener("click", () => openPopup("themePopupBackdrop"));
-    document.getElementById("langToggleBtn").addEventListener("click", () => openPopup("langPopupBackdrop"));
+    document.getElementById("themeToggleBtn").addEventListener("click", (event) => openPopup("themePopupBackdrop", event.currentTarget));
+    document.getElementById("langToggleBtn").addEventListener("click", (event) => openPopup("langPopupBackdrop", event.currentTarget));
 
     document.querySelectorAll(".popup-backdrop").forEach((backdrop) => {
       backdrop.addEventListener("click", (event) => {

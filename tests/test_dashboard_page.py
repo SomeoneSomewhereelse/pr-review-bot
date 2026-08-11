@@ -75,3 +75,34 @@ async def test_dashboard_page_has_translated_specialist_names():
     assert "sp_name_security" in body
     assert "אבטחה" in body
     assert "SPECIALIST_KEY" in body
+
+
+async def test_dashboard_page_renders_queue_and_backoff_as_chips_not_one_string():
+    """The Queue and Provider-backoff stat tiles must render each status/
+    provider as its own chip element, not one run-on string joined with
+    ' · ' — a single string wraps unpredictably at narrow widths (e.g. two
+    unrelated statuses landing on the same visual line), which is exactly
+    the mobile bug this pins against a regression."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert "tile-chip-list" in body
+    assert '<span class="tile-chip">' in body
+    assert "queueChips" in body
+    assert "backoffChips" in body
+    # the old bug joined every status/provider into one run-on string with
+    # this separator; the chip-based rendering must not reintroduce it
+    assert '.join(", ")' not in body
+
+
+async def test_dashboard_page_anchors_popups_to_their_button():
+    """Popups must be positioned near the button that opened them (an
+    absolutely-positioned popup placed via getBoundingClientRect), not
+    centered on the screen regardless of which button was clicked."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert "function positionPopup" in body
+    assert "getBoundingClientRect" in body
+    assert "openPopup(\"themePopupBackdrop\", event.currentTarget)" in body
+    assert "openPopup(\"langPopupBackdrop\", event.currentTarget)" in body
