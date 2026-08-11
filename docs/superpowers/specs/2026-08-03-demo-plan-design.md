@@ -136,6 +136,43 @@ pushes any locally-set provider credential, not just the selected one).
 is confirmed live and working again, but is not a useful tool for this
 specific segment with this account's current limits.**
 
+## Project updates since the rehearsal (2026-08-11)
+
+A dashboard feature and an audit fix round landed after the 2026-08-10
+rehearsal. Re-verified against the live service before touching this plan
+further:
+
+- **New: Ops/Demo Dashboard**, confirmed live at
+  `https://pr-review-engine.onrender.com/dashboard`
+  (`GET /api/dashboard` returns real queue/backoff/review data). Built
+  specifically to serve this demo's own purpose — its spec's stated goal is
+  "pull it up live while triggering a real PR review and watch it update."
+  **Folded into the plan below**: opened once, kept visible for the entire
+  walkthrough, not just one segment. Its `reviews` history only starts from
+  when this feature deployed — none of this rehearsal's PRs (#10-#22) will
+  appear in it, but every PR from here on will.
+- **The deploy-credential-verification gap is resolved** — the parked
+  thread from `docs/2026-08-10-deploy-provider-credential-verification-gap.md`.
+  `scripts/deploy.py` now has a `provider-live` check, and
+  `scripts/set_provider.py` proactively verifies the target provider's
+  credential against Render *before* writing an override, refusing by
+  default (with a `--force` escape hatch) if it's missing or mismatched —
+  the exact Gemini scenario hit live during rehearsal can't silently recur.
+- **Audit fix round** (12 findings, security/performance/quality) landed
+  and was checked against this plan's dependencies — no regressions:
+  `factory.py`'s new per-provider instance caching still keys off
+  `active_provider()` (the DB override), so Segment B/C's provider-swap
+  mechanics are untouched; the planted secret in both fixtures was softened
+  to an unambiguously synthetic value (still triggers the same
+  hardcoded-credential finding, just doesn't look like a real leaked key
+  anymore — cosmetic only); a 45s explicit LLM client timeout was added
+  (irrelevant at this demo's real ~5-45s review latencies).
+- **PR #16 confirmed healed** — real findings now posted, placeholder gone.
+  No action needed; this was already the expected outcome per Finding 3.
+- Still open, unrelated to the above, tracked separately: more Groq
+  quota/request-bucket testing and hardening (Finding 3's risk isn't
+  mitigated in code, just documented as a scheduling risk).
+
 ## Environment facts
 
 - **Hosting is Render + Supabase**, confirmed live at
@@ -183,7 +220,14 @@ Narrate the flow from `README.md`/`SPEC.md`'s diagram: webhook → HMAC verify
 → dedup → durable Postgres ticket → single serial dispatcher → diff fetch +
 annotate → 3 concurrent specialists → merge (atomic on rate-limit, never
 partial otherwise) → upsert PR comment. Mention Render + Supabase as the
-production home. No live action needed yet.
+production home.
+
+**Open `https://pr-review-engine.onrender.com/dashboard` in a second
+tab/window now** and leave it visible (polling every 4s) for the rest of the
+walkthrough — stat tiles (total reviews, cost, avg time), queue depth by
+status, per-provider backoff state, and a live review list are what turns
+every later segment from "trust me, it worked" into something the audience
+watches happen in real time.
 
 ### 2. Happy path (~2 min) — establishes the baseline
 
@@ -192,7 +236,9 @@ production home. No live action needed yet.
 - `uv run python -m scripts.seed_demo_pr` → opens a PR with the planted
   `fixtures/bad_code/billing_report.py` issues.
 - **Measured live: 4.9s, real findings across all three specialists, $0.0034.**
-- Show the resulting comment.
+- Show the resulting comment, then point at the dashboard: the review list
+  gains a row (real findings expandable inline) and the stat tiles update —
+  total reviews, cost, avg time all tick from their prior values.
 
 ### 3. Segment B — a real vendor died overnight, and self-heals on its own schedule (~5 min)
 
@@ -204,6 +250,8 @@ production home. No live action needed yet.
   *completed* review with 3 failed rows) showing the real error:
   `Error code: 410 - {'error': {'code': 'github_models_retirement_brownout', ...}}`
   — narrate that this is GitHub's actual retirement, not a staged failure.
+  The dashboard's review list shows this row too — a real failed review,
+  visible and countable, not swept under the rug.
 - **Clear the override:** `uv run python -m scripts.set_provider --clear`.
 - Push a trivial follow-up commit to the same PR's branch (`gh pr checkout`
   into a scratch clone, since `seed_demo_pr`'s own clone is discarded).
@@ -230,8 +278,13 @@ Still on `groq`. Fire, back-to-back:
 
 - PR A succeeded normally (5.6s, 10,664 tokens).
 - PR B hit a real `429` → `RateLimited` → deferred → placeholder:
-  `"⏳ Queued behind rate limit — review will appear shortly."`
-- PR B healed automatically ~8 seconds later, no manual action.
+  `"⏳ Queued behind rate limit — review will appear shortly."` — **this is
+  the dashboard's best moment**: point at `queue.backoff.groq` populating
+  with a real until-timestamp, and `queue.by_status.deferred` ticking to 1,
+  live, at the exact instant the placeholder appears on GitHub.
+- PR B healed automatically ~8 seconds later, no manual action — the
+  dashboard's backoff field clears and `deferred` drops back to 0 in the
+  same refresh cycle the GitHub comment updates in.
 - Narrate the guarantee explicitly: this review's own demand (~10,664)
   stays under the 12,000 absolute cap, so recovery is *guaranteed* once
   enough real time passes — unlike a review sized at or above the full cap,
@@ -260,6 +313,9 @@ against a 12,000 cap is strictly stronger than two.
    important step; everything else assumes the deployed code actually has
    the features this plan depends on (Finding 1).
 2. `curl https://pr-review-engine.onrender.com/healthz` → `200`.
+2b. `curl https://pr-review-engine.onrender.com/api/dashboard` → real JSON
+   (stats/queue/reviews, no `"error"` fields) — confirms the dashboard
+   itself is healthy before relying on it live in Segment 1.
 3. Confirm the UptimeRobot monitor is active.
 4. `uv run python -m scripts.set_provider --clear` — no stale DB override.
 5. Check the testbed repo for leftover open PRs from earlier rehearsals;
