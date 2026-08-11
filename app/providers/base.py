@@ -23,12 +23,14 @@ Later steps depend on this shape:
 
 from __future__ import annotations
 
+import json
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 
 @dataclass
@@ -97,3 +99,31 @@ def rate_limited_or_none(exc: Exception, now: datetime, default: float) -> "Rate
     headers = getattr(response, "headers", None) or {}
     retry_after = parse_retry_after(headers.get("retry-after"), now, default)
     return RateLimited(retry_after)
+
+
+def parse_or_none(raw_text: str, schema: type[BaseModel]) -> BaseModel | None:
+    """Best-effort JSON parse + schema validation. Never raises."""
+    try:
+        data = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    try:
+        return schema.model_validate(data)
+    except ValidationError:
+        return None
+
+
+@asynccontextmanager
+async def translate_rate_limit(default: float):
+    """Re-raise a 429 transport error as ``RateLimited``; anything else propagates.
+
+    Wraps a single provider SDK call so every adapter shares one 429-detection
+    path instead of duplicating the same try/except.
+    """
+    try:
+        yield
+    except Exception as exc:  # noqa: BLE001 -- re-raised as RateLimited or re-raised as-is below
+        rl = rate_limited_or_none(exc, now=datetime.now(timezone.utc), default=default)
+        if rl is not None:
+            raise rl from exc
+        raise

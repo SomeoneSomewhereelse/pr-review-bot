@@ -15,28 +15,13 @@ other provider's never-raise contract.
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from app.config import settings
-from app.providers.base import LLMResponse, rate_limited_or_none
+from app.providers.base import LLMResponse, parse_or_none, translate_rate_limit
 
 _BASE_URL = "https://models.github.ai/inference"
-
-
-def _parse(raw_text: str, schema: type[BaseModel]) -> BaseModel | None:
-    """Best-effort JSON parse + schema validation. Never raises."""
-    try:
-        data = json.loads(raw_text)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    try:
-        return schema.model_validate(data)
-    except ValidationError:
-        return None
 
 
 def _add_additional_properties_false(node: object) -> None:
@@ -85,7 +70,7 @@ class GitHubModelsProvider:
         self._model = settings.github_models_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        try:
+        async with translate_rate_limit(default=settings.default_retry_after_seconds):
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
@@ -94,14 +79,6 @@ class GitHubModelsProvider:
                 ],
                 response_format=_response_format(schema),
             )
-        # re-raised unless it's a 429
-        except Exception as exc:  # noqa: BLE001
-            rl = rate_limited_or_none(
-                exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds
-            )
-            if rl is not None:
-                raise rl from exc
-            raise
 
         raw_text = response.choices[0].message.content or ""
         usage = response.usage
@@ -112,5 +89,5 @@ class GitHubModelsProvider:
             raw_text=raw_text,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
-            parsed=_parse(raw_text, schema),
+            parsed=parse_or_none(raw_text, schema),
         )
