@@ -1,5 +1,5 @@
-"""Ops/demo dashboard: GET /api/dashboard (JSON) backing GET /dashboard's
-static page. Knows nothing about LLM providers or GitHub — only reads
+"""Ops/demo dashboard: GET /api/dashboard (JSON) backing GET /'s static
+page. Knows nothing about LLM providers or GitHub — only reads
 app.queue.store and app.queue.dispatcher, same separation formatting.py
 keeps from the LLM layer.
 """
@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.providers.base import KNOWN_PROVIDERS
 from app.queue import dispatcher, store
@@ -59,11 +59,6 @@ async def api_dashboard() -> JSONResponse:
     return JSONResponse(payload)
 
 
-@router.get("/dashboard")
+@router.get("/")
 async def dashboard_page() -> HTMLResponse:
     return HTMLResponse(_DASHBOARD_HTML)
-
-
-@router.get("/")
-async def root() -> RedirectResponse:
-    return RedirectResponse(url="/dashboard")

@@ -9,7 +9,7 @@ the event loop.
 
 Also owns the ``reviews`` table — an insert-only history of completed reviews
 (provider, model, timing, tokens, cost, findings) that has no bearing on queue
-lifecycle but backs the ``GET /dashboard`` / ``GET /api/dashboard`` ops/demo
+lifecycle but backs the ``GET /`` / ``GET /api/dashboard`` ops/demo
 page (``app/dashboard.py``) via the ``dashboard_*`` read helpers below.
 """
 from __future__ import annotations

@@ -66,7 +66,7 @@ app/
   orchestrator.py      prepare diff → fan out → merge into ReviewResult
   diff_utils.py        annotate diff with file:line; token cap + truncation
   formatting.py        ReviewResult → Markdown comment (with bot marker)
-  dashboard.py         ops/demo dashboard: GET /dashboard static page + GET /api/dashboard JSON
+  dashboard.py         ops/demo dashboard: GET / static page + GET /api/dashboard JSON
   specialists/
     base.py            Specialist protocol + shared run() (calls provider + validate-repair)
     schemas.py         Pydantic finding models + envelopes
@@ -357,7 +357,7 @@ Trust & Safety pacing discipline in CLAUDE.md — no change made.
 `(repo_full_name, pr_number)` (from `GITHUB_TARGET_REPO` env var) with a `UNIQUE` constraint.
 The same module also owns a `reviews` table (one insert-only row per completed
 review — provider, model, timing, tokens, cost, and findings) that backs the
-`GET /dashboard` / `GET /api/dashboard` ops/demo page (`app/dashboard.py`); it
+`GET /` / `GET /api/dashboard` ops/demo page (`app/dashboard.py`); it
 is separate from `tickets`'s queue-lifecycle bookkeeping and from the
 single-row `runtime_config` provider-override table.
 `enqueue_or_update` applies a single per-state re-review policy (full design rationale:

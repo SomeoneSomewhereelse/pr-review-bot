@@ -1,4 +1,4 @@
-"""Tests for GET /dashboard — the static HTML page shell."""
+"""Tests for GET / — the static HTML dashboard page shell."""
 from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
@@ -11,16 +11,9 @@ async def _client() -> AsyncClient:
     return AsyncClient(transport=transport, base_url="http://test")
 
 
-async def test_root_redirects_to_dashboard():
-    client = await _client()
-    resp = await client.get("/", follow_redirects=False)
-    assert resp.status_code in (302, 303, 307, 308)
-    assert resp.headers["location"] == "/dashboard"
-
-
 async def test_dashboard_page_serves_html_with_theme_and_language_controls():
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     body = resp.text
@@ -32,9 +25,17 @@ async def test_dashboard_page_serves_html_with_theme_and_language_controls():
     assert 'dir="ltr"' in body
 
 
-async def test_dashboard_page_includes_polling_and_rendering_hooks():
+async def test_dashboard_no_longer_served_at_slash_dashboard():
+    """The page moved from /dashboard to / (no redirect, no duplicate route)
+    — /dashboard should be gone, not just an alias."""
     client = await _client()
     resp = await client.get("/dashboard")
+    assert resp.status_code == 404
+
+
+async def test_dashboard_page_includes_polling_and_rendering_hooks():
+    client = await _client()
+    resp = await client.get("/")
     body = resp.text
     assert "/api/dashboard" in body
     assert "setInterval" in body
@@ -54,7 +55,7 @@ async def test_render_stats_guards_on_queue_by_status_error_not_bare_queue_error
     the stats section. The guard must dereference queue.by_status?.error.
     """
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert "queue.by_status?.error" in body
     assert "queue.error" not in body
@@ -65,7 +66,7 @@ async def test_dashboard_page_escapes_llm_text_before_innerhtml():
     must run them through esc() before interpolating into innerHTML, not
     just LLM-controlled-looking closed enums like severity/status."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert "function esc(value)" in body
     assert "esc(specialist.error" in body
@@ -77,7 +78,7 @@ async def test_dashboard_page_has_translated_specialist_names():
     'Security'/'Performance'/'Code Quality' field, so Hebrew mode doesn't
     half-translate ('Security: תקין')."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert "sp_name_security" in body
     assert "אבטחה" in body
@@ -91,7 +92,7 @@ async def test_dashboard_page_renders_queue_and_backoff_as_chips_not_one_string(
     unrelated statuses landing on the same visual line), which is exactly
     the mobile bug this pins against a regression."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert "tile-chip-list" in body
     assert '<span class="tile-chip">' in body
@@ -107,7 +108,7 @@ async def test_dashboard_page_anchors_popups_to_their_button():
     absolutely-positioned popup placed via getBoundingClientRect), not
     centered on the screen regardless of which button was clicked."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert "function positionPopup" in body
     assert "getBoundingClientRect" in body
@@ -120,7 +121,7 @@ async def test_dashboard_page_has_how_it_works_section():
     parallel-group container and its mini-cards, and the arrow connector's
     (unconditional) downward rotation."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert 'id="howItWorks"' in body
     assert "hiw_heading" in body
@@ -143,7 +144,7 @@ async def test_dashboard_how_it_works_flow_is_always_vertical():
     row layout kept causing width/wrapping bugs (mini-card overflow, the
     flow's own min-width exceeding its breakpoint, etc.)."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert ".hiw-flow {\n    display: flex;\n    flex-direction: column;" in body
     assert ".hiw-parallel-cards {\n    display: flex;\n    flex-direction: column;" in body
@@ -161,7 +162,7 @@ async def test_dashboard_page_uses_a_thicker_svg_arrow_not_a_unicode_glyph():
     `color`), so the rotation transform must target the svg element rather
     than a ::before pseudo-element's text content."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert '<svg viewBox="0 0 24 24"' in body
     assert 'stroke="currentColor"' in body
@@ -178,6 +179,6 @@ async def test_dashboard_page_mini_cards_have_min_width_zero():
     harmless to keep and cheap to guard against a future regression back to
     a row layout."""
     client = await _client()
-    resp = await client.get("/dashboard")
+    resp = await client.get("/")
     body = resp.text
     assert ".hiw-mini-card {\n    min-width: 0;" in body
