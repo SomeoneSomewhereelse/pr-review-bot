@@ -144,7 +144,7 @@ async def test_dashboard_how_it_works_flow_breakpoint_matches_arrow_breakpoints(
 
     flow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-flow"
     arrow_wide_re = r"@media \(min-width: (\d+)px\) \{\s*\[dir=\"rtl\"\] \.hiw-arrow"
-    arrow_narrow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-arrow::before"
+    arrow_narrow_re = r"@media \(max-width: (\d+)px\) \{\s*\.hiw-arrow svg"
 
     flow_break = int(re.search(flow_re, body).group(1))
     arrow_wide = int(re.search(arrow_wide_re, body).group(1))
@@ -152,3 +152,29 @@ async def test_dashboard_how_it_works_flow_breakpoint_matches_arrow_breakpoints(
 
     assert arrow_wide == flow_break + 1
     assert arrow_narrow == flow_break
+
+
+async def test_dashboard_page_uses_a_thicker_svg_arrow_not_a_unicode_glyph():
+    """The connector was a thin Unicode "→" glyph; it's now a bolder inline
+    SVG (stroke-based, colored via currentColor from .hiw-arrow's own
+    `color`), so the RTL-mirror/rotation transforms must target the svg
+    element rather than a ::before pseudo-element's text content."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert '<svg viewBox="0 0 24 24"' in body
+    assert 'stroke="currentColor"' in body
+    assert 'stroke-width="3"' in body
+    assert ".hiw-arrow svg" in body
+    assert '.hiw-arrow::before { content: "→"' not in body
+
+
+async def test_dashboard_page_mini_cards_can_shrink_to_fit_their_group():
+    """.hiw-mini-card must set min-width: 0 -- without it, flexbox's
+    automatic content-based minimum stops the three specialist mini-cards
+    from shrinking to fit .hiw-parallel-group on desktop, so they overflow
+    to the right and get covered by the next card in the flow."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert ".hiw-mini-card {\n    flex: 1;\n    min-width: 0;" in body
