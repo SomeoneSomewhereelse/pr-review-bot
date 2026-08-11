@@ -19,6 +19,11 @@ assumes either a public target repo or that the dashboard's own exposure is
 acceptable for the demo). No new Python dependency and no CDN script — plain
 server-rendered HTML with a small inline vanilla-JS polling loop.
 
+**Re-checked 2026-08-11 (security audit):** the findings-text exposure noted
+above was re-examined during the full-project security/performance/quality
+audit and confirmed to be the same known, deliberate tradeoff recorded here
+originally — not something the audit surfaced for the first time.
+
 ## Problem: review results aren't persisted today
 
 `orchestrator.attempt_review()` builds a `ReviewResult` (per-specialist
