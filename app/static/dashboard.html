@@ -298,7 +298,7 @@
 
     function renderStats(stats, queue) {
       const el = document.getElementById("stats");
-      if (stats.error || queue.error) {
+      if (stats.error || queue.by_status?.error) {
         el.innerHTML = "";
         return;
       }

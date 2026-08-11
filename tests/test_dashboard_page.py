@@ -33,3 +33,21 @@ async def test_dashboard_page_includes_polling_and_rendering_hooks():
     assert "setInterval" in body
     assert "renderReviews" in body
     assert "renderStats" in body
+
+
+async def test_render_stats_guards_on_queue_by_status_error_not_bare_queue_error():
+    """renderStats's degrade-guard must check queue.by_status.error.
+
+    /api/dashboard's queue payload is always {"by_status": ..., "backoff": ...} —
+    there is no top-level "error" key on queue itself. build_dashboard_payload()
+    (app/dashboard.py) degrades queue.by_status to {"error": "data unavailable"}
+    on a store failure, not queue as a whole. A guard written as `queue.error`
+    is permanently undefined and never trips, so a degraded queue would render
+    a garbled stat tile (e.g. "q_error: data unavailable") instead of clearing
+    the stats section. The guard must dereference queue.by_status?.error.
+    """
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert "queue.by_status?.error" in body
+    assert "queue.error" not in body
