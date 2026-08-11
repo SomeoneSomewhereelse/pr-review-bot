@@ -26,7 +26,8 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.queue import store
-from scripts.deploy import _PROVIDERS, _find_render_service_id, _render_env_vars
+from scripts import _render
+from scripts.deploy import _PROVIDERS
 
 
 def _verify_render_credential(provider: str) -> tuple[bool, str]:
@@ -41,13 +42,13 @@ def _verify_render_credential(provider: str) -> tuple[bool, str]:
             "setting override without live verification"
         )
     try:
-        service_id = _find_render_service_id()
+        service_id = _render.find_service_id()
         if service_id is None:
             return True, (
                 f"could not verify against Render (no service named "
                 f"{settings.render_service_name}); setting override without live verification"
             )
-        env_vars = _render_env_vars(service_id)
+        env_vars = _render.env_vars(service_id)
     # deliberate: inability to verify degrades to a warning, never a refusal
     except Exception as exc:  # noqa: BLE001
         return True, (
