@@ -68,7 +68,11 @@ class GroqProvider:
         # visible via a placeholder/schedule-note comment -- so a second,
         # hidden retry layer underneath it is redundant at best and actively
         # hides a real signal at worst.
-        self._client = AsyncGroq(api_key=settings.groq_api_key, max_retries=0)
+        self._client = AsyncGroq(
+            api_key=settings.groq_api_key,
+            max_retries=0,
+            timeout=settings.llm_request_timeout_seconds,
+        )
         self._model = settings.groq_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:

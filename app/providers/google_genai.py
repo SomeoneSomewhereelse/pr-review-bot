@@ -76,7 +76,12 @@ class GeminiProvider:
     """``gemini`` (AI-Studio) — the actually-live provider in this environment."""
 
     def __init__(self) -> None:
-        self._client = genai.Client(api_key=settings.gemini_api_key)
+        self._client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(
+                timeout=int(settings.llm_request_timeout_seconds * 1000)
+            ),
+        )
         self._model = settings.llm_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:

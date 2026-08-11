@@ -77,7 +77,11 @@ class GitHubModelsProvider:
     """``github_models`` — cross-vendor option riding the user's GitHub account."""
 
     def __init__(self) -> None:
-        self._client = AsyncOpenAI(base_url=_BASE_URL, api_key=settings.github_models_token)
+        self._client = AsyncOpenAI(
+            base_url=_BASE_URL,
+            api_key=settings.github_models_token,
+            timeout=settings.llm_request_timeout_seconds,
+        )
         self._model = settings.github_models_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
