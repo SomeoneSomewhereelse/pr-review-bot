@@ -52,6 +52,9 @@ class LLMProvider(Protocol):
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse: ...
 
 
+KNOWN_PROVIDERS = ("gemini", "groq", "github_models")
+
+
 class RateLimited(Exception):
     """Raised by an adapter when the provider returns HTTP 429.
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.providers.base import KNOWN_PROVIDERS
 from app.queue import dispatcher, store
 
 logger = logging.getLogger(__name__)
@@ -19,10 +20,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _REVIEWS_LIMIT = 50
-# Kept local rather than imported from app/providers/factory.py: factory.py
-# has no shared constant for this list, and the dashboard has no other
-# reason to depend on it.
-_KNOWN_PROVIDERS = ("gemini", "groq", "github_models")
 _STATIC_DIR = Path(__file__).parent / "static"
 _DASHBOARD_HTML = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
 
@@ -39,7 +36,7 @@ def build_dashboard_payload() -> dict:
         payload["stats"] = {"error": "data unavailable"}
 
     backoff_raw = dispatcher.backoff_status()
-    backoff = {provider: backoff_raw.get(provider) for provider in _KNOWN_PROVIDERS}
+    backoff = {provider: backoff_raw.get(provider) for provider in KNOWN_PROVIDERS}
     try:
         by_status = store.dashboard_queue_counts()
     except Exception:  # noqa: BLE001
