@@ -223,12 +223,15 @@
         stat_provider_backoff: "Provider backoff",
         error_banner: "Live data is unavailable right now.",
         empty_reviews: "No reviews yet.",
+        no_findings: "No issues found.",
         q_pending: "Pending", q_running: "Running", q_deferred: "Deferred",
         q_retrying: "Retrying", q_done: "Done", q_failed: "Failed",
         col_pr: "PR", col_repo: "Repository", col_provider: "Provider / Model",
         col_time: "Elapsed", col_tokens: "Tokens", col_cost: "Est. cost",
         col_when: "When", col_comment: "View comment",
         sp_ok: "OK", sp_failed: "Failed",
+        sp_name_security: "Security", sp_name_performance: "Performance",
+        sp_name_quality: "Code Quality",
         sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
         backoff_none: "none",
       },
@@ -247,15 +250,24 @@
         stat_provider_backoff: "חסימת ספק",
         error_banner: "המידע החי אינו זמין כרגע.",
         empty_reviews: "אין עדיין בדיקות.",
+        no_findings: "לא נמצאו ממצאים.",
         q_pending: "מחכה", q_running: "רץ", q_deferred: "נדחה",
         q_retrying: "מנסה שוב", q_done: "הושלם", q_failed: "נכשל",
         col_pr: "מספר PR", col_repo: "מאגר", col_provider: "ספק / מודל",
         col_time: "זמן", col_tokens: "טוקנים", col_cost: "עלות משוערת",
         col_when: "מתי", col_comment: "צפייה בתגובה",
         sp_ok: "תקין", sp_failed: "נכשל",
+        sp_name_security: "אבטחה", sp_name_performance: "ביצועים",
+        sp_name_quality: "איכות קוד",
         sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
         backoff_none: "אין",
       },
+    };
+
+    const SPECIALIST_KEY = {
+      Security: "sp_name_security",
+      Performance: "sp_name_performance",
+      "Code Quality": "sp_name_quality",
     };
 
     const THEME_ICON = { light: "☀️", dark: "🌙", system: "🖥️" };
@@ -266,6 +278,12 @@
 
     function t(key) {
       return STRINGS[currentLang][key] || STRINGS.en[key] || key;
+    }
+
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
     }
 
     function applyTheme(theme) {
@@ -323,23 +341,23 @@
 
     function findingRows(specialist) {
       if (specialist.status === "failed") {
-        return `<div class="finding">${specialist.error || ""}</div>`;
+        return `<div class="finding">${esc(specialist.error || "")}</div>`;
       }
       if (!specialist.findings || !specialist.findings.length) {
-        return `<div class="finding">${t("empty_reviews")}</div>`;
+        return `<div class="finding">${t("no_findings")}</div>`;
       }
       return specialist.findings.map((finding) => {
         const parts = [];
         if (finding.severity) {
-          parts.push(`<span class="sev-${finding.severity}">${t("sev_" + finding.severity)}</span>`);
+          parts.push(`<span class="sev-${esc(finding.severity)}">${t("sev_" + finding.severity)}</span>`);
         }
-        if (finding.estimated_impact) parts.push(finding.estimated_impact);
-        if (finding.category) parts.push(finding.category);
-        if (finding.type) parts.push(finding.type);
-        if (finding.file) parts.push(`${finding.file}:${finding.line ?? "?"}`);
+        if (finding.estimated_impact) parts.push(esc(finding.estimated_impact));
+        if (finding.category) parts.push(esc(finding.category));
+        if (finding.type) parts.push(esc(finding.type));
+        if (finding.file) parts.push(`${esc(finding.file)}:${esc(finding.line ?? "?")}`);
         const text = finding.description || finding.issue || finding.suggestion || "";
         const fix = finding.fix || finding.refactoring_suggestion || "";
-        return `<div class="finding">${parts.join(" · ")} — ${text}${fix ? ` → ${fix}` : ""}</div>`;
+        return `<div class="finding">${parts.join(" · ")} — ${esc(text)}${fix ? ` → ${esc(fix)}` : ""}</div>`;
       }).join("");
     }
 
@@ -357,20 +375,20 @@
         const key = `${review.repo}#${review.pr_number}#${review.created_at}`;
         const isExpanded = expandedPrs.has(key);
         const statuses = review.specialists.map((s) =>
-          `<span class="status-${s.status}">${s.name}: ${s.status === "ok" ? t("sp_ok") : t("sp_failed")}</span>`
+          `<span class="status-${esc(s.status)}">${t(SPECIALIST_KEY[s.name]) || esc(s.name)}: ${s.status === "ok" ? t("sp_ok") : t("sp_failed")}</span>`
         ).join(" · ");
         const findings = review.specialists.map((s) => `
           <div class="finding-group">
-            <h3>${s.name}</h3>
+            <h3>${t(SPECIALIST_KEY[s.name]) || esc(s.name)}</h3>
             ${findingRows(s)}
           </div>
         `).join("");
         return `
-          <div class="review-card${isExpanded ? " expanded" : ""}" data-key="${key}">
+          <div class="review-card${isExpanded ? " expanded" : ""}" data-key="${esc(key)}">
             <div class="review-row" role="button" tabindex="0" aria-expanded="${isExpanded}">
               <span class="field"><span class="field-label">${t("col_pr")}: </span><span class="field-value">#${review.pr_number}</span></span>
-              <span class="field"><span class="field-label">${t("col_repo")}: </span><span class="field-value">${review.repo}</span></span>
-              <span class="field"><span class="field-label">${t("col_provider")}: </span><span class="field-value">${review.provider}/${review.model}</span></span>
+              <span class="field"><span class="field-label">${t("col_repo")}: </span><span class="field-value">${esc(review.repo)}</span></span>
+              <span class="field"><span class="field-label">${t("col_provider")}: </span><span class="field-value">${esc(review.provider)}/${esc(review.model)}</span></span>
               <span class="field"><span class="field-label">${t("col_time")}: </span><span class="field-value">${(review.elapsed_ms / 1000).toFixed(1)}s</span></span>
               <span class="field"><span class="field-label">${t("col_tokens")}: </span><span class="field-value">${review.tokens_in}/${review.tokens_out}</span></span>
               <span class="field"><span class="field-label">${t("col_cost")}: </span><span class="field-value">$${review.est_cost_usd.toFixed(4)}</span></span>
@@ -384,14 +402,22 @@
         `;
       }).join("");
 
+      function toggleReviewCard(row) {
+        const card = row.closest(".review-card");
+        const key = card.getAttribute("data-key");
+        const nowExpanded = !card.classList.contains("expanded");
+        card.classList.toggle("expanded", nowExpanded);
+        row.setAttribute("aria-expanded", String(nowExpanded));
+        if (nowExpanded) expandedPrs.add(key); else expandedPrs.delete(key);
+      }
+
       el.querySelectorAll(".review-row").forEach((row) => {
-        row.addEventListener("click", () => {
-          const card = row.closest(".review-card");
-          const key = card.getAttribute("data-key");
-          const nowExpanded = !card.classList.contains("expanded");
-          card.classList.toggle("expanded", nowExpanded);
-          row.setAttribute("aria-expanded", String(nowExpanded));
-          if (nowExpanded) expandedPrs.add(key); else expandedPrs.delete(key);
+        row.addEventListener("click", () => toggleReviewCard(row));
+        row.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            if (event.key === " ") event.preventDefault();
+            toggleReviewCard(row);
+          }
         });
       });
     }

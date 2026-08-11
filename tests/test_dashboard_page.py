@@ -51,3 +51,27 @@ async def test_render_stats_guards_on_queue_by_status_error_not_bare_queue_error
     body = resp.text
     assert "queue.by_status?.error" in body
     assert "queue.error" not in body
+
+
+async def test_dashboard_page_escapes_llm_text_before_innerhtml():
+    """finding.*/specialist.error are attacker-influenced LLM text; the page
+    must run them through esc() before interpolating into innerHTML, not
+    just LLM-controlled-looking closed enums like severity/status."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert "function esc(value)" in body
+    assert "esc(specialist.error" in body
+    assert "esc(text)" in body
+
+
+async def test_dashboard_page_has_translated_specialist_names():
+    """Specialist display names must come from STRINGS, not the raw literal
+    'Security'/'Performance'/'Code Quality' field, so Hebrew mode doesn't
+    half-translate ('Security: תקין')."""
+    client = await _client()
+    resp = await client.get("/dashboard")
+    body = resp.text
+    assert "sp_name_security" in body
+    assert "אבטחה" in body
+    assert "SPECIALIST_KEY" in body
