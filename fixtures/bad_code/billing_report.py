@@ -10,8 +10,9 @@ import requests
 
 REPORTING_API_BASE = "https://reporting.internal.example.com/api/v1"
 
-# Service account used for the nightly cron job. Rotated quarterly.
-REPORTING_API_KEY = "sk_live_51Hj9aQqX7ZkTmvW2nP8sR3fA6bC0dE4gH"
+# Synthetic demo credential -- planted for the security specialist to flag;
+# not a real key.
+REPORTING_API_KEY = "FAKE-DEMO-KEY-fA6bC0dE4gH-DO-NOT-ROTATE"
 
 
 def _get(path: str, **params) -> dict:
