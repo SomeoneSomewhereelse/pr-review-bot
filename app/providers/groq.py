@@ -20,25 +20,12 @@ provider-agnostic notion of "validation failed".
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 
 from groq import AsyncGroq
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from app.config import settings
-from app.providers.base import LLMResponse, rate_limited_or_none
-
-
-def _parse(raw_text: str, schema: type[BaseModel]) -> BaseModel | None:
-    """Best-effort JSON parse + schema validation. Never raises."""
-    try:
-        data = json.loads(raw_text)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    try:
-        return schema.model_validate(data)
-    except ValidationError:
-        return None
+from app.providers.base import LLMResponse, parse_or_none, translate_rate_limit
 
 
 def _schema_system_prompt(system: str, schema: type[BaseModel]) -> str:
@@ -68,11 +55,15 @@ class GroqProvider:
         # visible via a placeholder/schedule-note comment -- so a second,
         # hidden retry layer underneath it is redundant at best and actively
         # hides a real signal at worst.
-        self._client = AsyncGroq(api_key=settings.groq_api_key, max_retries=0)
+        self._client = AsyncGroq(
+            api_key=settings.groq_api_key,
+            max_retries=0,
+            timeout=settings.llm_request_timeout_seconds,
+        )
         self._model = settings.groq_model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
-        try:
+        async with translate_rate_limit(default=settings.default_retry_after_seconds):
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[
@@ -81,14 +72,6 @@ class GroqProvider:
                 ],
                 response_format={"type": "json_object"},
             )
-        # re-raised unless it's a 429
-        except Exception as exc:  # noqa: BLE001
-            rl = rate_limited_or_none(
-                exc, now=datetime.now(timezone.utc), default=settings.default_retry_after_seconds
-            )
-            if rl is not None:
-                raise rl from exc
-            raise
 
         raw_text = response.choices[0].message.content or ""
         usage = response.usage
@@ -99,5 +82,5 @@ class GroqProvider:
             raw_text=raw_text,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
-            parsed=_parse(raw_text, schema),
+            parsed=parse_or_none(raw_text, schema),
         )

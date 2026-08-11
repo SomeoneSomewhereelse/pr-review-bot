@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     github_models_token: str = ""
     github_models_model: str = "openai/gpt-4o-mini"
+    # Ceiling on a single LLM request, in seconds. The dispatcher is a single
+    # serial consumer of the whole queue (app/queue/dispatcher.py) -- a hung
+    # call with no timeout would stall every pending PR's review, not just
+    # one, for however long the SDK's own default timeout is (several
+    # minutes). 45s is well under that while still tolerating a genuinely
+    # slow-but-healthy response.
+    llm_request_timeout_seconds: float = 45.0
 
     database_url: str = ""
     dispatcher_idle_sleep_seconds: float = 1.0

@@ -13,6 +13,11 @@ from app.webhook import router as webhook_router
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not settings.github_webhook_secret:
+        raise RuntimeError(
+            "GITHUB_WEBHOOK_SECRET is unset -- refusing to start "
+            "(an empty secret would accept any webhook signature)."
+        )
     if not settings.github_app_installation_id:
         # Not set (e.g. on Render, per docs/superpowers/specs/.../design.md
         # §6: the installation id "becomes optional (auto-discovered)").

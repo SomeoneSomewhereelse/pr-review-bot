@@ -18,7 +18,13 @@ from app.queue import dispatcher, store
 
 
 @pytest.fixture(autouse=True)
-def _env(db):
+def _env(db, monkeypatch):
+    # Ambient GITHUB_WEBHOOK_SECRET (e.g. local dev's .env) is not guaranteed
+    # in every test environment (e.g. a fresh git worktree has no untracked
+    # .env file) -- lifespan now refuses to start with an empty secret, so
+    # every test that isn't specifically exercising that check needs a
+    # non-empty stand-in.
+    monkeypatch.setattr(settings, "github_webhook_secret", "test-webhook-secret")
     dispatcher.reset_blocked_until()
     yield
     dispatcher.reset_blocked_until()
@@ -116,6 +122,19 @@ async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
 
     assert calls == ["owner/repo"]
     assert settings.github_app_installation_id == 999999
+
+
+async def test_lifespan_fails_loudly_when_webhook_secret_is_empty(monkeypatch):
+    """An empty GITHUB_WEBHOOK_SECRET makes verify_signature accept any
+    signature (HMAC with an empty key) -- an effective auth bypass. Startup
+    must refuse to run rather than silently degrade."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(settings, "github_webhook_secret", "")
+
+    with pytest.raises(RuntimeError, match="GITHUB_WEBHOOK_SECRET"):
+        async with main.lifespan(main.app):
+            pass
 
 
 async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch):

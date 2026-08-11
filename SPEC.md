@@ -346,6 +346,13 @@ immediately. A single serial dispatcher (`app/queue/dispatcher.py`,
 serializes every pacing/quota decision, and serial dispatch is anti-burst by
 construction.
 
+**Re-checked 2026-08-11 (performance audit):** the current polling cadence
+(dispatcher's ~1s idle sleep between `claim_next_due` attempts; the
+dashboard's 4s client-side poll of `/api/dashboard`) and this single-serial
+dispatch design were both reviewed during the full-project audit and
+confirmed correct as deliberate tradeoffs at free-tier scale and per the
+Trust & Safety pacing discipline in CLAUDE.md — no change made.
+
 **Durable Postgres ticket, one per PR.** `app/queue/store.py` keeps one row per
 `(repo_full_name, pr_number)` (from `GITHUB_TARGET_REPO` env var) with a `UNIQUE` constraint.
 The same module also owns a `reviews` table (one insert-only row per completed

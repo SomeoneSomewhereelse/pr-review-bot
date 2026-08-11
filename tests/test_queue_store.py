@@ -114,6 +114,14 @@ def test_mark_failed_sets_status_failed():
     assert t.updated_at == T1
 
 
+def test_mark_failed_persists_the_error_message():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.mark_failed(tid, now=T1, error="boom: connection reset")
+    t = store.get_ticket(tid)
+    assert t.last_error == "boom: connection reset"
+
+
 def test_push_during_deferred_rides_out_keeping_not_before():
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)                       # -> running

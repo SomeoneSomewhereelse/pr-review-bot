@@ -101,6 +101,44 @@ def test_format_comment_renders_failed_specialist_visibly():
     assert "DeadlineExceeded" in body
 
 
+def test_format_comment_escapes_pipe_and_newline_in_finding_text():
+    """A crafted finding (attacker-controlled via the PR diff) must not be able
+    to inject extra Markdown table columns/rows via `|` or a newline."""
+    result = ReviewResult(
+        pr_number=99,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[
+            SpecialistResult(
+                name="Security",
+                status="ok",
+                findings=[
+                    {
+                        "severity": "high",
+                        "file": "app.py",
+                        "line": 1,
+                        "description": "Legit issue | fake col ```\n### Injected header",
+                        "fix": "Escape it",
+                    }
+                ],
+                elapsed_ms=100,
+            )
+        ],
+        total_elapsed_ms=100,
+        total_tokens_in=1,
+        total_tokens_out=1,
+        est_cost_usd=0.0,
+    )
+    body = format_comment(result)
+
+    # The raw pipe/newline must not survive unescaped inside the table.
+    assert "fake col ```\n### Injected header" not in body
+    assert "\\|" in body
+    # The newline is gone, so "### Injected header" can no longer start a new
+    # line and render as a real Markdown heading -- it's now inert cell text.
+    assert "\n### Injected header" not in body
+
+
 def test_format_comment_does_not_hardcode_specialist_count():
     result = ReviewResult(
         pr_number=1,

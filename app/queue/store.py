@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     notice_not_before  TEXT,
     UNIQUE (repo_full_name, pr_number)
 );
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_error TEXT;
 CREATE TABLE IF NOT EXISTS runtime_config (
     id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     provider   TEXT,
@@ -101,6 +102,7 @@ class Ticket:
     last_reviewed_at: str | None
     cooldown_level: int
     notice_not_before: str | None
+    last_error: str | None
 
 
 def _configure(conn) -> None:
@@ -344,12 +346,11 @@ def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
     elapsed, or no prior successful review) or 'deferred' (still cooling down
     from the last completed review), escalating/resetting ``cooldown_level``
     per the escalation policy and resetting ``attempts`` to 0 either way.
-    ``error`` is accepted for future use (e.g. logging/inspection) but is not
-    persisted in a column today — the schema has no error column.
     """
     with _require_pool().connection() as conn:
         conn.execute(
-            "UPDATE tickets SET status = 'failed', updated_at = %s WHERE id = %s", (now, ticket_id)
+            "UPDATE tickets SET status = 'failed', last_error = %s, updated_at = %s WHERE id = %s",
+            (error, now, ticket_id),
         )
 
 

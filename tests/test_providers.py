@@ -21,6 +21,15 @@ from app.providers.google_genai import GeminiProvider
 from app.providers.validate import validate_and_repair
 
 
+@pytest.fixture(autouse=True)
+def _reset_provider_cache():
+    from app.providers.factory import reset_provider_cache
+
+    reset_provider_cache()
+    yield
+    reset_provider_cache()
+
+
 class Greeting(BaseModel):
     message: str
 
@@ -143,6 +152,17 @@ def test_factory_raises_for_unknown_provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "bogus")
     with pytest.raises(ValueError):
         get_provider()
+
+
+def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
+    from app.providers.factory import reset_provider_cache
+
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    reset_provider_cache()
+    first = get_provider()
+    second = get_provider()
+    assert first is second
+    reset_provider_cache()
 
 
 # --------------------------------------------------------------------------
