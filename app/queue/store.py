@@ -6,6 +6,11 @@ existing ticket's head_sha instead of stacking a duplicate. A ticket's persisted
 TEXT (lexical comparison == chronological). Functions are synchronous; async
 callers wrap them in asyncio.to_thread so Postgres network latency never blocks
 the event loop.
+
+Also owns the ``reviews`` table — an insert-only history of completed reviews
+(provider, model, timing, tokens, cost, findings) that has no bearing on queue
+lifecycle but backs the ``GET /dashboard`` / ``GET /api/dashboard`` ops/demo
+page (``app/dashboard.py``) via the ``dashboard_*`` read helpers below.
 """
 from __future__ import annotations
 
@@ -381,6 +386,7 @@ _TICKET_STATUSES = ("pending", "running", "deferred", "retrying", "done", "faile
 
 
 def dashboard_stats() -> dict:
+    """Aggregate totals across all recorded reviews (count, cost, avg elapsed)."""
     with _require_pool().connection() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS n, COALESCE(SUM(est_cost_usd), 0) AS cost, "
@@ -394,6 +400,7 @@ def dashboard_stats() -> dict:
 
 
 def dashboard_queue_counts() -> dict[str, int]:
+    """Ticket counts per status, zero-filled for every known status."""
     counts = {status: 0 for status in _TICKET_STATUSES}
     with _require_pool().connection() as conn:
         rows = conn.execute(
@@ -405,6 +412,7 @@ def dashboard_queue_counts() -> dict[str, int]:
 
 
 def dashboard_reviews(limit: int = 50) -> list[dict]:
+    """Most recent completed reviews, newest first, with a derived comment_url."""
     with _require_pool().connection() as conn:
         rows = conn.execute(
             "SELECT repo_full_name, pr_number, provider, model, comment_id, created_at, "

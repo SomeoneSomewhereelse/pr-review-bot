@@ -12,9 +12,12 @@ audiences at once:
 - **Ops**: at any other time, a glance at queue depth, recent review outcomes,
   and provider health (including rate-limit backoff).
 
-No auth (nothing sensitive is shown — repo/PR identifiers, timing, token
-counts, and estimated cost). No new Python dependency and no CDN script —
-plain server-rendered HTML with a small inline vanilla-JS polling loop.
+No auth (nothing secret is shown — no credentials, tokens, or internal URLs;
+it does surface repo/PR identifiers, timing, cost, and the reviewed findings
+themselves — file paths, line numbers, and LLM-written descriptions — so this
+assumes either a public target repo or that the dashboard's own exposure is
+acceptable for the demo). No new Python dependency and no CDN script — plain
+server-rendered HTML with a small inline vanilla-JS polling loop.
 
 ## Problem: review results aren't persisted today
 
