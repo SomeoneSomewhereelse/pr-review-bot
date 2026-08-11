@@ -24,6 +24,7 @@ _REVIEWS_LIMIT = 50
 # reason to depend on it.
 _KNOWN_PROVIDERS = ("gemini", "groq", "github_models")
 _STATIC_DIR = Path(__file__).parent / "static"
+_DASHBOARD_HTML = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
 
 
 def build_dashboard_payload() -> dict:
@@ -63,5 +64,4 @@ async def api_dashboard() -> JSONResponse:
 
 @router.get("/dashboard")
 async def dashboard_page() -> HTMLResponse:
-    html = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
-    return HTMLResponse(html)
+    return HTMLResponse(_DASHBOARD_HTML)
