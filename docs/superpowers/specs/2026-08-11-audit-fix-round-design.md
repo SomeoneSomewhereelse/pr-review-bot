@@ -78,10 +78,10 @@ Add one sentence confirming the rationale was re-checked against the fact that `
 Add to `Settings`:
 
 ```python
-llm_request_timeout_seconds: float = 20.0
+llm_request_timeout_seconds: float = 45.0
 ```
 
-20s (not the originally-drafted 45s) — chosen to stay close to SPEC.md's documented 15s full-comment-latency target rather than just "less than the SDK's multi-minute default." A specialist whose call exceeds this renders as a real `❌ check failed` row via the existing partial-failure path (`app/orchestrator.py`) — it does not block the other two specialists, and does not affect the webhook's `202`-immediate response, which is already fully decoupled from review execution.
+45s — well under the SDK's multi-minute default (bounding worst-case queue-stall to tens of seconds instead of minutes), while still tolerant of a genuinely slow-but-healthy provider response. A specialist whose call exceeds this renders as a real `❌ check failed` row via the existing partial-failure path (`app/orchestrator.py`) — it does not block the other two specialists, and does not affect the webhook's `202`-immediate response, which is already fully decoupled from review execution.
 
 Pass `timeout=settings.llm_request_timeout_seconds` to each SDK client constructor:
 - `genai.Client(...)` — via its `http_options`/timeout param (google-genai SDK)
