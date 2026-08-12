@@ -136,6 +136,41 @@ pushes any locally-set provider credential, not just the selected one).
 is confirmed live and working again, but is not a useful tool for this
 specific segment with this account's current limits.**
 
+## Rehearsal with an associate (2026-08-12) — Finding 3 recurred, worse
+
+Ran the full plan (Segments 1-C) live against the updated dashboard-at-`/`
+service, ahead of a rehearsal with an associate. Segments 1, 2, and B's
+failure+cooldown-defer mechanics all ran clean and exactly as documented
+below. Segment C reproduced Finding 3 again, worse than the 2026-08-10
+measurement:
+
+- PR #23 (happy path) and PR #25 (Segment C, first bulk PR) both ran clean.
+- PR #24 (dead-vendor `github_models`) failed with the real `410`, deferred
+  on push per the cooldown as expected, and **healed at 07:46:54 UTC** with
+  real `groq` findings (3.3s, $0.0034) — confirms Finding 4 still holds.
+- PR #26 (Segment C, second bulk PR) hit a real `429` as designed, but this
+  time the placeholder escalated from "queued behind rate limit" straight
+  to **`"⏳ Daily model quota reached"`**, with a backoff timestamp that
+  climbed live from ~07:44 UTC to **08:24:43 UTC (~40 minutes out)** across
+  repeated checks — not the ~8-second heal from the 2026-08-10 rehearsal.
+  Root cause: this session had already fired 4 groq reviews (PRs #23-#26)
+  plus retries within ~5 minutes, depleting the same slow-refilling
+  requests-bucket Finding 3 already flagged as a risk, not a new bug.
+- **Decision (with the user): stopped firing anything more at groq** and
+  left PR #26 to heal on its own, rather than burning more quota chasing a
+  faster resolution — consistent with CLAUDE.md's hygiene rule.
+- **Implication for the live call:** Finding 3's risk is confirmed to
+  compound with rehearsal frequency — a single rehearsal pass right
+  before presenting is no longer just "not recommended" (per checklist
+  item 7), it is now confirmed capable of leaving the account in exactly
+  the depleted state a real audience would then walk into. If a rehearsal
+  with an associate happens same-day as the graded call, budget real
+  recovery time (tens of minutes, not the ~5s good case) between the two,
+  or use Gemini for that day's Segment C run instead (per Finding 5,
+  Gemini doesn't reproduce a 429 at these sizes at all, so it can't
+  demonstrate the segment — only usable as a "quota risk is avoided
+  entirely by swapping providers" fallback narration, not a live 429 demo).
+
 ## Project updates since the last rehearsal (2026-08-12)
 
 Two more changes landed after the 2026-08-11 update below, re-verified live
