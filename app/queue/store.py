@@ -22,6 +22,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from app.config import settings
+from app.providers import registry
 from app.queue import cooldown_config
 from app.specialists.schemas import ReviewResult
 
@@ -53,6 +54,9 @@ CREATE TABLE IF NOT EXISTS runtime_config (
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_base_seconds DOUBLE PRECISION;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_max_seconds  DOUBLE PRECISION;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_factor       DOUBLE PRECISION;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_key_index        INTEGER;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_key_index          INTEGER;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS github_models_key_index INTEGER;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,
@@ -575,3 +579,52 @@ def set_cooldown_override(
             "updated_at = EXCLUDED.updated_at",
             (base, cap, factor, now),
         )
+
+
+def get_key_index_override(provider: str) -> int | None:
+    """The API-key-slot index override for `provider`, or None when unset.
+
+    Synchronous like every other store function -- async callers use
+    asyncio.to_thread.
+    """
+    column = registry.KEY_INDEX_COLUMNS[provider]
+    with _require_pool().connection() as conn:
+        row = conn.execute(f"SELECT {column} FROM runtime_config WHERE id = 1").fetchone()
+    return (row or {}).get(column)
+
+
+def set_key_index_override(provider: str, index: int | None, now: str) -> None:
+    """Set the override for `provider`, or clear it with index=None.
+
+    Upserts the singleton row -- same CHECK (id = 1) guarantee as
+    set_provider_override. `column` is looked up through
+    registry.KEY_INDEX_COLUMNS -- a hardcoded whitelist of exactly three
+    names -- and never built from `provider` directly; psycopg parameterizes
+    values but not column identifiers, so this lookup IS the injection
+    guard, not an optimization.
+    """
+    column = registry.KEY_INDEX_COLUMNS[provider]
+    with _require_pool().connection() as conn:
+        conn.execute(
+            f"INSERT INTO runtime_config (id, {column}, updated_at) VALUES (1, %s, %s) "
+            f"ON CONFLICT (id) DO UPDATE SET {column} = EXCLUDED.{column}, "
+            "updated_at = EXCLUDED.updated_at",
+            (index, now),
+        )
+
+
+def get_all_key_index_overrides() -> dict[str, int]:
+    """{provider: index} for every provider with a non-null override.
+
+    One query reading all three columns -- the dispatcher calls this once
+    per claimed ticket, not once per provider.
+    """
+    columns = registry.KEY_INDEX_COLUMNS
+    select = ", ".join(columns.values())
+    with _require_pool().connection() as conn:
+        row = conn.execute(f"SELECT {select} FROM runtime_config WHERE id = 1").fetchone()
+    if row is None:
+        return {}
+    return {
+        provider: row[column] for provider, column in columns.items() if row[column] is not None
+    }

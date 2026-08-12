@@ -7,6 +7,54 @@ from __future__ import annotations
 import pytest
 
 from app.providers import key_index
+from app.queue import store
+
+T0 = "2026-01-01T12:00:00+00:00"
+T1 = "2026-01-01T12:00:01+00:00"
+
+
+@pytest.fixture(autouse=True)
+def _temp_db(db):
+    yield
+
+
+def test_set_then_get_returns_the_override():
+    store.set_key_index_override("groq", 2, T0)
+    assert store.get_key_index_override("groq") == 2
+
+
+def test_setting_twice_replaces_rather_than_inserting(db_query):
+    store.set_key_index_override("groq", 1, T0)
+    store.set_key_index_override("groq", 2, T1)
+    assert store.get_key_index_override("groq") == 2
+    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 1
+
+
+def test_clearing_restores_none():
+    store.set_key_index_override("groq", 2, T0)
+    store.set_key_index_override("groq", None, T1)
+    assert store.get_key_index_override("groq") is None
+
+
+def test_providers_track_independent_indices():
+    store.set_key_index_override("groq", 2, T0)
+    store.set_key_index_override("gemini", 1, T0)
+    assert store.get_key_index_override("groq") == 2
+    assert store.get_key_index_override("gemini") == 1
+    assert store.get_key_index_override("github_models") is None
+
+
+def test_get_all_key_index_overrides_returns_only_the_set_ones():
+    store.set_key_index_override("groq", 2, T0)
+    assert store.get_all_key_index_overrides() == {"groq": 2}
+
+
+def test_get_all_key_index_overrides_is_empty_when_no_row_exists():
+    assert store.get_all_key_index_overrides() == {}
+
+
+def test_override_defaults_to_none():
+    assert store.get_key_index_override("groq") is None
 
 
 @pytest.fixture(autouse=True)
