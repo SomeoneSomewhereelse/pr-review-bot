@@ -5,10 +5,16 @@ docs/superpowers/specs/2026-08-12-override-cli-unification-design.md."""
 from __future__ import annotations
 
 import httpx
+import pytest
 import respx
 
 from app.config import settings
 from scripts import _override
+
+
+@pytest.fixture(autouse=True)
+def _temp_db(db):
+    yield
 
 
 def test_local_numbered_slots_finds_matching_keys(tmp_path):
@@ -125,6 +131,8 @@ def test_verify_render_slot_refuses_when_local_value_differs(monkeypatch, db_url
         ok, message = _override.verify_render_slot("groq", 0)
     assert ok is False
     assert "differs" in message
+    assert "gsk_local" not in message
+    assert "gsk_remote" not in message
 
 
 def test_verify_render_slot_passes_when_local_value_matches(monkeypatch, db_url):
