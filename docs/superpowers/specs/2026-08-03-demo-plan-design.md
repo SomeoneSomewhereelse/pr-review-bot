@@ -1,9 +1,10 @@
 # Demo plan — Zoom screen-share, course grading presentation
 
-Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10, updated 2026-08-12)
-Status: **Rehearsed against the real hosted service.** Every segment below
-has run for real at least once, post-fixes. Numbers are measured, not
-estimated, unless explicitly marked otherwise.
+Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10, hardened and re-rehearsed 2026-08-12)
+Status: **Ready.** Rehearsed against the real hosted service, including
+the 2026-08-12 provider-split + cooldown-tuning hardening — every segment
+has run for real at least once post-hardening, on a fresh Groq key. Numbers
+are measured, not estimated, unless explicitly marked otherwise.
 
 **Supersedes:** the original 2026-08-03 version in full, and the
 2026-08-10 rewrite's Segment C sizing (which was a re-derived estimate at
@@ -316,8 +317,9 @@ slow-refilling bucket degrades badly under any incidental extra load).
   (leave it set — Segment B reuses it).
 - `uv run python -m scripts.seed_demo_pr` → opens a PR with the planted
   `fixtures/bad_code/billing_report.py` issues.
-- Previously measured on `groq`: 4.9s, $0.0034 — re-measure live on
-  `gemini` at the next rehearsal; not yet re-confirmed under this provider.
+- **Confirmed live on `gemini` (2026-08-12): 34.0s, $0.0025** — noticeably
+  slower than groq's 4.9s but well inside the segment's ~2 min budget;
+  narrate at normal pace, don't expect groq's snappier feel.
 - Show the resulting comment, then point at the dashboard: the review list
   gains a row (real findings expandable inline) and the stat tiles update —
   total reviews, cost, avg time all tick from their prior values.
@@ -408,10 +410,9 @@ demand against a 12,000 cap is strictly stronger than two.
 ### 5. Wrap-up (~1 min)
 
 - Cost model: `cost.md`'s ~$8-10/mo at brief scale, demo ran at $0
-  (Groq + Gemini + Render + Supabase free tiers). Real measured costs from
-  the last full rehearsal: $0.0034 (happy path, on groq) to $0.0073
-  (oversized Segment C review) — re-measure happy-path cost under gemini
-  next rehearsal.
+  (Groq + Gemini + Render + Supabase free tiers). Real measured costs,
+  hardened plan (2026-08-12): $0.0025 (happy path, gemini), $0.0073-0.0074
+  (Segment C's two oversized groq reviews).
 - What's not live: Vertex — evaluated and removed from the codebase entirely.
 - One-line callout: GitHub Models' retirement happened *during this
   project's life*, and the architecture absorbed it with a single DB write
@@ -472,9 +473,25 @@ demand against a 12,000 cap is strictly stronger than two.
   the call date — extremely likely, given it's a confirmed permanent
   retirement.
 - ~~Segment B's cooldown-heal wait (~5 min) may not fit comfortably in a
-  live time budget~~ — **superseded 2026-08-12**: the cooldown is now
-  DB-tunable to 30s for the live call, so Segment B's heal is expected to
-  fit comfortably; not yet re-confirmed live under the 30s value.
+  live time budget~~ — **superseded 2026-08-12**: confirmed live at the
+  30s override — healed well within the segment's budget (dispatcher
+  claimed the due ticket ~15-20s after the push, comment updated
+  ~30-45s after that). Timing has some natural looseness (poll interval +
+  actual review runtime stack on top of the 30s floor), but stayed
+  comfortably inside acceptable margins both times measured — **not** a
+  precise 30-second guarantee, budget more like "under a minute."
+- **New 2026-08-12:** Segment B's re-review itself hit real, transient
+  Gemini-side errors on one run (`504 DEADLINE_EXCEEDED`, `503
+  UNAVAILABLE` — high demand), independent of anything this project
+  controls. Accepted as ordinary provider variance, not tracked further —
+  the partial-failure guarantee held (1 of 3 specialists still succeeded
+  and posted), which is itself the point if it recurs live.
+- **New 2026-08-12:** the freshly-rotated groq key behaves like a healthy
+  account — Segment C's second PR healed in ~18s on it, vs. the old key's
+  multi-hour stall. This key is now real, spent quota too: the existing
+  "don't over-rehearse Segment C before the real call" guidance
+  (checklist item 7) applies to it exactly as it did to the old one — a
+  fresh key resets the clock, it doesn't remove the risk.
 - The testbed repo and Groq's daily request budget are both shared,
   cross-session state — either can drift for reasons unrelated to this
   plan between the last rehearsal and the real call. **Narrowed
