@@ -383,6 +383,37 @@ def test_next_cooldown_level_increments_and_guards():
     assert store.next_cooldown_level(30) == 30      # _MAX_COOLDOWN_LEVEL guard
 
 
+def test_cooldown_overrides_default_to_none():
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_set_then_get_cooldown_overrides():
+    store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T0)
+    assert store.get_cooldown_overrides() == (30.0, 600.0, 1.5)
+
+
+def test_setting_cooldown_override_twice_replaces_rather_than_inserting(db_query):
+    store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T0)
+    store.set_cooldown_override(base=60.0, cap=1200.0, factor=2.0, now=T1)
+    assert store.get_cooldown_overrides() == (60.0, 1200.0, 2.0)
+    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 1
+
+
+def test_clearing_cooldown_override_restores_none():
+    store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T0)
+    store.set_cooldown_override(base=None, cap=None, factor=None, now=T1)
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_cooldown_override_and_provider_override_coexist():
+    """Both overrides live on the same singleton row -- setting one must not
+    clobber the other."""
+    store.set_provider_override("groq", T0)
+    store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T1)
+    assert store.get_provider_override() == "groq"
+    assert store.get_cooldown_overrides() == (30.0, 600.0, 1.5)
+
+
 def test_new_ticket_has_cooldown_level_zero():
     tid = _enqueue()
     assert store.get_ticket(tid).cooldown_level == 0
