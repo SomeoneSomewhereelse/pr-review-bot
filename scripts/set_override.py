@@ -1,0 +1,144 @@
+"""Set or clear the DB-backed provider override and/or a provider's
+API-key-slot index override -- in one combined write+verification pass
+when both are given.
+
+    uv run python -m scripts.set_override groq
+    uv run python -m scripts.set_override --clear
+    uv run python -m scripts.set_override groq --index 1
+    uv run python -m scripts.set_override groq --index 1 --no-activate
+    uv run python -m scripts.set_override groq --clear-index
+    uv run python -m scripts.set_override groq --clear-index --no-activate
+
+Full replacement for scripts/set_provider.py and scripts/set_api_key.py --
+see docs/superpowers/specs/2026-08-12-override-cli-unification-design.md
+section 5 for the complete mapping table. Both older scripts are temporary
+and are NOT modified by this script's existence; they are deleted
+separately, after the presentation this was built for.
+
+Verifies against the EFFECTIVE index -- whatever will actually be active
+for this provider after the write, not always index 0 -- via
+scripts._override.verify_render_slot. This fixes a latent gap in
+scripts/set_provider.py, which always verified index 0 regardless of any
+existing key-index override for that provider.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import datetime, timezone
+
+from app.providers import registry
+from app.queue import store
+from scripts import _override
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="set_override",
+        # Without this, argparse treats a truncated flag like --cle as an
+        # abbreviation of --clear and runs it -- scripts/deploy.py,
+        # scripts/set_provider.py, and scripts/set_api_key.py all carry the
+        # same guard after an identical abbreviation match fired a live
+        # production sync.
+        allow_abbrev=False,
+        description=(
+            "Set or clear the DB-backed provider override and/or a provider's "
+            "API-key-slot index override."
+        ),
+    )
+    parser.add_argument(
+        "provider",
+        nargs="?",
+        help=f"one of: {', '.join(sorted(registry.PROVIDERS))}",
+    )
+    parser.add_argument(
+        "--index", type=int, help="set this provider's key-index override to N"
+    )
+    parser.add_argument(
+        "--clear-index", action="store_true", help="clear this provider's key-index override"
+    )
+    parser.add_argument(
+        "--no-activate",
+        action="store_true",
+        help="only touch the key-index override; leave the active-provider override untouched",
+    )
+    parser.add_argument(
+        "--clear",
+        action="store_true",
+        help="clear the provider override (must be used alone)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="write despite a failed live-verification refusal",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.clear:
+        if args.provider or args.index is not None or args.clear_index or args.no_activate:
+            print("--clear must be used alone", file=sys.stderr)
+            return 2
+        store.init_pool()
+        store.set_provider_override(None, datetime.now(timezone.utc).isoformat())
+        print("provider override cleared; falling back to LLM_PROVIDER")
+        return 0
+
+    if not args.provider:
+        print("a provider is required (or --clear)", file=sys.stderr)
+        return 2
+    if args.provider not in registry.PROVIDERS:
+        accepted = ", ".join(sorted(registry.PROVIDERS))
+        print(
+            f"unsupported provider {args.provider!r} (expected one of: {accepted})",
+            file=sys.stderr,
+        )
+        return 2
+    if args.index is not None and args.clear_index:
+        print("--index and --clear-index are mutually exclusive", file=sys.stderr)
+        return 2
+    if args.no_activate and args.index is None and not args.clear_index:
+        print("--no-activate requires --index or --clear-index", file=sys.stderr)
+        return 2
+    if args.index is not None and args.index < 0:
+        print(f"index must be >= 0, got {args.index}", file=sys.stderr)
+        return 2
+
+    store.init_pool()
+
+    if args.index is not None:
+        effective_index = args.index
+    elif args.clear_index:
+        effective_index = 0
+    else:
+        effective_index = store.get_key_index_override(args.provider) or 0
+
+    ok, message = _override.verify_render_slot(args.provider, effective_index)
+    if ok:
+        print(message)
+    elif args.force:
+        print(f"{message} -- proceeding anyway (--force)", file=sys.stderr)
+    else:
+        print(f"refusing to set the override: {message}", file=sys.stderr)
+        return 2
+
+    now = datetime.now(timezone.utc).isoformat()
+    if not args.no_activate:
+        store.set_provider_override(args.provider, now)
+        print(f"provider override set to {args.provider}")
+    if args.index is not None:
+        store.set_key_index_override(args.provider, args.index, now)
+        print(f"{args.provider} key-index override set to {args.index}")
+    elif args.clear_index:
+        store.set_key_index_override(args.provider, None, now)
+        print(f"{args.provider} key-index override cleared")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
