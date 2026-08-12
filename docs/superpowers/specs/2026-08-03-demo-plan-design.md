@@ -1,10 +1,15 @@
 # Demo plan — Zoom screen-share, course grading presentation
 
-Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10, hardened and re-rehearsed 2026-08-12)
-Status: **Ready.** Rehearsed against the real hosted service, including
-the 2026-08-12 provider-split + cooldown-tuning hardening — every segment
-has run for real at least once post-hardening, on a fresh Groq key. Numbers
-are measured, not estimated, unless explicitly marked otherwise.
+Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10, hardened and
+re-rehearsed twice more on 2026-08-12: once with a gemini/groq provider
+split, once superseding that with a groq-only key-index split)
+Status: **Ready, provisioned for tomorrow's presentation.** Rehearsed
+against the real hosted service through two rounds of same-day hardening.
+The live plan below is the key-index version (groq throughout, index 0 for
+Segments 2/B, index 1 for Segment C) — the gemini-split version earlier in
+this doc's history is superseded, not deleted, since it's still a real,
+tested fallback if groq itself becomes unusable. Numbers are measured, not
+estimated, unless explicitly marked otherwise.
 
 **Supersedes:** the original 2026-08-03 version in full, and the
 2026-08-10 rewrite's Segment C sizing (which was a re-derived estimate at
@@ -280,12 +285,31 @@ Gemini (different tokenizer/model, not independently targeted).
 
 ### 1. Architecture overview (~2 min)
 
-**Pre-demo setup, before narration starts (2026-08-12):** `uv run python -m
-scripts.set_cooldown --base 30` — set the presentation-friendly cooldown
-now, once, off-camera, rather than mid-Segment-B. It's inert until a
-review actually finalizes, so setting it this early causes no visible
-effect before Segment B needs it; it just removes one live step (and one
-thing that could go wrong on-camera) from the middle of the walkthrough.
+**Pre-demo setup, before narration starts:**
+
+- `uv run python -m scripts.set_cooldown --base 30` — the presentation-
+  friendly cooldown (2026-08-12), set now, off-camera, rather than
+  mid-Segment-B. It's inert until a review actually finalizes, so setting
+  it this early causes no visible effect before Segment B needs it.
+- `uv run python -m scripts.set_provider --clear` and `uv run python -m
+  scripts.set_api_key groq --clear` — deterministic starting state:
+  provider falls back to the env default (`groq`), key index falls back
+  to 0 (the base `GROQ_API_KEY`), regardless of whatever was left over
+  from a prior rehearsal.
+
+**Key-index hardening (2026-08-12), supersedes the gemini-split
+hardening above:** the new per-provider API-key-slot override
+(`scripts/set_api_key.py`, live per the 2026-08-12 api-key-index-override
+design) makes the earlier groq/gemini provider split unnecessary — Segment
+C can now get its own **separate quota bucket** via a different key index
+on the *same* provider, instead of switching vendors. This drops Gemini
+from the live segment plan entirely: no more 34s response times, no more
+transient 504/503 variance, no `GEMINI_API_KEY` dependency for these
+segments. Two of the three provisioned Render `GROQ_API_KEY*` slots are
+assigned; the third (`GROQ_API_KEY_2`, index 2) is an unassigned spare —
+if index 0 or 1 turns out exhausted right before or during the real call,
+`uv run python -m scripts.set_api_key groq 2` is a live escape hatch with
+no redeploy.
 
 **Open `https://pr-review-engine.onrender.com/` in a second tab/window now**
 and leave it visible (polling every 4s) for the rest of the walkthrough.
@@ -306,20 +330,16 @@ watches happen in real time.
 
 ### 2. Happy path (~2 min) — establishes the baseline
 
-**Provider hardening (2026-08-12):** Happy path and Segment B now run on
-`gemini`, not `groq` — this keeps groq's request-bucket completely
-unspent by the two segments that don't need to touch it, reserving all of
-it for Segment C, the one segment whose entire premise is exhausting it
-(see the 2026-08-12 rehearsal finding above on why this matters: groq's
-slow-refilling bucket degrades badly under any incidental extra load).
+**Key-index hardening (2026-08-12):** stays on `groq`, index 0 (the base
+`GROQ_API_KEY`) — already the state from Segment 1's pre-demo setup, no
+script call needed here.
 
-- **Set the DB override:** `uv run python -m scripts.set_provider gemini`
-  (leave it set — Segment B reuses it).
 - `uv run python -m scripts.seed_demo_pr` → opens a PR with the planted
   `fixtures/bad_code/billing_report.py` issues.
-- **Confirmed live on `gemini` (2026-08-12): 34.0s, $0.0025** — noticeably
-  slower than groq's 4.9s but well inside the segment's ~2 min budget;
-  narrate at normal pace, don't expect groq's snappier feel.
+- Previously measured on `groq`: 4.9s, $0.0034 — re-measure at the next
+  rehearsal on the current `GROQ_API_KEY` (rotated 2026-08-12); the
+  provider is unchanged but the specific key is new, so don't assume the
+  old number without re-checking.
 - Show the resulting comment, then point at the dashboard: the review list
   gains a row (real findings expandable inline) and the stat tiles update —
   total reviews, cost, avg time all tick from their prior values.
@@ -333,7 +353,7 @@ in Segment 1's pre-demo setup, replacing the 300s default. This is what
 turns the old "narrate the mechanism and move on without waiting"
 fallback into an actual on-screen heal that fits the time budget.
 
-- Provider is already `gemini` from Segment 2.
+- Provider is already `groq` (index 0) from Segment 2 — unchanged.
 - **Set the DB override:** `uv run python -m scripts.set_provider github_models`.
 - `uv run python -m scripts.seed_demo_pr` → opens a **fresh** PR (not the
   happy-path one — a fully dead provider's failure still finalizes the
@@ -345,10 +365,12 @@ fallback into an actual on-screen heal that fits the time budget.
   GitHub's actual retirement, not a staged failure. The dashboard's review
   list shows this row too — a real failed review, visible and countable,
   not swept under the rug.
-- **Return the override to `gemini`** (not `--clear` — clearing falls back
-  to `LLM_PROVIDER`'s env default, which is `groq`, undoing the whole
-  point of keeping this segment off groq): `uv run python -m
-  scripts.set_provider gemini`.
+- **Clear the override:** `uv run python -m scripts.set_provider --clear`
+  — falls back to `groq`, index 0 (the key-index override is untouched by
+  a provider swap; each provider tracks its own slot independently, so
+  returning to `groq` returns to whichever index was active before, still
+  0 here). This is simpler than the gemini-split version of this step:
+  clearing is now correct, not a trap, because groq is the env default.
 - Push a trivial follow-up commit to the same PR's branch (`gh pr checkout`
   into a scratch clone, since `seed_demo_pr`'s own clone is discarded).
 - **Expected, with the 30s override:** the push lands inside the
@@ -359,18 +381,20 @@ fallback into an actual on-screen heal that fits the time budget.
   **This PR is the one expected to actually complete on screen** — unlike
   Segment C's second PR below, which is expected to stay blocked.
 - **Once due** (~30s later, not ~5 min): the same comment (same marker)
-  updates in place with real `gemini` findings, footnote gone, live,
-  within the segment's own time budget. Not yet re-confirmed live under
-  the 30s override — first thing to verify at the next rehearsal.
+  updates in place with real `groq` findings (index 0 — same quota bucket
+  as Segment 2, not Segment C's), footnote gone, live, within the
+  segment's own time budget.
 
 ### 4. Segment C — quota exhaustion + auto-recovery (~4 min)
 
-**Provider hardening (2026-08-12):** switch back to `groq` here — this is
-the one segment whose premise actually requires tripping a real rate
-limit, and Gemini doesn't reproduce a 429 at these sizes (Finding 5) so it
-can't substitute.
+**Key-index hardening (2026-08-12):** stay on `groq` (unchanged since
+Segment 2), but switch to **index 1** — a separate `GROQ_API_KEY_1`
+credential, meaning this segment's own quota-exhaustion story trips a
+limit on a bucket Segments 2 and B never touched, and vice versa: this
+segment's burst can't spill over and cause an unrelated defer somewhere
+else in the walkthrough.
 
-- **Set the DB override:** `uv run python -m scripts.set_provider groq`.
+- **Set the key-index override:** `uv run python -m scripts.set_api_key groq 1`.
 
 Fire, back-to-back:
 
@@ -394,14 +418,19 @@ Fire, back-to-back:
   which could never recover. That distinction is the actual engineering
   point, not just "it retries."
 
-**Provider-hardening expectation (2026-08-12):** with the previous groq
-account state deferring PR B by tens of minutes rather than seconds (the
-2026-08-12 associate-rehearsal finding above), **plan for PR B to stay
-blocked/deferred for the rest of the live segment, and treat that as
-expected, not a failure to fix live.** The placeholder itself — a real
-429, a real until-timestamp on the dashboard, a real guarantee of eventual
-recovery — is the demo point; a fast on-screen heal is a bonus if the
-account happens to be healthy, not something to promise or wait for.
+**Key-index hardening expectation (2026-08-12):** `GROQ_API_KEY_1` (index
+1) is a freshly-provisioned, previously-unused slot as of this hardening
+pass — expect it to behave like a healthy account (a fast, on-screen heal,
+seconds not minutes) the first time it's actually exercised, the same way
+the rotated base key did at index 0. That said, **don't promise the fast
+heal as a hard guarantee**: this same slot can be depleted by rehearsing
+Segment C repeatedly before the real call, exactly like every prior key
+was (Finding 3's risk applies to whichever slot is active, not to a
+specific key value) — if a rehearsal pass has already burned this slot's
+budget, plan for PR B to stay blocked for the rest of the live segment and
+treat that as expected, not a failure to fix live. The placeholder itself
+— a real 429, a real until-timestamp on the dashboard, a real guarantee of
+eventual recovery — is the demo point regardless of which way it goes.
 
 **If PR A itself doesn't trip a 429** (headroom can vary — see Finding 3),
 fire a third immediately rather than re-deriving the math: three reviews'
@@ -409,22 +438,29 @@ demand against a 12,000 cap is strictly stronger than two.
 
 ### 5. Wrap-up (~1 min)
 
-- Cost model: `cost.md`'s ~$8-10/mo at brief scale, demo ran at $0
-  (Groq + Gemini + Render + Supabase free tiers). Real measured costs,
-  hardened plan (2026-08-12): $0.0025 (happy path, gemini), $0.0073-0.0074
-  (Segment C's two oversized groq reviews).
-- What's not live: Vertex — evaluated and removed from the codebase entirely.
+- Cost model: `cost.md`'s ~$8-10/mo at brief scale, demo ran at $0 (Groq +
+  Render + Supabase free tiers — Gemini is no longer part of the live
+  segment plan as of the 2026-08-12 key-index hardening). Real measured
+  costs from the last full rehearsal: $0.0034 (happy path) to
+  $0.0073-0.0074 (Segment C's two oversized reviews) — all on `groq`.
+- What's not live: Vertex — evaluated and removed from the codebase
+  entirely; Gemini remains a working, tested alternative (Segments 2/B ran
+  on it during the 2026-08-12 rehearsal) but isn't exercised in the
+  current live plan.
 - One-line callout: GitHub Models' retirement happened *during this
   project's life*, and the architecture absorbed it with a single DB write
   and no code change or redeploy.
 - Second callout, new this hardening pass: **the same DB-override pattern
-  now covers three independent knobs live** — provider (`set_provider.py`),
-  and the re-review cooldown's base/cap/escalation-factor
-  (`set_cooldown.py`) — all writable with zero redeploy, all demonstrated
-  in this same walkthrough.
+  now covers four independent knobs live** — provider (`set_provider.py`),
+  which API-key slot a provider uses (`set_api_key.py`), and the re-review
+  cooldown's base/cap/escalation-factor (`set_cooldown.py`) — all writable
+  with zero redeploy, three of the four demonstrated in this same
+  walkthrough (cooldown, key-index; provider swap is Segment B's own
+  story).
 - **Clean up before ending the call:** `uv run python -m scripts.set_provider
-  --clear` and `uv run python -m scripts.set_cooldown --clear` — the latter
-  is specifically what reverts the cooldown from Segment 1's 30s back to
+  --clear`, `uv run python -m scripts.set_api_key groq --clear`, and `uv
+  run python -m scripts.set_cooldown --clear` — reverts provider to env
+  default, key index to 0, and the cooldown from Segment 1's 30s back to
   the real 300s default, so nothing demo-tuned is left live afterward.
 
 ## Pre-call / pre-rehearsal checklist
@@ -438,26 +474,32 @@ demand against a 12,000 cap is strictly stronger than two.
    (stats/queue/reviews, no `"error"` fields) — confirms the dashboard
    itself is healthy before relying on it live in Segment 1.
 3. Confirm the UptimeRobot monitor is active.
-4. `uv run python -m scripts.set_provider --clear` and `uv run python -m
-   scripts.set_cooldown --clear` — no stale DB override of either kind
-   left over from a prior rehearsal.
+4. `uv run python -m scripts.set_provider --clear`, `uv run python -m
+   scripts.set_api_key groq --clear`, and `uv run python -m
+   scripts.set_cooldown --clear` — no stale DB override of any of the
+   three kinds left over from a prior rehearsal.
 5. Check the testbed repo for leftover open PRs from earlier rehearsals;
    close anything that would confuse the live narration.
-6. **Gemini's credential must actually be on Render, not just local** —
-   it's no longer an optional/untested provider, Segments 2 and B both
-   depend on it now (2026-08-12 hardening). Confirm via `uv run python -m
-   scripts.deploy` (`provider-live` covers whichever provider is
-   currently overridden, not every provider — check with the override
-   actually set to `gemini`); `--sync-env` pushes a locally-set credential
-   opportunistically if it's missing (Finding 5's exact failure mode).
+6. **Both `GROQ_API_KEY_1` and `GROQ_API_KEY_2` must actually be present
+   on Render, not just local `.env`** (2026-08-12) — provisioning a new
+   numbered slot needs a one-off manual push (see the finding above:
+   `--sync-env` does *not* push numbered slots despite what README says;
+   this is a real doc/code gap in the shipped feature, not yet fixed).
+   Confirm via `uv run python -m scripts.deploy` (`api-key-live` only
+   checks the *currently active* provider+index, so this alone doesn't
+   prove index 1/2 are present — check presence directly, e.g. via
+   `_render.env_vars()`, if a fresh slot was provisioned since the last
+   check).
 7. **Don't rehearse Segment C heavily in the hour before the real call** —
    groq's requests-bucket refills slowly enough (~1 slot/86s) that a
    rehearsal session can deplete it in a way that only recovers over tens
    of minutes to hours under sustained use (Finding 3, confirmed worse on
-   2026-08-12: one ticket took over 2.5 hours to clear). Segments 2 and B
-   no longer touch groq at all (2026-08-12 hardening), so only Segment C
-   rehearsal carries this risk now — rehearsing 1-2 first, and B, no
-   longer burns the budget Segment C needs.
+   2026-08-12: one ticket took over 2.5 hours to clear). This now applies
+   per-key-index, not per-account: Segment C's `GROQ_API_KEY_1` (index 1)
+   is its own bucket, separate from Segments 2/B's `GROQ_API_KEY` (index
+   0) — rehearsing 1-2 and B no longer burns Segment C's budget, and
+   vice versa, but repeated Segment C rehearsals still deplete index 1
+   specifically.
 8. Confirm `gh auth status` shows the account that owns `GITHUB_TARGET_REPO`.
 9. **After rotating any provider API key** (e.g. a fresh Groq key after a
    prior rehearsal exhausted the account): update it locally, then push
@@ -494,9 +536,11 @@ demand against a 12,000 cap is strictly stronger than two.
   fresh key resets the clock, it doesn't remove the risk.
 - The testbed repo and Groq's daily request budget are both shared,
   cross-session state — either can drift for reasons unrelated to this
-  plan between the last rehearsal and the real call. **Narrowed
-  2026-08-12**: only Segment C touches groq now, so this risk no longer
-  applies to Segments 1/2/B.
+  plan between the last rehearsal and the real call. **Superseded again,
+  same day (key-index hardening)**: every segment is back on `groq`, but
+  each uses its own key index (0 for Segments 2/B, 1 for Segment C), so
+  the shared-budget risk is now scoped per-index, not eliminated for any
+  segment — see checklist item 7.
 - A rate-limited ticket's auto-heal is not a bounded-time guarantee under
   sustained load — confirmed live twice now: first a push from 09:56 UTC
   to 10:41 UTC, then the 2026-08-12 associate rehearsal where one ticket's
@@ -504,11 +548,21 @@ demand against a 12,000 cap is strictly stronger than two.
   not something to fix live**: plan for the second oversized PR to stay
   deferred through the rest of the segment (see Segment 4 above) rather
   than promising or waiting for an on-screen heal.
-- New 2026-08-12: Gemini is now load-bearing for two segments (2, B), not
-  just an occasionally-tested alternative — its credential being missing
-  or stale on Render is a harder blocker than before (checklist item 6).
-- New 2026-08-12: swapping providers mid-plan (`gemini` → `github_models`
-  → `gemini` → `groq`) means a missed `set_provider` step leaves the
-  *wrong* provider active for a whole segment with no error — narrate each
-  swap explicitly and verify the dashboard/comment's `provider:` field
-  matches what's expected before moving on, don't just trust the script ran.
+- ~~New 2026-08-12: Gemini is now load-bearing for two segments (2, B)~~
+  — **superseded same day**: the key-index hardening above drops Gemini
+  from the live plan entirely; this concern no longer applies.
+- **New 2026-08-12 (key-index hardening):** swapping providers/indices
+  mid-plan (`groq` idx0 → `github_models` → `groq` idx0 → `groq` idx1)
+  means a missed `set_provider` or `set_api_key` step leaves the *wrong*
+  credential active for a whole segment with no error — narrate each swap
+  explicitly and verify the dashboard/comment's `provider:` field matches
+  what's expected before moving on, don't just trust the script ran. This
+  risk is smaller than the gemini-split version (fewer distinct swaps,
+  same vendor throughout except the one deliberate Segment B failure), but
+  not zero.
+- **New 2026-08-12 (key-index hardening):** the `--sync-env`/README
+  mismatch found while provisioning `GROQ_API_KEY_1`/`_2` (checklist item
+  6) is a real gap in shipped code/docs, not just a rehearsal footnote —
+  worth a proper fix (either teach `_wanted_env()` about numbered slots,
+  or correct README's claim) before this feature gets used again outside
+  a one-off manual push.
