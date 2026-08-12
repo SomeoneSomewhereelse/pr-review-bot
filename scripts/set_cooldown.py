@@ -11,8 +11,13 @@ redeploy. It writes to whatever DATABASE_URL points at, so against a local
 Unlike scripts/set_provider.py, there is no credential at stake here -- only
 numbers. Before writing, this checks (when RENDER_API_KEY is set) whether the
 local DATABASE_URL matches the live Render service's, purely as an
-informational signal that the write will actually reach production; it never
-refuses the write, so there is no --force flag.
+informational signal that the write will actually reach production; that
+check never refuses the write, so there is no --force flag. It DOES refuse
+the write (exit 2) if the merged base/cap/factor -- resolved against env
+defaults for any unset field, the same way cooldown_config.effective_config()
+resolves it at read time -- would be invalid (factor < 1.0, base > cap, or a
+non-positive base/cap): writing such a value would succeed but be silently
+discarded as a whole triple on every read, leaving the override inert.
 
 A plain tool, not a slash command -- matches scripts/set_provider.py.
 """
@@ -86,8 +91,21 @@ def main(argv: list[str] | None = None) -> int:
     if not args.clear and args.base is None and args.cap is None and args.factor is None:
         print("at least one of --base/--cap/--factor is required (or --clear)", file=sys.stderr)
         return 2
+    if args.clear and (args.base is not None or args.cap is not None or args.factor is not None):
+        print(
+            "--clear cannot be combined with --base/--cap/--factor -- clear "
+            "first, then re-set individual fields in a separate call",
+            file=sys.stderr,
+        )
+        return 2
     if args.factor is not None and args.factor < 1.0:
         print(f"--factor must be >= 1.0 (got {args.factor})", file=sys.stderr)
+        return 2
+    if args.base is not None and args.base <= 0:
+        print(f"--base must be > 0 (got {args.base})", file=sys.stderr)
+        return 2
+    if args.cap is not None and args.cap <= 0:
+        print(f"--cap must be > 0 (got {args.cap})", file=sys.stderr)
         return 2
 
     now = datetime.now(timezone.utc).isoformat()
@@ -98,11 +116,42 @@ def main(argv: list[str] | None = None) -> int:
         print("cleared; falling back to the env-configured cooldown defaults")
         return 0
 
-    print(_verify_render_reachability())
     current_base, current_cap, current_factor = store.get_cooldown_overrides()
     new_base = args.base if args.base is not None else current_base
     new_cap = args.cap if args.cap is not None else current_cap
     new_factor = args.factor if args.factor is not None else current_factor
+
+    # Resolve the merged triple against env defaults exactly like
+    # cooldown_config.effective_config() does at read time, and refuse the
+    # write outright if the result would be invalid -- otherwise a partial
+    # write (e.g. --cap alone, below the env base) would write successfully
+    # but be silently discarded as a WHOLE triple on every read, leaving the
+    # override completely inert while this script reports success.
+    resolved_base = (
+        new_base if new_base is not None else settings.dispatcher_rereview_cooldown_seconds
+    )
+    resolved_cap = (
+        new_cap if new_cap is not None else settings.dispatcher_rereview_cooldown_max_seconds
+    )
+    resolved_factor = (
+        new_factor if new_factor is not None else settings.dispatcher_rereview_cooldown_factor
+    )
+    if (
+        resolved_factor < 1.0
+        or resolved_base > resolved_cap
+        or resolved_base <= 0
+        or resolved_cap <= 0
+    ):
+        print(
+            "refusing to write: the resulting cooldown would resolve to "
+            f"base={resolved_base} cap={resolved_cap} factor={resolved_factor}, "
+            "which effective_config() would discard entirely (needs "
+            "factor >= 1.0, 0 < base <= cap) -- the write would be a no-op",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(_verify_render_reachability())
     store.set_cooldown_override(base=new_base, cap=new_cap, factor=new_factor, now=now)
     print(
         f"cooldown override: base {current_base} -> {new_base}, "

@@ -64,6 +64,57 @@ def test_rejects_a_factor_below_one(capsys):
     assert store.get_cooldown_overrides() == (None, None, None)
 
 
+def test_rejects_a_non_positive_base(capsys):
+    assert set_cooldown.main(["--base", "-5"]) == 2
+    assert "base" in capsys.readouterr().err.lower()
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_rejects_a_zero_base(capsys):
+    assert set_cooldown.main(["--base", "0"]) == 2
+    assert "base" in capsys.readouterr().err.lower()
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_rejects_a_non_positive_cap(capsys):
+    assert set_cooldown.main(["--cap", "-1"]) == 2
+    assert "cap" in capsys.readouterr().err.lower()
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_rejects_clear_combined_with_base(capsys):
+    assert set_cooldown.main(["--clear", "--base", "30"]) == 2
+    err = capsys.readouterr().err.lower()
+    assert "clear" in err
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_rejects_clear_combined_with_cap(capsys):
+    assert set_cooldown.main(["--clear", "--cap", "600"]) == 2
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_rejects_clear_combined_with_factor(capsys):
+    assert set_cooldown.main(["--clear", "--factor", "1.5"]) == 2
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_refuses_a_write_that_would_resolve_to_an_inert_override(capsys):
+    """A lone --cap below the env-configured base resolves (once merged with
+    env defaults) to base=300 > cap=20 -- effective_config() would discard
+    the whole triple, so the write must be refused rather than silently
+    doing nothing while reporting success."""
+    assert set_cooldown.main(["--cap", "20"]) == 2
+    err = capsys.readouterr().err.lower()
+    assert "300" in err or "base" in err
+    assert store.get_cooldown_overrides() == (None, None, None)
+
+
+def test_allows_a_cap_write_that_stays_above_the_resolved_base():
+    assert set_cooldown.main(["--cap", "600"]) == 0
+    assert store.get_cooldown_overrides() == (None, 600.0, None)
+
+
 def test_requires_at_least_one_flag_or_clear(capsys):
     assert set_cooldown.main([]) == 2
     assert capsys.readouterr().err

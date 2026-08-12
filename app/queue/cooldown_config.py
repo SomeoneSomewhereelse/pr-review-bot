@@ -10,8 +10,9 @@ keeping this module import-light and non-blocking.
 Fail-safe by construction: the cache starts empty, so before the first refresh
 -- and whenever a refresh fails -- the service degrades to its configured
 defaults rather than to no cooldown. An override that reads back invalid
-(factor < 1, or base > cap) is discarded as a WHOLE triple, never partially
-applied, so a bad field can never pair with a stale override in another field.
+(factor < 1, base > cap, or a non-positive base/cap) is discarded as a WHOLE
+triple, never partially applied, so a bad field can never pair with a stale
+override in another field.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ def effective_config() -> tuple[float, float, float]:
     base = _base if _base is not None else settings.dispatcher_rereview_cooldown_seconds
     cap = _cap if _cap is not None else settings.dispatcher_rereview_cooldown_max_seconds
     factor = _factor if _factor is not None else settings.dispatcher_rereview_cooldown_factor
-    if factor < 1.0 or base > cap:
+    if factor < 1.0 or base > cap or base <= 0 or cap <= 0:
         return (
             settings.dispatcher_rereview_cooldown_seconds,
             settings.dispatcher_rereview_cooldown_max_seconds,

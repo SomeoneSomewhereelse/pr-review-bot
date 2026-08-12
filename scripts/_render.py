@@ -1,4 +1,5 @@
-"""Shared Render API access for scripts/deploy.py and scripts/set_provider.py.
+"""Shared Render API access for scripts/deploy.py, scripts/set_provider.py,
+and scripts/set_cooldown.py.
 
 Not a CLI entry point -- support code for the scripts/ CLIs. Consolidates
 what was previously duplicated Render-fetch logic (service lookup, env-var

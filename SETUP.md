@@ -411,7 +411,40 @@ from your local `.env` value; pass `--force` to write the override anyway.
 this guard, and both are built on the same `GET
 /v1/services/{id}/env-vars` call.
 
-### 3.7 Deploying an image, for a service with no connected repo
+### 3.7 Tuning the re-review cooldown live: `scripts/set_cooldown.py`
+
+```bash
+uv run python -m scripts.set_cooldown --base 30 --factor 1.5   # tune for a demo
+uv run python -m scripts.set_cooldown --cap 600
+uv run python -m scripts.set_cooldown --clear                  # remove the override
+```
+
+Same pattern as `set_provider.py` above: this writes the base/cap/factor
+override to the `runtime_config` table in whatever database `DATABASE_URL`
+currently resolves to — a local `.env` run sets a purely local override.
+It takes effect on the **next ticket the dispatcher claims** — no restart,
+no redeploy — which is what makes it useful for showing the escalating
+cooldown speed up on stage instead of waiting out the 300s/3600s production
+defaults.
+
+Unlike `set_provider.py` there's no credential at stake, only numbers, so a
+non-cleared write is never refused for a credential reason; before writing,
+it only checks (when `RENDER_API_KEY` is set) whether the local
+`DATABASE_URL` matches the live Render service's, purely as an informational
+signal, and proceeds regardless. It *does* refuse the write (exit 2) if the
+resulting base/cap/factor would resolve to something `cooldown_config.
+effective_config()` discards at read time (`factor < 1.0`, `base > cap`, or
+a non-positive base/cap) — a single `--cap` below the env-configured base
+would otherwise write successfully but be silently inert on every read.
+
+**A DB override in force masks env-var changes.** If you change
+`DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/`_FACTOR` in the Render
+dashboard while a DB override is still set, the redeploy will appear to do
+nothing — the override still wins at read time. Run
+`uv run python -m scripts.set_cooldown --clear` first if you want the
+env-var values to take effect again.
+
+### 3.8 Deploying an image, for a service with no connected repo
 
 Render **always builds on Render** — either from a connected GitHub repo, or
 by pulling a pre-built image from a container registry. It never accepts or

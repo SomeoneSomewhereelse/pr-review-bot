@@ -52,6 +52,28 @@ def test_base_above_cap_falls_back_to_env_defaults_entirely(monkeypatch):
     assert cooldown_config.effective_config() == (300.0, 3600.0, 2.0)
 
 
+def test_non_positive_base_falls_back_to_env_defaults_entirely(monkeypatch):
+    """A base <= 0 makes the cooldown a no-op, silently defeating the churn
+    protection. It must discard the WHOLE override triple, not just base --
+    pick distinct valid non-defaults for cap/factor so a partial-mix bug
+    would be caught."""
+    _set_env_defaults(monkeypatch)
+    cooldown_config.set_override_cache(0.0, 600.0, 1.5)
+    assert cooldown_config.effective_config() == (300.0, 3600.0, 2.0)
+
+
+def test_negative_base_falls_back_to_env_defaults_entirely(monkeypatch):
+    _set_env_defaults(monkeypatch)
+    cooldown_config.set_override_cache(-5.0, 600.0, 1.5)
+    assert cooldown_config.effective_config() == (300.0, 3600.0, 2.0)
+
+
+def test_non_positive_cap_falls_back_to_env_defaults_entirely(monkeypatch):
+    _set_env_defaults(monkeypatch)
+    cooldown_config.set_override_cache(30.0, 0.0, 1.5)
+    assert cooldown_config.effective_config() == (300.0, 3600.0, 2.0)
+
+
 def test_clearing_the_cache_returns_to_env_defaults(monkeypatch):
     _set_env_defaults(monkeypatch)
     cooldown_config.set_override_cache(30.0, 600.0, 1.5)

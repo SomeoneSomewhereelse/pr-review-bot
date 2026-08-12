@@ -204,6 +204,28 @@ the one Render's service actually reads (e.g. you're testing against a local
 database), this verification is skipped automatically, since the write
 cannot affect production either way.
 
+#### Tuning the re-review cooldown without a redeploy
+
+```bash
+uv run python -m scripts.set_cooldown --base 30 --factor 1.5   # tune for a demo
+uv run python -m scripts.set_cooldown --clear                  # remove the override
+```
+
+Same shape as `set_provider.py` above: it writes a base/cap/factor override
+to the `runtime_config` table and takes effect on the **next ticket the
+dispatcher claims** — no restart, no redeploy — so the escalating cooldown
+can be sped up on stage instead of waiting out the 300s/3600s production
+defaults. It writes to whatever `DATABASE_URL` currently resolves to, so a
+local `.env` run sets a local override only. Unlike `set_provider.py` there's
+no credential at stake, so a non-cleared write is never refused for a
+Render-verification reason — only refused if the resulting base/cap/factor
+would resolve to something invalid (`factor < 1.0`, `base > cap`, or a
+non-positive base/cap), since that combination would write successfully but
+be silently discarded on every read. **A DB override in force also masks env
+var changes** — editing `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
+`_FACTOR` in the Render dashboard will appear to do nothing until you run
+`--clear`.
+
 #### Deploying an image, when the Render service has no connected repo
 
 Render **always builds on Render** — from a connected GitHub repo, or by
