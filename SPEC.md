@@ -379,15 +379,28 @@ While a re-review waits out the cooldown, a self-cleaning "re-review
 scheduled ~HH:MM UTC" footnote is shown below the preserved review (see
 below) rather than staying silent.
 This cooldown now **escalates** per PR — a `cooldown_level` raises the
-effective wait geometrically (`effective_cooldown(level) = min(base·2^level, cap)`,
-`DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` default 3600s) for a PR that keeps
-being pushed inside each window, resetting to 0 once the PR stays quiet for a
-full window. Level 0 equals the base cooldown, so normal PRs are unchanged;
-escalation only lengthens `not_before` (the schedule notice's ETA reflects it
-automatically); it bounds a churning PR from
-~288 to ~26 reviews/day without ever abandoning it. The two escalation sites are:
-(1) `enqueue_or_update` done/failed re-arm, and (2) `finalize_review`'s
-dirty-flag branch.
+effective wait geometrically (`effective_cooldown(level) = min(base·factor^level, cap)`)
+for a PR that keeps being pushed inside each window, resetting to 0 once the PR
+stays quiet for a full window. Level 0 equals the base cooldown, so normal PRs
+are unchanged; escalation only lengthens `not_before` (the schedule notice's
+ETA reflects it automatically); at the defaults (factor 2, cap 3600s) it bounds
+a churning PR from ~288 to ~26 reviews/day without ever abandoning it. The two
+escalation sites are: (1) `enqueue_or_update` done/failed re-arm, and
+(2) `finalize_review`'s dirty-flag branch.
+
+**Tuning base/cap/factor.** All three are env vars
+(`DISPATCHER_REREVIEW_COOLDOWN_SECONDS` default 300s,
+`DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` default 3600s,
+`DISPATCHER_REREVIEW_COOLDOWN_FACTOR` default 2.0, must be `>= 1.0`), declared
+in `render.yaml` and editable in the Render dashboard (redeploys on change).
+For live tuning without a redeploy — e.g. shrinking the base to a few seconds
+for a demo — `scripts/set_cooldown.py` writes a DB-backed override to the same
+`runtime_config` singleton row the LLM-provider override already uses
+(`scripts/set_provider.py`); it takes effect on the next claimed ticket. A
+read of the override that comes back invalid (`factor < 1.0`, or `base > cap`)
+is discarded as a whole triple and falls back to the env defaults —
+`app/queue/cooldown_config.py` mirrors `app/providers/active.py`'s fail-safe
+cache pattern.
 
 **Re-review scheduled notice.** Rather than a fully silent wait, a deferred
 ticket with a visible prior review gets a self-cleaning footnote —
