@@ -77,6 +77,7 @@
     cursor: pointer;
   }
   button.control:hover { border-color: var(--accent); }
+  #hiwJumpBtn { margin-inline-end: 1.25rem; }
   .popup-backdrop {
     position: fixed;
     inset: 0;
@@ -255,6 +256,7 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="hiwJumpBtn" class="control" type="button" data-i18n="hiw_jump"></button>
     <button id="themeToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
     <button id="langToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
   </header>
@@ -364,6 +366,7 @@
         sp_name_quality: "Code Quality",
         sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
         backoff_none: "none",
+        hiw_jump: "↓ How it works",
         hiw_heading: "How it works",
         hiw_step1_title: "PR opened or updated",
         hiw_step1_desc: "A pull request is opened, reopened, or pushed to.",
@@ -402,6 +405,7 @@
         sp_name_quality: "איכות קוד",
         sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
         backoff_none: "אין",
+        hiw_jump: "↓ איך זה עובד",
         hiw_heading: "איך זה עובד",
         hiw_step1_title: "PR נפתח או עודכן",
         hiw_step1_desc: "בקשת משיכה (PR) נפתחת, נפתחת מחדש, או מתעדכנת בקוד.",
@@ -629,6 +633,9 @@
 
     document.getElementById("themeToggleBtn").addEventListener("click", (event) => openPopup("themePopupBackdrop", event.currentTarget));
     document.getElementById("langToggleBtn").addEventListener("click", (event) => openPopup("langPopupBackdrop", event.currentTarget));
+    document.getElementById("hiwJumpBtn").addEventListener("click", () => {
+      document.getElementById("howItWorks").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
 
     document.querySelectorAll(".popup-backdrop").forEach((backdrop) => {
       backdrop.addEventListener("click", (event) => {
