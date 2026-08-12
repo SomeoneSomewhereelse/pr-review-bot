@@ -181,6 +181,10 @@ Claude Code users can run `/deploy` instead, which wraps the same CLI.
 
 #### Switching providers without a redeploy
 
+> Superseded by `scripts/set_override.py` below, which can do everything this script does
+> plus set a key-index override in the same write. Kept working and documented here until a
+> follow-up cleanup removes it.
+
 ```bash
 uv run python -m scripts.set_provider groq       # set the override
 uv run python -m scripts.set_provider --clear     # remove it
@@ -229,6 +233,10 @@ var changes** — editing `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
 
 #### Swapping API keys without a redeploy
 
+> Superseded by `scripts/set_override.py` below, which can do everything this script does
+> plus activate a provider in the same write. Kept working and documented here until a
+> follow-up cleanup removes it.
+
 ```bash
 uv run python -m scripts.set_api_key groq 2       # activate GROQ_API_KEY_2
 uv run python -m scripts.set_api_key groq --clear  # back to GROQ_API_KEY (index 0)
@@ -252,6 +260,29 @@ confirms the actively-resolved provider's actively-resolved slot is
 genuinely present on Render, catching the exact gap a redeploy-free index
 flip can introduce — the DB says index 2, but nobody ever pushed
 `GROQ_API_KEY_2` to Render.
+
+#### Setting the provider and key-index override together
+
+```bash
+uv run python -m scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
+uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, same as set_api_key.py below
+uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same as set_api_key.py below
+uv run python -m scripts.set_override groq                  # activate only, same as set_provider.py below
+uv run python -m scripts.set_override --clear                # clear the provider override, same as set_provider.py below
+```
+
+`scripts/set_override.py` is a full, standalone replacement for both `set_provider.py` and
+`set_api_key.py` below — every operation either of them supports is reachable through this
+one script (see `docs/superpowers/specs/2026-08-12-override-cli-unification-design.md`
+section 5 for the complete mapping), plus the new capability of setting both overrides in one
+write and one Render-verification pass instead of two round trips. It verifies against the
+**effective** index — whichever index will actually be active for that provider after the
+write, not always index 0 — so activating a provider that already has a non-default key-index
+override verifies the correct slot, not the base credential.
+
+`scripts/set_provider.py` and `scripts/set_api_key.py` (documented in the two sections above)
+are **superseded by this script** and will be removed in a follow-up cleanup; nothing below
+needs to change before then.
 
 #### Deploying an image, when the Render service has no connected repo
 
