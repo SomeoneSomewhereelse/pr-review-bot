@@ -22,6 +22,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from app.config import settings
+from app.queue import cooldown_config
 from app.specialists.schemas import ReviewResult
 
 _SCHEMA = """
@@ -164,15 +165,16 @@ _MAX_COOLDOWN_LEVEL = 30
 
 
 def effective_cooldown(level: int) -> float:
-    """Escalated per-PR cooldown: min(base * 2^min(level, _MAX_COOLDOWN_LEVEL), cap).
+    """Escalated per-PR cooldown: min(base * factor^min(level, _MAX_COOLDOWN_LEVEL), cap).
 
     level 0 -> base (identical to a non-escalating cooldown, so normal PRs are
     unaffected). Each consecutive rapid re-review raises the level, geometrically
-    lengthening the next wait, capped at dispatcher_rereview_cooldown_max_seconds.
+    lengthening the next wait, capped at the effective cap. base/cap/factor come
+    from cooldown_config.effective_config() -- a DB override when set and valid,
+    else the env-configured defaults.
     """
-    base = settings.dispatcher_rereview_cooldown_seconds
-    cap = settings.dispatcher_rereview_cooldown_max_seconds
-    return max(base, min(base * 2 ** min(level, _MAX_COOLDOWN_LEVEL), cap))
+    base, cap, factor = cooldown_config.effective_config()
+    return max(base, min(base * factor ** min(level, _MAX_COOLDOWN_LEVEL), cap))
 
 
 def next_cooldown_level(level: int) -> int:
