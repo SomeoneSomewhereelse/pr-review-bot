@@ -1171,6 +1171,38 @@ def test_wanted_env_is_always_a_superset_of_the_always_synced_names():
     assert set(deploy._ALWAYS_SYNCED) <= set(deploy._wanted_env())
 
 
+def test_wanted_env_pushes_a_numbered_slot_with_a_local_value(gemini_only_config, monkeypatch):
+    monkeypatch.setattr(
+        deploy._override, "local_numbered_slots",
+        lambda base: {"GEMINI_API_KEY_1": "gk_slot1"} if base == "GEMINI_API_KEY" else {},
+    )
+    wanted = deploy._wanted_env()
+    assert wanted["GEMINI_API_KEY_1"] == "gk_slot1"
+
+
+def test_wanted_env_omits_a_numbered_slot_with_no_local_value(gemini_only_config, monkeypatch):
+    monkeypatch.setattr(deploy._override, "local_numbered_slots", lambda base: {})
+    wanted = deploy._wanted_env()
+    assert "GEMINI_API_KEY_1" not in wanted
+    assert "GROQ_API_KEY_1" not in wanted
+
+
+def test_wanted_env_pushes_numbered_slots_for_every_provider_not_just_the_selected_one(
+    gemini_only_config, monkeypatch
+):
+    """Mirrors the existing 'other credentials pushed when locally filled'
+    policy (test_wanted_env_includes_other_credentials_that_are_set) --
+    extended to numbered slots."""
+    def _slots(base):
+        if base == "GROQ_API_KEY":
+            return {"GROQ_API_KEY_2": "gsk_slot2"}
+        return {}
+
+    monkeypatch.setattr(deploy._override, "local_numbered_slots", _slots)
+    wanted = deploy._wanted_env()
+    assert wanted["GROQ_API_KEY_2"] == "gsk_slot2"
+
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

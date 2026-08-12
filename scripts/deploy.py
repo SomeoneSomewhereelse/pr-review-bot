@@ -33,7 +33,7 @@ from github import GithubException
 from app import github_app
 from app.config import settings
 from app.providers import registry
-from scripts import _render
+from scripts import _override, _render
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
@@ -602,6 +602,8 @@ def _wanted_env() -> dict[str, str]:
         value = getattr(settings, other_credential.lower(), "")
         if value and other_credential not in wanted:
             wanted[other_credential] = value
+    for credential, _ in _PROVIDERS.values():
+        wanted.update(_override.local_numbered_slots(credential))
     return wanted
 
 
