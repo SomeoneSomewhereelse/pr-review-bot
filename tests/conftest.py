@@ -126,3 +126,32 @@ def live_operator_apis_allowed():
     statement that the test mocks its own transport (respx) or genuinely
     intends a live call."""
     return True
+
+
+@pytest.fixture(autouse=True)
+def _quarantine_local_numbered_slots(request, monkeypatch):
+    """scripts/deploy.py's _wanted_env() reads local .env directly via
+    scripts._override.local_numbered_slots(), bypassing Settings entirely --
+    unlike every other value _wanted_env() produces, this one isn't
+    automatically hermetic against a contributor's real .env (which may have
+    real numbered API-key slots configured). Default to reporting no local
+    slots; a test that needs specific slot data monkeypatches
+    scripts._override.local_numbered_slots itself, which naturally overrides
+    this default within that test. Unit tests that directly test the real
+    implementation can opt out by requesting the 'local_numbered_slots_allowed'
+    fixture."""
+    if "local_numbered_slots_allowed" in request.fixturenames:
+        return
+    from scripts import _override
+
+    monkeypatch.setattr(
+        _override, "local_numbered_slots", lambda base, env_path=".env": {}
+    )
+
+
+@pytest.fixture
+def local_numbered_slots_allowed():
+    """Opt out of the quarantine. Requesting this fixture is for unit tests
+    that directly test scripts._override.local_numbered_slots() and need the
+    real implementation, not a mock."""
+    return True

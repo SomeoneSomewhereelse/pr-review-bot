@@ -17,14 +17,14 @@ def _temp_db(db):
     yield
 
 
-def test_local_numbered_slots_finds_matching_keys(tmp_path):
+def test_local_numbered_slots_finds_matching_keys(tmp_path, local_numbered_slots_allowed):
     env_file = tmp_path / ".env"
     env_file.write_text("GROQ_API_KEY_1=gsk_one\nGROQ_API_KEY_2=gsk_two\nOTHER_VAR=x\n")
     slots = _override.local_numbered_slots("GROQ_API_KEY", env_path=str(env_file))
     assert slots == {"GROQ_API_KEY_1": "gsk_one", "GROQ_API_KEY_2": "gsk_two"}
 
 
-def test_local_numbered_slots_ignores_empty_values(tmp_path):
+def test_local_numbered_slots_ignores_empty_values(tmp_path, local_numbered_slots_allowed):
     env_file = tmp_path / ".env"
     env_file.write_text("GROQ_API_KEY_1=\nGROQ_API_KEY_2=gsk_two\n")
     slots = _override.local_numbered_slots("GROQ_API_KEY", env_path=str(env_file))
