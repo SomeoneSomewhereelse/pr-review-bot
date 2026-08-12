@@ -4,22 +4,8 @@ scripts/deploy.py's numbered-slot sync-env fix. See
 docs/superpowers/specs/2026-08-12-override-cli-unification-design.md."""
 from __future__ import annotations
 
-import httpx
-import pytest
-import respx
-
 from app.config import settings
 from scripts import _override
-
-RENDER_SERVICES = "https://api.render.com/v1/services"
-
-
-def _service_list(service_id="srv-1", name="pr-review-engine"):
-    return [{"service": {"id": service_id, "name": name}}]
-
-
-def _env_var_list(values: dict):
-    return [{"envVar": {"key": k, "value": v}} for k, v in values.items()]
 
 
 def test_local_numbered_slots_finds_matching_keys(tmp_path):

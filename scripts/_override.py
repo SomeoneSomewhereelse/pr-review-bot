@@ -23,7 +23,6 @@ from dotenv import dotenv_values
 
 from app.config import settings
 from app.providers import registry
-from scripts import _render
 
 _SLOT_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
