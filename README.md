@@ -226,6 +226,32 @@ var changes** — editing `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
 `_FACTOR` in the Render dashboard will appear to do nothing until you run
 `--clear`.
 
+#### Swapping API keys without a redeploy
+
+```bash
+uv run python -m scripts.set_api_key groq 2       # activate GROQ_API_KEY_2
+uv run python -m scripts.set_api_key groq --clear  # back to GROQ_API_KEY (index 0)
+```
+
+Each provider's credential env var can have numbered siblings —
+`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ... — provisioned ahead
+of time exactly like any other env var (one redeploy, via `--sync-env` or
+the Render dashboard, to add a new slot). This writes which slot is
+**active** to the `runtime_config` table and takes effect on the **next
+ticket the dispatcher claims** — no restart, no redeploy, and no secret
+value is ever written to, read from, or logged by the database: only the
+slot's integer index is. Each provider tracks its own index independently,
+so switching providers never disturbs the slot chosen for the other two.
+Same presence-only Render verification as `set_provider.py` — refuses by
+default (pass `--force` to override) if the target slot's env var is
+missing on the live service, but never compares against a local `.env`
+value, since a numbered slot typically has no local counterpart at all.
+`scripts/deploy.py`'s `api-key-live` check is the read-only counterpart: it
+confirms the actively-resolved provider's actively-resolved slot is
+genuinely present on Render, catching the exact gap a redeploy-free index
+flip can introduce — the DB says index 2, but nobody ever pushed
+`GROQ_API_KEY_2` to Render.
+
 #### Deploying an image, when the Render service has no connected repo
 
 Render **always builds on Render** — from a connected GitHub repo, or by

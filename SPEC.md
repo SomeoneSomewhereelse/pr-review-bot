@@ -402,6 +402,20 @@ is discarded as a whole triple and falls back to the env defaults —
 `app/queue/cooldown_config.py` mirrors `app/providers/active.py`'s fail-safe
 cache pattern.
 
+**Swapping API-key slots.** Each provider's credential env var can have
+numbered siblings (`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ...),
+provisioned like any other env var (one redeploy to add a slot). A separate
+`runtime_config` override per provider (`gemini_key_index`, `groq_key_index`,
+`github_models_key_index`) records which slot is active; `NULL` means index
+0, the base env var. `scripts/set_api_key.py` writes it — the same
+no-redeploy, next-claimed-ticket mechanics as the provider/cooldown
+overrides — and no secret ever reaches Postgres: only the integer index
+does. `app/providers/factory.py` keys its client cache by `(provider,
+index)`, so a swap invalidates exactly the right cached SDK client rather
+than the whole cache. `scripts/deploy.py`'s `api-key-live` check is the
+read-only counterpart, mirroring `provider-live`: it confirms the actively-
+resolved index's env var is genuinely present on the live Render service.
+
 **Re-review scheduled notice.** Rather than a fully silent wait, a deferred
 ticket with a visible prior review gets a self-cleaning footnote —
 `formatting.format_schedule_notice(not_before)`, "🔄 Re-review scheduled
