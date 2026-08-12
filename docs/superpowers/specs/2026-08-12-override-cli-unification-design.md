@@ -209,6 +209,11 @@ else:
 ...then calls `_override.verify_render_slot(args.provider, effective_index)` exactly once.
 This whole verification step is skipped when `--clear` is given — clearing the provider
 override needs no credential check, matching `set_provider.py --clear`'s existing behavior.
+Verification is also skipped when `--clear-index` is paired with `--no-activate` (added in a
+later fix round), matching old `set_api_key.py PROVIDER --clear`'s behavior — nothing is being
+activated and the target is the documented default, so there is no credential at stake.
+`--clear-index` *without* `--no-activate` still verifies, against index 0, since a provider is
+about to become active there.
 
 **Persistence — the "simple version"** (per explicit decision: an atomic combined-column
 UPSERT was considered and set aside): the script's `main()` calls the two existing granular

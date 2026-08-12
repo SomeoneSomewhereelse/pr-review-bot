@@ -265,10 +265,11 @@ flip can introduce — the DB says index 2, but nobody ever pushed
 
 ```bash
 uv run python -m scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
-uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, same as set_api_key.py below
-uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same as set_api_key.py below
-uv run python -m scripts.set_override groq                  # activate only, same as set_provider.py below
-uv run python -m scripts.set_override --clear                # clear the provider override, same as set_provider.py below
+uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, same as set_api_key.py above
+uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same as set_api_key.py above
+uv run python -m scripts.set_override groq                  # activate only, same as set_provider.py above
+uv run python -m scripts.set_override --clear                # clear the provider override, same as set_provider.py above
+uv run python -m scripts.set_override groq --index 1 --force  # write despite a failed live check
 ```
 
 `scripts/set_override.py` is a full, standalone replacement for both `set_provider.py` and
@@ -318,7 +319,7 @@ up a throwaway Postgres 16 via `testcontainers` automatically) or a
 those tests fail with an opaque testcontainers error. CI provides this
 automatically via a `services: postgres` container — no action needed there.
 
-99 deterministic tests, no real network calls — mocks GitHub's REST API (at
+508 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
 clients, and the webhook HTTP layer. CI (`.github/workflows/project-d-ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
