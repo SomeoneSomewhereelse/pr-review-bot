@@ -54,7 +54,7 @@ async def test_github_models_provider_parses_valid_structured_output(monkeypatch
         ),
     )
 
-    provider = GitHubModelsProvider()
+    provider = GitHubModelsProvider(api_key="dummy-key-for-construction-only")
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -80,7 +80,7 @@ async def test_github_models_provider_returns_none_parsed_on_malformed_json(monk
         ),
     )
 
-    provider = GitHubModelsProvider()
+    provider = GitHubModelsProvider(api_key="dummy-key-for-construction-only")
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -100,7 +100,7 @@ async def test_github_models_provider_returns_none_parsed_on_off_schema_json(mon
         ),
     )
 
-    provider = GitHubModelsProvider()
+    provider = GitHubModelsProvider(api_key="dummy-key-for-construction-only")
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -130,7 +130,7 @@ async def test_github_models_provider_sends_system_and_user_messages(monkeypatch
         ),
     )
 
-    provider = GitHubModelsProvider()
+    provider = GitHubModelsProvider(api_key="dummy-key-for-construction-only")
     await provider.complete("Be a helpful reviewer.", "user prompt", Greeting)
 
     _, kwargs = fake_create.call_args

@@ -40,7 +40,7 @@ def main() -> None:
     print(f"Provider: github_models   Model: {settings.github_models_model}")
     print("(never printing the token)")
 
-    provider = GitHubModelsProvider()
+    provider = GitHubModelsProvider(api_key=settings.github_models_token)
 
     system = "Respond in the given JSON schema."
     user = "Say hello in one short sentence."

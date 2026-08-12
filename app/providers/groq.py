@@ -45,7 +45,7 @@ def _schema_system_prompt(system: str, schema: type[BaseModel]) -> str:
 class GroqProvider:
     """``groq`` — cross-vendor fallback (Llama via Groq's OpenAI-compatible API)."""
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str) -> None:
         # max_retries=0: the SDK's own default (2) silently retries a 429
         # with backoff before this adapter's except clause ever sees it --
         # confirmed live (a 43.1s call, vs. ~5s normal, that never surfaced
@@ -56,7 +56,7 @@ class GroqProvider:
         # hidden retry layer underneath it is redundant at best and actively
         # hides a real signal at worst.
         self._client = AsyncGroq(
-            api_key=settings.groq_api_key,
+            api_key=api_key,
             max_retries=0,
             timeout=settings.llm_request_timeout_seconds,
         )

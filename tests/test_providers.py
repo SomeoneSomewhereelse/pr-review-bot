@@ -60,7 +60,7 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider()
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only")
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -81,7 +81,7 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider()
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only")
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -101,7 +101,7 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider()
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only")
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -162,6 +162,46 @@ def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
     first = get_provider()
     second = get_provider()
     assert first is second
+    reset_provider_cache()
+
+
+def test_factory_rebuilds_the_client_when_the_key_index_changes(monkeypatch):
+    from app.providers import key_index
+    from app.providers.factory import reset_provider_cache
+
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_index_0")
+    monkeypatch.setenv("GROQ_API_KEY_1", "gsk_index_1")
+    reset_provider_cache()
+    key_index.reset_override_cache()
+
+    at_index_0 = get_provider()
+    key_index.set_override_cache({"groq": 1})
+    at_index_1 = get_provider()
+
+    assert at_index_0 is not at_index_1
+    key_index.reset_override_cache()
+    reset_provider_cache()
+
+
+def test_factory_returns_to_the_original_cached_instance_after_switching_back(monkeypatch):
+    from app.providers import key_index
+    from app.providers.factory import reset_provider_cache
+
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_index_0")
+    monkeypatch.setenv("GROQ_API_KEY_1", "gsk_index_1")
+    reset_provider_cache()
+    key_index.reset_override_cache()
+
+    at_index_0 = get_provider()
+    key_index.set_override_cache({"groq": 1})
+    get_provider()
+    key_index.reset_override_cache()
+    back_at_index_0 = get_provider()
+
+    assert back_at_index_0 is at_index_0
+    key_index.reset_override_cache()
     reset_provider_cache()
 
 

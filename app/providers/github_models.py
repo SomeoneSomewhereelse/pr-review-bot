@@ -61,10 +61,10 @@ def _response_format(schema: type[BaseModel]) -> dict:
 class GitHubModelsProvider:
     """``github_models`` — cross-vendor option riding the user's GitHub account."""
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str) -> None:
         self._client = AsyncOpenAI(
             base_url=_BASE_URL,
-            api_key=settings.github_models_token,
+            api_key=api_key,
             timeout=settings.llm_request_timeout_seconds,
         )
         self._model = settings.github_models_model

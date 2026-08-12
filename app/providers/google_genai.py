@@ -52,9 +52,9 @@ async def _complete(
 class GeminiProvider:
     """``gemini`` (AI-Studio) — the actually-live provider in this environment."""
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str) -> None:
         self._client = genai.Client(
-            api_key=settings.gemini_api_key,
+            api_key=api_key,
             http_options=types.HttpOptions(
                 timeout=int(settings.llm_request_timeout_seconds * 1000)
             ),
