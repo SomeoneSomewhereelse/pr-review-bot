@@ -277,8 +277,10 @@ one script (see `docs/superpowers/specs/2026-08-12-override-cli-unification-desi
 section 5 for the complete mapping), plus the new capability of setting both overrides in one
 write and one Render-verification pass instead of two round trips. It verifies against the
 **effective** index — whichever index will actually be active for that provider after the
-write, not always index 0 — so activating a provider that already has a non-default key-index
-override verifies the correct slot, not the base credential.
+write, not always index 0 — except when clearing the index override with `--no-activate`,
+which never verifies (matching the old `set_api_key.py --clear` behavior, since nothing is
+being activated and the target is the documented default). Activating a provider that already
+has a non-default key-index override verifies the correct slot, not the base credential.
 
 `scripts/set_provider.py` and `scripts/set_api_key.py` (documented in the two sections above)
 are **superseded by this script** and will be removed in a follow-up cleanup; nothing below
