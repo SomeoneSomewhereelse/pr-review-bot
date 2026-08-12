@@ -39,7 +39,19 @@ def _build(provider: str, index: int) -> LLMProvider:
             f"Unknown provider: {provider!r} "
             "(expected 'gemini', 'groq', or 'github_models')"
         )
-    _, api_key = credentials.resolve(provider, index)
+    env_name, api_key = credentials.resolve(provider, index)
+    # Locally-detectable invalid state: no live call needed to know this slot
+    # was never provisioned anywhere. Caught by run_specialist's existing
+    # broad except -- all three specialists fail with this exact message,
+    # with zero network calls, instead of each independently discovering the
+    # same problem via a wasted, doomed real call. A DEAD-but-CONFIGURED
+    # provider (a real credential, vendor down/retired) is unaffected: resolve()
+    # returns a non-empty value here and this check never fires for it.
+    if not api_key:
+        raise ValueError(
+            f"no credential configured for provider={provider!r} index={index} "
+            f"({env_name} not set)"
+        )
     if provider == "gemini":
         return GeminiProvider(api_key=api_key)
     if provider == "groq":

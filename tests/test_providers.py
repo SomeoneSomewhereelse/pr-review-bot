@@ -132,7 +132,10 @@ def test_factory_rejects_retired_vertex_provider(monkeypatch):
 
 
 def test_factory_selects_groq(monkeypatch):
+    # Groq SDK requires a non-empty api_key, so a fresh checkout with no
+    # real .env (e.g. CI) needs a dummy non-empty value here.
     monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
     from app.providers.groq import GroqProvider
 
     assert isinstance(get_provider(), GroqProvider)
@@ -154,10 +157,46 @@ def test_factory_raises_for_unknown_provider(monkeypatch):
         get_provider()
 
 
+def test_factory_raises_a_clear_error_for_an_unprovisioned_key_index(monkeypatch):
+    """The locally-detectable invalid-state case: activating gemini at index 1
+    when only GEMINI_API_KEY (index 0) exists anywhere. Distinct from a
+    dead-but-configured provider (e.g. github_models' real retirement),
+    which must NOT be affected by this check -- that case has a real,
+    non-empty credential and fails at the live call, unchanged."""
+    from app.providers import key_index
+    from app.providers.factory import reset_provider_cache
+
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "gk_index_0")
+    monkeypatch.delenv("GEMINI_API_KEY_1", raising=False)
+    reset_provider_cache()
+    key_index.set_override_cache({"gemini": 1})
+
+    with pytest.raises(ValueError) as exc:
+        get_provider()
+    assert "GEMINI_API_KEY_1" in str(exc.value)
+    assert "gemini" in str(exc.value)
+    assert "1" in str(exc.value)
+
+    key_index.reset_override_cache()
+    reset_provider_cache()
+
+
+def test_factory_unaffected_by_a_dead_but_configured_provider(monkeypatch):
+    """A real, non-empty credential must still reach client construction --
+    this check only catches an EMPTY resolved value, nothing else."""
+    monkeypatch.setattr(settings, "llm_provider", "github_models")
+    monkeypatch.setattr(settings, "github_models_token", "ghp_real_but_dead")
+    from app.providers.github_models import GitHubModelsProvider
+
+    assert isinstance(get_provider(), GitHubModelsProvider)
+
+
 def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
     from app.providers.factory import reset_provider_cache
 
     monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
     reset_provider_cache()
     first = get_provider()
     second = get_provider()
