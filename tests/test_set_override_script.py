@@ -263,6 +263,7 @@ def test_clear_index_with_activating_still_verifies(monkeypatch, db_url, capsys)
 def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_local_differs")
     with respx.mock:
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(

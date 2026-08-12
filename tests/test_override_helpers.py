@@ -31,12 +31,16 @@ def test_local_numbered_slots_ignores_empty_values(tmp_path, local_numbered_slot
     assert slots == {"GROQ_API_KEY_2": "gsk_two"}
 
 
-def test_local_numbered_slots_returns_empty_for_a_missing_file(tmp_path):
+def test_local_numbered_slots_returns_empty_for_a_missing_file(
+    tmp_path, local_numbered_slots_allowed
+):
     missing = tmp_path / "does-not-exist.env"
     assert _override.local_numbered_slots("GROQ_API_KEY", env_path=str(missing)) == {}
 
 
-def test_local_numbered_slots_does_not_match_a_different_base(tmp_path):
+def test_local_numbered_slots_does_not_match_a_different_base(
+    tmp_path, local_numbered_slots_allowed
+):
     env_file = tmp_path / ".env"
     env_file.write_text("GEMINI_API_KEY_1=gk_one\n")
     assert _override.local_numbered_slots("GROQ_API_KEY", env_path=str(env_file)) == {}
