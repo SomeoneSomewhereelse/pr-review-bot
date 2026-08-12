@@ -35,6 +35,15 @@ def _clean_cooldown_cache():
     cooldown_config.reset_override_cache()
 
 
+@pytest.fixture(autouse=True)
+def _clean_key_index_cache():
+    from app.providers import key_index
+
+    key_index.reset_override_cache()
+    yield
+    key_index.reset_override_cache()
+
+
 def _enqueue(pr, now=NOW):
     return store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=pr, head_sha="sha", provider="groq",
@@ -754,6 +763,54 @@ async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch)
     _enqueue(1)
     result = await dispatcher.process_next_due(NOW)
     assert seen == ["gemini"]
+    assert result.action == "ran"
+
+
+async def test_claimed_ticket_uses_the_db_key_index_override(monkeypatch):
+    """The behavioral guarantee: a mid-session key-index override changes
+    which credential slot actually resolves, with no restart and no
+    redeploy."""
+    _stub_comments(monkeypatch)
+    store.set_key_index_override("groq", 2, NOW.isoformat())
+    seen = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        from app.providers import key_index
+        seen.append(key_index.active_key_index("groq"))
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+    _enqueue(1)
+    await dispatcher.process_next_due(NOW)
+    assert seen == [2]
+
+
+async def test_claim_falls_back_to_index_zero_when_the_key_index_read_fails(monkeypatch):
+    """Fail-safe: an unreachable override must degrade to index 0, never
+    abort the review, and never keep serving a stale cached override from a
+    previous successful refresh."""
+    from app.providers import key_index
+
+    _stub_comments(monkeypatch)
+    # A prior successful refresh cached a DIFFERENT index. If the failure
+    # handler merely logged and left the cache alone, active_key_index()
+    # would keep returning 2 forever -- this is what catches that.
+    key_index.set_override_cache({"groq": 2})
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(store, "get_all_key_index_overrides", boom)
+    seen = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        seen.append(key_index.active_key_index("groq"))
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+    _enqueue(1)
+    result = await dispatcher.process_next_due(NOW)
+    assert seen == [0]
     assert result.action == "ran"
 
 

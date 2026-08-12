@@ -31,7 +31,7 @@ from app.formatting import (
     format_schedule_notice,
 )
 from app.orchestrator import ReviewRateLimited, attempt_review
-from app.providers import active
+from app.providers import active, key_index
 from app.providers.active import active_provider
 from app.queue import cooldown_config, store
 
@@ -153,6 +153,18 @@ async def process_next_due(now: datetime) -> StepResult:
     except Exception:  # noqa: BLE001
         logger.exception("failed to refresh the cooldown override; using env defaults")
         cooldown_config.reset_override_cache()
+
+    # Refresh the API-key-index overrides once per claimed ticket, same
+    # cadence and fail-safe shape as the provider/cooldown refreshes above: a
+    # failure here must never abort a review, and must never leave a stale
+    # cached override in place -- degrade all the way to index 0 for every
+    # provider.
+    try:
+        key_index_overrides = await asyncio.to_thread(store.get_all_key_index_overrides)
+        key_index.set_override_cache(key_index_overrides)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to refresh key-index overrides; using index 0")
+        key_index.reset_override_cache()
 
     if ticket.notice_not_before is not None:
         try:
