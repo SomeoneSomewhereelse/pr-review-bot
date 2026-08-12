@@ -279,6 +279,13 @@ Gemini (different tokenizer/model, not independently targeted).
 
 ### 1. Architecture overview (~2 min)
 
+**Pre-demo setup, before narration starts (2026-08-12):** `uv run python -m
+scripts.set_cooldown --base 30` — set the presentation-friendly cooldown
+now, once, off-camera, rather than mid-Segment-B. It's inert until a
+review actually finalizes, so setting it this early causes no visible
+effect before Segment B needs it; it just removes one live step (and one
+thing that could go wrong on-camera) from the middle of the walkthrough.
+
 **Open `https://pr-review-engine.onrender.com/` in a second tab/window now**
 and leave it visible (polling every 4s) for the rest of the walkthrough.
 Narrate the flow from `README.md`/`SPEC.md`'s diagram (webhook → HMAC verify
@@ -319,11 +326,10 @@ slow-refilling bucket degrades badly under any incidental extra load).
 
 **Cooldown hardening (2026-08-12):** the re-review cooldown is now
 DB-tunable (`scripts/set_cooldown.py`, live per the 2026-08-12 runtime-
-cooldown-tuning design) — **set it to a presentation-friendly 30s before
-this segment**, replacing the 300s default: `uv run python -m
-scripts.set_cooldown --base 30`. This is what turns the old "narrate the
-mechanism and move on without waiting" fallback into an actual on-screen
-heal that fits the time budget.
+cooldown-tuning design) — already set to a presentation-friendly 30s back
+in Segment 1's pre-demo setup, replacing the 300s default. This is what
+turns the old "narrate the mechanism and move on without waiting"
+fallback into an actual on-screen heal that fits the time budget.
 
 - Provider is already `gemini` from Segment 2.
 - **Set the DB override:** `uv run python -m scripts.set_provider github_models`.
@@ -416,8 +422,9 @@ demand against a 12,000 cap is strictly stronger than two.
   (`set_cooldown.py`) — all writable with zero redeploy, all demonstrated
   in this same walkthrough.
 - **Clean up before ending the call:** `uv run python -m scripts.set_provider
-  --clear` and `uv run python -m scripts.set_cooldown --clear`, so nothing
-  demo-tuned is left live afterward.
+  --clear` and `uv run python -m scripts.set_cooldown --clear` — the latter
+  is specifically what reverts the cooldown from Segment 1's 30s back to
+  the real 300s default, so nothing demo-tuned is left live afterward.
 
 ## Pre-call / pre-rehearsal checklist
 
