@@ -132,8 +132,10 @@ def test_factory_rejects_retired_vertex_provider(monkeypatch):
 
 
 def test_factory_selects_groq(monkeypatch):
-    # Groq SDK requires a non-empty api_key, so a fresh checkout with no
-    # real .env (e.g. CI) needs a dummy non-empty value here.
+    # _build()'s new empty-credential check (added by this task) now raises
+    # before construction, so this test needs a non-empty value — previously an
+    # empty string reached GroqProvider.__init__ successfully, since Groq's SDK
+    # only rejects api_key=None, not an empty string.
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
     from app.providers.groq import GroqProvider
@@ -196,6 +198,7 @@ def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
     from app.providers.factory import reset_provider_cache
 
     monkeypatch.setattr(settings, "llm_provider", "groq")
+    # _build()'s empty-credential check requires a non-empty api_key.
     monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
     reset_provider_cache()
     first = get_provider()
