@@ -32,6 +32,7 @@ from github import GithubException
 
 from app import github_app
 from app.config import settings
+from app.providers import registry
 from scripts import _render
 
 _NAME_WIDTH = 18
@@ -105,15 +106,11 @@ def resolve_base_url() -> str:
     return base.rstrip("/")
 
 
-# The credential and model env var each LLM_PROVIDER value requires. This is the
-# single source of truth: check_config, --sync-env and scripts/set_provider.py
-# all read it, so a provider cannot be known to one and unknown to another.
-# provider -> (credential env var, model env var)
-_PROVIDERS = {
-    "gemini": ("GEMINI_API_KEY", "LLM_MODEL"),
-    "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
-    "github_models": ("GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL"),
-}
+# Single source of truth for provider -> env-var-name mappings, shared with
+# app/ -- see app/providers/registry.py. _PROVIDERS is kept as a
+# module-level alias so every existing call site in this file (and in
+# scripts/set_provider.py) keeps working unchanged.
+_PROVIDERS = registry.PROVIDERS
 
 
 def _private_key_b64() -> tuple[str, str]:
