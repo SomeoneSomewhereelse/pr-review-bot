@@ -1,6 +1,6 @@
 """Deploy verification CLI for the hosted Render + Supabase deployment.
 
-Runs eight independent checks and prints one aligned table. Every check runs
+Runs nine independent checks and prints one aligned table. Every check runs
 regardless of earlier failures, so a single run surfaces every problem rather
 than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
 CLI could not run at all.
@@ -326,6 +326,27 @@ def _resolved_provider_or_env() -> tuple[str, str | None]:
     return _resolved_provider()
 
 
+def _resolved_key_index(provider: str) -> tuple[int, int | None]:
+    """(active index, override or None) for `provider`. Reads via a raw
+    short-timeout connection, mirroring _resolved_provider() for the same
+    reason: a one-shot CLI must not pay store.init_pool()'s 30s timeout.
+    """
+    column = registry.KEY_INDEX_COLUMNS[provider]
+    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+        row = conn.execute(f"SELECT {column} FROM runtime_config WHERE id = 1").fetchone()
+    override = row[0] if row else None
+    return (override if override is not None else 0), override
+
+
+def _resolved_key_index_or_env(provider: str) -> tuple[int, int | None]:
+    """Like _resolved_key_index(), but usable without DATABASE_URL: without a
+    database there is no override to check, so this falls back to index 0.
+    """
+    if not settings.database_url:
+        return 0, None
+    return _resolved_key_index(provider)
+
+
 def check_provider_live() -> CheckResult:
     """Whether the actively-resolved provider's credential is genuinely
     present on the live Render service -- not just locally.
@@ -370,6 +391,50 @@ def check_provider_live() -> CheckResult:
             name, "FAIL", f"{provider} ({source}) -- {credential} not present on Render"
         )
     return CheckResult(name, "PASS", f"{provider} ({source}) -- {credential} present on Render")
+
+
+def check_api_key_live() -> CheckResult:
+    """Whether the actively-resolved provider's actively-resolved key SLOT is
+    genuinely present on the live Render service -- catches "the DB says
+    index 2 but nobody ever pushed GROQ_API_KEY_2 to Render", the same class
+    of gap check_provider_live catches for the provider name itself.
+    """
+    name = "api-key-live"
+    if not settings.render_api_key:
+        return CheckResult(
+            name, "SKIPPED", "set RENDER_API_KEY to verify credentials against the live service"
+        )
+    try:
+        provider, _provider_override = _resolved_provider_or_env()
+    # deliberate: a DB problem is provider's/database's row to report, not ours
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name, "SKIPPED", f"could not resolve the active provider ({type(exc).__name__})"
+        )
+    entry = _PROVIDERS.get(provider)
+    if entry is None:
+        return CheckResult(name, "SKIPPED", f"{provider} is not a supported provider")
+    try:
+        index, index_override = _resolved_key_index_or_env(provider)
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(
+            name, "SKIPPED", f"could not resolve the active key index ({type(exc).__name__})"
+        )
+    credential, _ = entry
+    env_name = credential if index == 0 else f"{credential}_{index}"
+    source = f"index {index}" + (" (DB override)" if index_override is not None else "")
+    try:
+        service_id = _render.find_service_id()
+        if service_id is None:
+            return CheckResult(name, "FAIL", f"no service named {settings.render_service_name}")
+        live_value = _render.env_vars(service_id).get(env_name) or ""
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
+    if not live_value:
+        return CheckResult(
+            name, "FAIL", f"{provider} ({source}) -- {env_name} not present on Render"
+        )
+    return CheckResult(name, "PASS", f"{provider} ({source}) -- {env_name} present on Render")
 
 
 def _local_head() -> tuple[str, bool] | None:
@@ -747,7 +812,7 @@ def _safe(name: str, fn, *args) -> CheckResult:
 
 
 def run_checks(repo: str, base: str) -> list[CheckResult]:
-    """All eight, cheapest and most foundational first, so a misconfiguration
+    """All nine, cheapest and most foundational first, so a misconfiguration
     is reported before the checks that would fail as a consequence of it."""
     return [
         _safe("config", check_config),
@@ -756,6 +821,7 @@ def run_checks(repo: str, base: str) -> list[CheckResult]:
         _safe("database", check_database),
         _safe("provider", check_provider),
         _safe("provider-live", check_provider_live),
+        _safe("api-key-live", check_api_key_live),
         _safe("render-service", check_render_service),
         _safe("uptime-pinger", check_uptime_pinger, base),
     ]
@@ -771,8 +837,9 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Verify the hosted deployment: configuration, GitHub App installation "
             "and webhook, health endpoint, database, active provider, whether that "
-            "provider's credential is actually live on Render, Render service, "
-            "and keep-warm pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
+            "provider's credential is actually live on Render, whether its active "
+            "API-key slot is actually live on Render, Render service, and keep-warm "
+            "pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
         ),
     )
     parser.add_argument(

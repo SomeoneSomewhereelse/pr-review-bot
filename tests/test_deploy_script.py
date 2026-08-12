@@ -665,10 +665,10 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
 
 
 def _stub_all_checks(monkeypatch, statuses):
-    """Replace all eight checks with constant results, in report order."""
+    """Replace all nine checks with constant results, in report order."""
     names = [
         "config", "github-app", "health", "database", "provider",
-        "provider-live", "render-service", "uptime-pinger",
+        "provider-live", "api-key-live", "render-service", "uptime-pinger",
     ]
     fns = [
         "check_config",
@@ -677,6 +677,7 @@ def _stub_all_checks(monkeypatch, statuses):
         "check_database",
         "check_provider",
         "check_provider_live",
+        "check_api_key_live",
         "check_render_service",
         "check_uptime_pinger",
     ]
@@ -693,7 +694,7 @@ def runnable(monkeypatch):
 
 
 def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 3)
+    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
@@ -701,7 +702,7 @@ def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
 def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
     _stub_all_checks(
         monkeypatch,
-        ["PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"],
+        ["PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"],
     )
     assert deploy.main([]) == 1
     assert "1 failed" in capsys.readouterr().out
@@ -712,7 +713,7 @@ def test_main_with_sync_env_falls_through_to_the_checklist_on_success(
 ):
     """Spec section 8 step 7: a successful sync must not skip the post-sync
     checklist -- it is the thing that proves the sync actually took."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 3)
+    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 0)
     assert deploy.main(["--sync-env"]) == 0
     assert "all checks passed" in capsys.readouterr().out
@@ -724,7 +725,7 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     """A non-zero sync_env() must short-circuit main() before run_checks/
     render_report ever run -- printing the table after a failed sync would
     misleadingly suggest the sync itself is fine."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 3)
+    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 2)
     assert deploy.main(["--sync-env"]) == 2
     assert "all checks passed" not in capsys.readouterr().out
@@ -743,25 +744,25 @@ def test_main_returns_two_without_a_base_url(monkeypatch):
     assert deploy.main([]) == 2
 
 
-def test_run_checks_reports_all_eight_in_order(runnable, monkeypatch):
-    _stub_all_checks(monkeypatch, ["PASS"] * 8)
+def test_run_checks_reports_all_nine_in_order(runnable, monkeypatch):
+    _stub_all_checks(monkeypatch, ["PASS"] * 9)
     results = deploy.run_checks("owner/repo", BASE)
     assert [r.name for r in results] == [
         "config", "github-app", "health", "database", "provider",
-        "provider-live", "render-service", "uptime-pinger",
+        "provider-live", "api-key-live", "render-service", "uptime-pinger",
     ]
 
 
 def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, monkeypatch):
     """A complete table is the deliverable; one broken check must not deprive
-    the operator of the other seven diagnoses (spec section 7.3)."""
+    the operator of the other eight diagnoses (spec section 7.3)."""
     def _boom():
         raise ValueError("unexpected")
 
-    _stub_all_checks(monkeypatch, ["PASS"] * 8)
+    _stub_all_checks(monkeypatch, ["PASS"] * 9)
     monkeypatch.setattr(deploy, "check_database", _boom)
     results = deploy.run_checks("owner/repo", BASE)
-    assert len(results) == 8
+    assert len(results) == 9
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
     assert "ValueError" in database.detail
@@ -1425,6 +1426,130 @@ def test_provider_live_never_leaks_a_fetched_value(override_seam, monkeypatch):
     assert result.detail.endswith("(env) -- GROQ_API_KEY present on Render")
 
 
+def test_resolved_key_index_or_env_falls_back_without_a_database_url(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "")
+    assert deploy._resolved_key_index_or_env("groq") == (0, None)
+
+
+def test_resolved_key_index_or_env_resolves_the_override_when_database_url_is_set(
+    override_seam,
+):
+    override_seam((2,))
+    assert deploy._resolved_key_index_or_env("groq") == (2, 2)
+
+
+def test_resolved_key_index_or_env_defaults_to_zero_when_no_override(override_seam):
+    override_seam(None)
+    assert deploy._resolved_key_index_or_env("groq") == (0, None)
+
+
+def test_resolved_key_index_or_env_propagates_a_db_error(override_seam):
+    override_seam(RuntimeError("boom"))
+    with pytest.raises(RuntimeError):
+        deploy._resolved_key_index_or_env("groq")
+
+
+def test_api_key_live_skips_without_a_render_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "")
+    assert deploy.check_api_key_live().status == "SKIPPED"
+
+
+def test_api_key_live_skips_when_the_provider_resolution_raises(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", boom)
+    assert deploy.check_api_key_live().status == "SKIPPED"
+
+
+def test_api_key_live_skips_when_the_index_resolution_raises(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+
+    def boom(provider):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(deploy, "_resolved_key_index_or_env", boom)
+    assert deploy.check_api_key_live().status == "SKIPPED"
+
+
+def test_api_key_live_skips_for_an_unsupported_provider(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("vertex", None))
+    assert deploy.check_api_key_live().status == "SKIPPED"
+
+
+def test_api_key_live_passes_for_index_zero_present_on_render(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_key_index_or_env", lambda provider: (0, None))
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({"GROQ_API_KEY": "gsk_x"}))
+        )
+        result = deploy.check_api_key_live()
+    assert result.status == "PASS"
+    assert "GROQ_API_KEY" in result.detail
+    assert "GROQ_API_KEY_" not in result.detail  # index 0 -> unsuffixed name
+
+
+def test_api_key_live_fails_when_the_overrides_slot_is_missing_on_render(monkeypatch):
+    """The exact failure mode this check exists to catch: the DB override
+    names index 2 but nobody ever pushed GROQ_API_KEY_2 to Render."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_key_index_or_env", lambda provider: (2, 2))
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({"GROQ_API_KEY": "gsk_x"}))
+        )
+        result = deploy.check_api_key_live()
+    assert result.status == "FAIL"
+    assert "GROQ_API_KEY_2" in result.detail
+    assert "not present" in result.detail
+
+
+def test_api_key_live_never_leaks_a_fetched_value(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("groq", None))
+    monkeypatch.setattr(deploy, "_resolved_key_index_or_env", lambda provider: (0, None))
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(
+                200, json=_env_var_list({"GROQ_API_KEY": "gsk_SUPER_SECRET"})
+            )
+        )
+        result = deploy.check_api_key_live()
+    assert "gsk_SUPER_SECRET" not in result.detail
+
+
+def test_run_checks_includes_the_api_key_live_row(monkeypatch):
+    monkeypatch.setattr(deploy, "check_api_key_live",
+                        lambda: deploy.CheckResult("api-key-live", "PASS", ""))
+    for fn, row in (
+        ("check_config", "config"),
+        ("check_installation_and_webhook", "github-app"),
+        ("check_health_endpoint", "health"),
+        ("check_database", "database"),
+        ("check_provider", "provider"),
+        ("check_provider_live", "provider-live"),
+        ("check_render_service", "render-service"),
+        ("check_uptime_pinger", "uptime-pinger"),
+    ):
+        monkeypatch.setattr(deploy, fn, lambda *a, _n=row: deploy.CheckResult(_n, "PASS", ""))
+    names = [r.name for r in deploy.run_checks("owner/repo", BASE)]
+    assert "api-key-live" in names
+    assert names.index("api-key-live") > names.index("provider-live")
+
+
 def test_run_checks_includes_the_provider_live_row(monkeypatch):
     monkeypatch.setattr(deploy, "check_provider_live",
                         lambda: deploy.CheckResult("provider-live", "PASS", ""))
@@ -1434,6 +1559,7 @@ def test_run_checks_includes_the_provider_live_row(monkeypatch):
         ("check_health_endpoint", "health"),
         ("check_database", "database"),
         ("check_provider", "provider"),
+        ("check_api_key_live", "api-key-live"),
         ("check_render_service", "render-service"),
         ("check_uptime_pinger", "uptime-pinger"),
     ):
@@ -1453,6 +1579,7 @@ def test_run_checks_includes_the_provider_row(monkeypatch):
         ("check_health_endpoint", "health"),
         ("check_database", "database"),
         ("check_provider_live", "provider-live"),
+        ("check_api_key_live", "api-key-live"),
         ("check_render_service", "render-service"),
         ("check_uptime_pinger", "uptime-pinger"),
     ):
