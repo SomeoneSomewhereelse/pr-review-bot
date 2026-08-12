@@ -20,6 +20,18 @@ for this provider after the write, not always index 0 -- via
 scripts._override.verify_render_slot. This fixes a latent gap in
 scripts/set_provider.py, which always verified index 0 regardless of any
 existing key-index override for that provider.
+
+Verification is intentionally asymmetric around --clear-index: paired with
+--no-activate (clearing the index override without touching which provider
+is active), it never verifies at all -- matching old set_api_key.py's
+--clear, which also never checked a credential before clearing one.
+Reverting to the default slot is exactly the operation an operator reaches
+for during a key rotation, precisely when a Render/local mismatch is most
+likely, so a clear must not be blockable by a verification failure.
+--clear-index WITHOUT --no-activate still verifies (against index 0, the
+slot about to become active) because that combination puts a provider into
+production and checking its target credential first is a genuine, worthwhile
+check.
 """
 
 from __future__ import annotations
@@ -110,21 +122,33 @@ def main(argv: list[str] | None = None) -> int:
 
     store.init_pool()
 
-    if args.index is not None:
-        effective_index = args.index
-    elif args.clear_index:
-        effective_index = 0
+    # A pure "clear the key-index override, leave the active provider
+    # alone" never verifies -- same as old set_api_key.py's --clear, which
+    # never checked a credential before clearing one either. Clearing is
+    # exactly what an operator reaches for during a key rotation, precisely
+    # when a Render/local mismatch is most likely, so it must not be
+    # refusable. --clear-index WITHOUT --no-activate is NOT covered by this
+    # skip -- it also activates the provider at index 0, so verifying that
+    # index actually has a credential first is worthwhile and still runs
+    # below.
+    if args.clear_index and args.no_activate:
+        pass
     else:
-        effective_index = store.get_key_index_override(args.provider) or 0
+        if args.index is not None:
+            effective_index = args.index
+        elif args.clear_index:
+            effective_index = 0
+        else:
+            effective_index = store.get_key_index_override(args.provider) or 0
 
-    ok, message = _override.verify_render_slot(args.provider, effective_index)
-    if ok:
-        print(message)
-    elif args.force:
-        print(f"{message} -- proceeding anyway (--force)", file=sys.stderr)
-    else:
-        print(f"refusing to set the override: {message}", file=sys.stderr)
-        return 2
+        ok, message = _override.verify_render_slot(args.provider, effective_index)
+        if ok:
+            print(message)
+        elif args.force:
+            print(f"{message} -- proceeding anyway (--force)", file=sys.stderr)
+        else:
+            print(f"refusing to set the override: {message}", file=sys.stderr)
+            return 2
 
     now = datetime.now(timezone.utc).isoformat()
     if not args.no_activate:

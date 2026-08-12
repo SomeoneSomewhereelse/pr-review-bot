@@ -199,6 +199,67 @@ def test_clear_never_calls_the_render_verification(monkeypatch):
     assert set_override.main(["--clear"]) == 0
 
 
+def test_clear_index_without_activating_never_verifies(monkeypatch, db_url):
+    """Review-round fix: --clear-index --no-activate must never verify
+    against Render -- matches old set_api_key.py's --clear, which also
+    never checked a credential before clearing one. Mirrors
+    test_refuses_when_the_effective_slot_is_missing_on_render's setup
+    (the base GROQ_API_KEY is absent from Render's env vars, which WOULD
+    refuse the write if verification ran, since --clear-index's effective
+    index is always 0) but asserts success -- proving verification was
+    skipped entirely, not just that its result was overridden."""
+    set_override.main(["groq", "--index", "2", "--no-activate"])
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({"DATABASE_URL": db_url}))
+        )
+        code = set_override.main(["groq", "--clear-index", "--no-activate"])
+    assert code == 0
+    assert store.get_key_index_override("groq") is None
+    assert store.get_provider_override() is None
+
+
+def test_clear_index_without_activating_never_calls_the_render_verification(monkeypatch):
+    """Same property as the test above, proven the more direct way (like
+    test_clear_never_calls_the_render_verification above it): the shared
+    verify_render_slot is monkeypatched to blow up if called at all."""
+
+    def _boom(provider, index):
+        raise AssertionError("must not verify on --clear-index --no-activate")
+
+    set_override.main(["groq", "--index", "2", "--no-activate"])
+    monkeypatch.setattr(_override, "verify_render_slot", _boom)
+    assert set_override.main(["groq", "--clear-index", "--no-activate"]) == 0
+    assert store.get_key_index_override("groq") is None
+
+
+def test_clear_index_with_activating_still_verifies(monkeypatch, db_url, capsys):
+    """Unlike the --no-activate case above, --clear-index while ALSO
+    activating the provider does verify -- against index 0, the slot about
+    to become active -- because checking its target credential first is a
+    genuine, worthwhile check. The base GROQ_API_KEY is absent from Render's
+    env vars here, so this must refuse (exit 2) and leave both overrides
+    untouched, same as test_refuses_when_the_effective_slot_is_missing_on_render
+    does for --index."""
+    set_override.main(["groq", "--index", "2", "--no-activate"])
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({"DATABASE_URL": db_url}))
+        )
+        code = set_override.main(["groq", "--clear-index"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert store.get_provider_override() is None
+    assert store.get_key_index_override("groq") == 2
+    assert "GROQ_API_KEY" in err
+
+
 def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
