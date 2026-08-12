@@ -1,6 +1,6 @@
 # Demo plan — Zoom screen-share, course grading presentation
 
-Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10)
+Date: 2026-08-03 (rewritten 2026-08-10, rehearsed 2026-08-10, updated 2026-08-12)
 Status: **Rehearsed against the real hosted service.** Every segment below
 has run for real at least once, post-fixes. Numbers are measured, not
 estimated, unless explicitly marked otherwise.
@@ -136,6 +136,34 @@ pushes any locally-set provider credential, not just the selected one).
 is confirmed live and working again, but is not a useful tool for this
 specific segment with this account's current limits.**
 
+## Project updates since the last rehearsal (2026-08-12)
+
+Two more changes landed after the 2026-08-11 update below, re-verified live
+before touching this plan further:
+
+- **The dashboard now lives at `/`, not `/dashboard`.** `GET /dashboard` is
+  a plain **404** — confirmed live, there is no redirect kept for the old
+  path. Every reference below is updated to `https://pr-review-engine.onrender.com/`.
+- **A new "How it works" section renders on the same page, below the review
+  list** — five static steps (PR opened → diff fetched → 3 specialists in
+  parallel → findings merged → comment posted), confirmed present in the
+  live HTML (`id="howItWorks"`). It's translated UI chrome, not live data —
+  no new poll, no new endpoint. This is a genuinely useful visual aid for
+  Segment 1: it's the same flow the narration already covers, now visible
+  on the same tab as the live stats, so **Segment 1 can point at it instead
+  of (or alongside) narrating from memory.**
+- **A runtime-tunable re-review cooldown & escalation factor is in
+  progress, not deployed** (`docs/superpowers/specs/2026-08-12-runtime-cooldown-tuning-design.md`,
+  work-in-progress in a separate worktree). This would let Segment B's
+  ~5-minute cooldown wait be shortened live via a DB write (mirroring
+  `set_provider.py`), but it isn't in production yet — **this plan makes no
+  use of it.** Once it ships, revisit Segment B's wait-or-narrate fallback
+  (see "Open items" below).
+- **9 more leftover PRs (#10, #11, #12, #15, #16, #19, #20, #21, #22) from
+  the 2026-08-10 rehearsal were closed** at the start of this rehearsal
+  (2026-08-12) — the testbed repo is shared across rehearsals and needs
+  this sweep every time (see checklist item 5).
+
 ## Project updates since the rehearsal (2026-08-11)
 
 A dashboard feature and an audit fix round landed after the 2026-08-10
@@ -216,17 +244,21 @@ Gemini (different tokenizer/model, not independently targeted).
 
 ### 1. Architecture overview (~2 min)
 
-Narrate the flow from `README.md`/`SPEC.md`'s diagram: webhook → HMAC verify
+**Open `https://pr-review-engine.onrender.com/` in a second tab/window now**
+and leave it visible (polling every 4s) for the rest of the walkthrough.
+Narrate the flow from `README.md`/`SPEC.md`'s diagram (webhook → HMAC verify
 → dedup → durable Postgres ticket → single serial dispatcher → diff fetch +
 annotate → 3 concurrent specialists → merge (atomic on rate-limit, never
-partial otherwise) → upsert PR comment. Mention Render + Supabase as the
-production home.
+partial otherwise) → upsert PR comment), then **scroll to the "How it
+works" section on the same page** — it's the same five-step flow rendered
+as a visual, so the audience gets it twice, once spoken and once on
+screen, on the tab they're about to watch for the rest of the demo. Mention
+Render + Supabase as the production home.
 
-**Open `https://pr-review-engine.onrender.com/dashboard` in a second
-tab/window now** and leave it visible (polling every 4s) for the rest of the
-walkthrough — stat tiles (total reviews, cost, avg time), queue depth by
-status, per-provider backoff state, and a live review list are what turns
-every later segment from "trust me, it worked" into something the audience
+Scroll back up before moving on — stat tiles (total reviews, cost, avg
+time), queue depth by status, per-provider backoff state, and a live review
+list are what turns every later segment from "trust me, it worked" into
+something the audience
 watches happen in real time.
 
 ### 2. Happy path (~2 min) — establishes the baseline
