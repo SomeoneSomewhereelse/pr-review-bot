@@ -1266,6 +1266,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "provider",
+        # nargs="?": a required positional with no value at all makes
+        # argparse raise SystemExit(2) itself before main() ever runs, which
+        # would bypass this script's own "a provider is required" message
+        # and break `main([]) == 2` as a return value rather than an
+        # uncaught SystemExit. scripts/set_provider.py's `provider` carries
+        # the same nargs="?" for the identical reason.
+        nargs="?",
         help=f"one of: {', '.join(sorted(registry.PROVIDERS))}",
     )
     parser.add_argument(
@@ -1287,6 +1294,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    if not args.provider:
+        print("a provider is required", file=sys.stderr)
+        return 2
     if args.provider not in registry.PROVIDERS:
         accepted = ", ".join(sorted(registry.PROVIDERS))
         print(
