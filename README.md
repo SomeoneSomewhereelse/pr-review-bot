@@ -104,7 +104,7 @@ Run it from your own machine, not inside the Render container — `scripts/` is 
 copied into the Docker image, and `RENDER_EXTERNAL_URL` only exists inside
 Render's own container, which is why `PUBLIC_BASE_URL` is passed explicitly here.
 
-It prints one line per check and always runs all eight, so a single run
+It prints one line per check and always runs all nine, so a single run
 surfaces every problem rather than only the first:
 
 | Check | Verifies | Required? |
@@ -115,6 +115,7 @@ surfaces every problem rather than only the first:
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
 | `provider` | The provider that will actually run — `LLM_PROVIDER`, or an active **DB override** — has its credential set | optional |
 | `provider-live` | The actively-resolved provider's credential (env or DB override) is present on the deployed Render service — not just locally | optional |
+| `api-key-live` | The actively-resolved provider's actively-resolved key slot (base env var, or an `_N` slot set by a DB override) is present on the deployed Render service | optional |
 | `render-service` | The latest Render deploy is `live`, and (when a commit is comparable) matches local `HEAD` | optional |
 | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
@@ -133,12 +134,12 @@ actually active, not just the env var.
 In short: exit 0 means trust the table as-is, exit 1 means read the table for
 what to fix, exit 2 means the run never really started.
 
-Five checks are skipped with a hint unless you set the matching
+Six checks are skipped with a hint unless you set the matching
 operator-local key. None of these keys is ever set on the Render service
 itself:
 
 - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
-  `render-service`, `provider-live`, and `--sync-env`.
+  `render-service`, `provider-live`, `api-key-live`, and `--sync-env`.
 - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
 - `DATABASE_URL` enables both `database` and `provider` (the override lives
   in the same database). It is normally a Render dashboard secret; export it

@@ -44,7 +44,9 @@ def _build(provider: str, index: int) -> LLMProvider:
         return GeminiProvider(api_key=api_key)
     if provider == "groq":
         return GroqProvider(api_key=api_key)
-    return GitHubModelsProvider(api_key=api_key)
+    if provider == "github_models":
+        return GitHubModelsProvider(api_key=api_key)
+    raise ValueError(f"registry lists {provider!r} but _build cannot construct it")
 
 
 def get_provider() -> LLMProvider:
