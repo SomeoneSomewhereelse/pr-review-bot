@@ -89,7 +89,7 @@ def effective_config() -> tuple[float, float, float]:
     base = _base if _base is not None else settings.dispatcher_rereview_cooldown_seconds
     cap = _cap if _cap is not None else settings.dispatcher_rereview_cooldown_max_seconds
     factor = _factor if _factor is not None else settings.dispatcher_rereview_cooldown_factor
-    if factor < 1.0 or base > cap:
+    if factor < 1.0 or base > cap or base <= 0 or cap <= 0:
         return (
             settings.dispatcher_rereview_cooldown_seconds,
             settings.dispatcher_rereview_cooldown_max_seconds,
@@ -104,6 +104,9 @@ def reset_override_cache() -> None: ...
 A bad row (hand-edited, or a future bug) can never produce a broken effective
 cooldown — the whole override set is discarded for that read, not just the
 offending field, so a bad `factor` can't silently pair with a stale `base`/`cap`.
+The invalidity condition is `factor < 1.0 or base > cap or base <= 0 or cap <=
+0` — the last two guard against a non-positive base/cap silently switching
+off the churn protection the escalating cooldown exists for.
 
 - `store.effective_cooldown(level)` calls `cooldown_config.effective_config()`
   instead of reading `settings` directly.

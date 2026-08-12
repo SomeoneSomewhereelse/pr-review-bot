@@ -33,7 +33,7 @@ from app.formatting import (
 from app.orchestrator import ReviewRateLimited, attempt_review
 from app.providers import active
 from app.providers.active import active_provider
-from app.queue import store
+from app.queue import cooldown_config, store
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,17 @@ async def process_next_due(now: datetime) -> StepResult:
     except Exception:  # noqa: BLE001
         logger.exception("failed to refresh the provider override; using LLM_PROVIDER")
         active.set_override_cache(None)
+
+    # Refresh the cooldown override once per claimed ticket, same cadence and
+    # fail-safe shape as the provider-override refresh above: a failure here
+    # must never abort a review, and must never leave a stale cached override
+    # in place -- degrade all the way to the env defaults.
+    try:
+        base, cap, factor = await asyncio.to_thread(store.get_cooldown_overrides)
+        cooldown_config.set_override_cache(base, cap, factor)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to refresh the cooldown override; using env defaults")
+        cooldown_config.reset_override_cache()
 
     if ticket.notice_not_before is not None:
         try:

@@ -30,3 +30,9 @@ services:
         sync: false
       - key: GITHUB_MODELS_MODEL
         sync: false
+      - key: DISPATCHER_REREVIEW_COOLDOWN_SECONDS
+        sync: false
+      - key: DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS
+        sync: false
+      - key: DISPATCHER_REREVIEW_COOLDOWN_FACTOR
+        sync: false

@@ -12,7 +12,7 @@ import pytest
 
 from app.config import settings
 from app.providers import active
-from app.queue import dispatcher, store
+from app.queue import cooldown_config, dispatcher, store
 import app.orchestrator as orchestrator
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -26,6 +26,13 @@ def _env(db, monkeypatch):
     yield
     dispatcher.reset_blocked_until()
     active.reset_override_cache()
+
+
+@pytest.fixture(autouse=True)
+def _clean_cooldown_cache():
+    cooldown_config.reset_override_cache()
+    yield
+    cooldown_config.reset_override_cache()
 
 
 def _enqueue(pr, now=NOW):
@@ -747,4 +754,66 @@ async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch)
     _enqueue(1)
     result = await dispatcher.process_next_due(NOW)
     assert seen == ["gemini"]
+    assert result.action == "ran"
+
+
+async def test_claimed_ticket_uses_the_db_cooldown_override(monkeypatch):
+    """The behavioral guarantee: a mid-session cooldown override changes the
+    next scheduled re-review, with no restart and no redeploy."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 2.0)
+    store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=NOW.isoformat())
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        # A push lands mid-review -> dirty flag -> the cooldown actually gets
+        # consulted on the re-arm path (see store.finalize_review).
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=1, head_sha="sha2",
+            provider="groq", now=NOW.isoformat(),
+        )
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+    _enqueue(1)
+    await dispatcher.process_next_due(NOW)
+    t = store.get_ticket(1)
+    expected = NOW + timedelta(seconds=30.0)  # level 0 -> base override, not env 300s
+    assert t.not_before == expected.isoformat()
+
+
+async def test_claim_falls_back_to_env_cooldown_when_the_override_read_fails(monkeypatch):
+    """Fail-safe: an unreachable cooldown override must degrade to the
+    configured env defaults, never abort the review, and never keep serving a
+    stale cached override from a previous successful refresh."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 300.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 2.0)
+    # A prior successful refresh cached a DIFFERENT base. If the failure
+    # handler merely logged and left the cache alone, effective_cooldown would
+    # keep using 30.0 forever -- this is what catches that.
+    cooldown_config.set_override_cache(30.0, 600.0, 1.5)
+
+    def boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(store, "get_cooldown_overrides", boom)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        # A push lands mid-review -> dirty flag -> the cooldown actually gets
+        # consulted on the re-arm path (see store.finalize_review).
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=1, head_sha="sha2",
+            provider="groq", now=NOW.isoformat(),
+        )
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+    _enqueue(1)
+    result = await dispatcher.process_next_due(NOW)
+    t = store.get_ticket(1)
+    expected = NOW + timedelta(seconds=300.0)  # env default, not the stale 30.0
+    assert t.not_before == expected.isoformat()
     assert result.action == "ran"

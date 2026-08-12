@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     dispatcher_backoff_jitter_seconds: float = 0.0
     dispatcher_rereview_cooldown_seconds: float = 300.0
     dispatcher_rereview_cooldown_max_seconds: float = 3600.0
+    # ge=1.0: a factor < 1 would shrink the cooldown across escalation
+    # levels instead of lengthening it, defeating the point of escalation.
+    dispatcher_rereview_cooldown_factor: float = Field(default=2.0, ge=1.0)
     # gt=0: 0 would silently disable the notice sweep entirely, and -1 means
     # "no limit" in SQLite, silently reverting to the unbounded pre-fix
     # behavior this setting exists to prevent.

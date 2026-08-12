@@ -22,6 +22,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from app.config import settings
+from app.queue import cooldown_config
 from app.specialists.schemas import ReviewResult
 
 _SCHEMA = """
@@ -49,6 +50,9 @@ CREATE TABLE IF NOT EXISTS runtime_config (
     provider   TEXT,
     updated_at TEXT NOT NULL
 );
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_base_seconds DOUBLE PRECISION;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_max_seconds  DOUBLE PRECISION;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_factor       DOUBLE PRECISION;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,
@@ -161,15 +165,16 @@ _MAX_COOLDOWN_LEVEL = 30
 
 
 def effective_cooldown(level: int) -> float:
-    """Escalated per-PR cooldown: min(base * 2^min(level, _MAX_COOLDOWN_LEVEL), cap).
+    """Escalated per-PR cooldown: min(base * factor^min(level, _MAX_COOLDOWN_LEVEL), cap).
 
     level 0 -> base (identical to a non-escalating cooldown, so normal PRs are
     unaffected). Each consecutive rapid re-review raises the level, geometrically
-    lengthening the next wait, capped at dispatcher_rereview_cooldown_max_seconds.
+    lengthening the next wait, capped at the effective cap. base/cap/factor come
+    from cooldown_config.effective_config() -- a DB override when set and valid,
+    else the env-configured defaults.
     """
-    base = settings.dispatcher_rereview_cooldown_seconds
-    cap = settings.dispatcher_rereview_cooldown_max_seconds
-    return max(base, min(base * 2 ** min(level, _MAX_COOLDOWN_LEVEL), cap))
+    base, cap, factor = cooldown_config.effective_config()
+    return max(base, min(base * factor ** min(level, _MAX_COOLDOWN_LEVEL), cap))
 
 
 def next_cooldown_level(level: int) -> int:
@@ -529,4 +534,44 @@ def set_provider_override(provider: str | None, now: str) -> None:
             "ON CONFLICT (id) DO UPDATE SET provider = EXCLUDED.provider, "
             "updated_at = EXCLUDED.updated_at",
             (provider, now),
+        )
+
+
+def get_cooldown_overrides() -> tuple[float | None, float | None, float | None]:
+    """(base, cap, factor) overrides in force, or (None, None, None) when unset.
+
+    Synchronous like every other store function -- async callers use
+    asyncio.to_thread.
+    """
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT cooldown_base_seconds, cooldown_max_seconds, cooldown_factor "
+            "FROM runtime_config WHERE id = 1"
+        ).fetchone()
+    if row is None:
+        return (None, None, None)
+    return (row["cooldown_base_seconds"], row["cooldown_max_seconds"], row["cooldown_factor"])
+
+
+def set_cooldown_override(
+    base: float | None, cap: float | None, factor: float | None, now: str
+) -> None:
+    """Set the (base, cap, factor) override triple, or clear a field with None.
+
+    Upserts the singleton row -- same CHECK (id = 1) guarantee as
+    set_provider_override. Writes exactly the three values it's given; a
+    caller wanting to change only one field is responsible for reading the
+    current triple first (see scripts/set_cooldown.py).
+    """
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO runtime_config "
+            "(id, cooldown_base_seconds, cooldown_max_seconds, cooldown_factor, updated_at) "
+            "VALUES (1, %s, %s, %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "cooldown_base_seconds = EXCLUDED.cooldown_base_seconds, "
+            "cooldown_max_seconds = EXCLUDED.cooldown_max_seconds, "
+            "cooldown_factor = EXCLUDED.cooldown_factor, "
+            "updated_at = EXCLUDED.updated_at",
+            (base, cap, factor, now),
         )
