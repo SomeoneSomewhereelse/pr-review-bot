@@ -100,6 +100,13 @@ Full click-by-click detail for each: [`SETUP.md`](SETUP.md) §3.
 PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy
 ```
 
+PowerShell:
+
+```powershell
+$env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
+uv run python -m scripts.deploy
+```
+
 Run it from your own machine, not inside the Render container — `scripts/` is not
 copied into the Docker image, and `RENDER_EXTERNAL_URL` only exists inside
 Render's own container, which is why `PUBLIC_BASE_URL` is passed explicitly here.
@@ -151,6 +158,13 @@ With `RENDER_API_KEY` set, this is a complete, repeatable deploy:
 
 ```bash
 PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
+```
+
+PowerShell:
+
+```powershell
+$env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
+uv run python -m scripts.deploy --sync-env
 ```
 
 The push set is **provider-derived**, not a fixed list: it always pushes
