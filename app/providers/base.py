@@ -52,7 +52,7 @@ class LLMProvider(Protocol):
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse: ...
 
 
-KNOWN_PROVIDERS = ("gemini", "groq", "github_models")
+KNOWN_PROVIDERS = ("gemini", "groq")
 
 
 class RateLimited(Exception):

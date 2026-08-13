@@ -128,7 +128,7 @@ def test_factory_rejects_retired_vertex_provider(monkeypatch):
     with pytest.raises(ValueError) as exc:
         get_provider()
     assert "vertex" in str(exc.value)
-    assert "'gemini', 'groq', or 'github_models'" in str(exc.value)
+    assert "'gemini' or 'groq'" in str(exc.value)
 
 
 def test_factory_selects_groq(monkeypatch):
@@ -143,16 +143,6 @@ def test_factory_selects_groq(monkeypatch):
     assert isinstance(get_provider(), GroqProvider)
 
 
-def test_factory_selects_github_models(monkeypatch):
-    # AsyncOpenAI raises immediately on a missing/empty api_key, so a fresh
-    # checkout with no real .env (e.g. CI) needs a dummy non-empty value.
-    monkeypatch.setattr(settings, "llm_provider", "github_models")
-    monkeypatch.setattr(settings, "github_models_token", "dummy-token-for-construction-only")
-    from app.providers.github_models import GitHubModelsProvider
-
-    assert isinstance(get_provider(), GitHubModelsProvider)
-
-
 def test_factory_raises_for_unknown_provider(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "bogus")
     with pytest.raises(ValueError):
@@ -162,9 +152,9 @@ def test_factory_raises_for_unknown_provider(monkeypatch):
 def test_factory_raises_a_clear_error_for_an_unprovisioned_key_index(monkeypatch):
     """The locally-detectable invalid-state case: activating gemini at index 1
     when only GEMINI_API_KEY (index 0) exists anywhere. Distinct from a
-    dead-but-configured provider (e.g. github_models' real retirement),
-    which must NOT be affected by this check -- that case has a real,
-    non-empty credential and fails at the live call, unchanged."""
+    dead-but-configured provider (a real credential for a vendor that's down
+    or retired), which must NOT be affected by this check -- that case has a
+    real, non-empty credential and fails at the live call, unchanged."""
     from app.providers import key_index
     from app.providers.factory import reset_provider_cache
 
@@ -187,11 +177,11 @@ def test_factory_raises_a_clear_error_for_an_unprovisioned_key_index(monkeypatch
 def test_factory_unaffected_by_a_dead_but_configured_provider(monkeypatch):
     """A real, non-empty credential must still reach client construction --
     this check only catches an EMPTY resolved value, nothing else."""
-    monkeypatch.setattr(settings, "llm_provider", "github_models")
-    monkeypatch.setattr(settings, "github_models_token", "ghp_real_but_dead")
-    from app.providers.github_models import GitHubModelsProvider
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "gsk_real_but_dead")
+    from app.providers.groq import GroqProvider
 
-    assert isinstance(get_provider(), GitHubModelsProvider)
+    assert isinstance(get_provider(), GroqProvider)
 
 
 def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
@@ -366,10 +356,3 @@ def test_estimate_cost_usd_groq_llama():
 def test_estimate_cost_usd_groq_unknown_model_raises():
     with pytest.raises(KeyError):
         pricing.estimate_cost_usd("groq", "no-such-model", tokens_in=1, tokens_out=1)
-
-
-def test_estimate_cost_usd_github_models_is_free():
-    cost = pricing.estimate_cost_usd(
-        "github_models", "openai/gpt-4o-mini", tokens_in=4_000, tokens_out=500
-    )
-    assert cost == 0.0

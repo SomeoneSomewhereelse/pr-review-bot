@@ -31,7 +31,7 @@ async def test_empty_state_shape():
     assert body["queue"]["by_status"] == {
         "pending": 0, "running": 0, "deferred": 0, "retrying": 0, "done": 0, "failed": 0,
     }
-    assert body["queue"]["backoff"] == {"gemini": None, "groq": None, "github_models": None}
+    assert body["queue"]["backoff"] == {"gemini": None, "groq": None}
     assert body["reviews"] == []
 
 

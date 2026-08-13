@@ -19,7 +19,6 @@ from __future__ import annotations
 from app.providers import credentials, key_index, registry
 from app.providers.active import active_provider
 from app.providers.base import LLMProvider
-from app.providers.github_models import GitHubModelsProvider
 from app.providers.google_genai import GeminiProvider
 from app.providers.groq import GroqProvider
 
@@ -35,10 +34,7 @@ def _build(provider: str, index: int) -> LLMProvider:
     # message naming the accepted providers -- resolving first would raise
     # the wrong exception type before ever reaching the check below.
     if provider not in registry.PROVIDERS:
-        raise ValueError(
-            f"Unknown provider: {provider!r} "
-            "(expected 'gemini', 'groq', or 'github_models')"
-        )
+        raise ValueError(f"Unknown provider: {provider!r} (expected 'gemini' or 'groq')")
     env_name, api_key = credentials.resolve(provider, index)
     # Locally-detectable invalid state: no live call needed to know this slot
     # was never provisioned anywhere. Caught by run_specialist's existing
@@ -56,8 +52,6 @@ def _build(provider: str, index: int) -> LLMProvider:
         return GeminiProvider(api_key=api_key)
     if provider == "groq":
         return GroqProvider(api_key=api_key)
-    if provider == "github_models":
-        return GitHubModelsProvider(api_key=api_key)
     raise ValueError(f"registry lists {provider!r} but _build cannot construct it")
 
 

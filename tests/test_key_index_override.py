@@ -41,7 +41,6 @@ def test_providers_track_independent_indices():
     store.set_key_index_override("gemini", 1, T0)
     assert store.get_key_index_override("groq") == 2
     assert store.get_key_index_override("gemini") == 1
-    assert store.get_key_index_override("github_models") is None
 
 
 def test_get_all_key_index_overrides_returns_only_the_set_ones():

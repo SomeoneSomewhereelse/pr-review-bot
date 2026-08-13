@@ -24,8 +24,6 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
-    github_models_token: str = ""
-    github_models_model: str = "openai/gpt-4o-mini"
     # Ceiling on a single LLM request, in seconds. The dispatcher is a single
     # serial consumer of the whole queue (app/queue/dispatcher.py) -- a hung
     # call with no timeout would stall every pending PR's review, not just

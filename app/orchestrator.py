@@ -41,16 +41,13 @@ _SPECIALIST_NAMES = ("Security", "Performance", "Code Quality")
 def _active_model() -> str:
     """Return the model name for whichever provider is actually active.
 
-    ``settings.llm_model`` only applies to the gemini provider; groq and
-    github_models each have their own model var (see config.py's comment on
-    why a single shared var became ambiguous once more than one provider
-    family entered the picture).
+    ``settings.llm_model`` only applies to the gemini provider; groq has its
+    own model var (see config.py's comment on why a single shared var became
+    ambiguous once more than one provider family entered the picture).
     """
     provider = active_provider()
     if provider == "groq":
         return settings.groq_model
-    if provider == "github_models":
-        return settings.github_models_model
     return settings.llm_model
 
 

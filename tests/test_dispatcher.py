@@ -288,9 +288,9 @@ async def test_blocked_gate_uses_current_settings_provider_not_stale_ticket_prov
     different name to simulate LLM_PROVIDER having changed with a ticket
     still in flight."""
     posted = _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "llm_provider", "github_models")
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
     _enqueue(pr=7)  # ticket.provider == "groq" (stale, from _enqueue helper)
-    dispatcher._blocked_until["github_models"] = NOW + timedelta(seconds=120)
+    dispatcher._blocked_until["gemini"] = NOW + timedelta(seconds=120)
 
     called = []
 

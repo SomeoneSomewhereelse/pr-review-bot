@@ -27,7 +27,7 @@ def _no_real_provider_credentials(monkeypatch):
     """deploy.py's tests never need a real provider key, and _wanted_env now
     reads every provider's credential -- so without this, a developer's .env
     flows into mocked request bodies and out through any respx match failure."""
-    for name in ("gemini_api_key", "groq_api_key", "github_models_token"):
+    for name in ("gemini_api_key", "groq_api_key"):
         monkeypatch.setattr(settings, name, "")
 
 
@@ -131,23 +131,23 @@ def test_check_config_names_every_missing_key_at_once(complete_config, monkeypat
 
 
 def test_check_config_requires_the_key_for_the_selected_provider(complete_config, monkeypatch):
-    monkeypatch.setattr(settings, "llm_provider", "github_models")
-    monkeypatch.setattr(settings, "github_models_token", "")
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+    monkeypatch.setattr(settings, "groq_api_key", "")
     result = deploy.check_config()
     assert result.status == "FAIL"
-    assert "GITHUB_MODELS_TOKEN" in result.detail
+    assert "GROQ_API_KEY" in result.detail
 
 
 def test_check_config_ignores_provider_keys_for_other_providers(complete_config, monkeypatch):
-    """groq is selected, so a missing GITHUB_MODELS_TOKEN is irrelevant."""
-    monkeypatch.setattr(settings, "github_models_token", "")
+    """groq is selected, so a missing GEMINI_API_KEY is irrelevant."""
+    monkeypatch.setattr(settings, "gemini_api_key", "")
     assert deploy.check_config().status == "PASS"
 
 
 def test_providers_table_covers_every_supported_provider():
     """One table, read by check_config, --sync-env and set_override.py, so a
     provider cannot be known to one consumer and unknown to another."""
-    assert set(deploy._PROVIDERS) == {"gemini", "groq", "github_models"}
+    assert set(deploy._PROVIDERS) == {"gemini", "groq"}
     for credential, model_var in deploy._PROVIDERS.values():
         assert credential and model_var
 
@@ -775,7 +775,6 @@ def gemini_only_config(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
     monkeypatch.setattr(settings, "groq_api_key", "")
-    monkeypatch.setattr(settings, "github_models_token", "")
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     # database_url is a dummy, unreachable host -- stub psycopg.connect so the
@@ -800,7 +799,6 @@ def test_wanted_env_omits_unset_credentials_of_other_providers(gemini_only_confi
     provider's key -- the whole point of opt-in provider config."""
     wanted = deploy._wanted_env()
     assert "GROQ_API_KEY" not in wanted
-    assert "GITHUB_MODELS_TOKEN" not in wanted
 
 
 def test_wanted_env_includes_other_credentials_that_are_set(
@@ -820,7 +818,6 @@ def test_sync_env_does_not_demand_other_providers_keys(
     code = deploy.sync_env()
     err = capsys.readouterr().err
     assert "GROQ_API_KEY" not in err
-    assert "GITHUB_MODELS_TOKEN" not in err
     assert code == 1          # got past the guards, failed on the missing service
 
 
@@ -851,7 +848,6 @@ def sync_ready(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
-    monkeypatch.setattr(settings, "github_models_token", "ghp_x")
     monkeypatch.setattr(deploy.time, "sleep", lambda _seconds: None)
     # database_url is a dummy, unreachable host -- stub psycopg.connect so the
     # masking guard's "no override" outcome is deterministic rather than an

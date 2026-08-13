@@ -2,8 +2,7 @@
 
 Uses a lightweight fake exception (status_code/code + response.headers) rather
 than constructing real SDK error objects, so the test is SDK-agnostic and makes
-no network call. Live confirmation that GitHub Models actually sends Retry-After
-is a separate one-deliberate-call verification (per CLAUDE.md hygiene).
+no network call.
 """
 from __future__ import annotations
 

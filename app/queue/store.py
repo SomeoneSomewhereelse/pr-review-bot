@@ -54,9 +54,8 @@ CREATE TABLE IF NOT EXISTS runtime_config (
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_base_seconds DOUBLE PRECISION;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_max_seconds  DOUBLE PRECISION;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_factor       DOUBLE PRECISION;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_key_index        INTEGER;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_key_index          INTEGER;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS github_models_key_index INTEGER;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_key_index INTEGER;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_key_index   INTEGER;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,

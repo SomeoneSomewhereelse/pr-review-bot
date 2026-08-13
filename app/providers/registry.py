@@ -14,7 +14,6 @@ from __future__ import annotations
 PROVIDERS = {
     "gemini": ("GEMINI_API_KEY", "LLM_MODEL"),
     "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
-    "github_models": ("GITHUB_MODELS_TOKEN", "GITHUB_MODELS_MODEL"),
 }
 
 # provider -> the runtime_config column holding its active API-key-slot
@@ -25,5 +24,4 @@ PROVIDERS = {
 KEY_INDEX_COLUMNS = {
     "gemini": "gemini_key_index",
     "groq": "groq_key_index",
-    "github_models": "github_models_key_index",
 }

@@ -171,9 +171,8 @@ The push set is **provider-derived**, not a fixed list: it always pushes
 `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
 `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, and `LLM_PROVIDER`, plus the
 **selected provider's** credential and model var — e.g. `LLM_PROVIDER=groq`
-pushes `GROQ_API_KEY` and `GROQ_MODEL`, not `GEMINI_API_KEY`/`LLM_MODEL` or
-`GITHUB_MODELS_TOKEN`/`GITHUB_MODELS_MODEL`. Any *other* provider's
-credential is pushed too, but only if you happen to have it set locally —
+pushes `GROQ_API_KEY` and `GROQ_MODEL`, not `GEMINI_API_KEY`/`LLM_MODEL`. Any
+*other* provider's credential is pushed too, but only if you happen to have it set locally —
 an unselected provider's key is never demanded. It refuses to start (exit 2)
 if any wanted value is empty locally, so a blank `.env` entry can never
 overwrite a working secret on the service; only changed variables are
@@ -311,7 +310,6 @@ CI. Each is self-contained and prints what it's proving:
 | `scripts/manual_verify_step3.py` | GitHub App auth, diff fetch, comment upsert (edit-in-place) against a real PR |
 | `scripts/manual_verify_step4.py` | Gemini provider through the validate-repair layer |
 | `scripts/manual_verify_groq.py` | Groq provider through the validate-repair layer |
-| `scripts/manual_verify_github_models.py` | GitHub Models provider through the validate-repair layer |
 | `scripts/seed_demo_pr.py` | Opens a real PR with planted issues (`fixtures/bad_code/`) on the test repo |
 | `scripts/demo_provider_swap.py` | `LLM_PROVIDER` is a genuine runtime seam — see below for this script's current expected behavior |
 
@@ -349,15 +347,6 @@ the full history of runs and timings.
 - **Groq is the primary live provider** (`LLM_PROVIDER=groq`,
   `llama-3.3-70b-versatile`) — pulled forward from a later build step
   specifically to have a working live path.
-- **GitHub Models is a second, genuinely live cross-vendor provider**
-  (`LLM_PROVIDER=github_models`, `openai/gpt-4o-mini`) — rides the user's
-  existing GitHub account (a fine-grained PAT with the "Models" permission),
-  no separate signup/account-flagging risk. Real OpenAI models, a different
-  vendor and model family from both Gemini (Google) and Groq (Llama) —
-  live-verified end-to-end (all three specialists, real PR comment, 7.5s).
-  Free tier caps are modest (single-digit RPM, ~150 requests/day on the
-  low-access-tier models) — fine for demonstration, a real constraint at any
-  meaningful sustained volume.
 - **Docker**: fully verified (`docker build` + container boot + endpoint
   checks) — installed partway through development, not from the start.
 - **Durable review queue is single-process** (see `SPEC.md` §12) — one
@@ -373,10 +362,7 @@ the full history of runs and timings.
   Accepted cost of a simple, atomic review pipeline.
 - **`DEFAULT_RETRY_AFTER_SECONDS` (default 60) is a backoff fallback**, used
   only when a `429` omits a usable `Retry-After` header — not a per-provider
-  cap. Groq is documented to send `retry-after`; **GitHub Models sending a
-  usable `Retry-After` is still an open assumption**, to be confirmed with a
-  single live call per `CLAUDE.md`'s hygiene rules (not yet performed as of
-  this writing) — until then, that provider's backoff runs on the fallback.
+  cap. Groq is documented to send `retry-after`.
 
 See `SETUP.md` for the full narrative of each deviation, including what was
 tried and why.

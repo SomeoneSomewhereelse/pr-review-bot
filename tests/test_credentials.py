@@ -23,6 +23,4 @@ def test_a_missing_numbered_slot_resolves_to_an_empty_string(monkeypatch):
 
 def test_resolves_correctly_for_every_provider(monkeypatch):
     monkeypatch.setattr(settings, "gemini_api_key", "gk_x")
-    monkeypatch.setattr(settings, "github_models_token", "ghm_x")
     assert credentials.resolve("gemini", 0) == ("GEMINI_API_KEY", "gk_x")
-    assert credentials.resolve("github_models", 0) == ("GITHUB_MODELS_TOKEN", "ghm_x")
