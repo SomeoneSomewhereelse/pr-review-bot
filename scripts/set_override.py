@@ -131,9 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     # skip -- it also activates the provider at index 0, so verifying that
     # index actually has a credential first is worthwhile and still runs
     # below.
-    if args.clear_index and args.no_activate:
-        pass
-    else:
+    if not (args.clear_index and args.no_activate):
         if args.index is not None:
             effective_index = args.index
         elif args.clear_index:
@@ -150,16 +148,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"refusing to set the override: {message}", file=sys.stderr)
             return 2
 
+    # Index write before provider-activation write (not the reverse): these
+    # are two separate statements, not one transaction (see the design doc's
+    # non-atomic-by-choice decision), so this order picks the safer partial-
+    # failure mode -- if the second write never happens, the index changed
+    # but the provider isn't active yet, so nothing behavior-visible changes
+    # until both succeed. The reverse order would leave a provider active
+    # against a stale index if only the first write landed.
     now = datetime.now(timezone.utc).isoformat()
-    if not args.no_activate:
-        store.set_provider_override(args.provider, now)
-        print(f"provider override set to {args.provider}")
     if args.index is not None:
         store.set_key_index_override(args.provider, args.index, now)
         print(f"{args.provider} key-index override set to {args.index}")
     elif args.clear_index:
         store.set_key_index_override(args.provider, None, now)
         print(f"{args.provider} key-index override cleared")
+    if not args.no_activate:
+        store.set_provider_override(args.provider, now)
+        print(f"provider override set to {args.provider}")
 
     return 0
 

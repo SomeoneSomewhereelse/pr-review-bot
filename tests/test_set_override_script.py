@@ -56,6 +56,17 @@ def test_activates_and_sets_index_together():
     assert store.get_key_index_override("groq") == 1
 
 
+def test_explicit_index_0_is_not_treated_as_unset():
+    """--index 0 must take the explicit-index branch (args.index is not
+    None), not fall through to the "neither given" branch that reads the
+    existing override -- both currently resolve to the same effective
+    index, but only if the explicit-0 path is actually taken."""
+    set_override.main(["groq", "--index", "2", "--no-activate"])
+    assert set_override.main(["groq", "--index", "0"]) == 0
+    assert store.get_provider_override() == "groq"
+    assert store.get_key_index_override("groq") == 0
+
+
 def test_activates_and_clears_index_together():
     set_override.main(["groq", "--index", "1", "--no-activate"])
     assert set_override.main(["groq", "--clear-index"]) == 0
@@ -95,10 +106,12 @@ def test_clear_must_be_used_alone_with_a_provider(capsys):
 
 def test_clear_must_be_used_alone_with_an_index(capsys):
     assert set_override.main(["--clear", "--index", "1"]) == 2
+    assert "alone" in capsys.readouterr().err
 
 
 def test_index_and_clear_index_are_mutually_exclusive(capsys):
     assert set_override.main(["groq", "--index", "1", "--clear-index"]) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
 
 
 def test_no_activate_requires_index_or_clear_index(capsys):
