@@ -296,7 +296,7 @@ field (the app code will decode it at startup).
    | `render-service` | The latest Render deploy is `live`, and (when a commit is comparable) matches local `HEAD` | optional |
    | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
-   A **DB override** is a runtime provider swap: `scripts/set_provider.py`
+   A **DB override** is a runtime provider swap: `scripts/set_override.py`
    (§3.6 below) writes a provider name straight into the `runtime_config`
    table, and it wins over the `LLM_PROVIDER` env var starting at the
    dispatcher's next claimed ticket — no restart, no redeploy. `provider`
@@ -352,7 +352,7 @@ field (the app code will decode it at startup).
    If a DB override is active and disagrees with the `LLM_PROVIDER` you're
    about to push, `--sync-env` refuses (exit 2) — pushing would be pointless,
    since the override wins at runtime anyway. Clear it first:
-   `uv run python -m scripts.set_provider --clear` (§3.6).
+   `uv run python -m scripts.set_override --clear` (§3.6).
 
    Before it triggers anything, it waits for any deploy already in progress
    to settle (it never stacks a second deploy on top of one still building)
@@ -383,33 +383,46 @@ schedule. Use an interval of **5 minutes**; anything above 10 lets Render's
 ~15-minute spin-down win. UptimeRobot's free tier sends `HEAD` rather than
 `GET`, which is why `/healthz` answers both verbs.
 
-### 3.6 Switching providers live: `scripts/set_provider.py`
+### 3.6 Switching providers and API keys live: `scripts/set_override.py`
 
 ```bash
-uv run python -m scripts.set_provider groq       # set the override
-uv run python -m scripts.set_provider --clear    # remove it
+uv run python -m scripts.set_override groq                   # activate a provider
+uv run python -m scripts.set_override --clear                 # remove the provider override
+uv run python -m scripts.set_override groq --index 2          # activate groq AND its index-2 slot, together
+uv run python -m scripts.set_override groq --index 2 --no-activate   # index only, leave the active provider alone
+uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only
 ```
 
-This writes a row to the `runtime_config` table in whatever database
-`DATABASE_URL` currently resolves to — **not** necessarily production. Run it
-with your local `.env` and you get a purely local override; it reaches the
-production service only if your local `DATABASE_URL` happens to be the
-production one. The override takes effect on the **next ticket the
-dispatcher claims** — no restart, no redeploy, which is what makes it useful
-for a live provider-swap demo (build step 7's `demo_provider_swap.py`
-predates this and used two `uvicorn` restarts instead; a follow-up spec
-rewrite is tracked but deferred).
+This writes a provider override and/or a provider's key-index override to
+the `runtime_config` table in whatever database `DATABASE_URL` currently
+resolves to — **not** necessarily production. Run it with your local `.env`
+and you get a purely local override; it reaches the production service only
+if your local `DATABASE_URL` happens to be the production one. The override
+takes effect on the **next ticket the dispatcher claims** — no restart, no
+redeploy, which is what makes it useful for a live provider-swap demo (build
+step 7's `demo_provider_swap.py` predates this and used two `uvicorn`
+restarts instead; a follow-up spec rewrite is tracked but deferred).
 
-Before writing a non-cleared override, `set_provider.py` verifies the target
-provider's credential against the live Render service — when `RENDER_API_KEY`
-is set, and only when the local `DATABASE_URL` is actually the one Render
-reads (if it isn't, e.g. you're testing against a local database, the write
-cannot affect production and verification is skipped automatically). It
-refuses by default (exit 2) if the credential is missing on Render or differs
-from your local `.env` value; pass `--force` to write the override anyway.
-`scripts/deploy.py`'s `provider-live` check is the read-only counterpart to
-this guard, and both are built on the same `GET
-/v1/services/{id}/env-vars` call.
+Each provider's credential env var can have numbered siblings (`GROQ_API_KEY`,
+`GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ...), provisioned like any other env var
+(one redeploy, via `--sync-env` or the Render dashboard, to add a slot). Each
+provider tracks its own key-index independently, and no secret value is ever
+written to, read from, or logged by the database — only the slot's integer
+index is.
+
+Before writing, `set_override.py` verifies against the **effective** index —
+whichever index will actually be active for that provider after the write —
+against the live Render service, when `RENDER_API_KEY` is set and only when
+the local `DATABASE_URL` is actually the one Render reads (if it isn't, e.g.
+you're testing against a local database, the write cannot affect production
+and verification is skipped automatically). It refuses by default (exit 2) if
+the target credential is missing on Render or, for index 0, differs from your
+local `.env` value; pass `--force` to write the override anyway. Clearing the
+index override with `--no-activate` never verifies at all — a key rotation
+must not be blockable by a Render/local mismatch. `scripts/deploy.py`'s
+`provider-live` and `api-key-live` checks are the read-only counterparts to
+this guard, and both are built on the same `GET /v1/services/{id}/env-vars`
+call.
 
 ### 3.7 Tuning the re-review cooldown live: `scripts/set_cooldown.py`
 
@@ -419,7 +432,7 @@ uv run python -m scripts.set_cooldown --cap 600
 uv run python -m scripts.set_cooldown --clear                  # remove the override
 ```
 
-Same pattern as `set_provider.py` above: this writes the base/cap/factor
+Same pattern as `set_override.py` above: this writes the base/cap/factor
 override to the `runtime_config` table in whatever database `DATABASE_URL`
 currently resolves to — a local `.env` run sets a purely local override.
 It takes effect on the **next ticket the dispatcher claims** — no restart,
@@ -427,7 +440,7 @@ no redeploy — which is what makes it useful for showing the escalating
 cooldown speed up on stage instead of waiting out the 300s/3600s production
 defaults.
 
-Unlike `set_provider.py` there's no credential at stake, only numbers, so a
+Unlike `set_override.py` there's no credential at stake, only numbers, so a
 non-cleared write is never refused for a credential reason; before writing,
 it only checks (when `RENDER_API_KEY` is set) whether the local
 `DATABASE_URL` matches the live Render service's, purely as an informational

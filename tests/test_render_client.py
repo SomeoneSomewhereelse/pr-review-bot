@@ -1,5 +1,6 @@
 """Direct unit tests for scripts/_render.py, the shared Render API access
-module used by scripts/deploy.py and scripts/set_provider.py."""
+module used by scripts/deploy.py and scripts/set_cooldown.py (via
+scripts/_override.py, also used by scripts/set_override.py)."""
 
 from __future__ import annotations
 

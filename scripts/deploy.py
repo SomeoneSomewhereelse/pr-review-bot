@@ -109,7 +109,7 @@ def resolve_base_url() -> str:
 # Single source of truth for provider -> env-var-name mappings, shared with
 # app/ -- see app/providers/registry.py. _PROVIDERS is kept as a
 # module-level alias so every existing call site in this file (and in
-# scripts/set_provider.py) keeps working unchanged.
+# scripts/set_override.py) keeps working unchanged.
 _PROVIDERS = registry.PROVIDERS
 
 
@@ -725,7 +725,7 @@ def sync_env() -> int:
             print(
                 f"refusing to sync: a DB provider override ({override}) is active and "
                 f"wins over the LLM_PROVIDER={settings.llm_provider} being pushed. "
-                "Clear it first: uv run python -m scripts.set_provider --clear",
+                "Clear it first: uv run python -m scripts.set_override --clear",
                 file=sys.stderr,
             )
             return 2

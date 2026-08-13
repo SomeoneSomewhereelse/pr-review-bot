@@ -145,7 +145,7 @@ def test_check_config_ignores_provider_keys_for_other_providers(complete_config,
 
 
 def test_providers_table_covers_every_supported_provider():
-    """One table, read by check_config, --sync-env and set_provider.py, so a
+    """One table, read by check_config, --sync-env and set_override.py, so a
     provider cannot be known to one consumer and unknown to another."""
     assert set(deploy._PROVIDERS) == {"gemini", "groq", "github_models"}
     for credential, model_var in deploy._PROVIDERS.values():
@@ -1638,5 +1638,5 @@ def test_sync_env_refuses_when_an_override_would_mask_the_push(
     code = deploy.sync_env()
     assert code == 2
     err = capsys.readouterr().err
-    assert "groq" in err and "set_provider" in err
+    assert "groq" in err and "set_override" in err
     assert called == []

@@ -396,7 +396,7 @@ in `render.yaml` and editable in the Render dashboard (redeploys on change).
 For live tuning without a redeploy — e.g. shrinking the base to a few seconds
 for a demo — `scripts/set_cooldown.py` writes a DB-backed override to the same
 `runtime_config` singleton row the LLM-provider override already uses
-(`scripts/set_provider.py`); it takes effect on the next claimed ticket. A
+(`scripts/set_override.py`); it takes effect on the next claimed ticket. A
 read of the override that comes back invalid (`factor < 1.0`, or `base > cap`)
 is discarded as a whole triple and falls back to the env defaults —
 `app/queue/cooldown_config.py` mirrors `app/providers/active.py`'s fail-safe
@@ -407,7 +407,7 @@ numbered siblings (`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ...),
 provisioned like any other env var (one redeploy to add a slot). A separate
 `runtime_config` override per provider (`gemini_key_index`, `groq_key_index`,
 `github_models_key_index`) records which slot is active; `NULL` means index
-0, the base env var. `scripts/set_api_key.py` writes it — the same
+0, the base env var. `scripts/set_override.py` writes it — the same
 no-redeploy, next-claimed-ticket mechanics as the provider/cooldown
 overrides — and no secret ever reaches Postgres: only the integer index
 does. `app/providers/factory.py` keys its client cache by `(provider,

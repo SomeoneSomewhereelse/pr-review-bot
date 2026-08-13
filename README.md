@@ -127,10 +127,10 @@ surfaces every problem rather than only the first:
 | `uptime-pinger` | A monitor targets `/healthz` exactly, is active, and polls at most every 10 minutes | optional |
 
 A **DB override** is a provider swap written straight into the
-`runtime_config` table by `scripts/set_provider.py` (see "Switching providers
-without a redeploy" below) — it wins over `LLM_PROVIDER` at runtime with no
-restart and no redeploy, so `provider` resolves and checks whichever one is
-actually active, not just the env var.
+`runtime_config` table by `scripts/set_override.py` (see "Switching providers
+and API keys without a redeploy" below) — it wins over `LLM_PROVIDER` at
+runtime with no restart and no redeploy, so `provider` resolves and checks
+whichever one is actually active, not just the env var.
 
 | Exit | Meaning |
 | --- | --- |
@@ -182,7 +182,7 @@ pushed, and if nothing differs no deploy is triggered.
 If a **DB override** (see below) is active and disagrees with the
 `LLM_PROVIDER` being pushed, `--sync-env` refuses (exit 2) rather than push a
 value the override would silently ignore at runtime — clear it first with
-`uv run python -m scripts.set_provider --clear`.
+`uv run python -m scripts.set_override --clear`.
 
 Before triggering anything, it waits for any deploy already in progress to
 settle (it never stacks a second deploy on top of one still building) —
@@ -193,35 +193,53 @@ under a minute in practice.
 
 Claude Code users can run `/deploy` instead, which wraps the same CLI.
 
-#### Switching providers without a redeploy
-
-> Superseded by `scripts/set_override.py` below, which can do everything this script does
-> plus set a key-index override in the same write. Kept working and documented here until a
-> follow-up cleanup removes it.
+#### Switching providers and API keys without a redeploy
 
 ```bash
-uv run python -m scripts.set_provider groq       # set the override
-uv run python -m scripts.set_provider --clear     # remove it
+uv run python -m scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
+uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, leave the active provider alone
+uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same
+uv run python -m scripts.set_override groq                  # activate only, keep the existing index override
+uv run python -m scripts.set_override --clear                # clear the provider override
+uv run python -m scripts.set_override groq --index 1 --force  # write despite a failed live check
 ```
 
-This writes a provider override to the `runtime_config` table and takes
-effect on the **next ticket the dispatcher claims** — no restart, no
-redeploy. It writes to whatever `DATABASE_URL` currently resolves to, so
-running it against a local `.env` sets a **local** override only; nothing
-reaches production unless your local `DATABASE_URL` happens to be the
-production one. `scripts/deploy.py`'s `provider` check resolves the override
-the same way the dispatcher does and confirms the resulting provider's
-credential is set — but only in **your local `.env`**, not on the deployed
-service. `scripts/deploy.py`'s `provider-live` check is the read-only
-counterpart to this guard: it verifies the resolved provider's credential
-against the live Render service itself, not just your local `.env`.
-`scripts/set_provider.py` itself now verifies the target provider's
-credential against Render before writing the override (when `RENDER_API_KEY`
-is set), and refuses by default if it's missing or differs from your local
-`.env` — pass `--force` to write anyway. If your local `DATABASE_URL` isn't
-the one Render's service actually reads (e.g. you're testing against a local
-database), this verification is skipped automatically, since the write
-cannot affect production either way.
+This writes a provider override and/or a provider's key-index override to
+the `runtime_config` table and takes effect on the **next ticket the
+dispatcher claims** — no restart, no redeploy. It writes to whatever
+`DATABASE_URL` currently resolves to, so running it against a local `.env`
+sets a **local** override only; nothing reaches production unless your
+local `DATABASE_URL` happens to be the production one.
+
+Each provider's credential env var can have numbered siblings —
+`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ... — provisioned ahead
+of time exactly like any other env var (one redeploy, via `--sync-env` or
+the Render dashboard, to add a new slot). Each provider tracks its own
+key-index independently, so switching providers never disturbs the slot
+chosen for the other two, and no secret value is ever written to, read
+from, or logged by the database — only the slot's integer index is.
+
+It verifies against the **effective** index — whichever index will
+actually be active for that provider after the write, not always index 0 —
+against the live Render service (when `RENDER_API_KEY` is set), and
+refuses by default (pass `--force` to override) if the target credential
+is missing or, for index 0, differs from your local `.env`. Clearing the
+index override with `--no-activate` never verifies at all — an operator
+reaching for this during a key rotation must not be blockable by a
+Render/local mismatch; clearing it while also activating still verifies,
+against index 0, the slot about to become active. If your local
+`DATABASE_URL` isn't the one Render's service actually reads (e.g. you're
+testing against a local database), verification against a local `.env`
+value is skipped automatically, since the write cannot affect production
+either way.
+
+`scripts/deploy.py`'s `provider`/`provider-live` checks are the read-only
+counterparts of the provider override: they confirm the resolved
+provider's credential is set locally, and genuinely present on Render,
+respectively. `api-key-live` is the read-only counterpart of the key-index
+override: it confirms the actively-resolved slot is genuinely present on
+Render, catching the exact gap a redeploy-free index flip can introduce —
+the DB says index 2, but nobody ever pushed `GROQ_API_KEY_2` to Render.
 
 #### Tuning the re-review cooldown without a redeploy
 
@@ -230,12 +248,12 @@ uv run python -m scripts.set_cooldown --base 30 --factor 1.5   # tune for a demo
 uv run python -m scripts.set_cooldown --clear                  # remove the override
 ```
 
-Same shape as `set_provider.py` above: it writes a base/cap/factor override
+Same shape as `set_override.py` above: it writes a base/cap/factor override
 to the `runtime_config` table and takes effect on the **next ticket the
 dispatcher claims** — no restart, no redeploy — so the escalating cooldown
 can be sped up on stage instead of waiting out the 300s/3600s production
 defaults. It writes to whatever `DATABASE_URL` currently resolves to, so a
-local `.env` run sets a local override only. Unlike `set_provider.py` there's
+local `.env` run sets a local override only. Unlike `set_override.py` there's
 no credential at stake, so a non-cleared write is never refused for a
 Render-verification reason — only refused if the resulting base/cap/factor
 would resolve to something invalid (`factor < 1.0`, `base > cap`, or a
@@ -244,62 +262,6 @@ be silently discarded on every read. **A DB override in force also masks env
 var changes** — editing `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
 `_FACTOR` in the Render dashboard will appear to do nothing until you run
 `--clear`.
-
-#### Swapping API keys without a redeploy
-
-> Superseded by `scripts/set_override.py` below, which can do everything this script does
-> plus activate a provider in the same write. Kept working and documented here until a
-> follow-up cleanup removes it.
-
-```bash
-uv run python -m scripts.set_api_key groq 2       # activate GROQ_API_KEY_2
-uv run python -m scripts.set_api_key groq --clear  # back to GROQ_API_KEY (index 0)
-```
-
-Each provider's credential env var can have numbered siblings —
-`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ... — provisioned ahead
-of time exactly like any other env var (one redeploy, via `--sync-env` or
-the Render dashboard, to add a new slot). This writes which slot is
-**active** to the `runtime_config` table and takes effect on the **next
-ticket the dispatcher claims** — no restart, no redeploy, and no secret
-value is ever written to, read from, or logged by the database: only the
-slot's integer index is. Each provider tracks its own index independently,
-so switching providers never disturbs the slot chosen for the other two.
-Same presence-only Render verification as `set_provider.py` — refuses by
-default (pass `--force` to override) if the target slot's env var is
-missing on the live service, but never compares against a local `.env`
-value, since a numbered slot typically has no local counterpart at all.
-`scripts/deploy.py`'s `api-key-live` check is the read-only counterpart: it
-confirms the actively-resolved provider's actively-resolved slot is
-genuinely present on Render, catching the exact gap a redeploy-free index
-flip can introduce — the DB says index 2, but nobody ever pushed
-`GROQ_API_KEY_2` to Render.
-
-#### Setting the provider and key-index override together
-
-```bash
-uv run python -m scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
-uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, same as set_api_key.py above
-uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same as set_api_key.py above
-uv run python -m scripts.set_override groq                  # activate only, same as set_provider.py above
-uv run python -m scripts.set_override --clear                # clear the provider override, same as set_provider.py above
-uv run python -m scripts.set_override groq --index 1 --force  # write despite a failed live check
-```
-
-`scripts/set_override.py` is a full, standalone replacement for both `set_provider.py` and
-`set_api_key.py` below — every operation either of them supports is reachable through this
-one script (see `docs/superpowers/specs/2026-08-12-override-cli-unification-design.md`
-section 5 for the complete mapping), plus the new capability of setting both overrides in one
-write and one Render-verification pass instead of two round trips. It verifies against the
-**effective** index — whichever index will actually be active for that provider after the
-write, not always index 0 — except when clearing the index override with `--no-activate`,
-which never verifies (matching the old `set_api_key.py --clear` behavior, since nothing is
-being activated and the target is the documented default). Activating a provider that already
-has a non-default key-index override verifies the correct slot, not the base credential.
-
-`scripts/set_provider.py` and `scripts/set_api_key.py` (documented in the two sections above)
-are **superseded by this script** and will be removed in a follow-up cleanup; nothing below
-needs to change before then.
 
 #### Deploying an image, when the Render service has no connected repo
 

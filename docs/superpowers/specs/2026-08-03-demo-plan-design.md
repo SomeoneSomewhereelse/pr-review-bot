@@ -197,7 +197,7 @@ before touching this plan further:
   progress, not deployed** (`docs/superpowers/specs/2026-08-12-runtime-cooldown-tuning-design.md`,
   work-in-progress in a separate worktree). This would let Segment B's
   ~5-minute cooldown wait be shortened live via a DB write (mirroring
-  `set_provider.py`), but it isn't in production yet — **this plan makes no
+  `set_override.py`), but it isn't in production yet — **this plan makes no
   use of it.** Once it ships, revisit Segment B's wait-or-narrate fallback
   (see "Open items" below).
 - **9 more leftover PRs (#10, #11, #12, #15, #16, #19, #20, #21, #22) from
@@ -223,7 +223,7 @@ further:
 - **The deploy-credential-verification gap is resolved** — the parked
   thread from `docs/2026-08-10-deploy-provider-credential-verification-gap.md`.
   `scripts/deploy.py` now has a `provider-live` check, and
-  `scripts/set_provider.py` proactively verifies the target provider's
+  `scripts/set_override.py` proactively verifies the target provider's
   credential against Render *before* writing an override, refusing by
   default (with a `--force` escape hatch) if it's missing or mismatched —
   the exact Gemini scenario hit live during rehearsal can't silently recur.
@@ -248,7 +248,7 @@ further:
   `https://pr-review-engine.onrender.com/healthz`. Local `uvicorn` +
   Cloudflare quick tunnel is retired entirely.
 - **`gh` and `uv` are native Linux binaries** in this environment.
-- **Provider switching is a DB write** (`scripts/set_provider.py` →
+- **Provider switching is a DB write** (`scripts/set_override.py` →
   `runtime_config` table), effective on the **next ticket claimed** — no
   restart, no redeploy. Confirmed live, repeatedly, once the service itself
   was up to date (see Finding 1).
@@ -299,8 +299,10 @@ Gemini (different tokenizer/model, not independently targeted).
 
 **Key-index hardening (2026-08-12), supersedes the gemini-split
 hardening above:** the new per-provider API-key-slot override
-(`scripts/set_api_key.py`, live per the 2026-08-12 api-key-index-override
-design) makes the earlier groq/gemini provider split unnecessary — Segment
+(`scripts/set_override.py`, live per the 2026-08-12 api-key-index-override
+design, later unified with the provider override by the 2026-08-12
+override-cli-unification design) makes the earlier groq/gemini provider
+split unnecessary — Segment
 C can now get its own **separate quota bucket** via a different key index
 on the *same* provider, instead of switching vendors. This drops Gemini
 from the live segment plan entirely: no more 34s response times, no more
@@ -451,9 +453,9 @@ demand against a 12,000 cap is strictly stronger than two.
   project's life*, and the architecture absorbed it with a single DB write
   and no code change or redeploy.
 - Second callout, new this hardening pass: **the same DB-override pattern
-  now covers four independent knobs live** — provider (`set_provider.py`),
-  which API-key slot a provider uses (`set_api_key.py`), and the re-review
-  cooldown's base/cap/escalation-factor (`set_cooldown.py`) — all writable
+  now covers four independent knobs live** — provider and which API-key
+  slot it uses (`set_override.py`), and the re-review cooldown's
+  base/cap/escalation-factor (`set_cooldown.py`) — all writable
   with zero redeploy, three of the four demonstrated in this same
   walkthrough (cooldown, key-index; provider swap is Segment B's own
   story).

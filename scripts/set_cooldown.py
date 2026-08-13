@@ -8,7 +8,7 @@ The override takes effect on the next claimed ticket -- no restart, no
 redeploy. It writes to whatever DATABASE_URL points at, so against a local
 .env this sets a LOCAL override and nothing reaches production.
 
-Unlike scripts/set_provider.py, there is no credential at stake here -- only
+Unlike scripts/set_override.py, there is no credential at stake here -- only
 numbers. Before writing, this checks (when RENDER_API_KEY is set) whether the
 local DATABASE_URL matches the live Render service's, purely as an
 informational signal that the write will actually reach production; that
@@ -19,7 +19,7 @@ resolves it at read time -- would be invalid (factor < 1.0, base > cap, or a
 non-positive base/cap): writing such a value would succeed but be silently
 discarded as a whole triple on every read, leaving the override inert.
 
-A plain tool, not a slash command -- matches scripts/set_provider.py.
+A plain tool, not a slash command -- matches scripts/set_override.py.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _verify_render_reachability() -> str:
     Render-hosted production database. Never blocks the write -- see the
     module docstring. Never returns, prints, or logs a fetched Render value,
     only presence/absence and in-memory equality results (matches
-    set_provider.py's credential-leak guard, applied here to DATABASE_URL)."""
+    set_override.py's credential-leak guard, applied here to DATABASE_URL)."""
     if not settings.render_api_key:
         return (
             "could not verify against Render (no RENDER_API_KEY); "
@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="set_cooldown",
         # Without this, argparse treats a truncated flag like --cle as an
-        # abbreviation of --clear and runs it -- scripts/set_provider.py
+        # abbreviation of --clear and runs it -- scripts/set_override.py
         # carries the same guard after an identical abbreviation match fired
         # a live production incident on a different script.
         allow_abbrev=False,
