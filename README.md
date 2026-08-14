@@ -340,14 +340,17 @@ the full history of runs and timings.
 
 ## Known limitations (deviations from `SPEC.md`, all deliberate)
 
-- **Vertex AI**: live (`LLM_PROVIDER=vertex`), reinstated 2026-08-14 — it had
-  been removed while this project's no-card constraint made it unrunnable, and
-  came back once GCP billing/ADC access became available. Unlike the other two
-  providers its credential is a GCP service-account identity:
-  `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted) → a local key file → implicit ADC.
-  Implemented and unit-tested (mocked SDK boundary); the live-verification
-  script (`scripts/manual_verify_vertex.py`) is written but has not yet been
-  run against a real GCP credential — see `SETUP.md` §2.
+- **Vertex AI**: implemented, not yet live-verified (`LLM_PROVIDER=vertex`),
+  reinstated 2026-08-14 — it had been removed while this project's no-card
+  constraint made it unrunnable, and came back once GCP billing/ADC access
+  became available. Unlike the other two providers its credential is a GCP
+  service-account identity: `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted) → a local
+  key file → implicit ADC. Implemented and unit-tested (mocked SDK boundary);
+  `scripts/manual_verify_vertex.py` was run once against a real GCP credential
+  and reached Google's real OAuth endpoint correctly, but the call failed with
+  `invalid_scope: Invalid OAuth scope or ID token audience provided` — likely
+  a missing IAM role or the Vertex AI API not being enabled on the target
+  project, not a code defect. See `SETUP.md` §2.
 - **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
   2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
   non-zero token usage). See `SETUP.md` for the account-access history this

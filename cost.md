@@ -45,10 +45,14 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
 
 - **Vertex** on the **$300 GCP trial credit** (90 days) covers all LLM calls —
   implemented as of 2026-08-14 (`LLM_PROVIDER=vertex`) — code-complete and
-  unit-tested, but live verification against a real GCP-billed project is
-  still outstanding; see `SETUP.md` §2. Billed at the same per-token rate as
-  the Gemini entry below (`app/providers/pricing.py`); the two differ in the
-  auth path, not in price.
+  unit-tested. A single live-verification attempt against a real GCP
+  credential reached Google's real OAuth endpoint correctly (proving the code
+  path end-to-end) but failed with `invalid_scope: Invalid OAuth scope or ID
+  token audience provided` — likely a missing IAM role or the Vertex AI API
+  not being enabled on the target project, not a code defect; see `SETUP.md`
+  §2. Billed at the same per-token rate as the Gemini entry below
+  (`app/providers/pricing.py`); the two differ in the auth path, not in
+  price.
 - **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0
   fallback in principle (account-blocked in this environment, see `SETUP.md`).
 - **Groq** free tier: ~30 RPM / up to 14.4K req/day — the actual live

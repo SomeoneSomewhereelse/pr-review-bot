@@ -101,11 +101,24 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   but this question hasn't been revisited since; still open.
 - **Vertex reinstated, 2026-08-14:** the no-card constraint that ruled Vertex
   out no longer applies — GCP billing/ADC access became available, so
-  `LLM_PROVIDER=vertex` is now a real, live-runnable provider, with
-  `scripts/manual_verify_vertex.py` written and ready to confirm it — but not
-  yet run against a real GCP credential in this build environment (no
-  billing-enabled GCP project/service-account key was available here). Run it
-  once real GCP access is available before treating vertex as
+  `LLM_PROVIDER=vertex` is now a real, code-complete provider.
+  `scripts/manual_verify_vertex.py` was run once against a real GCP
+  service-account credential, per this project's one-deliberate-call testing
+  hygiene rule (see `CLAUDE.md`): credential resolution and project-id
+  derivation both worked correctly (a real project id was resolved, and no
+  credential material was ever printed), and the call reached Google's real
+  OAuth token endpoint — a genuine network round-trip, not a mock — proving
+  the vertex code path (credential resolution → `VertexProvider` construction
+  → the `google-genai` `vertexai=True` client → an actual HTTPS call) is wired
+  correctly end-to-end. The call itself then failed with
+  `google.auth.exceptions.RefreshError: invalid_scope: Invalid OAuth scope or
+  ID token audience provided`. This looks like a missing IAM role (the service
+  account likely needs the **Vertex AI User** role) or the Vertex AI API not
+  being enabled on the target GCP project — not a defect in this codebase.
+  Per the testing-hygiene rule, this was **not** retried with a different
+  scope/key; a future operator should grant the Vertex AI User role and/or
+  enable the Vertex AI API on the target project, then re-run
+  `scripts/manual_verify_vertex.py` once before treating vertex as
   production-verified, the same live-verification step
   `manual_verify_step4.py`/`manual_verify_groq.py` already completed for the
   other two providers. Its credential is a GCP service-account identity, not
