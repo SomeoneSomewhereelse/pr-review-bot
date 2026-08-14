@@ -347,10 +347,15 @@ the full history of runs and timings.
   service-account identity: `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted) → a local
   key file → implicit ADC. Implemented and unit-tested (mocked SDK boundary);
   `scripts/manual_verify_vertex.py` was run once against a real GCP credential
-  and reached Google's real OAuth endpoint correctly, but the call failed with
-  `invalid_scope: Invalid OAuth scope or ID token audience provided` — likely
-  a missing IAM role or the Vertex AI API not being enabled on the target
-  project, not a code defect. See `SETUP.md` §2.
+  and correctly resolved the credential and reached Google's real OAuth
+  endpoint, but the call failed with `invalid_scope: Invalid OAuth scope or
+  ID token audience provided`. Root cause identified and fixed: `VertexProvider`
+  was constructing its service-account credentials without the required
+  `cloud-platform` OAuth scope (`app/providers/google_genai.py`) — the
+  implicit-ADC path already had the correct scope via `google-genai`'s own
+  SDK, but the explicit service-account path (the hosted/Render production
+  configuration) did not. Live re-verification against real Vertex AI is
+  pending a follow-up run. See `SETUP.md` §2.
 - **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
   2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
   non-zero token usage). See `SETUP.md` for the account-access history this

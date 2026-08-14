@@ -53,8 +53,18 @@ def resolve_service_account_info(index: int) -> dict | None:
     """
     _, b64 = credentials.resolve("vertex", index)
     if b64:
-        return json.loads(base64.b64decode(b64).decode())
+        data = json.loads(base64.b64decode(b64, validate=True).decode())
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"GCP service-account credential at index {index} is not a JSON object"
+            )
+        return data
     path = _local_path(index)
     if path and Path(path).is_file():
-        return json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text())
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"GCP service-account credential file at index {index} is not a JSON object"
+            )
+        return data
     return None

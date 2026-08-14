@@ -69,6 +69,9 @@ class GeminiProvider:
         return await _complete(self._client, self._model, system, user, schema)
 
 
+_VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
+
+
 class VertexProvider:
     """``vertex`` -- gemini-flash-latest via Vertex AI (``vertexai=True``).
 
@@ -89,7 +92,7 @@ class VertexProvider:
         creds = None
         if service_account_info is not None:
             creds = service_account.Credentials.from_service_account_info(
-                service_account_info
+                service_account_info, scopes=_VERTEX_SCOPES
             )
         self._client = genai.Client(
             vertexai=True,

@@ -158,7 +158,10 @@ def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
 
 def test_vertex_provider_builds_credentials_from_the_service_account_info(monkeypatch):
     """from_service_account_info is mocked: a real one needs a real RSA private
-    key, and this test is about the wiring, not about google-auth's parsing."""
+    key, and this test is about the wiring, not about google-auth's parsing.
+    Also pins the OAuth scope: without it, the resulting credentials produce
+    an empty-scope JWT assertion that Google's token endpoint rejects with
+    invalid_scope -- the exact failure a real live call against this code hit."""
     captured: dict = {}
     sentinel = object()
     seen: dict = {}
@@ -166,16 +169,24 @@ def test_vertex_provider_builds_credentials_from_the_service_account_info(monkey
         "app.providers.google_genai.genai.Client",
         _fake_client_factory(captured, AsyncMock()),
     )
+
+    def _fake_from_service_account_info(info, scopes=None):
+        seen.update(info)
+        seen["_scopes"] = scopes
+        return sentinel
+
     monkeypatch.setattr(
         "app.providers.google_genai.service_account.Credentials.from_service_account_info",
-        lambda info: seen.update(info) or sentinel,
+        _fake_from_service_account_info,
     )
 
     info = {"type": "service_account", "project_id": "proj-x"}
     VertexProvider(project="proj-x", location="us-central1", service_account_info=info)
 
     assert captured["credentials"] is sentinel
-    assert seen == info
+    assert seen["type"] == "service_account"
+    assert seen["project_id"] == "proj-x"
+    assert seen["_scopes"] == ["https://www.googleapis.com/auth/cloud-platform"]
 
 
 # --------------------------------------------------------------------------
@@ -327,7 +338,7 @@ def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch
     )
     monkeypatch.setattr(
         "app.providers.google_genai.service_account.Credentials.from_service_account_info",
-        lambda info: object(),
+        lambda info, scopes=None: object(),
     )
 
     assert isinstance(get_provider(), VertexProvider)
@@ -348,7 +359,7 @@ def test_factory_prefers_an_explicit_gcp_project_over_the_keys_own(monkeypatch):
     )
     monkeypatch.setattr(
         "app.providers.google_genai.service_account.Credentials.from_service_account_info",
-        lambda info: object(),
+        lambda info, scopes=None: object(),
     )
 
     get_provider()

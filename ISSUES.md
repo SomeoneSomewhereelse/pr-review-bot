@@ -1,0 +1,36 @@
+# Issues log — vertex AI provider implementation
+
+Running log of anything that went wrong (mine or a subagent's) while executing
+`docs/superpowers/plans/2026-08-14-vertex-ai-provider.md`, so `CLAUDE.md` can
+be updated afterward to avoid repeating the same mistake. One entry per
+issue: what happened, what it cost, what should change.
+
+Format:
+
+```
+## <short title>
+- **When:** Task N, step/context
+- **What happened:** ...
+- **Cost:** (time lost / rework / none — just a near-miss)
+- **Suggested CLAUDE.md change:** ...
+```
+
+---
+
+## Live call attempted with a real credential: reached Google, got invalid_scope
+- **When:** After Task 6 dispatch, controller session — user supplied a real GCP service-account key at `tmp.json` (gitignored, outside the worktree) mid-turn.
+- **What happened:** Ran `scripts/manual_verify_vertex.py` exactly once with `GCP_SERVICE_ACCOUNT_KEY_PATH` pointed at the real key. Credential resolution and project derivation worked correctly (printed `Project: tovtech-vertex-imagen`, `Location: us-central1`, no credential material ever printed). The call reached `google.oauth2._client.jwt_grant`'s token endpoint and failed with `google.auth.exceptions.RefreshError: ('invalid_scope: Invalid OAuth scope or ID token audience provided.', ...)`. This is a real network round-trip to Google's OAuth endpoint, not a local/mocked failure — it proves the entire vertex code path (credential resolution → VertexProvider construction → google-genai's vertexai=True client → an actual HTTP call) is wired correctly end to end. The failure is external: either the service account lacks the right IAM role/API scope for Vertex AI, or the Vertex AI API isn't enabled on that project, or there's a known google-genai/ADC audience quirk for this key type — not something this codebase's logic controls.
+- **Cost:** None to the implementation — this is exactly the kind of failure the "no credential" pre-authorized outcome (see the entry below) predicted might instead be needed, and it confirms Tasks 1-4's code is correct up to the network boundary. Per CLAUDE.md's testing-hygiene rule ("if a provider starts returning 403/429 [or here, an OAuth error], stop calling it immediately... investigate via docs/support channels rather than retrying"), this was NOT retried with a different scope/key/model. The docs written in Task 6 ("live verification still outstanding") remain accurate — an attempt was made and failed for external/permission reasons, so verification genuinely has not succeeded yet.
+- **Suggested CLAUDE.md change:** Extend the existing "if a provider starts returning 403/429, stop calling it immediately" rule to also cover OAuth/auth-layer errors like `invalid_scope`/`RefreshError` — these are a different failure shape but the same "stop, don't loop across configs" principle applies. Worth having someone with IAM access on the `tovtech-vertex-imagen` project check that the service account has the `roles/aiplatform.user` role and that the Vertex AI API is enabled before the next live-verification attempt.
+
+## Plan's own docs-task text assumed the live verification would succeed
+- **When:** Controller review, before dispatching Task 6
+- **What happened:** The plan file's Task 6 brief (written during planning, before any task executed) drafted SETUP.md/README.md/cost.md wording as if `scripts/manual_verify_vertex.py` had already been run successfully — e.g. "verified by scripts/manual_verify_vertex.py", "configured and live as of 2026-08-14". This is a natural planning-time assumption (the plan didn't know it would run in a credential-less sandbox) but it would have produced dishonest documentation if dispatched verbatim.
+- **Cost:** None — caught before dispatch by re-reading the brief against Task 5's actual (blocked) outcome, and corrected wording was substituted directly in the Task 6 dispatch prompt rather than the brief file itself.
+- **Suggested CLAUDE.md change:** When a plan includes a "make one live call to prove it" step, later doc-writing steps that describe the result of that call should be written conditionally ("if the live call succeeded, say X; if not, say Y") rather than assuming success — or explicitly flagged as "revisit this wording based on Task N's actual outcome" so a controller re-reads it before dispatch instead of transcribing it as-is.
+
+## Live-verification step could not run: no GCP credential in this environment
+- **When:** Task 5 (scripts/manual_verify_vertex.py), during SDD execution
+- **What happened:** The plan's Task 5 requires one deliberate live call against real Vertex AI (`scripts/manual_verify_vertex.py`) to prove the feature actually works end-to-end, mirroring `manual_verify_step4.py`'s role for Gemini. This sandboxed dev environment has no GCP service-account key and no `gcloud auth application-default login` session available, so the script correctly exited with code 2 ("no project to call with") on its one attempt. Per CLAUDE.md's testing-hygiene rule, the implementer did not retry, loop, or fabricate a credential to force a "pass."
+- **Cost:** None to the code — the script and its wiring are complete and reviewed. The cost is a process gap: the vertex provider is fully implemented, unit-tested, and reviewed, but has never actually been proven against live Vertex AI. Someone with real GCP billing/ADC access must run `uv run python -m scripts.manual_verify_vertex` once before treating this feature as production-verified, matching how `manual_verify_step4.py`/`manual_verify_groq.py` were originally verified for the other two providers.
+- **Suggested CLAUDE.md change:** Add a line to the "LLM API testing hygiene" section (or a new short section) noting that provider adapters built in an agent/sandbox session without live credentials ship with their live-verification step explicitly deferred and outstanding — the PR/commit description (or a project doc like SETUP.md) should say so explicitly, so it isn't mistaken for "verified" just because the code and mocked tests are green. This is a repeatable situation any future provider addition in a similar environment will hit.

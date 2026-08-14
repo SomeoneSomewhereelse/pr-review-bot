@@ -112,17 +112,19 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   → the `google-genai` `vertexai=True` client → an actual HTTPS call) is wired
   correctly end-to-end. The call itself then failed with
   `google.auth.exceptions.RefreshError: invalid_scope: Invalid OAuth scope or
-  ID token audience provided`. This looks like a missing IAM role (the service
-  account likely needs the **Vertex AI User** role) or the Vertex AI API not
-  being enabled on the target GCP project — not a defect in this codebase.
-  Per the testing-hygiene rule, this was **not** retried with a different
-  scope/key; a future operator should grant the Vertex AI User role and/or
-  enable the Vertex AI API on the target project, then re-run
-  `scripts/manual_verify_vertex.py` once before treating vertex as
-  production-verified, the same live-verification step
-  `manual_verify_step4.py`/`manual_verify_groq.py` already completed for the
-  other two providers. Its credential is a GCP service-account identity, not
-  an API key, resolved in three layers by
+  ID token audience provided`. Root cause identified and fixed: `VertexProvider`
+  was constructing its service-account credentials without the required
+  `cloud-platform` OAuth scope (`app/providers/google_genai.py`) — the
+  implicit-ADC path already had the correct scope via `google-genai`'s own
+  SDK, but the explicit service-account path (the hosted/Render production
+  configuration) did not. Per the testing-hygiene rule, this was **not**
+  retried with a different scope/key while diagnosing it; a future operator
+  should re-run `scripts/manual_verify_vertex.py` once, now that the scope
+  fix has landed, before treating vertex as production-verified — live
+  re-verification against real Vertex AI is pending that follow-up run, the
+  same live-verification step `manual_verify_step4.py`/`manual_verify_groq.py`
+  already completed for the other two providers. Its credential is a GCP
+  service-account identity, not an API key, resolved in three layers by
   `app/providers/vertex_credentials.py`:
   1. `GCP_SERVICE_ACCOUNT_KEY_B64` (+ numbered `_1`/`_2` siblings) — the
      hosted/Render path, selected by the same `vertex_key_index` override
@@ -143,7 +145,9 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   `provider` checks FAIL for `LLM_PROVIDER=vertex` unless
   `GCP_SERVICE_ACCOUNT_KEY_B64` is set locally — that is the value `--sync-env`
   pushes. A file-only local setup is fine for running the app locally, but is
-  deliberately not considered deployable.
+  deliberately not considered deployable. `--sync-env` does not push
+  `GCP_PROJECT`/`GCP_LOCATION` — if you rely on non-default values for
+  either, set them manually in the Render dashboard.
 
 ## 2b. Third provider — GitHub Models (added post-step-8, real cross-vendor demo)
 

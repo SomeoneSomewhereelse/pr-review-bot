@@ -110,6 +110,27 @@ def test_valid_base64_that_is_not_json_raises(monkeypatch):
         vertex_credentials.resolve_service_account_info(0)
 
 
+def test_b64_decoding_to_a_json_list_not_an_object_raises(monkeypatch):
+    """The documented contract is `dict | None` -- a syntactically valid JSON
+    value that isn't an object (e.g. a list) must surface as an error, not be
+    handed to VertexProvider as if it were a service-account key."""
+    monkeypatch.setattr(
+        settings,
+        "gcp_service_account_key_b64",
+        base64.b64encode(json.dumps([1, 2, 3]).encode()).decode(),
+    )
+    with pytest.raises(ValueError):
+        vertex_credentials.resolve_service_account_info(0)
+
+
+def test_local_file_containing_a_json_list_not_an_object_raises(monkeypatch, tmp_path):
+    key_file = tmp_path / "gcp-service-account-key.json"
+    key_file.write_text(json.dumps([1, 2, 3]))
+    monkeypatch.setattr(settings, "gcp_service_account_key_path", str(key_file))
+    with pytest.raises(ValueError):
+        vertex_credentials.resolve_service_account_info(0)
+
+
 def test_malformed_json_in_the_local_file_raises(monkeypatch, tmp_path):
     key_file = tmp_path / "gcp-service-account-key.json"
     key_file.write_text("{ not json")
