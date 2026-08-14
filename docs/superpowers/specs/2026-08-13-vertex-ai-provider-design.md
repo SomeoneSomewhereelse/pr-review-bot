@@ -2,14 +2,20 @@
 
 **Date:** 2026-08-13
 **Status:** Approved for planning
+**Updated 2026-08-14:** dropped the DB-stored credential-blob override and
+the `CLAUDE.md` "secrets only via env vars" exception it required. Vertex's
+credential now reuses the existing numbered-env-var-slot + key-index
+mechanism unchanged, exactly like gemini/groq — see §2 and §7 for why.
 **Relates to:** `app/providers/google_genai.py` (where `GeminiProvider` lives
 and where `VertexProvider` joins it), `app/providers/factory.py` /
 `registry.py` / `credentials.py` / `key_index.py` (the existing provider
-seam this extends), `app/github_app.py::_read_private_key` (the precedent
-for a b64-env-var / local-file credential split), `docs/superpowers/specs/
-2026-08-12-api-key-index-override-design.md` (the DB-override pattern this
-both reuses and extends), `CLAUDE.md`'s "Substitutions from the brief" and
-"secrets only via env vars" rules (both change as a result of this design).
+seam this extends, unchanged), `app/github_app.py::_read_private_key` (the
+precedent for a b64-env-var / local-file credential split),
+`docs/superpowers/specs/2026-08-12-api-key-index-override-design.md` (the
+key-index pattern this reuses as-is, including its explicit prior rejection
+of storing a secret in `runtime_config` — see §2), `CLAUDE.md`'s
+"Substitutions from the brief" rule (updated; "secrets only via env vars" is
+**not** touched by this design).
 
 ## 1. Problem
 
@@ -31,52 +37,65 @@ a server that can't run an interactive login. Reinstating Vertex means
 extending the provider seam to carry a structurally different credential
 shape, not just adding a fourth name to a list.
 
-A second, independent requirement surfaced during design: the service
-account must be swappable **on the fly, without a Render redeploy** — not
-just at the next scheduled deploy. The existing numbered-env-var-slot
-pattern (`GEMINI_API_KEY_1`, `_2`, ...) achieves "swap without redeploy" only
-for slots *already provisioned*; a genuinely new credential still costs one
-restart to add the Render env var. That's an acceptable cost for a 40-byte
-API key. For Vertex, the goal is stronger: swap to *any* credential, known
-or new, with zero restart, every time.
+The credential must also be swappable without a Render redeploy, matching
+what gemini/groq already have. An earlier version of this design chased a
+*stronger* guarantee — zero restart even for a credential Render has never
+seen before — by storing the credential value itself in `runtime_config`.
+That's unnecessary: the existing numbered-slot pattern already gives
+restart-free swapping among pre-provisioned credentials, and a first-time
+credential costing one restart to provision is an already-accepted cost for
+gemini/groq (see §2). Nothing about Vertex needs a stronger guarantee than
+that, so this design doesn't introduce one.
 
 ## 2. Decision
 
-Four credential sources, checked in priority order, each answering a
-different environment's need:
+Three credential sources, checked in priority order — no DB-stored
+credential value anywhere:
 
-1. **DB override** (`runtime_config.vertex_service_account_b64`) — the
-   production on-the-fly swap path. A pure Supabase write; the dispatcher
-   picks it up on its next poll. No Render env var touched, no restart,
-   ever — including the first time a given service account is used. This is
-   the mechanism that actually satisfies the "no redeploy" requirement in
-   full; the numbered-slot pattern below does not attempt to.
-2. **`GCP_SERVICE_ACCOUNT_KEY_B64`** env var — a static Render/hosted
-   fallback, present so the service has *something* to run on even before
-   any DB override is ever set. Same b64-in-env-var shape as
-   `GITHUB_APP_PRIVATE_KEY_B64` (~3KB vs. that key's ~2.2KB — same order of
-   magnitude, not a new size class for this deployment).
-3. **Local file** at `GCP_SERVICE_ACCOUNT_KEY_PATH` (default
+1. **`GCP_SERVICE_ACCOUNT_KEY_B64`** env var, with numbered siblings
+   `_1`, `_2`, ... on Render — the production path, resolved through the
+   *existing, unmodified* `credentials.resolve("vertex", index)` and
+   selected via the *existing, unmodified* key-index override
+   (`vertex_key_index` — a new column, but the same generic mechanism
+   gemini/groq already use). Swapping among slots already provisioned on
+   Render is a pure DB-integer write, no restart. Provisioning a
+   never-before-seen credential still costs one restart, to add the new
+   Render env var — the exact tradeoff already accepted for
+   `GEMINI_API_KEY_1`/`GROQ_API_KEY_1`, not a new one.
+2. **Local file** at `GCP_SERVICE_ACCOUNT_KEY_PATH` (default
    `./gcp-service-account-key.json`, gitignored), with numbered siblings
-   `GCP_SERVICE_ACCOUNT_KEY_PATH_1`, `_2`, ... selected via the existing
-   generic key-index mechanism (`vertex_key_index`). Local-dev-only, for
-   testing against several different service accounts (e.g. a
-   quota-exhausted one vs. a healthy one) without touching Supabase. This
-   mirrors `GITHUB_APP_PRIVATE_KEY_PATH`'s local-file precedent, not the
-   b64-env-var precedent — nobody hand-pastes a multi-KB blob into a local
-   `.env` in this project; the file stays a file.
-4. **Implicit ADC** — if none of the above resolve to a value, no explicit
-   `credentials` object is passed to the client at all, and `google-auth`
-   discovers `gcloud auth application-default login`'s local ADC file on its
-   own. Zero-config local fallback.
+   `GCP_SERVICE_ACCOUNT_KEY_PATH_1`, `_2`, ... — **also** selected by the
+   same `vertex_key_index`. Local-dev-only, for testing against several
+   different service accounts (e.g. a quota-exhausted one vs. a healthy
+   one) without touching Render or Supabase at all. Mirrors
+   `GITHUB_APP_PRIVATE_KEY_PATH`'s local-file precedent — nobody hand-pastes
+   a multi-KB blob into a local `.env` in this project; the file stays a
+   file.
+3. **Implicit ADC** — if neither of the above resolves to a value at the
+   active index, no explicit `credentials` object is passed to the client at
+   all, and `google-auth` discovers `gcloud auth application-default
+   login`'s local ADC file on its own. Zero-config local fallback.
 
-Sources 1–2 answer "what does the deployed service run on, and how do I
-change it without a restart." Source 3 answers "how do I test locally
-against a specific, chosen service account." Source 4 is what makes local
-dev usable with no setup beyond one `gcloud` command. They are independent
-mechanisms that happen to share one resolution function, not one mechanism
-wearing three names — worth keeping distinct in review, because a change to
-one (e.g. adding a fifth numbered local slot) has no bearing on the others.
+One index, two different real meanings depending on environment: on Render,
+`vertex_key_index` selects among numbered **env-var blobs**; locally (where
+those numbered env vars are typically never exported), it falls through to
+selecting among numbered **local files** instead. Both paths reuse
+`credentials.resolve()`'s and `key_index.py`'s existing code unchanged — no
+new override cache, no new `runtime_config` column beyond the index itself,
+no CLI changes (§7).
+
+**Why not store the credential value in `runtime_config` for a stronger
+"zero restart, even for a brand-new credential" guarantee?**
+`docs/superpowers/specs/2026-08-12-api-key-index-override-design.md`
+considered exactly this for gemini/groq and rejected it: *"A naive mirror of
+the existing pattern would store the key value itself in the `runtime_config`
+Postgres row. That works mechanically but is a real regression against
+`CLAUDE.md`'s 'secrets only via env vars' rule — it would make Supabase DB
+access equivalent to key access, for no offsetting benefit."* Nothing about
+Vertex's credential changes that calculus — it's a larger blob, not a
+different risk profile — so the same conclusion applies: store an index, not
+a secret, and accept the one-restart cost of provisioning a genuinely new
+credential, exactly as already accepted for the other two providers.
 
 `GCP_PROJECT` (required, no default) and `GCP_LOCATION` (default
 `us-central1`) are needed regardless of which credential source resolves —
@@ -100,16 +119,15 @@ gcp_service_account_key_path: str = "./gcp-service-account-key.json"
 
 One narrow module owns everything about resolving Vertex's credential —
 distinct from `credentials.py`, which only knows the "one env var, one
-string" shape gemini/groq use and can't represent a DB-override layer or a
-JSON-parsing local file without losing that simplicity for the other two
-providers.
+string" shape and stays that way; this module adds the local-file fallback
+and the JSON parsing on top, without complicating `credentials.py` for the
+other two providers that don't need either.
 
 ```python
-"""Resolves the Vertex service-account credential per the priority chain in
-docs/superpowers/specs/2026-08-13-vertex-ai-provider-design.md section 2:
-DB override -> GCP_SERVICE_ACCOUNT_KEY_B64 -> local file (index-aware) ->
-None (implicit ADC). Never logged -- same discipline as
-github_app.py::_read_private_key for the equivalent GitHub credential.
+"""Resolves the Vertex service-account credential: GCP_SERVICE_ACCOUNT_KEY_B64
+(env, index-aware) -> local file (index-aware) -> None (implicit ADC). Never
+logged -- same discipline as github_app.py::_read_private_key for the
+equivalent GitHub credential.
 """
 
 from __future__ import annotations
@@ -122,21 +140,6 @@ from pathlib import Path
 from app.config import settings
 from app.providers import credentials
 
-_override: str | None = None
-
-
-def credential_override() -> str | None:
-    return _override
-
-
-def set_override_cache(value: str | None) -> None:
-    global _override
-    _override = value
-
-
-def reset_override_cache() -> None:
-    set_override_cache(None)
-
 
 def _local_path(index: int) -> str:
     if index == 0:
@@ -145,9 +148,7 @@ def _local_path(index: int) -> str:
 
 
 def resolve_service_account_info(index: int) -> dict | None:
-    b64 = credential_override()
-    if not b64:
-        _, b64 = credentials.resolve("vertex", index)
+    _, b64 = credentials.resolve("vertex", index)
     if b64:
         return json.loads(base64.b64decode(b64).decode())
     path = _local_path(index)
@@ -156,12 +157,12 @@ def resolve_service_account_info(index: int) -> dict | None:
     return None
 ```
 
-`credentials.resolve("vertex", index)` (unchanged, generic) covers source 2:
+`credentials.resolve("vertex", index)` is the existing, unmodified function:
 at index 0 it reads `settings.gcp_service_account_key_b64` (the
 `base.lower()` convention already used for every provider); at index ≥ 1 it
-would read `GCP_SERVICE_ACCOUNT_KEY_B64_{index}` from `os.environ` — a slot
-this design doesn't provision anywhere, so it always resolves empty there
-and falls through to the local file, harmlessly.
+reads `GCP_SERVICE_ACCOUNT_KEY_B64_{index}` from `os.environ` — meaningful
+now, since these slots are meant to actually be provisioned on Render (§2),
+unlike the earlier draft of this design where they were never used.
 
 ## 5. Provider adapter (`app/providers/google_genai.py`)
 
@@ -252,179 +253,93 @@ def _build(provider: str, index: int) -> LLMProvider:
     raise ValueError(f"registry lists {provider!r} but _build cannot construct it")
 ```
 
-If credentials are genuinely missing in every environment (no DB override,
-no env b64, no local file, no ADC), `genai.Client(...)`/`google-auth` raises
-at construction. That flows into the existing generic
+If credentials are genuinely missing in every environment (no env b64, no
+local file, no ADC), `genai.Client(...)`/`google-auth` raises at
+construction. That flows into the existing generic
 `asyncio.gather(..., return_exceptions=True)` → failed-specialist-row path —
 no new error handling needed there.
 
-## 7. DB-backed credential-blob override
-
-### 7.1 Schema (`app/queue/store.py`)
+## 7. Schema (`app/queue/store.py`)
 
 ```sql
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS vertex_service_account_b64 TEXT;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS vertex_key_index INTEGER;
 ```
 
-`vertex_key_index` needs no new store functions — it's just a fourth column
-under the already-generic `KEY_INDEX_COLUMNS` machinery
-(`get_key_index_override`, `set_key_index_override`,
-`get_all_key_index_overrides` all already iterate the dict, not a hardcoded
-provider list).
+One column, needing no new store functions — it's a fourth entry under the
+already-generic `KEY_INDEX_COLUMNS` machinery (`get_key_index_override`,
+`set_key_index_override`, `get_all_key_index_overrides` all already iterate
+the dict, not a hardcoded provider list), and needs no dispatcher change
+either — the existing `get_all_key_index_overrides` refresh block already
+covers it.
 
-### 7.2 Store functions
+No `runtime_config.vertex_service_account_b64` column, no new store
+functions, no new override cache, no fourth dispatcher refresh block, no
+`scripts/set_override.py` changes: `--index`/`--clear-index` already work
+for vertex exactly as they do for gemini/groq, because `vertex` is now just
+a third entry in `KEY_INDEX_COLUMNS` and `registry.PROVIDERS`. The existing
+`_override.verify_render_slot` check (run by `set_override.py` before
+writing an index) checks Render for `GCP_SERVICE_ACCOUNT_KEY_B64_{index}`
+and compares it to a local counterpart if one exists — for a locally
+file-based setup there typically won't be one, and `verify_render_slot`
+already handles that gracefully ("present on Render (no local value to
+compare)"), the same message a numbered gemini/groq slot gets when there's
+no matching local `.env` entry either.
 
-```python
-def get_credential_override() -> str | None:
-    with _require_pool().connection() as conn:
-        row = conn.execute(
-            "SELECT vertex_service_account_b64 FROM runtime_config WHERE id = 1"
-        ).fetchone()
-    return (row or {}).get("vertex_service_account_b64") or None
+## 8. CLAUDE.md
 
+Only the "Substitutions from the brief" Vertex bullet changes — from
+"removed" to "reinstated once GCP billing/ADC access became available."
+**"Secrets only via env vars; no secret is ever logged" is unchanged** —
+this design introduces no exception to it.
 
-def set_credential_override(value: str | None, now: str) -> None:
-    with _require_pool().connection() as conn:
-        conn.execute(
-            "INSERT INTO runtime_config (id, vertex_service_account_b64, updated_at) "
-            "VALUES (1, %s, %s) ON CONFLICT (id) DO UPDATE SET "
-            "vertex_service_account_b64 = EXCLUDED.vertex_service_account_b64, "
-            "updated_at = EXCLUDED.updated_at",
-            (value, now),
-        )
-```
+## 9. Docs
 
-Mirrors `get_provider_override`/`set_provider_override` exactly — singleton
-row, same `ON CONFLICT` shape.
-
-### 7.3 Dispatcher refresh (`app/queue/dispatcher.py`)
-
-A fourth refresh block, same cadence and degrade-on-exception shape as the
-existing three:
-
-```python
-try:
-    cred_override = await asyncio.to_thread(store.get_credential_override)
-    vertex_credentials.set_override_cache(cred_override)
-except Exception:  # noqa: BLE001
-    logger.exception("failed to refresh the vertex credential override; using env/ADC")
-    vertex_credentials.reset_override_cache()
-```
-
-(The `vertex_key_index` column needs no dispatcher change — it's already
-covered by the existing `get_all_key_index_overrides` refresh block, which
-iterates `KEY_INDEX_COLUMNS` generically.)
-
-## 8. CLAUDE.md rule change
-
-"Secrets only via env vars; no secret is ever logged" gets an explicit,
-named exception:
-
-> Secrets only via env vars, **except the Vertex service-account credential,
-> which may also live in `runtime_config.vertex_service_account_b64`
-> (Supabase) — a deliberate exception made to support swapping it on the
-> fly without a Render redeploy. No secret is ever logged, regardless of
-> which store holds it.**
-
-The "Substitutions from the brief" section's Vertex bullet is rewritten from
-"removed" to "reinstated once GCP billing/ADC access became available,"
-keeping the original removal reasoning as history rather than deleting it.
-
-## 9. CLI (`scripts/set_override.py`)
-
-Two new flags, vertex-only:
-
-```
-uv run python -m scripts.set_override vertex --credential-file ./gcp-service-account-key.json
-uv run python -m scripts.set_override vertex --clear-credential
-```
-
-- `--credential-file PATH`: reads the file, validates it parses as JSON and
-  has the expected service-account shape (`type == "service_account"`,
-  non-empty `project_id`, `private_key`, `client_email`) — a local,
-  no-network check, refusing malformed input before it ever reaches
-  Supabase. Base64-encodes the raw bytes and writes via
-  `store.set_credential_override()`. Activates vertex as the active
-  provider unless `--no-activate` (mirroring `--index`'s existing
-  `--no-activate` behavior).
-- `--clear-credential`: `store.set_credential_override(None, now)`, falling
-  back to env b64 / local file / ADC.
-- Both flags error if `provider != "vertex"` — no other provider has this
-  concept — and are mutually exclusive with each other and with
-  `--index`/`--clear-index` in the same invocation, keeping each call
-  single-purpose.
-- `--force` does not apply to `--credential-file`: a malformed
-  service-account file is never a legitimate write, unlike the Render/local
-  verification checks elsewhere in this script, where `--force` overrides a
-  live-state mismatch that might itself be stale or wrong. There's no
-  "unverifiable, proceed with a warning" case here either — the JSON-shape
-  check is always locally resolvable, so it's a hard error or nothing.
-
-**One necessary deviation for vertex's existing `--index`/`--clear-index`
-path:** today, setting an index runs `_override.verify_render_slot`, which
-checks Render's live env vars for `{base}_{index}`. For vertex, `--index`
-selects a *local file* (`GCP_SERVICE_ACCOUNT_KEY_PATH_{index}`), which never
-exists on Render at all — running the existing Render check would either be
-meaningless or actively misleading ("missing on Render" for a file that was
-never supposed to be there). So `provider == "vertex"` skips
-`verify_render_slot` entirely and instead checks local file existence
-directly: `Path(_local_path(index)).is_file()`. Unlike the Render check
-(which degrades to a warning when it can't verify, because network/API
-availability is genuinely outside the operator's control), a missing local
-file is always definitively checkable — so this refuses unless `--force`,
-the same "verified and it's wrong → refuse" branch the Render check uses for
-a confirmed-missing slot.
-
-## 10. Docs
-
-- **`CLAUDE.md`** — §8 (as above); "Substitutions from the brief" Vertex
-  bullet rewritten (reinstated, not removed).
+- **`CLAUDE.md`** — "Substitutions from the brief" Vertex bullet rewritten
+  (reinstated, not removed). No other change.
 - **`SETUP.md`** §2 — add a dated update recording the constraint lift and
-  the ADC/ DB-override setup, keeping the existing removal history intact
-  above it (matching this file's existing pattern of dated updates rather
-  than rewriting history).
+  the ADC setup, keeping the existing removal history intact above it
+  (matching this file's existing pattern of dated updates rather than
+  rewriting history).
 - **`README.md`** — "Known limitations" Vertex bullet updated to describe it
-  as live; new "Swapping the Vertex credential without a redeploy" section
-  mirroring the existing provider/cooldown/key-index override sections.
-- **`SPEC.md`** — already describes vertex as the default provider;
-  needs no correction, only confirmation it still matches (the `runtime_config`
-  override section gains the two new columns in its listing).
+  as live. The existing "Swapping API keys without a redeploy" section gains
+  Vertex as a third example (numbered `GCP_SERVICE_ACCOUNT_KEY_B64_n` /
+  `GCP_SERVICE_ACCOUNT_KEY_PATH_n` slots) rather than a new section — it's
+  the same mechanism, not a new one.
+- **`SPEC.md`** — already describes vertex as the default provider; needs no
+  correction, only confirmation it still matches (the `runtime_config`
+  override section gains the one new column in its listing).
 - **`cost.md`** — replace the hypothetical "$300 GCP trial credit" costing
-  with a real per-token rate entry once one is looked up (see §12).
+  with a real per-token rate entry once one is looked up (see §11).
 - **`.env.example`** — `LLM_PROVIDER` comment gains `vertex`; new
-  `GCP_PROJECT`, `GCP_LOCATION`, `GCP_SERVICE_ACCOUNT_KEY_B64`,
-  `GCP_SERVICE_ACCOUNT_KEY_PATH` entries, following the existing
-  path-for-local/b64-for-hosted comment style used for the GitHub App key.
+  `GCP_PROJECT`, `GCP_LOCATION`, `GCP_SERVICE_ACCOUNT_KEY_B64` (+ commented
+  `_1`/`_2` siblings, matching the existing `GEMINI_API_KEY_1` pattern),
+  `GCP_SERVICE_ACCOUNT_KEY_PATH` (+ commented `_1`/`_2` siblings) entries,
+  following the existing path-for-local/b64-for-hosted comment style used
+  for the GitHub App key.
 - **`.gitignore`** — add `gcp-service-account-key.json` (the default local
   filename), alongside the existing `*.pem` entry.
 
-## 11. Surface
+## 10. Surface
 
 - `app/config.py` — 4 new settings.
 - `app/providers/base.py` — `KNOWN_PROVIDERS` gains `"vertex"`.
 - `app/providers/registry.py` — `PROVIDERS` and `KEY_INDEX_COLUMNS` gain a
   vertex entry each.
 - `app/providers/google_genai.py` — `VertexProvider`, sharing `_complete()`.
-- `app/providers/vertex_credentials.py` — new; resolution chain + override
-  cache.
+- `app/providers/vertex_credentials.py` — new; `resolve_service_account_info`.
 - `app/providers/factory.py` — vertex branch in `_build`, bypassing the
   generic empty-credential fast-fail.
-- `app/queue/store.py` — 2-column migration; `get_credential_override`,
-  `set_credential_override`.
-- `app/queue/dispatcher.py` — fourth override refresh block.
-- `scripts/set_override.py` — `--credential-file`, `--clear-credential`;
-  vertex-specific local-file check replacing `verify_render_slot` for
-  vertex's `--index` path.
+- `app/queue/store.py` — 1-column migration (`vertex_key_index`); no new
+  functions.
 - `app/providers/pricing.py` — new `("vertex", "gemini-flash-latest")` rate
   entry.
 - `CLAUDE.md`, `SETUP.md`, `README.md`, `SPEC.md`, `cost.md`,
-  `.env.example`, `.gitignore` — per §10.
+  `.env.example`, `.gitignore` — per §9.
 - `tests/test_providers.py`, `tests/test_deploy_script.py`,
-  `tests/test_set_override_script.py` — see §12, rewriting the four existing
+  `tests/test_set_override_script.py` — see §11, rewriting the four existing
   "vertex is rejected" assertions.
 
-## 12. Testing (deterministic-first, per `CLAUDE.md`'s LLM testing-hygiene rule)
+## 11. Testing (deterministic-first, per `CLAUDE.md`'s LLM testing-hygiene rule)
 
 **Rewritten (vertex was rejected → vertex is accepted):**
 - `test_providers.py::test_factory_rejects_retired_vertex_provider` →
@@ -444,45 +359,37 @@ a confirmed-missing slot.
 
 **New:**
 - `vertex_credentials.py::resolve_service_account_info` — one test per
-  priority-chain layer: DB override present → used regardless of env/file;
-  DB override absent + env b64 present → decoded; both absent + local file
-  present → read and parsed; nothing present → `None`; malformed b64/JSON at
-  any layer surfaces as a clear error, not a silent fallthrough.
-- `vertex_credentials.py` override cache — mirrors `active.py`'s existing
-  cache tests (starts `None`, set/reset).
+  priority-chain layer: env b64 present (index 0 and index ≥ 1) → decoded;
+  env b64 absent + local file present → read and parsed; neither present →
+  `None`; malformed b64/JSON at either layer surfaces as a clear error, not
+  a silent fallthrough.
 - `factory.py` — vertex branch returns a `VertexProvider`; missing
   `GCP_PROJECT` raises before any credential resolution or network call;
-  empty credential (no DB/env/file/ADC signal locally mocked) does **not**
-  raise from `_build` itself (the raise, if any, comes from the mocked SDK
-  client construction, not from `_build`'s own check) — this is the one
-  behavioral difference from gemini/groq worth a dedicated test.
+  an empty resolved credential (no env/file/ADC signal locally mocked) does
+  **not** raise from `_build` itself (the raise, if any, comes from the
+  mocked SDK client construction, not from `_build`'s own check) — this is
+  the one behavioral difference from gemini/groq worth a dedicated test.
 - `google_genai.py::VertexProvider` — mocked `genai.Client`; confirms
   `credentials=None` when `service_account_info` is `None`, and a real
   `service_account.Credentials` object when it isn't.
-- `store.py` — round-trip `get/set_credential_override`; schema migration
-  adds both new columns to a pre-existing table.
-- `dispatcher.py` — fourth refresh block follows the same
-  once-per-claimed-ticket, degrade-on-exception shape as the existing three.
-- `scripts/set_override.py` — `--credential-file` with valid/malformed
-  JSON; `--clear-credential`; both flags rejected for a non-vertex provider;
-  `--index`/`--clear-index` for vertex checks local file existence (not
-  Render) and refuses on a missing file unless `--force`.
+- `store.py` — schema migration adds `vertex_key_index` to a pre-existing
+  table; round-trips through the existing generic
+  `get_key_index_override`/`set_key_index_override`.
 - **One live-verification script**, `scripts/manual_verify_vertex.py`,
   mirroring `scripts/manual_verify_step4.py` — a single deliberate call
   confirming real structured output against actual Vertex, run once per
-  CLAUDE.md's "one deliberate call per real verification need" rule, not
+  `CLAUDE.md`'s "one deliberate call per real verification need" rule, not
   repeated or looped.
 
-## 13. Non-goals
+## 12. Non-goals
 
-- No numbered `GCP_SERVICE_ACCOUNT_KEY_B64_{n}` Render env-var slots — the
-  DB override already gives unconditional no-redeploy swapping, so
-  pre-provisioning multiple hosted blob slots would be redundant complexity
-  solving an already-solved problem.
-- No Render-side verification for vertex's local-file key-index — verified
-  locally instead (§9), since the files in question never exist on Render.
+- No credential value stored in `runtime_config` or anywhere in Supabase —
+  see §2 for why that guarantee isn't needed and would regress the
+  secrets-only-via-env-vars rule for no offsetting benefit.
+- No new CLI flags and no changes to `scripts/set_override.py` — vertex
+  rides the existing `--index`/`--clear-index` machinery unchanged.
 - No automatic credential rotation, expiry tracking, or scheduling — a human
-  runs `set_override.py --credential-file` when they decide to swap, same
-  manual-trigger model as every other override in this codebase.
+  runs `set_override.py vertex --index N` when they decide to swap, same
+  manual-trigger model as gemini/groq.
 - No change to how gemini/groq resolve credentials — this design only adds
   a new branch alongside the existing ones.
