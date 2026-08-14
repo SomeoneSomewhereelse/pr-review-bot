@@ -555,3 +555,14 @@ def test_estimate_cost_usd_vertex_flash():
         "vertex", "gemini-flash-latest", tokens_in=4_000, tokens_out=500
     )
     assert cost == pytest.approx(0.0012 + 0.00125)
+
+
+def test_estimate_cost_usd_vertex_gemini_2_5_flash():
+    """The model actually confirmed live for vertex (see ISSUES.md) --
+    gemini-flash-latest doesn't exist as a Vertex publisher model for every
+    project/region, so a real deployment needs this entry to avoid a
+    KeyError after a successful live call."""
+    cost = pricing.estimate_cost_usd(
+        "vertex", "gemini-2.5-flash", tokens_in=4_000, tokens_out=500
+    )
+    assert cost == pytest.approx(0.0012 + 0.00125)

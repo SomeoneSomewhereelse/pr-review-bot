@@ -16,9 +16,17 @@ from __future__ import annotations
 # gemini entry below -- Vertex and AI-Studio differ in the auth path, not in
 # what a token costs. Kept as a separate key because estimate_cost_usd is
 # called with the ACTIVE provider name, and a missing entry is a hard KeyError.
+# vertex/gemini-2.5-flash: confirmed live 2026-08-14 (see ISSUES.md) that
+# `gemini-flash-latest` does not exist as a Vertex publisher model for this
+# project/region -- only the 2.5 generation is available there, so a real
+# vertex deployment needs LLM_MODEL=gemini-2.5-flash, not the shared default.
+# Rate is representative (Gemini 2.5 Flash's published per-token price at
+# launch); verify at build time against current Vertex AI pricing before
+# relying on it for real spend, same caveat as the groq entry below.
 _RATES: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini", "gemini-flash-latest"): (0.30, 2.50),
     ("vertex", "gemini-flash-latest"): (0.30, 2.50),
+    ("vertex", "gemini-2.5-flash"): (0.30, 2.50),
     ("groq", "llama-3.3-70b-versatile"): (0.59, 0.79),
 }
 

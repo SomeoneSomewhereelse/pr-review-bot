@@ -136,12 +136,32 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   ids (often dated, e.g. `gemini-2.0-flash-001`-style) that don't necessarily
   mirror AI-Studio's aliases, so `gemini-flash-latest` doesn't resolve as a
   Vertex publisher model for this project/region. Per the one-deliberate-call
-  rule, this was **not** retried with a different model name. The one
-  remaining step before a fully successful live run is resolving that open
-  model-choice question for vertex specifically — checking Vertex's
-  publisher-model listing for this project/region and picking an id that
-  actually exists there, rather than assuming the AI-Studio alias carries
-  over. Its credential is a GCP
+  rule, this was **not** retried with a different model name.
+
+  **Model-choice question resolved for this project, same day: full live
+  success.** Rather than guessing model IDs via repeated `generateContent`
+  calls, candidate model IDs were checked via lightweight, no-cost
+  `GET https://us-central1-aiplatform.googleapis.com/v1/publishers/google/models/{model}`
+  catalog-existence requests first (metadata reads, not generation calls —
+  checking several of these in one pass is not the "bursting live calls"
+  pattern the testing-hygiene rule targets, since there's no token cost and
+  no completion request involved). Result: `gemini-2.0-flash-001`,
+  `gemini-2.0-flash-lite-001`, `gemini-1.5-flash-002`, and
+  `gemini-flash-latest` all 404; `gemini-2.5-flash` and
+  `gemini-2.5-flash-lite` both exist — this project's Vertex catalog only
+  carries the 2.5 generation. One deliberate `generateContent` call was then
+  made with `LLM_MODEL=gemini-2.5-flash`: **full success** — a valid
+  structured-output response with non-zero token usage
+  (`Greeting(message='Hello there!')`, 20 tokens in / 8 out), the first
+  genuinely complete end-to-end live verification of this provider. A
+  `("vertex", "gemini-2.5-flash")` pricing entry was added
+  (`app/providers/pricing.py`) to match, since the call otherwise succeeds
+  and then hits a `KeyError` at cost-estimation time.
+
+  **Operational note:** `LLM_MODEL`'s shared default (`gemini-flash-latest`)
+  does not resolve for vertex on this project — an operator enabling vertex
+  should set `LLM_MODEL=gemini-2.5-flash`, or check their own project's
+  Vertex publisher-model catalog if it differs. Its credential is a GCP
   service-account identity, not an API key, resolved in three layers by
   `app/providers/vertex_credentials.py`:
   1. `GCP_SERVICE_ACCOUNT_KEY_B64` (+ numbered `_1`/`_2` siblings) — the

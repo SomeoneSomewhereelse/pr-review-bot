@@ -340,31 +340,23 @@ the full history of runs and timings.
 
 ## Known limitations (deviations from `SPEC.md`, all deliberate)
 
-- **Vertex AI**: implemented, not yet live-verified (`LLM_PROVIDER=vertex`),
-  reinstated 2026-08-14 — it had been removed while this project's no-card
-  constraint made it unrunnable, and came back once GCP billing/ADC access
-  became available. Unlike the other two providers its credential is a GCP
+- **Vertex AI**: live and fully verified (`LLM_PROVIDER=vertex`), reinstated
+  2026-08-14 — it had been removed while this project's no-card constraint
+  made it unrunnable, and came back once GCP billing/ADC access became
+  available. Unlike the other two providers its credential is a GCP
   service-account identity: `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted) → a local
-  key file → implicit ADC. Implemented and unit-tested (mocked SDK boundary);
-  `scripts/manual_verify_vertex.py` was run once against a real GCP credential
-  and correctly resolved the credential and reached Google's real OAuth
-  endpoint, but the call failed with `invalid_scope: Invalid OAuth scope or
-  ID token audience provided`. Root cause identified and fixed: `VertexProvider`
-  was constructing its service-account credentials without the required
-  `cloud-platform` OAuth scope (`app/providers/google_genai.py`) — the
-  implicit-ADC path already had the correct scope via `google-genai`'s own
-  SDK, but the explicit service-account path (the hosted/Render production
-  configuration) did not. **Follow-up run confirms the fix**: re-running
-  `scripts/manual_verify_vertex.py` against a real GCP credential no longer
-  hits `invalid_scope` — credential resolution, project derivation, and OAuth
-  token refresh all succeeded, a genuine round-trip against Google's real
-  infrastructure. The call then reached Vertex AI's real `generateContent`
-  endpoint and failed with a separate, pre-existing, already-documented gap:
-  `404 NOT_FOUND` on publisher model `gemini-flash-latest` for this
-  project/region — the model-choice question `SETUP.md` §2 already flags as
-  open, now with concrete evidence. So the auth/credential path is confirmed
-  working end-to-end; a fully successful live run still needs a Vertex-side
-  publisher model id. See `SETUP.md` §2.
+  key file → implicit ADC. Two bugs were found and fixed via real live calls
+  before it succeeded (see `SETUP.md` §2 for the full history): a missing
+  OAuth scope on the service-account credential path, and the shared
+  `LLM_MODEL` default (`gemini-flash-latest`) not existing as a Vertex
+  publisher model for this project — Vertex's catalog only carries the 2.5
+  generation here (`gemini-2.5-flash`/`gemini-2.5-flash-lite`), not the
+  AI-Studio alias. **Confirmed live**: with `LLM_MODEL=gemini-2.5-flash`, a
+  real call through `scripts/manual_verify_vertex.py` against real Vertex AI
+  returned a valid structured-output response with non-zero token usage.
+  Operators enabling vertex should set `LLM_MODEL=gemini-2.5-flash` (or check
+  their own project's Vertex publisher-model catalog) rather than relying on
+  the AI-Studio-oriented default.
 - **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
   2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
   non-zero token usage). See `SETUP.md` for the account-access history this
