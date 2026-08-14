@@ -7,16 +7,20 @@ field) so that ``validate.py``'s repair-retry logic has one single,
 provider-agnostic notion of "validation failed" that doesn't depend on
 SDK-internal behavior.
 
-Deviation from SPEC.md (see CLAUDE.md's "Substitutions from the brief"): the
-``vertex`` adapter that once lived here was removed. Vertex AI requires an
-attached payment card, which this project's no-card constraint rules out, so it
-was never live-runnable here and could only ever be covered by mocked tests.
+This file holds BOTH google-genai client shapes, as SPEC.md section 4 always
+described it: ``vertex`` (``vertexai=True``, a GCP service-account identity)
+and ``gemini`` (an AI-Studio ``api_key``) -- one SDK, two clients, one shared
+``_complete()``. The vertex adapter was removed once (Vertex AI required an
+attached payment card, which this project's no-card constraint ruled out) and
+reinstated on 2026-08-14 when GCP billing/ADC access became available; see
+CLAUDE.md's "Substitutions from the brief".
 """
 
 from __future__ import annotations
 
 from google import genai
 from google.genai import types
+from google.oauth2 import service_account
 from pydantic import BaseModel
 
 from app.config import settings
@@ -55,6 +59,43 @@ class GeminiProvider:
     def __init__(self, api_key: str) -> None:
         self._client = genai.Client(
             api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=int(settings.llm_request_timeout_seconds * 1000)
+            ),
+        )
+        self._model = settings.llm_model
+
+    async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
+        return await _complete(self._client, self._model, system, user, schema)
+
+
+class VertexProvider:
+    """``vertex`` -- gemini-flash-latest via Vertex AI (``vertexai=True``).
+
+    Differs from GeminiProvider only in authentication: a GCP service-account
+    identity instead of an API key. ``service_account_info=None`` means "pass
+    no explicit credentials", which is what makes google-auth discover the
+    caller's implicit ADC (``gcloud auth application-default login``).
+    ``credentials=None`` is genai.Client's own default, so passing it
+    explicitly here is identical to omitting it.
+
+    Reinstated once GCP billing/ADC access became available -- see CLAUDE.md's
+    "Substitutions from the brief".
+    """
+
+    def __init__(
+        self, project: str, location: str, service_account_info: dict | None
+    ) -> None:
+        creds = None
+        if service_account_info is not None:
+            creds = service_account.Credentials.from_service_account_info(
+                service_account_info
+            )
+        self._client = genai.Client(
+            vertexai=True,
+            project=project,
+            location=location,
+            credentials=creds,
             http_options=types.HttpOptions(
                 timeout=int(settings.llm_request_timeout_seconds * 1000)
             ),

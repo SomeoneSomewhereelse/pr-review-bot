@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.providers import pricing
 from app.providers.factory import get_provider
-from app.providers.google_genai import GeminiProvider
+from app.providers.google_genai import GeminiProvider, VertexProvider
 from app.providers.validate import validate_and_repair
 
 
@@ -105,6 +105,77 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
+
+
+def _fake_client_factory(captured: dict, fake_generate):
+    def _build(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
+        )
+
+    return _build
+
+
+@pytest.mark.asyncio
+async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
+    """Same call, same parsing, same usage accounting as gemini -- the only
+    difference between the two adapters is how the client is authenticated."""
+    captured: dict = {}
+    fake_generate = AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"}), 42, 7))
+    monkeypatch.setattr(
+        "app.providers.google_genai.genai.Client",
+        _fake_client_factory(captured, fake_generate),
+    )
+
+    provider = VertexProvider(project="proj-x", location="us-central1", service_account_info=None)
+    result = await provider.complete("system prompt", "user prompt", Greeting)
+
+    assert result.parsed == Greeting(message="hi")
+    assert result.tokens_in == 42
+    assert result.tokens_out == 7
+    assert captured["vertexai"] is True
+    assert captured["project"] == "proj-x"
+    assert captured["location"] == "us-central1"
+    _, kwargs = fake_generate.call_args
+    assert kwargs["model"] == settings.llm_model
+
+
+def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
+    """credentials=None is genai.Client's own default, and passing it
+    explicitly is identical to omitting it -- which is exactly what makes
+    google-auth discover the local ADC file."""
+    captured: dict = {}
+    monkeypatch.setattr(
+        "app.providers.google_genai.genai.Client",
+        _fake_client_factory(captured, AsyncMock()),
+    )
+
+    VertexProvider(project="proj-x", location="us-central1", service_account_info=None)
+
+    assert captured["credentials"] is None
+
+
+def test_vertex_provider_builds_credentials_from_the_service_account_info(monkeypatch):
+    """from_service_account_info is mocked: a real one needs a real RSA private
+    key, and this test is about the wiring, not about google-auth's parsing."""
+    captured: dict = {}
+    sentinel = object()
+    seen: dict = {}
+    monkeypatch.setattr(
+        "app.providers.google_genai.genai.Client",
+        _fake_client_factory(captured, AsyncMock()),
+    )
+    monkeypatch.setattr(
+        "app.providers.google_genai.service_account.Credentials.from_service_account_info",
+        lambda info: seen.update(info) or sentinel,
+    )
+
+    info = {"type": "service_account", "project_id": "proj-x"}
+    VertexProvider(project="proj-x", location="us-central1", service_account_info=info)
+
+    assert captured["credentials"] is sentinel
+    assert seen == info
 
 
 # --------------------------------------------------------------------------
@@ -346,3 +417,12 @@ def test_estimate_cost_usd_groq_llama():
 def test_estimate_cost_usd_groq_unknown_model_raises():
     with pytest.raises(KeyError):
         pricing.estimate_cost_usd("groq", "no-such-model", tokens_in=1, tokens_out=1)
+
+
+def test_estimate_cost_usd_vertex_flash():
+    """Same model, same published rate as AI-Studio's paid tier -- the two
+    providers differ in the auth path, not in what a token costs."""
+    cost = pricing.estimate_cost_usd(
+        "vertex", "gemini-flash-latest", tokens_in=4_000, tokens_out=500
+    )
+    assert cost == pytest.approx(0.0012 + 0.00125)

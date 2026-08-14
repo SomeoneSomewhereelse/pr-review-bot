@@ -12,8 +12,13 @@ from __future__ import annotations
 # response (`pricing.prompt` / `pricing.completion`, USD per token) on
 # 2026-07-23 — $0.59 / $0.79 per 1M tokens. Representative; verify at build
 # time against https://groq.com/pricing before relying on it for real spend.
+# vertex/gemini-flash-latest: the same model at the same published rate as the
+# gemini entry below -- Vertex and AI-Studio differ in the auth path, not in
+# what a token costs. Kept as a separate key because estimate_cost_usd is
+# called with the ACTIVE provider name, and a missing entry is a hard KeyError.
 _RATES: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini", "gemini-flash-latest"): (0.30, 2.50),
+    ("vertex", "gemini-flash-latest"): (0.30, 2.50),
     ("groq", "llama-3.3-70b-versatile"): (0.59, 0.79),
 }
 
