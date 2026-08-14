@@ -28,3 +28,5 @@ queue.db-shm
 
 # Local git worktrees (superpowers subagent-driven-development scratch)
 .worktrees/
+
+tmp.json
