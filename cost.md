@@ -53,8 +53,11 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
   (`app/providers/google_genai.py`) — the implicit-ADC path already had the
   correct scope via `google-genai`'s own SDK, but the explicit
   service-account path (the hosted/Render production configuration) did not.
-  Live re-verification against real Vertex AI is pending a follow-up run; see
-  `SETUP.md` §2. Billed at the same per-token rate as the Gemini entry below
+  **Follow-up run confirms the fix**: OAuth auth now succeeds against real
+  Vertex AI infrastructure (no more `invalid_scope`); the call then hit a
+  separate, unrelated `404 NOT_FOUND` on the configured model alias, which is
+  a model-choice gap, not an auth/billing issue — see `SETUP.md` §2 for
+  detail. Billed at the same per-token rate as the Gemini entry below
   (`app/providers/pricing.py`); the two differ in the auth path, not in
   price.
 - **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0

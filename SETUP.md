@@ -118,12 +118,30 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   implicit-ADC path already had the correct scope via `google-genai`'s own
   SDK, but the explicit service-account path (the hosted/Render production
   configuration) did not. Per the testing-hygiene rule, this was **not**
-  retried with a different scope/key while diagnosing it; a future operator
-  should re-run `scripts/manual_verify_vertex.py` once, now that the scope
-  fix has landed, before treating vertex as production-verified — live
-  re-verification against real Vertex AI is pending that follow-up run, the
-  same live-verification step `manual_verify_step4.py`/`manual_verify_groq.py`
-  already completed for the other two providers. Its credential is a GCP
+  retried with a different scope/key while diagnosing it; instead, one
+  deliberate follow-up call was made once the fix had landed.
+
+  **Follow-up run, same day: the OAuth-scope fix is confirmed working.**
+  Re-running `scripts/manual_verify_vertex.py` once against a real GCP
+  service-account credential no longer hits `invalid_scope` — credential
+  resolution, project derivation, and OAuth token refresh all succeeded, a
+  genuine network round-trip against Google's real infrastructure, not a
+  mock. The call then reached Vertex AI's real `generateContent` endpoint and
+  failed with a different, unrelated error: `404 NOT_FOUND: Publisher model
+  'projects/tovtech-vertex-imagen/locations/us-central1/publishers/google/models/gemini-flash-latest'
+  was not found or your project does not have access to it.` This is not a
+  new bug — it's the model-choice question for Gemini/Vertex noted above
+  ("`LLM_MODEL` stays at `gemini-flash-latest` for now... still open"), now
+  with concrete evidence: Vertex's publisher-model catalog uses its own model
+  ids (often dated, e.g. `gemini-2.0-flash-001`-style) that don't necessarily
+  mirror AI-Studio's aliases, so `gemini-flash-latest` doesn't resolve as a
+  Vertex publisher model for this project/region. Per the one-deliberate-call
+  rule, this was **not** retried with a different model name. The one
+  remaining step before a fully successful live run is resolving that open
+  model-choice question for vertex specifically — checking Vertex's
+  publisher-model listing for this project/region and picking an id that
+  actually exists there, rather than assuming the AI-Studio alias carries
+  over. Its credential is a GCP
   service-account identity, not an API key, resolved in three layers by
   `app/providers/vertex_credentials.py`:
   1. `GCP_SERVICE_ACCOUNT_KEY_B64` (+ numbered `_1`/`_2` siblings) — the

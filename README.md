@@ -354,8 +354,17 @@ the full history of runs and timings.
   `cloud-platform` OAuth scope (`app/providers/google_genai.py`) — the
   implicit-ADC path already had the correct scope via `google-genai`'s own
   SDK, but the explicit service-account path (the hosted/Render production
-  configuration) did not. Live re-verification against real Vertex AI is
-  pending a follow-up run. See `SETUP.md` §2.
+  configuration) did not. **Follow-up run confirms the fix**: re-running
+  `scripts/manual_verify_vertex.py` against a real GCP credential no longer
+  hits `invalid_scope` — credential resolution, project derivation, and OAuth
+  token refresh all succeeded, a genuine round-trip against Google's real
+  infrastructure. The call then reached Vertex AI's real `generateContent`
+  endpoint and failed with a separate, pre-existing, already-documented gap:
+  `404 NOT_FOUND` on publisher model `gemini-flash-latest` for this
+  project/region — the model-choice question `SETUP.md` §2 already flags as
+  open, now with concrete evidence. So the auth/credential path is confirmed
+  working end-to-end; a fully successful live run still needs a Vertex-side
+  publisher model id. See `SETUP.md` §2.
 - **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
   2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
   non-zero token usage). See `SETUP.md` for the account-access history this
