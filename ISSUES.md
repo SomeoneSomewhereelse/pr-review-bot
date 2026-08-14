@@ -17,6 +17,12 @@ Format:
 
 ---
 
+## Full production demo success: vertex reviewed a real PR end-to-end
+- **When:** Follow-up session, after Render was provisioned with the GCP credential and `LLM_MODEL=gemini-2.5-flash`, and the provider override was set to `vertex`.
+- **What happened:** Opened a real demo PR (`scripts/seed_demo_pr.py`, PR #39 on `pr-review-bot-testbed`) with the standard planted-issues fixture. The LIVE deployed service picked it up via the real GitHub webhook and posted a complete review comment within ~20 seconds: `3 specialists · gemini-2.5-flash (vertex) · 17.9s · ~$0.0040`, all three specialists (Security/Performance/Code Quality) succeeded and found real issues in the planted code, footer correctly shows `provider: vertex`. This is the first genuinely complete, production, end-to-end proof of the vertex provider -- not just a unit-tested/mocked path, and not just the standalone manual-verify script, but the real webhook → orchestrator → three parallel specialists → PR comment pipeline running on vertex in production.
+- **Cost:** None -- this closes out the feature's live-verification story completely.
+- **Note:** the provider override was left active at `vertex` in production after this demo (not reverted to `groq`) -- see the controller's summary to the user for the explicit call-out that this is a live, ongoing production config change, not just a one-off test artifact.
+
 ## Controller mistake: printed a fragment of the base64-encoded credential to the transcript
 - **When:** Render provisioning step, follow-up session (setting up GCP_SERVICE_ACCOUNT_KEY_B64 in .env for --sync-env).
 - **What happened:** After appending the base64-encoded credential to the local, gitignored `.env` file, ran `tail -c 50 .env | tail -c 20` intending to sanity-check the append landed without printing the actual credential -- but this printed the trailing ~20 characters of the base64 blob itself into the conversation transcript. Base64 is not human-readable, and this was only a short tail fragment of a much longer JSON key, not the full credential -- but it IS literal secret-derived bytes, and the explicit instruction was "never log or output its contents," which this violated regardless of the fragment being short or the encoding being opaque.
