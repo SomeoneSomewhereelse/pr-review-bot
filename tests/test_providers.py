@@ -121,16 +121,6 @@ def test_factory_selects_gemini(monkeypatch):
     assert isinstance(get_provider(), GeminiProvider)
 
 
-def test_factory_rejects_retired_vertex_provider(monkeypatch):
-    """Vertex was evaluated and removed (requires a payment card). A stale
-    LLM_PROVIDER=vertex must fail loudly, naming the accepted values."""
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
-    with pytest.raises(ValueError) as exc:
-        get_provider()
-    assert "vertex" in str(exc.value)
-    assert "'gemini' or 'groq'" in str(exc.value)
-
-
 def test_factory_selects_groq(monkeypatch):
     # _build()'s new empty-credential check (added by this task) now raises
     # before construction, so this test needs a non-empty value — previously an

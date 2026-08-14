@@ -173,7 +173,8 @@ The push set is **provider-derived**, not a fixed list: it always pushes
 **selected provider's** credential and model var — e.g. `LLM_PROVIDER=groq`
 pushes `GROQ_API_KEY` and `GROQ_MODEL`, not `GEMINI_API_KEY`/`LLM_MODEL`. Any
 *other* provider's credential is pushed too, but only if you happen to have it set locally —
-an unselected provider's key is never demanded. It refuses to start (exit 2)
+an unselected provider's key is never demanded (this includes vertex's
+`GCP_SERVICE_ACCOUNT_KEY_B64`, which shares `LLM_MODEL` with gemini). It refuses to start (exit 2)
 if any wanted value is empty locally, so a blank `.env` entry can never
 overwrite a working secret on the service; only changed variables are
 pushed, and if nothing differs no deploy is triggered.

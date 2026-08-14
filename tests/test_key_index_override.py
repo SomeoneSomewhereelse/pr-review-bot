@@ -88,3 +88,22 @@ def test_clearing_the_cache_returns_to_zero():
     key_index.set_override_cache({"groq": 2})
     key_index.reset_override_cache()
     assert key_index.active_key_index("groq") == 0
+
+
+def test_vertex_round_trips_through_the_generic_key_index_machinery():
+    """vertex needs no new store functions -- it is a third entry under the
+    already-generic KEY_INDEX_COLUMNS, including the migration that adds
+    vertex_key_index to a runtime_config table that already existed."""
+    store.set_key_index_override("vertex", 3, T0)
+    assert store.get_key_index_override("vertex") == 3
+    assert store.get_all_key_index_overrides() == {"vertex": 3}
+    store.set_key_index_override("vertex", None, T1)
+    assert store.get_key_index_override("vertex") is None
+
+
+def test_vertex_index_is_independent_of_the_other_providers():
+    store.set_key_index_override("vertex", 2, T0)
+    store.set_key_index_override("groq", 1, T0)
+    assert store.get_key_index_override("vertex") == 2
+    assert store.get_key_index_override("groq") == 1
+    assert store.get_key_index_override("gemini") is None

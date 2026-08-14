@@ -82,9 +82,9 @@ def test_providers_track_independent_index_overrides():
 
 
 def test_rejects_an_unsupported_provider(capsys):
-    assert set_override.main(["vertex"]) == 2
+    assert set_override.main(["unknown"]) == 2
     err = capsys.readouterr().err
-    assert "vertex" in err
+    assert "unknown" in err
     assert "groq" in err
     assert store.get_provider_override() is None
 

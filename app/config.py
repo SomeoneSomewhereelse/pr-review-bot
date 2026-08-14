@@ -24,6 +24,20 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+
+    # --- Vertex AI (LLM_PROVIDER=vertex). Unlike gemini/groq, the credential
+    # is a GCP service-account identity rather than an API-key string:
+    # GCP_SERVICE_ACCOUNT_KEY_B64 (hosted) -> a local key file -> implicit ADC.
+    # See app/providers/vertex_credentials.py for the resolution order.
+    # An OPTIONAL override: unset means "use the project_id embedded in the
+    # resolved service-account key", so an operator handed nothing but a JSON
+    # key needs no separate project lookup.
+    gcp_project: str = ""
+    # Which Vertex regional endpoint to call -- not an account property, so the
+    # default needs no lookup either.
+    gcp_location: str = "us-central1"
+    gcp_service_account_key_b64: str = ""
+    gcp_service_account_key_path: str = "./gcp-service-account-key.json"
     # Ceiling on a single LLM request, in seconds. The dispatcher is a single
     # serial consumer of the whole queue (app/queue/dispatcher.py) -- a hung
     # call with no timeout would stall every pending PR's review, not just

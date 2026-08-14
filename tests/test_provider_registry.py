@@ -10,18 +10,29 @@ from scripts import deploy
 
 
 def test_registry_lists_all_providers():
-    assert set(registry.PROVIDERS) == {"gemini", "groq"}
+    assert set(registry.PROVIDERS) == {"gemini", "groq", "vertex"}
 
 
 def test_registry_maps_each_provider_to_its_credential_and_model_env_vars():
     assert registry.PROVIDERS["gemini"] == ("GEMINI_API_KEY", "LLM_MODEL")
     assert registry.PROVIDERS["groq"] == ("GROQ_API_KEY", "GROQ_MODEL")
+    assert registry.PROVIDERS["vertex"] == ("GCP_SERVICE_ACCOUNT_KEY_B64", "LLM_MODEL")
 
 
 def test_registry_lists_a_key_index_column_per_provider():
-    assert set(registry.KEY_INDEX_COLUMNS) == {"gemini", "groq"}
+    assert set(registry.KEY_INDEX_COLUMNS) == {"gemini", "groq", "vertex"}
     assert registry.KEY_INDEX_COLUMNS["gemini"] == "gemini_key_index"
     assert registry.KEY_INDEX_COLUMNS["groq"] == "groq_key_index"
+    assert registry.KEY_INDEX_COLUMNS["vertex"] == "vertex_key_index"
+
+
+def test_known_providers_matches_the_registry():
+    """app/dashboard.py builds its per-provider backoff panel from
+    KNOWN_PROVIDERS; a provider in one and not the other renders a panel that
+    silently omits a real provider."""
+    from app.providers.base import KNOWN_PROVIDERS
+
+    assert set(KNOWN_PROVIDERS) == set(registry.PROVIDERS)
 
 
 def test_deploy_script_imports_the_shared_registry():

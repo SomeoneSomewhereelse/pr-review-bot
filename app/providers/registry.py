@@ -14,6 +14,12 @@ from __future__ import annotations
 PROVIDERS = {
     "gemini": ("GEMINI_API_KEY", "LLM_MODEL"),
     "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
+    # vertex's credential is a base64-encoded service-account JSON key, not an
+    # API-key string -- but it is resolved through the same numbered-slot
+    # mechanism (credentials.resolve), so it belongs in the same table.
+    # app/providers/vertex_credentials.py layers the local-file and
+    # implicit-ADC fallbacks on top of what this entry resolves.
+    "vertex": ("GCP_SERVICE_ACCOUNT_KEY_B64", "LLM_MODEL"),
 }
 
 # provider -> the runtime_config column holding its active API-key-slot
@@ -24,4 +30,5 @@ PROVIDERS = {
 KEY_INDEX_COLUMNS = {
     "gemini": "gemini_key_index",
     "groq": "groq_key_index",
+    "vertex": "vertex_key_index",
 }

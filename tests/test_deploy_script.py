@@ -27,7 +27,7 @@ def _no_real_provider_credentials(monkeypatch):
     """deploy.py's tests never need a real provider key, and _wanted_env now
     reads every provider's credential -- so without this, a developer's .env
     flows into mocked request bodies and out through any respx match failure."""
-    for name in ("gemini_api_key", "groq_api_key"):
+    for name in ("gemini_api_key", "groq_api_key", "gcp_service_account_key_b64"):
         monkeypatch.setattr(settings, name, "")
 
 
@@ -147,18 +147,18 @@ def test_check_config_ignores_provider_keys_for_other_providers(complete_config,
 def test_providers_table_covers_every_supported_provider():
     """One table, read by check_config, --sync-env and set_override.py, so a
     provider cannot be known to one consumer and unknown to another."""
-    assert set(deploy._PROVIDERS) == {"gemini", "groq"}
+    assert set(deploy._PROVIDERS) == {"gemini", "groq", "vertex"}
     for credential, model_var in deploy._PROVIDERS.values():
         assert credential and model_var
 
 
 def test_check_config_fails_on_an_unrecognized_provider(complete_config, monkeypatch):
     """An unrecognized value used to contribute no requirement and pass with
-    nothing verified -- which after the vertex retirement includes 'vertex'."""
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    nothing verified."""
+    monkeypatch.setattr(settings, "llm_provider", "unknown")
     result = deploy.check_config()
     assert result.status == "FAIL"
-    assert "vertex" in result.detail
+    assert "unknown" in result.detail
     assert "gemini" in result.detail
 
 
@@ -167,11 +167,22 @@ def test_check_config_reports_a_bad_provider_alongside_other_missing_keys(
 ):
     """An unsupported provider must not mask problems already collected --
     one run surfaces every problem, per this module's own contract."""
-    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "llm_provider", "unknown")
     monkeypatch.setattr(settings, "github_webhook_secret", "")
     detail = deploy.check_config().detail
     assert "GITHUB_WEBHOOK_SECRET" in detail
-    assert "vertex" in detail
+    assert "unknown" in detail
+
+
+def test_check_config_requires_the_gcp_key_when_vertex_selected(complete_config, monkeypatch):
+    """deploy.py answers "can this be DEPLOYED", and Render has neither a local
+    key file nor a `gcloud` ADC login -- so the base64 form is genuinely
+    required there even though a local run could resolve either fallback."""
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_service_account_key_b64", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GCP_SERVICE_ACCOUNT_KEY_B64" in result.detail
 
 
 def test_check_config_requires_the_gemini_key_when_gemini_selected(
@@ -1505,7 +1516,7 @@ def test_api_key_live_skips_when_the_index_resolution_raises(monkeypatch):
 
 def test_api_key_live_skips_for_an_unsupported_provider(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("vertex", None))
+    monkeypatch.setattr(deploy, "_resolved_provider_or_env", lambda: ("unknown", None))
     assert deploy.check_api_key_live().status == "SKIPPED"
 
 

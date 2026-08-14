@@ -231,7 +231,7 @@ The production deployment uses:
    - `GITHUB_WEBHOOK_SECRET`: (from `.env`)
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
-   - (Other provider creds as needed: `GEMINI_API_KEY`, etc.)
+   - (Other provider creds as needed: `GEMINI_API_KEY`, `GCP_SERVICE_ACCOUNT_KEY_B64`, etc.)
    - Do **not** set `GITHUB_APP_INSTALLATION_ID`. Leaving it unset is
      deliberate: the app auto-discovers it at boot from the App JWT.
    - `RENDER_API_KEY` is **not** a service env var. It is optional

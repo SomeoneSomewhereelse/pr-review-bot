@@ -26,15 +26,16 @@ _instances: dict[tuple[str, int], LLMProvider] = {}
 
 
 def _build(provider: str, index: int) -> LLMProvider:
-    # Check membership BEFORE calling credentials.resolve(): resolve() does
+    # Check membership BEFORE resolving any credential: resolve() does
     # registry.PROVIDERS[provider], an unguarded dict lookup that raises a
-    # bare KeyError for an unknown name. Two pre-existing tests
-    # (test_factory_raises_for_unknown_provider,
-    # test_factory_rejects_retired_vertex_provider) expect ValueError with a
-    # message naming the accepted providers -- resolving first would raise
-    # the wrong exception type before ever reaching the check below.
+    # bare KeyError for an unknown name. test_factory_raises_for_unknown_provider
+    # expects ValueError with a message naming the accepted providers --
+    # resolving first would raise the wrong exception type before ever
+    # reaching the check below.
     if provider not in registry.PROVIDERS:
-        raise ValueError(f"Unknown provider: {provider!r} (expected 'gemini' or 'groq')")
+        raise ValueError(
+            f"Unknown provider: {provider!r} (expected 'gemini', 'groq', or 'vertex')"
+        )
     env_name, api_key = credentials.resolve(provider, index)
     # Locally-detectable invalid state: no live call needed to know this slot
     # was never provisioned anywhere. Caught by run_specialist's existing
