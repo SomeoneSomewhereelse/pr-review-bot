@@ -2,7 +2,11 @@
 against the active API-key-slot index (also DB-overridable) per provider.
 
 Narrow on purpose: this module knows which class to instantiate and which
-credential to hand it — nothing about provider internals beyond that.
+credential to hand it -- nothing about provider internals beyond that. The
+one asymmetry is vertex, whose credential is a service-account identity
+rather than an API-key string and whose absence means "use implicit ADC"
+rather than "misconfigured"; app/providers/vertex_credentials.py owns that
+resolution, this module only branches on it.
 
 One instance per (provider name, key index) is cached for the process
 lifetime — each ``complete()`` call was previously paying a fresh SDK client
@@ -16,10 +20,11 @@ explicit teardown needed.
 
 from __future__ import annotations
 
-from app.providers import credentials, key_index, registry
+from app.config import settings
+from app.providers import credentials, key_index, registry, vertex_credentials
 from app.providers.active import active_provider
 from app.providers.base import LLMProvider
-from app.providers.google_genai import GeminiProvider
+from app.providers.google_genai import GeminiProvider, VertexProvider
 from app.providers.groq import GroqProvider
 
 _instances: dict[tuple[str, int], LLMProvider] = {}
@@ -35,6 +40,28 @@ def _build(provider: str, index: int) -> LLMProvider:
     if provider not in registry.PROVIDERS:
         raise ValueError(
             f"Unknown provider: {provider!r} (expected 'gemini', 'groq', or 'vertex')"
+        )
+    if provider == "vertex":
+        # Deliberately ahead of the generic empty-credential fast-fail below:
+        # for vertex an empty resolved credential is legitimate (it means
+        # "fall through to implicit ADC"), unlike gemini/groq where an empty
+        # string always means misconfigured. The locally-detectable invalid
+        # state here is instead "no project to call with at all", which
+        # happens only with no GCP_PROJECT override AND no service-account key
+        # anywhere to derive one from. Both steps are local -- decoding an env
+        # var, reading a file -- so this is still a no-network fast-fail, just
+        # performed after credential resolution instead of before it.
+        info = vertex_credentials.resolve_service_account_info(index)
+        project = settings.gcp_project or (info or {}).get("project_id", "")
+        if not project:
+            raise ValueError(
+                "no credential configured for provider='vertex': GCP_PROJECT not set "
+                "and no service-account key found to derive it from"
+            )
+        return VertexProvider(
+            project=project,
+            location=settings.gcp_location,
+            service_account_info=info,
         )
     env_name, api_key = credentials.resolve(provider, index)
     # Locally-detectable invalid state: no live call needed to know this slot

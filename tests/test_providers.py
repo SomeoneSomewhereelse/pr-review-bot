@@ -298,6 +298,124 @@ def test_factory_returns_to_the_original_cached_instance_after_switching_back(mo
     reset_provider_cache()
 
 
+def _mock_vertex_client(monkeypatch, captured: dict | None = None):
+    """genai.Client would otherwise try to authenticate for real at
+    construction; these tests are about _build's own branching. Pass a dict to
+    capture the kwargs it was constructed with."""
+
+    def _build(**kwargs):
+        if captured is not None:
+            captured.update(kwargs)
+        return SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace()))
+
+    monkeypatch.setattr("app.providers.google_genai.genai.Client", _build)
+
+
+def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch):
+    """GCP_PROJECT unset is the COMMON case: an operator handed nothing but a
+    service-account JSON key gets the project from the key's own project_id."""
+    from app.providers.google_genai import VertexProvider
+
+    captured: dict = {}
+    _mock_vertex_client(monkeypatch, captured)
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_project", "")
+    monkeypatch.setattr(settings, "gcp_location", "us-central1")
+    monkeypatch.setattr(
+        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        lambda index: {"type": "service_account", "project_id": "proj-from-key"},
+    )
+    monkeypatch.setattr(
+        "app.providers.google_genai.service_account.Credentials.from_service_account_info",
+        lambda info: object(),
+    )
+
+    assert isinstance(get_provider(), VertexProvider)
+    assert captured["project"] == "proj-from-key"
+    assert captured["location"] == "us-central1"
+
+
+def test_factory_prefers_an_explicit_gcp_project_over_the_keys_own(monkeypatch):
+    """GCP_PROJECT still exists as an override -- for pointing a key at a
+    different project than the one it was minted in."""
+    captured: dict = {}
+    _mock_vertex_client(monkeypatch, captured)
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(
+        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        lambda index: {"type": "service_account", "project_id": "proj-from-key"},
+    )
+    monkeypatch.setattr(
+        "app.providers.google_genai.service_account.Credentials.from_service_account_info",
+        lambda info: object(),
+    )
+
+    get_provider()
+    assert captured["project"] == "proj-explicit"
+
+
+def test_factory_builds_vertex_from_implicit_adc_when_a_project_is_set(monkeypatch):
+    """The one behavioral difference from gemini/groq worth its own test: an
+    EMPTY resolved credential is not an error for vertex. _build must not
+    raise -- any failure then comes from the SDK/google-auth relying on
+    implicit ADC, which is a live-call concern, not a config one."""
+    from app.providers.google_genai import VertexProvider
+
+    _mock_vertex_client(monkeypatch)
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(
+        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        lambda index: None,
+    )
+
+    assert isinstance(get_provider(), VertexProvider)
+
+
+def test_factory_raises_when_vertex_has_neither_a_project_nor_a_credential(monkeypatch):
+    """Pure implicit-ADC with no key to derive a project from: locally
+    detectable, so it must fast-fail before any network call rather than let
+    three specialists each discover the same problem the expensive way."""
+    _mock_vertex_client(monkeypatch)
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_project", "")
+    monkeypatch.setattr(
+        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        lambda index: None,
+    )
+
+    with pytest.raises(ValueError) as exc:
+        get_provider()
+    assert "vertex" in str(exc.value)
+    assert "GCP_PROJECT" in str(exc.value)
+
+
+def test_factory_passes_the_active_key_index_to_vertex_credentials(monkeypatch):
+    """vertex rides the same key-index override as gemini/groq -- the index
+    must reach the credential resolver, or a slot swap would be a silent
+    no-op for this provider alone."""
+    from app.providers import key_index
+    from app.providers.factory import reset_provider_cache
+
+    _mock_vertex_client(monkeypatch)
+    seen: list[int] = []
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(
+        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        lambda index: seen.append(index) or None,
+    )
+    reset_provider_cache()
+    key_index.set_override_cache({"vertex": 2})
+
+    get_provider()
+    assert seen == [2]
+
+    key_index.reset_override_cache()
+    reset_provider_cache()
+
+
 # --------------------------------------------------------------------------
 # validate.py — validate-and-repair
 # --------------------------------------------------------------------------
