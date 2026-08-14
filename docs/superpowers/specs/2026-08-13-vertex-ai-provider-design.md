@@ -5,7 +5,10 @@
 **Updated 2026-08-14:** dropped the DB-stored credential-blob override and
 the `CLAUDE.md` "secrets only via env vars" exception it required. Vertex's
 credential now reuses the existing numbered-env-var-slot + key-index
-mechanism unchanged, exactly like gemini/groq — see §2 and §7 for why.
+mechanism unchanged, exactly like gemini/groq — see §2 and §7 for why. Also
+made `GCP_PROJECT` an optional override derived from the service-account
+key's own `project_id` when unset, since the operator may only ever be
+handed a JSON key, not separate project access — see §2 and §6.
 **Relates to:** `app/providers/google_genai.py` (where `GeminiProvider` lives
 and where `VertexProvider` joins it), `app/providers/factory.py` /
 `registry.py` / `credentials.py` / `key_index.py` (the existing provider
@@ -97,19 +100,37 @@ different risk profile — so the same conclusion applies: store an index, not
 a secret, and accept the one-restart cost of provisioning a genuinely new
 credential, exactly as already accepted for the other two providers.
 
-`GCP_PROJECT` (required, no default) and `GCP_LOCATION` (default
-`us-central1`) are needed regardless of which credential source resolves —
-`vertexai=True` cannot work without them, and both are locally detectable
-with no network call, so `factory._build` fast-fails on a missing
-`GCP_PROJECT` the same way it already fast-fails on a missing gemini/groq
-key — except an *empty resolved credential* for vertex is not itself an
-error (it means "fall through to implicit ADC"), unlike gemini/groq where an
-empty string always means misconfigured.
+`vertexai=True` cannot work without a project and a location, but neither
+needs to be something the operator looks up or is separately granted access
+to:
+
+- **`GCP_LOCATION`** (default `us-central1`) — not an account property at
+  all, just which Vertex regional endpoint to call. The default needs no
+  lookup; `GCP_LOCATION` only exists as an override for someone who wants a
+  different region.
+- **`GCP_PROJECT`** — a GCP service-account JSON key always embeds its own
+  `project_id`, so this is derived from the resolved credential
+  (`service_account_info["project_id"]`) rather than required as separate
+  configuration. `GCP_PROJECT` still exists as an explicit override (for
+  pointing at a different project than the key's own), but the common case
+  — nothing but a service-account JSON key — needs it set to nothing.
+
+`factory._build` resolves the credential first (§6), then computes
+`project = settings.gcp_project or (info or {}).get("project_id", "")` and
+fast-fails only if that's still empty — which happens only when there's
+*no* explicit override and *no* JSON key anywhere to derive a project from
+(pure implicit-ADC, e.g. a personal `gcloud` login with no service-account
+key at all). Both steps stay local — decoding an env var / reading a local
+file — so this remains a no-network-call fast-fail, just performed after
+credential resolution instead of before it. An *empty resolved credential*
+by itself is still not an error for vertex (it means "fall through to
+implicit ADC"), unlike gemini/groq where an empty string always means
+misconfigured.
 
 ## 3. Settings (`app/config.py`)
 
 ```python
-gcp_project: str = ""
+gcp_project: str = ""  # optional override; derived from the credential's own project_id when unset
 gcp_location: str = "us-central1"
 gcp_service_account_key_b64: str = ""
 gcp_service_account_key_path: str = "./gcp-service-account-key.json"
@@ -228,18 +249,25 @@ KEY_INDEX_COLUMNS = {
 
 `factory._build` gains a vertex branch that does **not** go through the
 existing "empty credential → raise" fast-fail (that check stays exactly as
-written for gemini/groq, where empty always means misconfigured):
+written for gemini/groq, where empty always means misconfigured). Instead,
+it resolves the credential first, derives the project from it when
+`GCP_PROJECT` isn't set, and only then fast-fails if there's still no
+project to use:
 
 ```python
 def _build(provider: str, index: int) -> LLMProvider:
     if provider not in registry.PROVIDERS:
         raise ValueError(f"Unknown provider: {provider!r} (expected 'gemini', 'groq', or 'vertex')")
     if provider == "vertex":
-        if not settings.gcp_project:
-            raise ValueError("no credential configured for provider='vertex': GCP_PROJECT not set")
         info = vertex_credentials.resolve_service_account_info(index)
+        project = settings.gcp_project or (info or {}).get("project_id", "")
+        if not project:
+            raise ValueError(
+                "no credential configured for provider='vertex': GCP_PROJECT not set and no "
+                "service-account key found to derive it from"
+            )
         return VertexProvider(
-            project=settings.gcp_project, location=settings.gcp_location, service_account_info=info
+            project=project, location=settings.gcp_location, service_account_info=info
         )
     env_name, api_key = credentials.resolve(provider, index)
     if not api_key:
@@ -363,12 +391,16 @@ this design introduces no exception to it.
   env b64 absent + local file present → read and parsed; neither present →
   `None`; malformed b64/JSON at either layer surfaces as a clear error, not
   a silent fallthrough.
-- `factory.py` — vertex branch returns a `VertexProvider`; missing
-  `GCP_PROJECT` raises before any credential resolution or network call;
-  an empty resolved credential (no env/file/ADC signal locally mocked) does
-  **not** raise from `_build` itself (the raise, if any, comes from the
-  mocked SDK client construction, not from `_build`'s own check) — this is
-  the one behavioral difference from gemini/groq worth a dedicated test.
+- `factory.py` — vertex branch returns a `VertexProvider`; project is
+  derived from a mocked `service_account_info`'s `project_id` when
+  `GCP_PROJECT` is unset; an explicit `GCP_PROJECT` overrides the derived
+  value when both are present; missing `GCP_PROJECT` **and** no resolvable
+  credential together raise, before any network call; an empty resolved
+  credential with `GCP_PROJECT` explicitly set does **not** raise from
+  `_build` itself (the raise, if any, comes from the mocked SDK client
+  construction relying on implicit ADC, not from `_build`'s own check) —
+  this is the one behavioral difference from gemini/groq worth a dedicated
+  test.
 - `google_genai.py::VertexProvider` — mocked `genai.Client`; confirms
   `credentials=None` when `service_account_info` is `None`, and a real
   `service_account.Credentials` object when it isn't.
