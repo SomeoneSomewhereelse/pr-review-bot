@@ -43,8 +43,12 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
 
 ## 4. Free-tier headroom (why the demo is $0)
 
-- **Vertex** on the **$300 GCP trial credit** (90 days) covers all LLM calls
-  when enabled (not configured in this environment — see `SETUP.md`).
+- **Vertex** on the **$300 GCP trial credit** (90 days) covers all LLM calls —
+  implemented as of 2026-08-14 (`LLM_PROVIDER=vertex`) — code-complete and
+  unit-tested, but live verification against a real GCP-billed project is
+  still outstanding; see `SETUP.md` §2. Billed at the same per-token rate as
+  the Gemini entry below (`app/providers/pricing.py`); the two differ in the
+  auth path, not in price.
 - **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0
   fallback in principle (account-blocked in this environment, see `SETUP.md`).
 - **Groq** free tier: ~30 RPM / up to 14.4K req/day — the actual live

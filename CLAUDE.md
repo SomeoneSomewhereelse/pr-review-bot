@@ -14,8 +14,9 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 
 - **Backend**: FastAPI (async), managed with `uv`.
 - **GitHub**: PyGitHub with **GitHub App** auth (JWT → short-lived installation token).
-- **AI**: `LLMProvider` seam with two adapters — `gemini`
-  (`google-genai` SDK) and `groq` (OpenAI-compatible, live primary).
+- **AI**: `LLMProvider` seam with three adapters — `gemini` and `vertex`
+  (both the `google-genai` SDK: an AI-Studio API key vs. a GCP service-account
+  identity) and `groq` (OpenAI-compatible, live primary).
   Selected via `LLM_PROVIDER` env var.
 - **Concurrency**: `asyncio.gather(..., return_exceptions=True)`.
 - **Validation**: Pydantic v2 with a shared validate-and-repair layer.
@@ -52,11 +53,15 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
 - **`gemini-flash-latest`** instead of `gemini-2.5-flash` — the brief's model is
   deprecated/removed. The alias is pinnable to a dated version via env for demo
   reproducibility.
-- **`vertex` adapter removed** — Vertex AI requires an attached payment card,
-  which the no-card constraint rules out (see SETUP.md §2), so it was never
-  live-runnable and its tests could only ever be mocked. `SPEC.md` still records
-  it as the brief's default; `cost.md` keeps the $300-trial-credit costing as
-  the evaluation record.
+- **`vertex` adapter reinstated (2026-08-14)** — it was removed when Vertex AI's
+  payment-card requirement collided with this project's no-card constraint (see
+  SETUP.md §2), leaving it live-unrunnable and mock-only. GCP billing/ADC access
+  later became available, so `vertex` is back as a real, live-runnable third
+  provider, matching `SPEC.md`'s stated default. Its credential is a GCP
+  service-account identity rather than an API-key string:
+  `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted, numbered slots) → a local key file →
+  implicit ADC, resolved in `app/providers/vertex_credentials.py`. No secret
+  reaches Postgres — only the slot index, exactly as for gemini/groq.
 
 ## Cost
 

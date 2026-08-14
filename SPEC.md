@@ -406,7 +406,7 @@ cache pattern.
 numbered siblings (`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ...),
 provisioned like any other env var (one redeploy to add a slot). A separate
 `runtime_config` override per provider (`gemini_key_index`, `groq_key_index`,
-`github_models_key_index`) records which slot is active; `NULL` means index
+`vertex_key_index`) records which slot is active; `NULL` means index
 0, the base env var. `scripts/set_override.py` writes it — the same
 no-redeploy, next-claimed-ticket mechanics as the provider/cooldown
 overrides — and no secret ever reaches Postgres: only the integer index

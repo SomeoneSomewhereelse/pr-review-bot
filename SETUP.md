@@ -38,7 +38,7 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   - **Client ID** — not used by this project at all. Easy to grab by mistake,
     since it sits on the same page.
 
-## 2. LLM provider — Groq (live), not Vertex; Gemini blocked, then resolved
+## 2. LLM provider — Groq (live); Vertex reinstated 2026-08-14; Gemini blocked, then resolved
 
 - **Deviation from the original plan (GCP/Vertex):** Vertex AI requires a
   billing account (card) to enable. The user declined to add one, so no GCP
@@ -99,6 +99,38 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   free-tier rate caps) is explicitly deferred — `LLM_MODEL` stays at
   `gemini-flash-latest` for now. The account-access issue is resolved (above),
   but this question hasn't been revisited since; still open.
+- **Vertex reinstated, 2026-08-14:** the no-card constraint that ruled Vertex
+  out no longer applies — GCP billing/ADC access became available, so
+  `LLM_PROVIDER=vertex` is now a real, live-runnable provider, with
+  `scripts/manual_verify_vertex.py` written and ready to confirm it — but not
+  yet run against a real GCP credential in this build environment (no
+  billing-enabled GCP project/service-account key was available here). Run it
+  once real GCP access is available before treating vertex as
+  production-verified, the same live-verification step
+  `manual_verify_step4.py`/`manual_verify_groq.py` already completed for the
+  other two providers. Its credential is a GCP service-account identity, not
+  an API key, resolved in three layers by
+  `app/providers/vertex_credentials.py`:
+  1. `GCP_SERVICE_ACCOUNT_KEY_B64` (+ numbered `_1`/`_2` siblings) — the
+     hosted/Render path, selected by the same `vertex_key_index` override
+     gemini/groq use.
+  2. `GCP_SERVICE_ACCOUNT_KEY_PATH` (default `./gcp-service-account-key.json`,
+     gitignored; + numbered siblings) — local-dev only, for testing several
+     service accounts without touching Render or Supabase.
+  3. Implicit ADC — with neither of the above, `google-auth` discovers
+     `gcloud auth application-default login`'s local credentials on its own.
+
+  `GCP_PROJECT` is an **optional** override: unset, the project is read from
+  the service-account key's own `project_id`, so an operator handed nothing
+  but a JSON key needs no separate project lookup. `GCP_LOCATION` defaults to
+  `us-central1`.
+
+  **Deploying vertex to Render requires the base64 form.** Render has neither
+  a local key file nor a `gcloud` login, so `scripts/deploy.py`'s `config` and
+  `provider` checks FAIL for `LLM_PROVIDER=vertex` unless
+  `GCP_SERVICE_ACCOUNT_KEY_B64` is set locally — that is the value `--sync-env`
+  pushes. A file-only local setup is fine for running the app locally, but is
+  deliberately not considered deployable.
 
 ## 2b. Third provider — GitHub Models (added post-step-8, real cross-vendor demo)
 

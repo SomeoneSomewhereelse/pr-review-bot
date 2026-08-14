@@ -214,7 +214,12 @@ local `DATABASE_URL` happens to be the production one.
 Each provider's credential env var can have numbered siblings —
 `GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ... — provisioned ahead
 of time exactly like any other env var (one redeploy, via `--sync-env` or
-the Render dashboard, to add a new slot). Each provider tracks its own
+the Render dashboard, to add a new slot). `vertex` rides the identical
+mechanism with a differently-shaped credential: `GCP_SERVICE_ACCOUNT_KEY_B64`,
+`_1`, `_2`, ... on Render, and locally the same index instead selects among
+`GCP_SERVICE_ACCOUNT_KEY_PATH`, `_1`, `_2`, ... key files — so
+`uv run python -m scripts.set_override vertex --index 1` swaps service
+accounts with no redeploy and no CLI change. Each provider tracks its own
 key-index independently, so switching providers never disturbs the slot
 chosen for the other two, and no secret value is ever written to, read
 from, or logged by the database — only the slot's integer index is.
@@ -295,7 +300,7 @@ up a throwaway Postgres 16 via `testcontainers` automatically) or a
 those tests fail with an opaque testcontainers error. CI provides this
 automatically via a `services: postgres` container — no action needed there.
 
-508 deterministic tests, no real network calls — mocks GitHub's REST API (at
+493 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
 clients, and the webhook HTTP layer. CI (`.github/workflows/project-d-ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
@@ -335,11 +340,14 @@ the full history of runs and timings.
 
 ## Known limitations (deviations from `SPEC.md`, all deliberate)
 
-- **Vertex AI**: evaluated and **removed**. It requires an attached payment
-  card, which this project's no-card constraint rules out, so it was never
-  live-runnable here. The adapter existed under mocked tests only and was
-  deleted rather than carried as a fourth code path no test could exercise for
-  real. `SPEC.md` still records it as the brief's default provider.
+- **Vertex AI**: live (`LLM_PROVIDER=vertex`), reinstated 2026-08-14 — it had
+  been removed while this project's no-card constraint made it unrunnable, and
+  came back once GCP billing/ADC access became available. Unlike the other two
+  providers its credential is a GCP service-account identity:
+  `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted) → a local key file → implicit ADC.
+  Implemented and unit-tested (mocked SDK boundary); the live-verification
+  script (`scripts/manual_verify_vertex.py`) is written but has not yet been
+  run against a real GCP credential — see `SETUP.md` §2.
 - **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
   2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
   non-zero token usage). See `SETUP.md` for the account-access history this
