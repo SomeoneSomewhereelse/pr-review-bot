@@ -311,6 +311,7 @@ CI. Each is self-contained and prints what it's proving:
 | `scripts/manual_verify_step3.py` | GitHub App auth, diff fetch, comment upsert (edit-in-place) against a real PR |
 | `scripts/manual_verify_step4.py` | Gemini provider through the validate-repair layer |
 | `scripts/manual_verify_groq.py` | Groq provider through the validate-repair layer |
+| `scripts/manual_verify_vertex.py` | Vertex AI provider (service-account or ADC) through the validate-repair layer |
 | `scripts/seed_demo_pr.py` | Opens a real PR with planted issues (`fixtures/bad_code/`) on the test repo |
 | `scripts/demo_provider_swap.py` | `LLM_PROVIDER` is a genuine runtime seam — see below for this script's current expected behavior |
 
