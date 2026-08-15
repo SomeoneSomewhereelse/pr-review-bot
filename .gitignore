@@ -7,6 +7,9 @@ Thumbs.db
 *.pem
 # GCP service-account key files (default name + any numbered local siblings)
 gcp-service-account-key*.json
+
+# Operational config (no secrets, but machine-specific)
+.env.config
 .venv/
 __pycache__/
 **/__pycache__/

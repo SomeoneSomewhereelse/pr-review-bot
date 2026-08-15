@@ -3,12 +3,33 @@ silently reverting to unbounded/disabled behavior at runtime.
 """
 from __future__ import annotations
 
+import re
 from datetime import time
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings
+from app.config import OPERATIONAL_KEYS, Settings
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_KEY_RE = re.compile(r"^([A-Z_0-9]+)=")
+
+
+def _key_names(path: Path) -> set[str]:
+    """Env-var NAMES only -- values are discarded before returning.
+
+    This function is the reason a test may look at .env at all: it can only
+    ever produce names, so no assertion built on it can print a secret. See
+    CLAUDE.md's "Secret handling" section.
+    """
+    if not path.is_file():
+        return set()
+    return {
+        match.group(1)
+        for line in path.read_text().splitlines()
+        if (match := _KEY_RE.match(line))
+    }
 
 
 def test_notice_sweep_batch_size_rejects_non_positive_values():
@@ -117,3 +138,61 @@ def test_key_usage_caps_accept_positive_values():
     settings = Settings(key_usage_token_cap=1, key_usage_cost_cap_usd=0.01)
     assert settings.key_usage_token_cap == 1
     assert settings.key_usage_cost_cap_usd == 0.01
+
+
+def test_env_config_wins_over_env(tmp_path):
+    """.env.config is the designated home for operational config, so it must
+    win if a key somehow appears in both files."""
+    env = tmp_path / ".env"
+    env.write_text("LLM_PROVIDER=from_secrets_file\n")
+    config = tmp_path / ".env.config"
+    config.write_text("LLM_PROVIDER=from_config_file\n")
+    settings = Settings(_env_file=(str(env), str(config)))
+    assert settings.llm_provider == "from_config_file"
+
+
+def test_both_files_merge(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("GEMINI_API_KEY=sentinel-key\n")
+    config = tmp_path / ".env.config"
+    config.write_text("LLM_PROVIDER=groq\n")
+    settings = Settings(_env_file=(str(env), str(config)))
+    assert settings.gemini_api_key == "sentinel-key"
+    assert settings.llm_provider == "groq"
+
+
+def test_process_env_beats_both_files(tmp_path, monkeypatch):
+    """This is what makes Render unaffected by the split: neither file exists
+    in the container, and injected env vars outrank both anyway."""
+    env = tmp_path / ".env"
+    env.write_text("LLM_PROVIDER=from_secrets_file\n")
+    config = tmp_path / ".env.config"
+    config.write_text("LLM_PROVIDER=from_config_file\n")
+    monkeypatch.setenv("LLM_PROVIDER", "from_process_env")
+    settings = Settings(_env_file=(str(env), str(config)))
+    assert settings.llm_provider == "from_process_env"
+
+
+def test_every_operational_key_is_a_real_settings_field():
+    """A typo in the allowlist would classify a key that cannot be read,
+    silently exempting a real key from the placement guard below."""
+    fields = set(Settings.model_fields)
+    unknown = {key for key in OPERATIONAL_KEYS if key.lower() not in fields}
+    assert not unknown, f"OPERATIONAL_KEYS names no such Settings field: {sorted(unknown)}"
+
+
+def test_no_operational_key_lives_in_the_secrets_file():
+    """Operational config must not sit in .env, because an agent may never open
+    .env -- which is the entire point of the split. Reports NAMES only."""
+    misplaced = _key_names(_REPO_ROOT / ".env") & OPERATIONAL_KEYS
+    assert not misplaced, (
+        f"move these keys from .env to .env.config: {sorted(misplaced)}"
+    )
+
+
+def test_no_unlisted_key_lives_in_the_config_file():
+    """Secret-by-default: anything not on the allowlist must stay in .env."""
+    intruders = _key_names(_REPO_ROOT / ".env.config") - OPERATIONAL_KEYS
+    assert not intruders, (
+        f"these keys are not on OPERATIONAL_KEYS and must live in .env: {sorted(intruders)}"
+    )

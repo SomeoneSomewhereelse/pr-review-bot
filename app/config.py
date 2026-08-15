@@ -3,9 +3,57 @@ from datetime import time
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Env-var names that hold plain operational config, not credentials. LISTED =
+# OPERATIONAL (lives in .env.config, freely editable by anyone including an
+# agent); EVERYTHING ELSE IS SECRET BY DEFAULT (lives in .env, which an agent
+# must never open -- see CLAUDE.md's "Secret handling" section).
+#
+# Every entry is a LITERAL key name, enumerated one by one -- never a prefix or
+# glob. A pattern would silently classify future keys that happen to match,
+# which is exactly the secret-by-default guarantee this list exists to provide.
+#
+# Adding a setting here is a deliberate classification decision, not a
+# formality: tests/test_config.py fails if a listed key is found in .env or an
+# unlisted key is found in .env.config.
+OPERATIONAL_KEYS = frozenset(
+    {
+        "LLM_PROVIDER",
+        "LLM_MODEL",
+        "GROQ_MODEL",
+        "KEY_USAGE_TOKEN_CAP",
+        "KEY_USAGE_COST_CAP_USD",
+        "KEY_USAGE_RESET_TIME_UTC",
+        "GCP_PROJECT",
+        "GCP_LOCATION",
+        "LLM_REQUEST_TIMEOUT_SECONDS",
+        "DISPATCHER_IDLE_SLEEP_SECONDS",
+        "DEFAULT_RETRY_AFTER_SECONDS",
+        "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS",
+        "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS",
+        "DISPATCHER_MAX_FAILURE_ATTEMPTS",
+        "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS",
+        "DISPATCHER_MIN_RETRY_AFTER_SECONDS",
+        "DISPATCHER_BACKOFF_JITTER_SECONDS",
+        "DISPATCHER_REREVIEW_COOLDOWN_SECONDS",
+        "DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS",
+        "DISPATCHER_REREVIEW_COOLDOWN_FACTOR",
+        "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE",
+        "RENDER_SERVICE_NAME",
+        "GITHUB_TARGET_REPO",
+        "PUBLIC_BASE_URL",
+    }
+)
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Two files, one Settings. .env holds credentials and identity; .env.config
+    # holds operational settings (OPERATIONAL_KEYS above). The LAST file wins on
+    # a key present in both, so .env.config -- the designated home -- outranks a
+    # stale line left in .env. A real process env var still beats both, which is
+    # why Render is unaffected: neither file exists in the container.
+    model_config = SettingsConfigDict(
+        env_file=(".env", ".env.config"), extra="ignore"
+    )
 
     github_app_id: int = 0
     github_app_installation_id: int = 0
