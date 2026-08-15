@@ -628,9 +628,9 @@ dispatcher; the atomic ticket claim would make multi-instance possible later
 but it is neither built for nor tested). One item this list previously
 named — *proactive quota accounting* — was deliberately reopened and built:
 see "Proactive per-key daily usage cap" above. What remains out of scope
-within it is the provider-reported half —
-no `x-ratelimit-*` header tracking, no knowledge of the provider's own
-limits; the cap is entirely self-imposed and locally computed.
+within it is the provider-reported half — no `x-ratelimit-*` header
+tracking, no knowledge of the provider's own limits; the cap is entirely
+self-imposed and locally computed.
 
 **Testing.** Extends section 8's deterministic-first strategy with new
 layers, all using an injected clock (no real sleeps): ticket store
