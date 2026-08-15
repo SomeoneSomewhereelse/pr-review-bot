@@ -273,6 +273,45 @@ def test_clear_index_with_activating_still_verifies(monkeypatch, db_url, capsys)
     assert "GROQ_API_KEY" in err
 
 
+def test_sets_model_and_activates_provider():
+    assert set_override.main(["vertex", "--model", "gemini-2.5-flash"]) == 0
+    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+    assert store.get_provider_override() == "vertex"
+
+
+def test_sets_model_without_activating():
+    assert set_override.main(
+        ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
+    ) == 0
+    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+    assert store.get_provider_override() is None
+
+
+def test_clear_model_leaves_other_providers_alone():
+    set_override.main(["groq", "--model", "llama-3.1-8b-instant", "--no-activate"])
+    set_override.main(["vertex", "--model", "gemini-2.5-flash", "--no-activate"])
+    assert set_override.main(["vertex", "--clear-model", "--no-activate"]) == 0
+    assert store.get_model_override("vertex") is None
+    assert store.get_model_override("groq") == "llama-3.1-8b-instant"
+
+
+def test_model_and_clear_model_are_mutually_exclusive(capsys):
+    assert set_override.main(["vertex", "--model", "x", "--clear-model"]) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_no_activate_alone_still_requires_something_to_do(capsys):
+    assert set_override.main(["vertex", "--no-activate"]) == 2
+    assert "--no-activate requires" in capsys.readouterr().err
+
+
+def test_empty_model_is_refused(capsys):
+    """An empty model name is not a model; active_model() would treat it as
+    "no override" and silently ignore the write."""
+    assert set_override.main(["vertex", "--model", "  ", "--no-activate"]) == 2
+    assert "must not be empty" in capsys.readouterr().err
+
+
 def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
