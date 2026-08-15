@@ -420,6 +420,32 @@ def record_review(
         )
 
 
+def get_key_usage(provider: str, key_index: int, since: str) -> tuple[int, float]:
+    """(tokens_total, cost_total_usd) recorded for this (provider, key_index)
+    since ``since`` (inclusive, an ISO-8601 UTC string).
+
+    Derived with a SUM over `reviews` rather than kept in a dedicated
+    running-total table: at free-tier volume (~20 PRs/day) the aggregate
+    costs nothing, and there is no second copy of the number that could
+    drift out of sync with the review history it is supposed to describe.
+    A NULL key_index (row written before that column existed) counts as
+    index 0.
+    """
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(total_tokens_in + total_tokens_out), 0) AS tokens,
+                   COALESCE(SUM(est_cost_usd), 0) AS cost
+            FROM reviews
+            WHERE provider = %s
+              AND COALESCE(key_index, 0) = %s
+              AND created_at >= %s
+            """,
+            (provider, key_index, since),
+        ).fetchone()
+    return (int(row["tokens"]), float(row["cost"]))
+
+
 _TICKET_STATUSES = ("pending", "running", "deferred", "retrying", "done", "failed")
 
 
