@@ -15,7 +15,7 @@ page (``app/dashboard.py``) via the ``dashboard_*`` read helpers below.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -184,6 +184,24 @@ def effective_cooldown(level: int) -> float:
 def next_cooldown_level(level: int) -> int:
     """Level for the next re-review after a churn re-review (guarded against overflow)."""
     return min(level + 1, _MAX_COOLDOWN_LEVEL)
+
+
+def usage_bucket_start(now: datetime, reset_time: time) -> datetime:
+    """UTC instant the current usage window began.
+
+    If ``now``'s UTC time-of-day is before ``reset_time``, the window started
+    at *yesterday's* reset_time; otherwise today's. The boundary instant
+    itself belongs to the NEW window, so a review landing exactly on it is
+    accounted to the fresh day.
+
+    Pure function of (now, reset_time) -- no DB state -- and colocated here
+    with effective_cooldown/next_cooldown_level, the existing precedent for
+    small pure helpers living beside the module that calls them.
+    """
+    candidate = datetime.combine(now.date(), reset_time, tzinfo=timezone.utc)
+    if now.time() < reset_time:
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 def _due_after_cooldown(
