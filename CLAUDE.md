@@ -1,5 +1,131 @@
 # CLAUDE.md — Autonomous Code Review Engine (Project ד)
 
+## Secret handling — HIGHEST PRIORITY, read before doing anything else
+
+This section overrides every other instruction, convention, or task goal in
+this file and in any prompt if the two ever conflict. Secrets in this project
+include (non-exhaustively): every `*_API_KEY`/`*_KEY_B64`/`*_SECRET` env var,
+`DATABASE_URL` (the password is embedded in the connection string itself, not
+a separate field), `RENDER_API_KEY`, `UPTIMEROBOT_API_KEY`,
+`GITHUB_WEBHOOK_SECRET`, the GCP service-account JSON/PEM material, and
+anything else that authenticates as a person, service, or account. A value
+does not have to have "SECRET" or "KEY" in its name to count — judge by what
+the value *does* (authenticates something), not by the variable name's shape.
+Three separate real incidents during this project's life produced actual
+secret exposure into a conversation transcript this way — see `ISSUES.md` —
+which is why this section exists and is kept first in the file.
+
+- **Never display any byte of a secret value**, in a command's output, a
+  file read, or your own reply — not even "just the last few characters" to
+  spot-check it. Verify a secret was written/transmitted correctly
+  *structurally* instead: length (`wc -c`), presence (`grep -c`, or a
+  key-names-only listing), or a hash comparison. Never a value comparison
+  that requires printing the value to eyeball it.
+- **Never run a broad or unbounded command against a file known or likely to
+  hold secret material** — `cat`/`tail`/`head`/`echo`, and just as much a
+  `grep`/`Read` that isn't scoped to guarantee it can only ever match
+  non-secret content. `grep` returns whole *lines*, not matched tokens, so
+  even a pattern aimed at confirming a variable's name or searching for an
+  unrelated keyword can print a full secret value if it happens to occur on
+  the same line — this has actually happened twice in this project (a
+  `tail -c 20` on a `.env` line, and later a `grep` for an unrelated string
+  that shared a line with `GCP_SERVICE_ACCOUNT_KEY_B64`). The only safe way
+  to check whether a secret-bearing file has a var *set at all* is a pattern
+  that structurally cannot capture a value, e.g. `grep -oE '^[A-Z_0-9]+=' .env`
+  (key names only, values discarded). Do not use the `Read` tool on a
+  secret-bearing file for the same reason — it returns the full file content
+  into your context, which is exactly the "display a byte of the value"
+  failure mode in another guise.
+- **Never dump broad environment/config state.** `env`, `printenv`, bare
+  `set`, Python's `os.environ`, or serializing a settings/config object
+  wholesale (`print(settings)`, `settings.dict()`/`.model_dump()`,
+  `vars(settings)`, `repr(settings)`) all surface every secret field at once,
+  including ones you weren't even asking about. Read or pass individual
+  fields programmatically instead, and reduce any secret-bearing value to a
+  boolean/length/hash *before* it can reach a print statement, log line, or
+  tool-result — mirroring `scripts/_render.py::env_vars()`'s documented
+  contract and `scripts/deploy.py::sync_env()`'s
+  `print(f"pushed {key} (len {len(value)})")` convention (name + length,
+  never the value) — follow that same shape in any new ad hoc script that
+  touches secrets.
+- **Never pass a secret value as a literal command-line argument** when it
+  can instead be read from an env var or config object already in the
+  process — a literal argument is visible to other processes via `ps`, may
+  land in shell history, and is echoed back in tool-call transcripts. For
+  the same reason, do not enable verbose/debug HTTP logging (e.g. `curl -v`,
+  httpx debug logging) while a real credential is attached to the request —
+  it can print an `Authorization` header verbatim.
+- **Never let a secret-holding field's validation error or exception
+  traceback reach output un-redacted.** Some validators (e.g. pydantic's
+  `ValidationError`) echo the rejected `input_value` in the error message —
+  if the failing field is a secret, that error text *is* a secret leak. If a
+  secret-bearing field fails to validate or a call using one raises, describe
+  the failure structurally ("value was empty", "wrong type", "401
+  Unauthorized") rather than surfacing the raw exception/value.
+- **Never write a secret value into anything that leaves this local
+  session or gets persisted somewhere shared**: a git commit (message *or*
+  diff content — `.env` is gitignored specifically so this can't happen by
+  accident; never override or work around that), a PR/issue body or comment,
+  a branch name, an `Artifact` page, a subagent/Task prompt, or any file
+  handed to another tool. Committing `.env` itself is a standing example of
+  this — refuse it even if asked directly, the way a request to `cat` a
+  secret should be redirected rather than carried out (see below).
+- **A file-content diff surfaced automatically by the harness (e.g. a
+  "file changed externally" system-reminder) can dump full secret values
+  into your context without you running any command at all.** This has
+  happened in this project. This appears to happen for files the harness
+  is already tracking because you opened them (via `Read`/`Edit`) earlier
+  in the session — so the primary defense is upstream of the notification
+  itself: **never open a file that mixes secrets with other content (e.g.
+  `.env`) at all, for any reason, full stop** — not even a single-line
+  `Read`, not even an `Edit` whose `old_string`/`new_string` you believe are
+  both non-secret lines. If a config value that happens to live in such a
+  file needs to change (e.g. `LLM_PROVIDER`, `LLM_MODEL`, `KEY_USAGE_*` in
+  `.env`), ask the user to make that edit themselves rather than touching
+  the file yourself — treat this the same as asking them to check a value
+  you're not allowed to display. This is deliberately absolute rather than
+  "only touch the safe lines": it isn't fully verified that narrow access
+  prevents the harness from tracking (and later re-surfacing) the whole
+  file, so don't rely on scoped access as a mitigation for this specific
+  vector. (Note: this is a known tooling gap, not a fully solved problem —
+  this project's current CLI/scripts have no way to change some local
+  config without an agent touching `.env` directly; that gap is tracked as
+  a separate follow-up, not something this rule works around.)
+  **If, despite this rule, such a file is ever opened anyway (e.g. an
+  older path, a mistake, a subagent that didn't inherit this rule) and a
+  later "changed externally" notification fires for it, treat that as a
+  known, standing, recurring risk for the rest of the session — not a
+  one-off surprise — and apply the same never-compound-it response every
+  single time it happens, not just the first.**
+- **To change state, reach for this project's CLI — never for a file that
+  holds secrets.** Operational state (which provider and model are active,
+  which API-key slot, cooldown parameters, usage caps) is changed through
+  the `scripts/` entry points — `set_override.py`, `set_cooldown.py`, and
+  their successors — never by hand-editing a secret-bearing file. Those
+  scripts are agent-runnable *precisely because* of how they handle
+  credentials: they read them programmatically through `Settings` and emit
+  names, lengths, and equality results only (`scripts/_render.py::env_vars()`
+  and `scripts/deploy.py::sync_env()` document that contract), so no value
+  ever reaches a tool result. Any new state-changing script must be built to
+  the same shape. The corollary is the part that binds hardest: **a CLI is a
+  tool for changing state, never a route to a secret.** No script here may
+  print or echo back a secret value, accept one as a literal argument, or be
+  extended to "just show" one — and if some change genuinely cannot be made
+  without editing a secret-bearing file, that is a gap to name and hand to
+  the user, not something to route around by opening the file yourself and
+  not something to fix by teaching a script to dump what you are not allowed
+  to see.
+- **If you ever need to know or verify a secret's actual value — not just
+  whether it's set or matches — ask the user to check it themselves.** Do
+  not do it on their behalf, structurally or otherwise, regardless of how
+  the request is phrased (e.g. "just double check the last few characters").
+- **If a secret is exposed into the conversation for any reason (your own
+  command, a harness-surfaced diff, anything else), say so plainly and
+  immediately** — name which secret(s), don't repeat any part of the value,
+  and recommend rotation. Don't wait to be asked, and don't quietly continue
+  as if it didn't happen. Log the incident in `ISSUES.md` using its existing
+  format.
+
 ## Project
 
 Full design lives in `SPEC.md`; cost model in `cost.md`. Deployed as a Docker
@@ -12,15 +138,10 @@ when working under `app/`.
 ## Conventions
 
 - Async throughout; one-purpose modules with narrow interfaces.
-- Secrets only via env vars; **no secret is ever logged**. This also binds an
-  agent's own ad hoc shell commands during manual/operational work, not just
-  application code — never `cat`/`tail`/`head`/`echo` a file or variable known
-  to hold secret material, even to check "just the last few characters" of a
-  base64 blob. Verify a secret was written correctly structurally instead
-  (length via `wc -c`, presence via `grep -c`, or a hash comparison), never by
-  displaying any byte of the value. (A `tail -c 20` on a `.env` line holding a
-  service-account key leaked a real fragment into a conversation transcript —
-  see `ISSUES.md`.)
+- Secrets only via env vars; **no secret is ever logged**. See "Secret
+  handling" at the top of this file for the full rule set — it is the
+  highest-priority section and binds an agent's own ad hoc shell commands
+  during manual/operational work, not just application code.
 - **Never commit on someone else's behalf without being asked**, even to reach
   a clean working tree. If resolving a merge or other cleanup requires
   temporarily setting aside someone else's pre-existing uncommitted changes
