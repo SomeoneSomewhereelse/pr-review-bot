@@ -11,6 +11,12 @@ pass when several are given.
     uv run python -m scripts.set_override vertex --model gemini-2.5-flash
     uv run python -m scripts.set_override vertex --model gemini-2.5-flash --no-activate
     uv run python -m scripts.set_override vertex --clear-model --no-activate
+    uv run python -m scripts.set_override --list
+
+--list prints names and booleans only -- which slots exist locally, which
+exist on Render, the active index, and the active model -- and never a
+credential value, so it is safe to run and to paste anywhere (including into
+an agent's own transcript).
 
 The model override is per-provider, not global: setting one only changes the
 model used when that specific provider is active, so flipping the active
@@ -47,12 +53,14 @@ check.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import datetime, timezone
 
-from app.providers import registry
+from app.config import settings
+from app.providers import active_model, registry
 from app.queue import store
-from scripts import _override
+from scripts import _override, _render
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,11 +109,101 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write despite a failed live-verification refusal",
     )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="show each provider's slots, active index, and active model (must be used alone)",
+    )
     return parser
+
+
+def _print_inventory() -> int:
+    """Per provider: which key slots exist locally, which exist on Render, the
+    active index, and the active model.
+
+    NAMES AND BOOLEANS ONLY. Every value this touches -- a local slot value, a
+    Render env-var value -- is reduced to presence before anything is printed,
+    per scripts/_render.py::env_vars()'s contract. This is what lets an agent
+    answer "is --index 2 valid?" without ever opening .env, which it may not do.
+    """
+    render_keys: set[str] = set()
+    render_note = ""
+    if settings.render_api_key:
+        try:
+            service_id = _render.find_service_id()
+            if service_id is None:
+                render_note = f"(no Render service named {settings.render_service_name})"
+            else:
+                render_keys = {
+                    key for key, value in _render.env_vars(service_id).items() if value
+                }
+        # deliberate: inability to reach Render degrades to a note, never a failure
+        except Exception as exc:  # noqa: BLE001
+            render_note = f"(could not reach Render: {type(exc).__name__})"
+    else:
+        render_note = "(no RENDER_API_KEY; local slots only)"
+
+    index_overrides: dict[str, int] = {}
+    model_overrides: dict[str, str] = {}
+    if settings.database_url:
+        try:
+            store.init_pool()
+            index_overrides = store.get_all_key_index_overrides()
+            model_overrides = store.get_all_model_overrides()
+            active_model.set_override_cache(model_overrides)
+        # deliberate: the DB being unreachable degrades to "env values", never a failure
+        except Exception as exc:  # noqa: BLE001
+            render_note = f"{render_note} (DB unreachable: {type(exc).__name__})".strip()
+
+    if render_note:
+        print(render_note)
+    for provider in sorted(registry.PROVIDERS):
+        base, _ = registry.PROVIDERS[provider]
+        local = ((0,) if getattr(settings, base.lower(), "") else ()) + (
+            _override.local_slot_indices(base)
+        )
+        # Derived from the names Render actually reports, not a scanned index
+        # range: a range would silently stop reporting slots past its bound,
+        # and "no slot 12" reads identically to "slot 12 not checked".
+        slot_pattern = re.compile(rf"^{re.escape(base)}(?:_(\d+))?$")
+        hosted = sorted(
+            int(match.group(1) or 0)
+            for key in render_keys
+            if (match := slot_pattern.match(key))
+        )
+        index_source = "override" if provider in index_overrides else "default"
+        model_source = "override" if provider in model_overrides else "env"
+        print(
+            f"{provider}: local slots {list(local) or '-'}, "
+            f"render slots {hosted or '-'}, "
+            f"active index {index_overrides.get(provider, 0)} ({index_source}), "
+            f"model {active_model.active_model(provider)} ({model_source})"
+        )
+        for index in sorted(set(local) | set(hosted)):
+            name = registry.slot_env_name(provider, index)
+            print(
+                f"    {name}: local {'yes' if index in local else 'no'}, "
+                f"render {'yes' if index in hosted else 'no'}"
+            )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.list:
+        if (
+            args.provider
+            or args.index is not None
+            or args.clear_index
+            or args.no_activate
+            or args.clear
+            or args.model is not None
+            or args.clear_model
+        ):
+            print("--list must be used alone", file=sys.stderr)
+            return 2
+        return _print_inventory()
 
     if args.clear:
         if (

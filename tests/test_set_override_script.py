@@ -330,3 +330,41 @@ def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
     captured = capsys.readouterr()
     assert "gsk_SUPER_SECRET_REMOTE" not in captured.out
     assert "gsk_SUPER_SECRET_REMOTE" not in captured.err
+
+
+def test_list_reports_slots_and_active_state(capsys, monkeypatch):
+    from app.config import settings
+    from scripts import _override
+
+    monkeypatch.setattr(settings, "groq_api_key", "sentinel-groq")
+    monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
+    monkeypatch.setattr(
+        _override, "local_slot_indices",
+        lambda base, env_path=".env": (1,) if base == "GROQ_API_KEY" else (),
+    )
+    assert set_override.main(["--list"]) == 0
+    out = capsys.readouterr().out
+    assert "groq" in out
+    assert "GROQ_API_KEY_1" in out
+    assert "llama-3.3-70b-versatile" in out
+
+
+def test_list_never_prints_a_credential_value(capsys, monkeypatch):
+    """The whole point of --list: an agent can answer "is --index 2 valid?"
+    without opening .env, and nothing it prints can be a secret."""
+    from app.config import settings
+    from scripts import _override
+
+    monkeypatch.setattr(settings, "groq_api_key", "SENTINEL-SECRET-VALUE")
+    monkeypatch.setattr(
+        _override, "local_slot_indices", lambda base, env_path=".env": (1,)
+    )
+    set_override.main(["--list"])
+    captured = capsys.readouterr()
+    assert "SENTINEL-SECRET-VALUE" not in captured.out
+    assert "SENTINEL-SECRET-VALUE" not in captured.err
+
+
+def test_list_must_be_used_alone(capsys):
+    assert set_override.main(["--list", "groq"]) == 2
+    assert "--list must be used alone" in capsys.readouterr().err
