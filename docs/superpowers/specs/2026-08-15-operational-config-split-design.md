@@ -135,15 +135,24 @@ Initial contents:
 - `GCP_PROJECT`, `GCP_LOCATION`
 - `LLM_REQUEST_TIMEOUT_SECONDS`, each `DISPATCHER_*` setting, `RENDER_SERVICE_NAME`
 - `GITHUB_TARGET_REPO`
+- `PUBLIC_BASE_URL`
 
 Every entry is a **literal key name**, enumerated one by one — never a prefix or glob
 pattern. A pattern would silently classify future keys that happen to match, which is
 exactly the secret-by-default guarantee this list exists to provide.
 
-Deliberately **excluded**, as explicit calls rather than oversights: `GITHUB_APP_ID` and
-`PUBLIC_BASE_URL` (non-secret but identity-shaped and near-never changed — secret-by-default
-keeps them put), and `GCP_SERVICE_ACCOUNT_KEY_PATH` / `GITHUB_APP_PRIVATE_KEY_PATH` (paths
-that *point at* credentials). Each is a one-line addition later if it chafes.
+`PUBLIC_BASE_URL` earns its place on a stronger argument than "non-secret": a `/healthz`
+check needs **only the URL and no credential at all**, so with it in `.env.config` an agent
+can verify a deploy is up without touching `.env` even once. `RENDER_API_KEY` stays in
+`.env` and stays optional — its absence degrades a check to SKIPPED, never to an error, as
+`config.py:88-90` documents.
+
+Deliberately **excluded**, as explicit calls rather than oversights: `GITHUB_APP_ID`
+(non-secret but identity-shaped and near-never changed — secret-by-default keeps it put),
+and `GCP_SERVICE_ACCOUNT_KEY_PATH` / `GITHUB_APP_PRIVATE_KEY_PATH` (paths that *point at*
+credentials; both are slated for deletion by the §9 credential-convention follow-up, which
+makes their classification moot rather than wrong). Each is a one-line addition later if it
+chafes.
 
 **The allowlist is a classification, not a move list.** It states where a key belongs; it
 forces migration only for keys actually present in `.env` today.
@@ -164,7 +173,10 @@ service.
 
 ### 3.3 Finishing the model-var split
 
-`registry.PROVIDERS["vertex"]` becomes `("GCP_SERVICE_ACCOUNT_KEY_B64", "VERTEX_MODEL")`,
+`registry.PROVIDERS["vertex"]` becomes `("GCP_SERVICE_ACCOUNT_KEY_B64", "VERTEX_MODEL")`
+— the credential name is left exactly as it is today on purpose; §9's follow-up renames it
+to `GCP_SERVICE_ACCOUNT_KEY`, and doing that here would drag a credential migration into a
+plan that is otherwise operational-config-only —
 and `Settings` gains a `vertex_model` field (default in §5). This completes the split whose
 reasoning `config.py:19-23` already records for `GROQ_MODEL`, and it is what makes each
 provider own its model at the **env** layer, not only at the override layer — without it,
@@ -338,11 +350,47 @@ Live calls: none required. Every behavior above is deterministic and mockable, p
 
 ## 9. Non-goals / Open items
 
+- **Verbatim-only credential convention — decided, deferred to its own spec.** A credential
+  var always holds the credential material itself, **never a file path**. Today one logical
+  vertex credential can span six env vars (`GCP_SERVICE_ACCOUNT_KEY_B64`, `_B64_1`,
+  `_B64_2`, `GCP_SERVICE_ACCOUNT_KEY_PATH`, `_PATH_1`, `_PATH_2`), GitHub's PEM has its own
+  two-var pair, and gemini/groq keys are literal-only — three different shapes for "a
+  credential", which `vertex_credentials.py`'s docstring cites as its own reason to exist.
+  The convention collapses them to one shape. It carries a naming consequence: the `_B64`
+  suffix goes too, because whether a value is base64-encoded is a fixed property of the
+  credential *type* (a PEM and a JSON key always need it; `.env` cannot hold multiline
+  values; an API key never does) and therefore belongs declared once in `registry`, not
+  repeated in every var name. Names become `GITHUB_APP_PRIVATE_KEY`,
+  `GCP_SERVICE_ACCOUNT_KEY[_n]`, `GEMINI_API_KEY`.
+
+  What it deletes: `Settings.github_app_private_key_path` and
+  `.gcp_service_account_key_path`; `vertex_credentials._local_path()` and the numbered-file
+  fallback (leaving decode → parse → dict, else `None` for ADC); `deploy.py::_private_key_b64()`
+  and `check_config()`'s "unreadable PEM" branch; the file-vs-b64 branch at
+  `github_app.py:96-104`. ADC is unaffected — an empty var still means implicit ADC.
+
+  Two costs recorded deliberately: it moves `.env` *away* from bounding blast radius (the
+  full PEM and SA JSON definitively live there), which in this project changes uniformity
+  rather than real exposure, since the `_B64` forms were already present and are what the
+  harness diff dumped; and swapping a local service-account key becomes re-encoding rather
+  than editing a path, absorbed by the numbered slots, which are the supported mechanism
+  anyway. Sequenced **after** this work so there is one `.env` migration per landing rather
+  than two.
+
 - **One-secret-per-file** (`secrets/GROQ_API_KEY_1`, …). It is the strongest available
   answer to `ISSUES.md`'s worst incident — one harness diff exposing *every* credential
   becomes impossible once no single file holds them all — but it is a separate project from
   this config gap, and it multiplies the hand-migration burden that only the user can carry.
-  Explicitly deferred; §6's `slot_env_name()` seam keeps it cheap to adopt later.
+  Explicitly deferred; §6's `slot_env_name()` seam keeps it cheap to adopt later. Note it
+  interacts with the verbatim convention above: verbatim makes this *more* valuable, not
+  less, and adopting the two in separate passes would mean a third hand-migration of `.env`
+  — so whichever is designed second should account for the other rather than being specced
+  in isolation.
+
+- **A deploy-status / `/healthz` CLI subcommand.** Raised during design, not built here.
+  Moving `PUBLIC_BASE_URL` into `.env.config` (§3.1) is the enabling condition: the check
+  needs only the URL, so such a subcommand would require no credential at all and could not
+  leak one.
 - **Secret rotation.** The credentials exposed in the incidents behind `CLAUDE.md`'s Secret
   handling section remain unrotated at the user's deferral. Out of scope here, still
   outstanding.
