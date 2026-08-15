@@ -2,38 +2,12 @@
 
 ## Project
 
-Autonomous code-review engine. A GitHub PR webhook triggers an **Orchestrator**
-that fetches the diff and fans out to **three parallel LLM specialists**
-(Security, Performance, Code Quality); their findings are merged into a **single
-Markdown PR comment**. Runs in production via a Docker container exposed through a
-Render (stable public URL, not localhost), with the queue in Supabase Postgres.
+Full design lives in `SPEC.md`; cost model in `cost.md`. Deployed as a Docker
+container on Render (free tier) with the queue in Supabase Postgres, kept warm
+by a free external pinger — see `cost.md` for the alternatives that were weighed.
 
-Full design lives in `SPEC.md`; cost model in `cost.md`.
-
-## Tech stack
-
-- **Backend**: FastAPI (async), managed with `uv`.
-- **GitHub**: PyGitHub with **GitHub App** auth (JWT → short-lived installation token).
-- **AI**: `LLMProvider` seam with three adapters — `gemini` and `vertex`
-  (both the `google-genai` SDK: an AI-Studio API key vs. a GCP service-account
-  identity) and `groq` (OpenAI-compatible, live primary).
-  Selected via `LLM_PROVIDER` env var.
-- **Concurrency**: `asyncio.gather(..., return_exceptions=True)`.
-- **Validation**: Pydantic v2 with a shared validate-and-repair layer.
-- **Tests**: `pytest`, `pytest-asyncio`, `httpx.AsyncClient`, `respx`.
-- **CI**: GitHub Actions — `ruff` lint + `pytest` (deterministic test layers 1–6) on push/PR.
-- **Deploy**: Docker on Render (free tier) + Supabase Postgres, kept warm by a
-  free external pinger. See `cost.md` for the alternatives that were weighed.
-
-## Architecture of the agents
-
-- **Orchestrator** owns: diff prep (line annotation, token cap), fan-out, merge,
-  formatting. Knows nothing about provider internals.
-- **Specialists** are uniform (`run()`), differing only by **system prompt** +
-  **Pydantic schema**. Each records its own timing + token usage. Know nothing about GitHub.
-- **Providers** are swappable via `LLM_PROVIDER`; a shared validate-repair layer
-  guarantees structured output regardless of provider.
-- **Formatting** turns a `ReviewResult` into Markdown. Knows nothing about LLMs.
+Module boundaries and per-module contracts live in `app/CLAUDE.md`, which loads
+when working under `app/`.
 
 ## Conventions
 
@@ -54,10 +28,6 @@ Full design lives in `SPEC.md`; cost model in `cost.md`.
   committing them for tidiness is still an unrequested commit.
 - **Partial failure is always visible** in the PR comment (a failed specialist
   renders a real row) — never silently dropped.
-- Webhook handler: verify HMAC on the **raw body** → return **202 immediately** →
-  run the review in a background task.
-- Provider adapters normalize usage metadata (`tokens_in`/`tokens_out`) so cost
-  can be computed from a single rate table (`pricing.py`).
 
 ## Substitutions from the brief (and why)
 
