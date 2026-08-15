@@ -416,6 +416,33 @@ than the whole cache. `scripts/deploy.py`'s `api-key-live` check is the
 read-only counterpart, mirroring `provider-live`: it confirms the actively-
 resolved index's env var is genuinely present on the live Render service.
 
+**Proactive per-key daily usage cap.** The rate-limit handling above is
+*reactive* — it waits for a real 429. `KEY_USAGE_TOKEN_CAP` (or
+`KEY_USAGE_COST_CAP_USD`) adds a *proactive* ceiling: before starting a
+review, the dispatcher sums `total_tokens_in + total_tokens_out` (or
+`est_cost_usd`) over the `reviews` rows belonging to the currently-active
+`(provider, key slot)` since the last `KEY_USAGE_RESET_TIME_UTC` boundary
+(default `04:00` UTC, any `HH:MM`/`HH:MM:SS` granularity). At or over the
+cap, the ticket is deferred to the next reset instead of run — no call is
+made at all. Both caps are unset by default, so a deployment that sets
+neither env var is unaffected; `KEY_USAGE_TOKEN_CAP` wins outright when both
+are set (the cost cap is then not consulted at all). Usage is *derived*
+from the persisted `reviews` history rather than counted in memory, so a
+restart or redeploy never resets or loses it; a new `reviews.key_index`
+column records which slot paid for each review, so swapping slots with
+`scripts/set_override.py` immediately grants a fresh budget with no
+special-case code. The check is deliberately check-before, not
+predict-before: a review's real usage is only known once it completes, so
+the cap bounds when the *next* review may start, not the exact daily total —
+the same shape the reactive backoff already has. It also **fails open**: any
+error while checking logs and proceeds as "not capped", because a broken
+usage query must never be able to block every review. A capped ticket's PR
+notice is deliberately distinguishable from a provider wait (a new
+`tickets.defer_reason` column carries the distinction to the later notice
+sweep), so an operator debugging a stalled review isn't sent hunting at the
+provider for a limit this app imposed on itself. Full design rationale:
+`docs/superpowers/specs/2026-08-15-key-usage-cap-design.md`.
+
 **Re-review scheduled notice.** Rather than a fully silent wait, a deferred
 ticket with a visible prior review gets a self-cleaning footnote —
 `formatting.format_schedule_notice(not_before)`, "🔄 Re-review scheduled
@@ -576,7 +603,11 @@ drains whatever is due.
 `DISPATCHER_MIN_RETRY_AFTER_SECONDS` (default `1.0`),
 `DISPATCHER_BACKOFF_JITTER_SECONDS` (default `0.0`, off),
 `DISPATCHER_REREVIEW_COOLDOWN_SECONDS` (default `300.0`),
-`DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` (default `3600.0`).
+`DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` (default `3600.0`),
+`KEY_USAGE_TOKEN_CAP` (default unset — cap off), `KEY_USAGE_COST_CAP_USD`
+(default unset — cap off; ignored entirely when `KEY_USAGE_TOKEN_CAP` is
+set), `KEY_USAGE_RESET_TIME_UTC` (default `04:00`). The last three are the
+one set of *per-key* caps here; every other var above is a pacing knob.
 
 **Robust comment identity.** The bot identifies its own comment by the
 persisted `comment_id` first, falling back to an author-filtered marker scan
@@ -588,11 +619,14 @@ the correct comment without ambiguity. The column is also available for the
 design doc's §13 "ping comment" future feature, which remains out of scope.
 
 **Out of scope** (unchanged from the design doc, all deliberate): provider
-failover on a daily wall, proactive quota accounting (no `x-ratelimit-*`
-tracking, no hardcoded caps), a priority scheme (FIFO is sufficient), and
+failover on a daily wall, a priority scheme (FIFO is sufficient), and
 horizontal scaling (single process, single dispatcher; the atomic ticket
 claim would make multi-instance possible later but it is neither built for
-nor tested).
+nor tested). One item this list previously named — *proactive quota accounting* — was
+deliberately reopened and built: see "Proactive per-key daily usage cap"
+above. What remains out of scope within it is the provider-reported half —
+no `x-ratelimit-*` header tracking, no knowledge of the provider's own
+limits; the cap is entirely self-imposed and locally computed.
 
 **Testing.** Extends section 8's deterministic-first strategy with new
 layers, all using an injected clock (no real sleeps): ticket store

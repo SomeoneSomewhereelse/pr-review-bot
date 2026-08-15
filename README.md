@@ -268,6 +268,44 @@ var changes** — editing `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
 `_FACTOR` in the Render dashboard will appear to do nothing until you run
 `--clear`.
 
+#### Capping how much one API key may spend per day
+
+```bash
+KEY_USAGE_TOKEN_CAP=20000        # tokens/day for the ACTIVE key slot
+KEY_USAGE_COST_CAP_USD=0.50      # or a dollar ceiling instead
+KEY_USAGE_RESET_TIME_UTC=04:00   # when the day rolls over (default 04:00 UTC)
+```
+
+Both caps are **unset by default** — set neither and nothing changes. When a
+cap is in force, the dispatcher checks the currently-active `(provider, key
+slot)`'s usage so far today *before* starting a review; at or over the cap it
+defers the ticket to the next reset rather than making the call, and the PR
+gets a notice saying so in wording that's explicitly distinct from a provider
+rate limit. This is the proactive counterpart to the reactive 429 backoff:
+it's what stops a bug or a PR spike from burning a free-tier credit before
+anyone notices.
+
+**`KEY_USAGE_TOKEN_CAP` wins outright when both are set** — the cost cap is
+then not consulted at all, not used as a tiebreak.
+
+Three things worth knowing:
+
+- **The cap is per key slot, not global.** Swapping slots with
+  `uv run python -m scripts.set_override groq --index 1` immediately grants
+  a fresh budget, exactly as key rotation already works — nothing auto-swaps
+  on a breach; a human decides.
+- **Usage survives restarts.** It's summed from the persisted `reviews`
+  history, not counted in memory, so a redeploy neither resets nor loses it.
+- **The reset time takes any `HH:MM` (or `HH:MM:SS`)**, not whole hours —
+  set it a couple of minutes out to watch a cap reset during a demo instead
+  of waiting for the next hour boundary.
+
+The cap is a ceiling on when the *next* review may start, not on the exact
+daily total: a review's real token usage is only known once it finishes, so
+the run that crosses the line is allowed to complete. And a failure while
+checking usage **fails open** — it logs and proceeds — because a broken
+usage query must never be able to block every review.
+
 #### Deploying an image, when the Render service has no connected repo
 
 Render **always builds on Render** — from a connected GitHub repo, or by
