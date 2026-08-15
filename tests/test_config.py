@@ -98,3 +98,22 @@ def test_key_usage_reset_time_rejects_garbage(monkeypatch):
     monkeypatch.setenv("KEY_USAGE_RESET_TIME_UTC", "not-a-time")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_key_usage_caps_reject_non_positive_values():
+    """0 (or negative) would make the dispatcher's `tokens >= 0`/`cost >= 0`
+    comparison unconditionally true -- every ticket deferred forever, and the
+    deferral is STICKY (fixing the env var doesn't release already-deferred
+    tickets). Both caps must reject non-positive values at startup."""
+    for bad in (0, -1):
+        with pytest.raises(ValidationError):
+            Settings(key_usage_token_cap=bad)
+    for bad in (0, -1.0):
+        with pytest.raises(ValidationError):
+            Settings(key_usage_cost_cap_usd=bad)
+
+
+def test_key_usage_caps_accept_positive_values():
+    settings = Settings(key_usage_token_cap=1, key_usage_cost_cap_usd=0.01)
+    assert settings.key_usage_token_cap == 1
+    assert settings.key_usage_cost_cap_usd == 0.01

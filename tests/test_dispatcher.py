@@ -1110,3 +1110,34 @@ async def test_capped_ticket_with_a_visible_review_gets_no_placeholder(monkeypat
 
     assert (await dispatcher.process_next_due(NOW)).action == "deferred"
     assert posted == []
+
+
+async def test_under_cap_still_respects_the_blocked_provider_gate(monkeypatch, db_exec):
+    """The cap check and the reactive blocked-provider gate are two
+    independent gates in sequence: when the cap is configured but current
+    usage is comfortably under it (not capped), process_next_due must fall
+    through cleanly to the pre-existing blocked-provider gate below it,
+    rather than the cap check swallowing or masking that gate."""
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    tid = _enqueue(pr=99)
+    _set_comment_id(db_exec, tid, 9099)
+    _record_usage(db_exec, tokens=1)          # far under the cap -- not capped
+    dispatcher._blocked_until["groq"] = NOW + timedelta(seconds=120)
+
+    called = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        called.append(pr)
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+
+    assert result.action == "deferred"
+    assert called == []                          # never fired a doomed call
+    t = store.get_ticket(tid)
+    assert t.defer_reason is None                # provider gate, not the cap
+    assert posted and "rate limit" in posted[0][1].lower()
+    assert posted[0][2] == 9099

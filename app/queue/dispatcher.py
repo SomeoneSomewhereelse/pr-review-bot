@@ -21,6 +21,7 @@ import logging
 import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from app import github_app
 from app.config import settings
@@ -94,7 +95,7 @@ async def _post_placeholder(
     retry_after: float,
     now: datetime,
     comment_id: int | None = None,
-    reason: str = "provider",
+    reason: Literal["provider", "usage_cap"] = "provider",
 ) -> None:
     await asyncio.to_thread(
         github_app.upsert_comment,

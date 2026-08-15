@@ -115,7 +115,10 @@ class Ticket:
     last_error: str | None
     # Why this ticket is deferred: NULL/'provider' = a provider rate limit or
     # a re-review cooldown (today's only meaning); 'usage_cap' = the bot's own
-    # per-key daily cap. Drives which wording the PR notice uses.
+    # per-key daily cap. Drives which wording the PR notice uses. Only
+    # meaningful while status == 'deferred' -- a row in any other status
+    # (e.g. 'retrying' or 'done') may carry a stale leftover value that no
+    # code path reads.
     defer_reason: str | None
 
 
@@ -203,6 +206,10 @@ def usage_bucket_start(now: datetime, reset_time: time) -> datetime:
     Pure function of (now, reset_time) -- no DB state -- and colocated here
     with effective_cooldown/next_cooldown_level, the existing precedent for
     small pure helpers living beside the module that calls them.
+
+    Precondition: ``now`` must already be UTC-aware (e.g. ``datetime.now(timezone.utc)``,
+    as every actual caller passes) -- a naive or non-UTC-aware value is read as
+    wall-clock components and silently mis-bucketed.
     """
     candidate = datetime.combine(now.date(), reset_time, tzinfo=timezone.utc)
     if now.time() < reset_time:

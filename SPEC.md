@@ -431,7 +431,9 @@ from the persisted `reviews` history rather than counted in memory, so a
 restart or redeploy never resets or loses it; a new `reviews.key_index`
 column records which slot paid for each review, so swapping slots with
 `scripts/set_override.py` immediately grants a fresh budget with no
-special-case code. The check is deliberately check-before, not
+special-case code — for the next ticket claimed; a ticket already deferred
+by the cap still waits for its scheduled reset (raising or clearing the cap
+doesn't retroactively release it). The check is deliberately check-before, not
 predict-before: a review's real usage is only known once it completes, so
 the cap bounds when the *next* review may start, not the exact daily total —
 the same shape the reactive backoff already has. It also **fails open**: any
@@ -607,7 +609,8 @@ drains whatever is due.
 `KEY_USAGE_TOKEN_CAP` (default unset — cap off), `KEY_USAGE_COST_CAP_USD`
 (default unset — cap off; ignored entirely when `KEY_USAGE_TOKEN_CAP` is
 set), `KEY_USAGE_RESET_TIME_UTC` (default `04:00`). The last three are the
-one set of *per-key* caps here; every other var above is a pacing knob.
+one set of *per-key* caps here; every other *numeric* var above is a pacing
+knob (`DATABASE_URL`, first in the list, is a connection string, not one).
 
 **Robust comment identity.** The bot identifies its own comment by the
 persisted `comment_id` first, falling back to an author-filtered marker scan
@@ -618,13 +621,14 @@ guaranteeing that future edits (placeholder→result, or a re-review) locate
 the correct comment without ambiguity. The column is also available for the
 design doc's §13 "ping comment" future feature, which remains out of scope.
 
-**Out of scope** (unchanged from the design doc, all deliberate): provider
-failover on a daily wall, a priority scheme (FIFO is sufficient), and
-horizontal scaling (single process, single dispatcher; the atomic ticket
-claim would make multi-instance possible later but it is neither built for
-nor tested). One item this list previously named — *proactive quota accounting* — was
-deliberately reopened and built: see "Proactive per-key daily usage cap"
-above. What remains out of scope within it is the provider-reported half —
+**Out of scope** (mostly unchanged from the design doc, all deliberate — see
+below for the one exception): provider failover on a daily wall, a priority
+scheme (FIFO is sufficient), and horizontal scaling (single process, single
+dispatcher; the atomic ticket claim would make multi-instance possible later
+but it is neither built for nor tested). One item this list previously
+named — *proactive quota accounting* — was deliberately reopened and built:
+see "Proactive per-key daily usage cap" above. What remains out of scope
+within it is the provider-reported half —
 no `x-ratelimit-*` header tracking, no knowledge of the provider's own
 limits; the cap is entirely self-imposed and locally computed.
 

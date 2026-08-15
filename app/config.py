@@ -75,8 +75,14 @@ class Settings(BaseSettings):
     # a `time` field makes pydantic parse it, giving arbitrary granularity
     # rather than whole-hour-only resets, specifically so a demo can set the
     # reset a couple of minutes out instead of waiting for the next hour.
-    key_usage_token_cap: int | None = None
-    key_usage_cost_cap_usd: float | None = None
+    # gt=0: a 0 or negative cap would make the dispatcher's `tokens >= 0` /
+    # `cost >= 0` comparison unconditionally true, deferring every review
+    # forever -- and that deferral is STICKY, since a ticket's not_before is
+    # already set to a real future timestamp by the time it happens, so
+    # fixing the env var and redeploying does not release already-deferred
+    # tickets.
+    key_usage_token_cap: int | None = Field(default=None, gt=0)
+    key_usage_cost_cap_usd: float | None = Field(default=None, gt=0)
     key_usage_reset_time_utc: time = Field(default=time(4, 0))
 
     # --- Optional operator tooling: read only by scripts/deploy.py on the

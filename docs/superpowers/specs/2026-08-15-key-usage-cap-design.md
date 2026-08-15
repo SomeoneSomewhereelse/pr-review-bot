@@ -107,6 +107,11 @@ No dedicated aggregate table. *(Considered and rejected: a running-total
 keep consistent with `reviews` for no benefit at free-tier volume; a `SUM`
 over `reviews` costs nothing meaningful at 20 PRs/day.)*
 
+Known limitation of deriving usage from `reviews`: a review that ends in
+`ReviewRateLimited` returns before `store.record_review` is ever called, so
+any specialists that *did* succeed before the rate limit hit contribute no
+tokens to the usage total, even though those calls consumed real tokens.
+
 ### 3.1 Usage-day bucket
 
 ```python

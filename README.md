@@ -293,7 +293,9 @@ Three things worth knowing:
 - **The cap is per key slot, not global.** Swapping slots with
   `uv run python -m scripts.set_override groq --index 1` immediately grants
   a fresh budget, exactly as key rotation already works — nothing auto-swaps
-  on a breach; a human decides.
+  on a breach; a human decides. That fresh budget applies to the next ticket
+  claimed; a ticket already deferred by the cap still waits for its
+  scheduled reset (raising or clearing the cap doesn't retroactively release it).
 - **Usage survives restarts.** It's summed from the persisted `reviews`
   history, not counted in memory, so a redeploy neither resets nor loses it.
 - **The reset time takes any `HH:MM` (or `HH:MM:SS`)**, not whole hours —
