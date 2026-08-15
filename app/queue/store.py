@@ -58,6 +58,12 @@ ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_factor       DOUBLE
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_key_index INTEGER;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_key_index   INTEGER;
 ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS vertex_key_index INTEGER;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_model TEXT;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_model   TEXT;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS vertex_model TEXT;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS key_usage_token_cap INTEGER;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS key_usage_cost_cap_usd DOUBLE PRECISION;
+ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS key_usage_reset_time_utc TEXT;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,
@@ -716,3 +722,98 @@ def get_all_key_index_overrides() -> dict[str, int]:
     return {
         provider: row[column] for provider, column in columns.items() if row[column] is not None
     }
+
+
+def get_model_override(provider: str) -> str | None:
+    """The model override for `provider`, or None when unset.
+
+    Synchronous like every other store function -- async callers use
+    asyncio.to_thread. An empty string normalizes to None so a cleared-to-blank
+    row and an unset one can never mean different things.
+    """
+    column = registry.MODEL_COLUMNS[provider]
+    with _require_pool().connection() as conn:
+        row = conn.execute(f"SELECT {column} FROM runtime_config WHERE id = 1").fetchone()
+    return (row or {}).get(column) or None
+
+
+def set_model_override(provider: str, model: str | None, now: str) -> None:
+    """Set the model override for `provider`, or clear it with model=None.
+
+    Upserts the singleton row -- same CHECK (id = 1) guarantee as
+    set_provider_override. `column` comes from registry.MODEL_COLUMNS, a
+    hardcoded whitelist, and is never built from `provider` directly: psycopg
+    parameterizes values but not column identifiers, so this lookup IS the
+    injection guard.
+    """
+    column = registry.MODEL_COLUMNS[provider]
+    with _require_pool().connection() as conn:
+        conn.execute(
+            f"INSERT INTO runtime_config (id, {column}, updated_at) VALUES (1, %s, %s) "
+            f"ON CONFLICT (id) DO UPDATE SET {column} = EXCLUDED.{column}, "
+            "updated_at = EXCLUDED.updated_at",
+            (model, now),
+        )
+
+
+def get_all_model_overrides() -> dict[str, str]:
+    """{provider: model} for every provider with a non-empty override.
+
+    One query reading all three columns -- the dispatcher calls this once per
+    claimed ticket, not once per provider (mirrors
+    get_all_key_index_overrides).
+    """
+    columns = registry.MODEL_COLUMNS
+    select = ", ".join(columns.values())
+    with _require_pool().connection() as conn:
+        row = conn.execute(f"SELECT {select} FROM runtime_config WHERE id = 1").fetchone()
+    if row is None:
+        return {}
+    return {provider: row[column] for provider, column in columns.items() if row[column]}
+
+
+def get_usage_cap_overrides() -> tuple[int | None, float | None, str | None]:
+    """(token cap, cost cap, reset time) overrides, or Nones when unset.
+
+    The reset time comes back as the raw "HH:MM"/"HH:MM:SS" TEXT it was stored
+    as; parsing (and rejecting garbage) belongs to
+    app/queue/usage_cap_config.py, which is where the fail-safe policy lives.
+    """
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT key_usage_token_cap, key_usage_cost_cap_usd, key_usage_reset_time_utc "
+            "FROM runtime_config WHERE id = 1"
+        ).fetchone()
+    if row is None:
+        return (None, None, None)
+    return (
+        row["key_usage_token_cap"],
+        row["key_usage_cost_cap_usd"],
+        row["key_usage_reset_time_utc"],
+    )
+
+
+def set_usage_cap_override(
+    tokens: int | None, cost: float | None, reset: str | None, now: str
+) -> None:
+    """Set the (token cap, cost cap, reset time) override trio, or clear a
+    field with None.
+
+    Upserts the singleton row -- same CHECK (id = 1) guarantee as
+    set_provider_override. Writes exactly the three values it's given; a caller
+    wanting to change only one field is responsible for reading the current
+    trio first (see scripts/set_usage_cap.py).
+    """
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO runtime_config "
+            "(id, key_usage_token_cap, key_usage_cost_cap_usd, "
+            "key_usage_reset_time_utc, updated_at) "
+            "VALUES (1, %s, %s, %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "key_usage_token_cap = EXCLUDED.key_usage_token_cap, "
+            "key_usage_cost_cap_usd = EXCLUDED.key_usage_cost_cap_usd, "
+            "key_usage_reset_time_utc = EXCLUDED.key_usage_reset_time_utc, "
+            "updated_at = EXCLUDED.updated_at",
+            (tokens, cost, reset, now),
+        )

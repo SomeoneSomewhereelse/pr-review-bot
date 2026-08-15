@@ -605,3 +605,45 @@ def test_finalize_review_clears_a_stale_usage_cap_reason(db_exec):
 
 def test_new_ticket_has_no_defer_reason():
     assert store.get_ticket(_enqueue()).defer_reason is None
+
+
+def test_model_override_round_trips_per_provider():
+    """Per-provider, not one shared column: flipping which provider is active
+    must never disturb another provider's model."""
+    store.set_model_override("vertex", "gemini-2.5-flash", "2026-08-15T00:00:00+00:00")
+    store.set_model_override("groq", "llama-3.1-8b-instant", "2026-08-15T00:00:00+00:00")
+    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+    assert store.get_model_override("groq") == "llama-3.1-8b-instant"
+    assert store.get_model_override("gemini") is None
+
+
+def test_model_override_clears_with_none():
+    store.set_model_override("vertex", "gemini-2.5-flash", "2026-08-15T00:00:00+00:00")
+    store.set_model_override("vertex", None, "2026-08-15T00:01:00+00:00")
+    assert store.get_model_override("vertex") is None
+
+
+def test_get_all_model_overrides_omits_unset_providers():
+    store.set_model_override("groq", "llama-3.1-8b-instant", "2026-08-15T00:00:00+00:00")
+    assert store.get_all_model_overrides() == {"groq": "llama-3.1-8b-instant"}
+
+
+def test_get_all_model_overrides_is_empty_before_any_write():
+    assert store.get_all_model_overrides() == {}
+
+
+def test_usage_cap_overrides_round_trip():
+    store.set_usage_cap_override(20000, 0.5, "04:30", "2026-08-15T00:00:00+00:00")
+    assert store.get_usage_cap_overrides() == (20000, 0.5, "04:30")
+
+
+def test_usage_cap_overrides_default_to_all_none():
+    assert store.get_usage_cap_overrides() == (None, None, None)
+
+
+def test_usage_cap_overrides_write_exactly_what_they_are_given():
+    """Like set_cooldown_override, this writes all three fields every time; a
+    caller wanting to change one is responsible for read-modify-write."""
+    store.set_usage_cap_override(20000, 0.5, "04:30", "2026-08-15T00:00:00+00:00")
+    store.set_usage_cap_override(None, 0.25, None, "2026-08-15T00:01:00+00:00")
+    assert store.get_usage_cap_overrides() == (None, 0.25, None)
