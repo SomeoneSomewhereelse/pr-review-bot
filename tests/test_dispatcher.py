@@ -17,6 +17,11 @@ import app.orchestrator as orchestrator
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
+# NOW is 2026-01-01T12:00Z and the reset defaults to 04:00 UTC, so the
+# current usage bucket started at 04:00 today and next resets at 04:00 on
+# the 2nd -- 16 hours out.
+CAP_RESET_AT = datetime(2026, 1, 2, 4, 0, 0, tzinfo=timezone.utc)
+
 
 @pytest.fixture(autouse=True)
 def _env(db, monkeypatch):
@@ -44,6 +49,13 @@ def _clean_key_index_cache():
     key_index.reset_override_cache()
 
 
+@pytest.fixture(autouse=True)
+def _caps_off_by_default(monkeypatch):
+    monkeypatch.setattr(settings, "key_usage_token_cap", None)
+    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", None)
+    yield
+
+
 def _enqueue(pr, now=NOW):
     return store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=pr, head_sha="sha", provider="groq",
@@ -62,6 +74,19 @@ def _stub_comments(monkeypatch):
 
 def _set_comment_id(db_exec, tid, comment_id):
     db_exec("UPDATE tickets SET comment_id = %s WHERE id = %s", (comment_id, tid))
+
+
+def _record_usage(db_exec, tokens=0, cost=0.0, provider="groq", key_index=0, created_at=None):
+    """Insert one completed-review row directly. Raw SQL rather than
+    store.record_review so this file needn't build a whole ReviewResult; the
+    `results` JSONB is an inline SQL literal so no json adapter is needed."""
+    db_exec(
+        "INSERT INTO reviews (repo_full_name, pr_number, provider, model, comment_id, "
+        "created_at, total_elapsed_ms, total_tokens_in, total_tokens_out, est_cost_usd, "
+        "results, key_index) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'[]'::jsonb,%s)",
+        ("owner/repo", 1, provider, "m", None, created_at or NOW.isoformat(), 1,
+         tokens, 0, cost, key_index),
+    )
 
 
 async def test_idle_when_no_tickets(monkeypatch):
@@ -718,6 +743,41 @@ async def test_post_pending_notices_per_ticket_failure_does_not_block_others(mon
     assert store.get_ticket(tid2).notice_not_before == future.isoformat()
 
 
+async def test_notice_sweep_uses_usage_cap_wording_for_a_usage_capped_ticket(
+    monkeypatch, db_exec
+):
+    """The sweep runs on a later iteration with no memory of why the ticket
+    was deferred -- the ticket row is the durable carrier (design doc §4.1)."""
+    posted = _stub_append_schedule(monkeypatch)
+    tid = _enqueue(pr=99)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s, "
+        "defer_reason='usage_cap' WHERE id=%s",
+        (CAP_RESET_AT.isoformat(), NOW.isoformat(), tid),
+    )
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 1
+    assert "usage limit" in posted[0][1].lower()
+
+
+async def test_notice_sweep_uses_the_unchanged_wording_when_defer_reason_is_null(
+    monkeypatch, db_exec
+):
+    posted = _stub_append_schedule(monkeypatch)
+    tid = _enqueue(pr=100)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s WHERE id=%s",
+        ((NOW + timedelta(hours=1)).isoformat(), NOW.isoformat(), tid),
+    )
+
+    await dispatcher.post_pending_notices(NOW)
+
+    assert "usage limit" not in posted[0][1].lower()
+    assert "Re-review scheduled ~13:00 UTC" in posted[0][1]
+
+
 async def test_claimed_ticket_runs_against_the_db_override(monkeypatch):
     """The behavioral guarantee: a mid-session override changes which provider
     actually runs, with no restart and no redeploy."""
@@ -874,3 +934,179 @@ async def test_claim_falls_back_to_env_cooldown_when_the_override_read_fails(mon
     expected = NOW + timedelta(seconds=300.0)  # env default, not the stale 30.0
     assert t.not_before == expected.isoformat()
     assert result.action == "ran"
+
+
+async def test_over_token_cap_defers_without_calling_attempt_review(monkeypatch, db_exec):
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    tid = _enqueue(pr=90)
+    _set_comment_id(db_exec, tid, 9090)
+    _record_usage(db_exec, tokens=500)          # exactly at the cap -> already over
+
+    called = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        called.append(pr)
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+
+    assert result.action == "deferred"
+    assert called == []                          # the whole point: no call is made at all
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.defer_reason == "usage_cap"
+    assert t.not_before == CAP_RESET_AT.isoformat()
+    assert posted and posted[0][0] == 90
+    assert "usage limit" in posted[0][1].lower()
+    assert posted[0][2] == 9090                  # threaded comment_id preserved
+
+
+async def test_under_token_cap_runs_normally(monkeypatch, db_exec):
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    tid = _enqueue(pr=91)
+    _record_usage(db_exec, tokens=499)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+    assert store.get_ticket(tid).status == "done"
+
+
+async def test_usage_before_the_bucket_start_does_not_count(monkeypatch, db_exec):
+    """Yesterday's spend must not hold today's reviews hostage."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    _enqueue(pr=92)
+    _record_usage(db_exec, tokens=9000, created_at="2026-01-01T03:00:00+00:00")
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+
+
+async def test_another_key_slots_usage_does_not_count(monkeypatch, db_exec):
+    """A slot swap grants a fresh budget with no special-case code -- the
+    query is scoped to whatever active_key_index() resolves to now."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    _enqueue(pr=93)
+    _record_usage(db_exec, tokens=9000, key_index=1)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+
+
+async def test_cost_cap_applies_when_no_token_cap_is_set(monkeypatch, db_exec):
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", None)
+    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", 0.05)
+    tid = _enqueue(pr=94)
+    _record_usage(db_exec, tokens=1, cost=0.06)
+
+    called = []
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        called.append(pr)
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "deferred"
+    assert called == []
+    assert store.get_ticket(tid).defer_reason == "usage_cap"
+
+
+async def test_token_cap_wins_outright_when_both_caps_are_set(monkeypatch, db_exec):
+    """The cost cap is not consulted AT ALL when a token cap is set -- not
+    merely a tiebreak (design doc §2.1). A blown cost cap must therefore not
+    defer while the token cap still has headroom."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", 0.0001)
+    _enqueue(pr=95)
+    _record_usage(db_exec, tokens=100, cost=9.99)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+
+
+async def test_no_cap_configured_never_queries_usage(monkeypatch, db_exec):
+    """Feature off by default: an existing deployment must not even pay for
+    the query, let alone change behavior."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", None)
+    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", None)
+    _enqueue(pr=96)
+    _record_usage(db_exec, tokens=10**9, cost=10**6)
+
+    queried = []
+    monkeypatch.setattr(
+        dispatcher.store, "get_key_usage",
+        lambda *a, **kw: queried.append(a) or (0, 0.0),
+    )
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+    assert queried == []
+
+
+async def test_usage_check_failure_fails_open_and_runs_the_review(monkeypatch, db_exec):
+    """Cost-cap enforcement degrading to off is the same posture as every
+    other override here degrading to its safe default -- a broken usage query
+    must never be able to block every review."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 1)
+    _enqueue(pr=97)
+    _record_usage(db_exec, tokens=9000)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("usage query exploded")
+
+    monkeypatch.setattr(dispatcher.store, "get_key_usage", boom)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+
+
+async def test_capped_ticket_with_a_visible_review_gets_no_placeholder(monkeypatch, db_exec):
+    """A good review already on the PR is preserved; the notice sweep shows
+    the schedule footnote instead (same rule as every other deferral)."""
+    posted = _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 1)
+    tid = _enqueue(pr=98)
+    db_exec("UPDATE tickets SET last_reviewed_at=%s WHERE id=%s", (NOW.isoformat(), tid))
+    _record_usage(db_exec, tokens=9000)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "deferred"
+    assert posted == []

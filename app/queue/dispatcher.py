@@ -89,10 +89,19 @@ class StepResult:
 
 
 async def _post_placeholder(
-    repo: str, pr: int, retry_after: float, now: datetime, comment_id: int | None = None
+    repo: str,
+    pr: int,
+    retry_after: float,
+    now: datetime,
+    comment_id: int | None = None,
+    reason: str = "provider",
 ) -> None:
     await asyncio.to_thread(
-        github_app.upsert_comment, repo, pr, format_placeholder(pr, retry_after, now), comment_id
+        github_app.upsert_comment,
+        repo,
+        pr,
+        format_placeholder(pr, retry_after, now, reason=reason),
+        comment_id,
     )
 
 
@@ -109,7 +118,14 @@ async def post_pending_notices(now: datetime) -> int:
                 github_app.append_schedule_notice,
                 ticket.repo_full_name,
                 ticket.pr_number,
-                format_schedule_notice(datetime.fromisoformat(ticket.not_before)),
+                format_schedule_notice(
+                    datetime.fromisoformat(ticket.not_before),
+                    # The ticket row is the durable record of WHY this ticket
+                    # is waiting -- the sweep runs on a later iteration and
+                    # has no other memory of it. NULL means today's original
+                    # meaning: a provider rate limit or a cooldown wait.
+                    reason=ticket.defer_reason or "provider",
+                ),
                 ticket.comment_id,
             )
             await asyncio.to_thread(
@@ -180,8 +196,62 @@ async def process_next_due(now: datetime) -> StepResult:
     # Gate on the ACTIVE provider (the DB override when set, else the
     # env-configured default), not the provider recorded on the ticket at
     # enqueue time — attempt_review always runs against whatever provider is
-    # active now, so that's what can be blocked.
+    # active now, so that's what can be blocked or capped. Resolved once here
+    # and shared by both gates below.
     provider = active_provider()
+
+    # Pre-flight cap: has this (provider, key slot) already spent its
+    # self-imposed daily budget? Checked BEFORE the review, never predicted:
+    # a review's real usage is only known once it completes, so the cap bounds
+    # when the NEXT review may start, not the exact daily total — the same
+    # shape the reactive-429 gate below already has.
+    #
+    # FAILS OPEN. Every other per-ticket refresh above degrades to its safe
+    # default on error; the safe default for a cost cap is "not enforced",
+    # because a broken usage query must never be able to block every review.
+    # That is why the whole computation — bucket, query, comparison, reset
+    # instant — sits inside one try, and why nothing outside it is read.
+    cap_reset_at: datetime | None = None
+    if settings.key_usage_token_cap is not None or settings.key_usage_cost_cap_usd is not None:
+        try:
+            bucket_start = store.usage_bucket_start(now, settings.key_usage_reset_time_utc)
+            tokens, cost = await asyncio.to_thread(
+                store.get_key_usage,
+                provider,
+                key_index.active_key_index(provider),
+                bucket_start.isoformat(),
+            )
+            # The token cap WINS OUTRIGHT when both are set: the cost cap is
+            # not consulted at all, not used as a tiebreak.
+            over_cap = (
+                tokens >= settings.key_usage_token_cap
+                if settings.key_usage_token_cap is not None
+                else cost >= settings.key_usage_cost_cap_usd
+            )
+            if over_cap:
+                cap_reset_at = bucket_start + timedelta(hours=24)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to check key usage cap; proceeding without it")
+            cap_reset_at = None
+
+    if cap_reset_at is not None:
+        await asyncio.to_thread(
+            store.defer_usage_capped,
+            ticket.id,
+            not_before=cap_reset_at.isoformat(),
+            now=now.isoformat(),
+        )
+        if not _has_visible_review(ticket):
+            await _post_placeholder(
+                ticket.repo_full_name,
+                ticket.pr_number,
+                (cap_reset_at - now).total_seconds(),
+                now,
+                ticket.comment_id,
+                reason="usage_cap",
+            )
+        return StepResult(action="deferred", ticket_id=ticket.id)
+
     blocked = _blocked_until.get(provider)
     if blocked is not None and now < blocked:
         await asyncio.to_thread(
