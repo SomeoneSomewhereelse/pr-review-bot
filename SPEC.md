@@ -594,7 +594,7 @@ covers the latest commit, so the flag is moot); `deferred`/`retrying` tickets
 are left as-is, gated by their persisted `not_before`. The dispatcher then simply
 drains whatever is due.
 
-**Config** (`app/config.py`; none are per-provider caps): `DATABASE_URL`
+**Config** (`app/config.py`): `DATABASE_URL`
 (Postgres/Supabase connection string, required for production),
 `DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
 (default `1`), `DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS` (default `2.0`),
