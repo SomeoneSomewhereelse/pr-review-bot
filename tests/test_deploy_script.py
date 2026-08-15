@@ -1647,3 +1647,21 @@ def test_sync_env_refuses_when_an_override_would_mask_the_push(
     err = capsys.readouterr().err
     assert "groq" in err and "set_override" in err
     assert called == []
+
+
+def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
+    """A redeploy-free DB provider flip can activate ANY provider, so every
+    provider's model var must already be on the service -- not just the
+    currently-selected one's."""
+    from app.config import settings
+    from scripts import deploy
+
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "llm_model", "model-gemini")
+    monkeypatch.setattr(settings, "groq_model", "model-groq")
+    monkeypatch.setattr(settings, "vertex_model", "model-vertex")
+    monkeypatch.setattr(deploy, "_private_key_b64", lambda: ("pem-b64", ""))
+    wanted = deploy._wanted_env()
+    assert wanted["LLM_MODEL"] == "model-gemini"
+    assert wanted["GROQ_MODEL"] == "model-groq"
+    assert wanted["VERTEX_MODEL"] == "model-vertex"

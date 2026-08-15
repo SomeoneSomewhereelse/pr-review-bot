@@ -20,6 +20,7 @@ OPERATIONAL_KEYS = frozenset(
         "LLM_PROVIDER",
         "LLM_MODEL",
         "GROQ_MODEL",
+        "VERTEX_MODEL",
         "KEY_USAGE_TOKEN_CAP",
         "KEY_USAGE_COST_CAP_USD",
         "KEY_USAGE_RESET_TIME_UTC",
@@ -64,8 +65,8 @@ class Settings(BaseSettings):
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
     llm_provider: str = "gemini"
-    # ``llm_model`` is consumed by the gemini (google-genai) provider only.
-    # Groq is a different model family (Llama, via a different vendor), so it
+    # ``llm_model`` is consumed by the gemini provider only. Groq is a
+    # different model family (Llama, via a different vendor), so it
     # gets its own var — a single shared LLM_MODEL became ambiguous the moment
     # a second provider family entered the picture (see CLAUDE.md task 8 / PR
     # report for the reasoning).
@@ -74,6 +75,11 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+
+    # Vertex's own model var. Default is the model confirmed live against this
+    # project's Vertex catalog; the gemini default (gemini-flash-latest) 404s
+    # there, which is exactly why these two no longer share a var.
+    vertex_model: str = "gemini-2.5-flash"
 
     # --- Vertex AI (LLM_PROVIDER=vertex). Unlike gemini/groq, the credential
     # is a GCP service-account identity rather than an API-key string:

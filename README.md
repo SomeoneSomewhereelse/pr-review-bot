@@ -169,12 +169,17 @@ uv run python -m scripts.deploy --sync-env
 
 The push set is **provider-derived**, not a fixed list: it always pushes
 `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
-`GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, and `LLM_PROVIDER`, plus the
-**selected provider's** credential and model var — e.g. `LLM_PROVIDER=groq`
-pushes `GROQ_API_KEY` and `GROQ_MODEL`, not `GEMINI_API_KEY`/`LLM_MODEL`. Any
-*other* provider's credential is pushed too, but only if you happen to have it set locally —
-an unselected provider's key is never demanded (this includes vertex's
-`GCP_SERVICE_ACCOUNT_KEY_B64`, which shares `LLM_MODEL` with gemini). It refuses to start (exit 2)
+`GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, and **every
+provider's model var** (`LLM_MODEL`, `GROQ_MODEL`, `VERTEX_MODEL`) — a DB
+override (see below) can activate any provider with no redeploy, so every
+provider's model var has to already be on the service, not just the
+currently-selected one's. The **selected provider's** credential is always
+pushed too — e.g. `LLM_PROVIDER=groq` pushes `GROQ_API_KEY`, not
+`GEMINI_API_KEY`. Any *other* provider's credential is pushed too, but only
+if you happen to have it set locally — an unselected provider's key is never
+demanded (this includes vertex's `GCP_SERVICE_ACCOUNT_KEY_B64`, which now has
+its own `VERTEX_MODEL` rather than sharing gemini's `LLM_MODEL`). It refuses
+to start (exit 2)
 if any wanted value is empty locally, so a blank `.env` entry can never
 overwrite a working secret on the service; only changed variables are
 pushed, and if nothing differs no deploy is triggered.
@@ -391,12 +396,15 @@ the full history of runs and timings.
   `LLM_MODEL` default (`gemini-flash-latest`) not existing as a Vertex
   publisher model for this project — Vertex's catalog only carries the 2.5
   generation here (`gemini-2.5-flash`/`gemini-2.5-flash-lite`), not the
-  AI-Studio alias. **Confirmed live**: with `LLM_MODEL=gemini-2.5-flash`, a
-  real call through `scripts/manual_verify_vertex.py` against real Vertex AI
-  returned a valid structured-output response with non-zero token usage.
-  Operators enabling vertex should set `LLM_MODEL=gemini-2.5-flash` (or check
-  their own project's Vertex publisher-model catalog) rather than relying on
-  the AI-Studio-oriented default.
+  AI-Studio alias. **Confirmed live**: with the model set to
+  `gemini-2.5-flash`, a real call through `scripts/manual_verify_vertex.py`
+  against real Vertex AI returned a valid structured-output response with
+  non-zero token usage. Vertex now owns its own model var, `VERTEX_MODEL`
+  (default `gemini-2.5-flash`, the confirmed-working value) — sharing
+  `LLM_MODEL` with gemini made a DB provider flip to vertex guaranteed-broken,
+  since gemini's default 404s on Vertex's catalog. Operators only need to
+  override `VERTEX_MODEL` if their own project's Vertex publisher-model
+  catalog differs.
 - **Gemini (AI-Studio)**: live and working (`LLM_PROVIDER=gemini`) — re-verified
   2026-08-10 via `scripts/manual_verify_step4.py` (real structured output,
   non-zero token usage). See `SETUP.md` for the account-access history this

@@ -30,6 +30,14 @@ services:
         sync: false
       - key: GROQ_MODEL
         sync: false
+      - key: VERTEX_MODEL
+        sync: false
+      - key: GCP_SERVICE_ACCOUNT_KEY_B64
+        sync: false
+      - key: GCP_PROJECT
+        sync: false
+      - key: GCP_LOCATION
+        sync: false
       - key: DISPATCHER_REREVIEW_COOLDOWN_SECONDS
         sync: false
       - key: DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS

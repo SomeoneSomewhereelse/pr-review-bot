@@ -219,3 +219,21 @@ async def test_run_review_survives_record_review_raising(monkeypatch):
 
     result = await orchestrator.run_review("owner/repo", 99)  # must not raise
     assert result.pr_number == 99
+
+
+def test_active_model_resolves_per_provider_through_the_registry(monkeypatch):
+    from app import orchestrator
+    from app.config import settings
+    from app.providers import active
+
+    monkeypatch.setattr(settings, "llm_model", "model-gemini")
+    monkeypatch.setattr(settings, "groq_model", "model-groq")
+    monkeypatch.setattr(settings, "vertex_model", "model-vertex")
+    for provider, expected in (
+        ("gemini", "model-gemini"),
+        ("groq", "model-groq"),
+        ("vertex", "model-vertex"),
+    ):
+        active.set_override_cache(provider)
+        assert orchestrator._active_model() == expected
+    active.reset_override_cache()

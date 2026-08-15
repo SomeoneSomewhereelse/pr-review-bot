@@ -580,9 +580,10 @@ def _wanted_env() -> dict[str, str]:
     """Local values for every var --sync-env will push.
 
     Keys depend on the selected provider: the five always-synced vars, plus
-    LLM_PROVIDER, plus the selected provider's credential and model var. Any
-    other provider's credential is included only when it has a local value --
-    an opt-in .env lists the others empty, and must never be asked to fill them.
+    LLM_PROVIDER, plus every provider's credential (the selected one always,
+    the others only when they have a local value -- an opt-in .env lists the
+    others empty, and must never be asked to fill them), plus every
+    provider's model var.
     """
     pem_b64, _ = _private_key_b64()
     wanted = {
@@ -595,13 +596,18 @@ def _wanted_env() -> dict[str, str]:
     }
     entry = _PROVIDERS.get(settings.llm_provider)
     if entry is not None:
-        credential, model_var = entry
+        credential, _ = entry
         wanted[credential] = getattr(settings, credential.lower(), "")
-        wanted[model_var] = getattr(settings, model_var.lower(), "")
-    for other_credential, _ in _PROVIDERS.values():
+    for other_credential, model_var in _PROVIDERS.values():
         value = getattr(settings, other_credential.lower(), "")
         if value and other_credential not in wanted:
             wanted[other_credential] = value
+        # EVERY provider's model var, not just the selected one's: a DB
+        # provider override can activate any provider with no redeploy, and a
+        # provider whose model var was never pushed would read a missing or
+        # stale value on the service. All model vars have non-empty defaults,
+        # so this can never trip the empty-value guard in sync_env().
+        wanted[model_var] = getattr(settings, model_var.lower(), "")
     for credential, _ in _PROVIDERS.values():
         wanted.update(_override.local_numbered_slots(credential))
     return wanted

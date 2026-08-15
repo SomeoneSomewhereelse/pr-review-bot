@@ -196,3 +196,11 @@ def test_no_unlisted_key_lives_in_the_config_file():
     assert not intruders, (
         f"these keys are not on OPERATIONAL_KEYS and must live in .env: {sorted(intruders)}"
     )
+
+
+def test_vertex_model_defaults_to_the_confirmed_working_vertex_model(monkeypatch):
+    """gemini-flash-latest 404s on Vertex; gemini-2.5-flash is the value this
+    project confirmed live (ISSUES.md). A non-empty default also keeps
+    --sync-env's empty-value guard from ever tripping on it."""
+    monkeypatch.delenv("VERTEX_MODEL", raising=False)
+    assert Settings(_env_file=None).vertex_model == "gemini-2.5-flash"

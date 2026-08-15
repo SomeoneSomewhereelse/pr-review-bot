@@ -90,9 +90,9 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
 - **Current live provider: Groq** (`LLM_PROVIDER=groq`), pulled forward from
   build step 7 to have a working live path. Free tier, no card
   (https://console.groq.com/keys). Model: `llama-3.3-70b-versatile` (`GROQ_MODEL`
-  env var — kept separate from `LLM_MODEL`, which stays scoped to the
-  google-genai family/vertex-gemini, since one shared var stopped making sense
-  across two unrelated provider families). Structured output uses
+  env var — kept separate from `LLM_MODEL`, since one shared var stopped
+  making sense across two unrelated provider families; vertex later got the
+  same treatment via `VERTEX_MODEL`, see below). Structured output uses
   `json_object` mode + a schema-instructing system prompt (this model doesn't
   support Groq's `json_schema` constrained decoding — verified live).
 - The model-choice question for Gemini/Vertex (which flash generation, given
@@ -159,9 +159,11 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   and then hits a `KeyError` at cost-estimation time.
 
   **Operational note:** `LLM_MODEL`'s shared default (`gemini-flash-latest`)
-  does not resolve for vertex on this project — an operator enabling vertex
-  should set `LLM_MODEL=gemini-2.5-flash`, or check their own project's
-  Vertex publisher-model catalog if it differs. Its credential is a GCP
+  did not resolve for vertex on this project — vertex has since been split
+  onto its own `VERTEX_MODEL` var (default `gemini-2.5-flash`, the
+  confirmed-working value), so an operator enabling vertex gets a working
+  model with no override needed, and only has to set `VERTEX_MODEL` if their
+  own project's Vertex publisher-model catalog differs. Its credential is a GCP
   service-account identity, not an API key, resolved in three layers by
   `app/providers/vertex_credentials.py`:
   1. `GCP_SERVICE_ACCOUNT_KEY_B64` (+ numbered `_1`/`_2` siblings) — the
@@ -420,21 +422,24 @@ field (the app code will decode it at startup).
    ```
    The set of vars pushed is **provider-derived**, not a fixed list: it
    always pushes `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
-   `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, and `LLM_PROVIDER`, plus the
-   **selected provider's** credential and model var — for example
-   `LLM_PROVIDER=groq` pushes `GROQ_API_KEY` and `GROQ_MODEL`. Beyond that,
-   only a **credential** belonging to a different provider is ever pushed
-   opportunistically — if `GEMINI_API_KEY` or `GITHUB_MODELS_TOKEN` happens to
-   have a local value, it goes along even though `groq` is selected, so a
-   later dashboard-side provider switch has something to work with. Their
-   **model vars** do not get the same treatment: `LLM_MODEL` and
-   `GITHUB_MODELS_MODEL` are pushed only when that provider is the one
-   selected. A local `LLM_MODEL` sitting next to `LLM_PROVIDER=groq` is not
-   enough to have it pushed — `--sync-env` never sends a non-selected
-   provider's model var, regardless of what's set locally. It refuses to
-   start (exit 2) if any wanted value is empty locally, so a blank `.env`
-   entry can never overwrite a working secret on the service; only changed
-   variables are pushed, and if nothing differs no deploy is triggered.
+   `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, and **every
+   provider's model var** — `LLM_MODEL`, `GROQ_MODEL`, and `VERTEX_MODEL` are
+   all pushed regardless of which provider is selected, because a DB override
+   (§3.6) can activate any provider with no redeploy, and a provider whose
+   model var was never pushed would read a missing or stale value on the
+   service the moment it became active. (This used to only push the
+   selected provider's model var — a local `LLM_MODEL` sitting next to
+   `LLM_PROVIDER=groq` used to not be enough to have it pushed; that gap is
+   exactly what this change closes.) The **selected provider's** credential
+   is always pushed too — for example `LLM_PROVIDER=groq` pushes
+   `GROQ_API_KEY`. Beyond that, only a **credential** belonging to a
+   different provider is ever pushed opportunistically — if `GEMINI_API_KEY`
+   happens to have a local value, it goes along even though `groq` is
+   selected, so a later dashboard-side provider switch has something to work
+   with. It refuses to start (exit 2) if any wanted value is empty locally,
+   so a blank `.env` entry can never overwrite a working secret on the
+   service; only changed variables are pushed, and if nothing differs no
+   deploy is triggered.
 
    If a DB override is active and disagrees with the `LLM_PROVIDER` you're
    about to push, `--sync-env` refuses (exit 2) — pushing would be pointless,
