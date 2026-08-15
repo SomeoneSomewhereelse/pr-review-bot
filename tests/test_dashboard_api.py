@@ -49,7 +49,9 @@ async def test_includes_a_recorded_review_and_active_backoff():
         total_tokens_out=2,
         est_cost_usd=0.001,
     )
-    store.record_review("owner/repo", 42, review, comment_id=999, now="2026-08-11T12:00:00+00:00")
+    store.record_review(
+        "owner/repo", 42, review, comment_id=999, now="2026-08-11T12:00:00+00:00", key_index=0
+    )
 
     from datetime import datetime, timezone
     dispatcher._blocked_until["groq"] = datetime(2026, 8, 11, 14, 0, tzinfo=timezone.utc)

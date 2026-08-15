@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     results            JSONB   NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reviews_created_at_idx ON reviews (created_at DESC);
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS key_index INTEGER;
 """
 
 _pool: ConnectionPool | None = None
@@ -387,10 +388,18 @@ def record_review(
     review: ReviewResult,
     comment_id: int | None,
     now: str,
+    key_index: int,
 ) -> None:
     """Persist a completed review for the dashboard (insert-only).
 
-    Callers must never let a failure here affect the review itself — the PR
+    ``key_index`` is the API-key slot that actually paid for this review; it
+    is what get_key_usage() sums over, so the per-slot daily cap can be
+    scoped to one credential. Deliberately has NO default: silently
+    attributing a review to slot 0 would corrupt exactly the accounting the
+    cap depends on. Rows written before this column existed are NULL and are
+    read as index 0.
+
+    Callers must never let a failure here affect the review itself -- the PR
     comment is already posted by the time this is called.
     """
     results = Jsonb([r.model_dump() for r in review.results])
@@ -399,13 +408,14 @@ def record_review(
             """
             INSERT INTO reviews
               (repo_full_name, pr_number, provider, model, comment_id, created_at,
-               total_elapsed_ms, total_tokens_in, total_tokens_out, est_cost_usd, results)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               total_elapsed_ms, total_tokens_in, total_tokens_out, est_cost_usd, results,
+               key_index)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 repo_full_name, pr_number, review.provider, review.model, comment_id, now,
                 review.total_elapsed_ms, review.total_tokens_in, review.total_tokens_out,
-                review.est_cost_usd, results,
+                review.est_cost_usd, results, key_index,
             ),
         )
 

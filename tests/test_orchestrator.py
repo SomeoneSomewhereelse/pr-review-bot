@@ -167,12 +167,13 @@ async def test_run_review_records_the_completed_review(monkeypatch):
 
     recorded = {}
 
-    def fake_record_review(repo_full_name, pr_number, review, comment_id, now):
+    def fake_record_review(repo_full_name, pr_number, review, comment_id, now, key_index):
         recorded["repo_full_name"] = repo_full_name
         recorded["pr_number"] = pr_number
         recorded["review"] = review
         recorded["comment_id"] = comment_id
         recorded["now"] = now
+        recorded["key_index"] = key_index
 
     monkeypatch.setattr(orchestrator.store, "record_review", fake_record_review)
 
@@ -183,6 +184,7 @@ async def test_run_review_records_the_completed_review(monkeypatch):
     assert recorded["review"] is result
     assert recorded["comment_id"] == 111
     assert recorded["now"]  # a non-empty ISO timestamp string
+    assert recorded["key_index"] == 0     # no override cached -> the base slot
 
 
 async def test_run_review_survives_record_review_raising(monkeypatch):

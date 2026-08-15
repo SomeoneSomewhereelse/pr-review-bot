@@ -26,6 +26,7 @@ from app.diff_utils import annotate_and_cap
 from app.formatting import format_comment
 from app.providers.active import active_provider
 from app.providers.base import RateLimited
+from app.providers.key_index import active_key_index
 from app.providers.pricing import estimate_cost_usd
 from app.queue import store
 from app.specialists.performance import run_performance_specialist
@@ -132,6 +133,7 @@ async def attempt_review(
             review_result,
             posted.id,
             datetime.now(timezone.utc).isoformat(),
+            active_key_index(provider),
         )
     # a dashboard-persistence failure must never fail an already-posted review
     except Exception:  # noqa: BLE001

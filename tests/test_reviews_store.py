@@ -45,7 +45,8 @@ def _review(pr_number=42, cost=0.0021) -> ReviewResult:
 
 def test_record_review_round_trips_through_dashboard_reviews():
     store.record_review(
-        "owner/repo", 42, _review(), comment_id=999, now="2026-08-11T12:00:00+00:00"
+        "owner/repo", 42, _review(), comment_id=999, now="2026-08-11T12:00:00+00:00",
+        key_index=0,
     )
 
     rows = store.dashboard_reviews()
@@ -69,23 +70,34 @@ def test_record_review_round_trips_through_dashboard_reviews():
 
 def test_record_review_with_no_comment_id_has_no_comment_url():
     store.record_review(
-        "owner/repo", 43, _review(pr_number=43), comment_id=None, now="2026-08-11T12:00:00+00:00"
+        "owner/repo", 43, _review(pr_number=43), comment_id=None,
+        now="2026-08-11T12:00:00+00:00", key_index=0,
     )
     assert store.dashboard_reviews()[0]["comment_url"] is None
 
 
 def test_dashboard_reviews_orders_newest_first_and_respects_limit():
-    store.record_review("owner/repo", 1, _review(pr_number=1), 1, now="2026-08-11T12:00:00+00:00")
-    store.record_review("owner/repo", 2, _review(pr_number=2), 2, now="2026-08-11T12:00:01+00:00")
-    store.record_review("owner/repo", 3, _review(pr_number=3), 3, now="2026-08-11T12:00:02+00:00")
+    store.record_review(
+        "owner/repo", 1, _review(pr_number=1), 1, now="2026-08-11T12:00:00+00:00", key_index=0
+    )
+    store.record_review(
+        "owner/repo", 2, _review(pr_number=2), 2, now="2026-08-11T12:00:01+00:00", key_index=0
+    )
+    store.record_review(
+        "owner/repo", 3, _review(pr_number=3), 3, now="2026-08-11T12:00:02+00:00", key_index=0
+    )
 
     rows = store.dashboard_reviews(limit=2)
     assert [r["pr_number"] for r in rows] == [3, 2]
 
 
 def test_dashboard_stats_aggregates_across_all_reviews():
-    store.record_review("owner/repo", 1, _review(cost=0.001), 1, now="2026-08-11T12:00:00+00:00")
-    store.record_review("owner/repo", 2, _review(cost=0.002), 2, now="2026-08-11T12:00:01+00:00")
+    store.record_review(
+        "owner/repo", 1, _review(cost=0.001), 1, now="2026-08-11T12:00:00+00:00", key_index=0
+    )
+    store.record_review(
+        "owner/repo", 2, _review(cost=0.002), 2, now="2026-08-11T12:00:01+00:00", key_index=0
+    )
 
     stats = store.dashboard_stats()
     assert stats["total_reviews"] == 2
@@ -108,3 +120,15 @@ def test_dashboard_queue_counts_includes_all_statuses_defaulted_to_zero():
     assert counts == {
         "pending": 1, "running": 0, "deferred": 0, "retrying": 0, "done": 0, "failed": 0,
     }
+
+
+def test_record_review_persists_the_key_index_it_was_given(db_query):
+    """Which key slot paid for a review is the whole basis of the per-slot
+    usage cap (design doc §3) -- it must be persisted, not inferred later
+    from whatever slot happens to be active at read time."""
+    store.record_review(
+        "owner/repo", 44, _review(pr_number=44), comment_id=None,
+        now="2026-08-11T12:00:00+00:00", key_index=2,
+    )
+    rows = db_query("SELECT key_index FROM reviews WHERE pr_number = 44")
+    assert rows == [(2,)]
