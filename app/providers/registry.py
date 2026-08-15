@@ -49,3 +49,18 @@ MODEL_COLUMNS = {
     "groq": "groq_model",
     "vertex": "vertex_model",
 }
+
+
+def slot_env_name(provider: str, index: int) -> str:
+    """The env-var name for `provider`'s API-key slot `index`.
+
+    THE single place the `{base}` / `{base}_{n}` naming scheme is written down.
+    It was previously reconstructed independently in app/providers/credentials.py
+    and scripts/_override.py, which meant the scheme had no seam to change --
+    and a future credential store (one secret per file, say) would have been a
+    sweep instead of a one-module edit.
+
+    Index 0 is the base, unsuffixed var; indices >= 1 are the numbered slots.
+    """
+    base, _ = PROVIDERS[provider]
+    return base if index == 0 else f"{base}_{index}"

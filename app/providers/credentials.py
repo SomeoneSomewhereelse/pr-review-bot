@@ -39,5 +39,5 @@ def resolve(provider: str, index: int) -> tuple[str, str]:
     base, _ = registry.PROVIDERS[provider]
     if index == 0:
         return base, getattr(settings, base.lower(), "")
-    env_name = f"{base}_{index}"
+    env_name = registry.slot_env_name(provider, index)
     return env_name, os.environ.get(env_name, "")

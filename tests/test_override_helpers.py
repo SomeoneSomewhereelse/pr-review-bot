@@ -17,33 +17,33 @@ def _temp_db(db):
     yield
 
 
-def test_local_numbered_slots_finds_matching_keys(tmp_path, local_numbered_slots_allowed):
+def test_local_slot_values_finds_matching_keys(tmp_path, local_slot_discovery_allowed):
     env_file = tmp_path / ".env"
     env_file.write_text("GROQ_API_KEY_1=gsk_one\nGROQ_API_KEY_2=gsk_two\nOTHER_VAR=x\n")
-    slots = _override.local_numbered_slots("GROQ_API_KEY", env_path=str(env_file))
+    slots = _override.local_slot_values("GROQ_API_KEY", env_path=str(env_file))
     assert slots == {"GROQ_API_KEY_1": "gsk_one", "GROQ_API_KEY_2": "gsk_two"}
 
 
-def test_local_numbered_slots_ignores_empty_values(tmp_path, local_numbered_slots_allowed):
+def test_local_slot_values_ignores_empty_values(tmp_path, local_slot_discovery_allowed):
     env_file = tmp_path / ".env"
     env_file.write_text("GROQ_API_KEY_1=\nGROQ_API_KEY_2=gsk_two\n")
-    slots = _override.local_numbered_slots("GROQ_API_KEY", env_path=str(env_file))
+    slots = _override.local_slot_values("GROQ_API_KEY", env_path=str(env_file))
     assert slots == {"GROQ_API_KEY_2": "gsk_two"}
 
 
-def test_local_numbered_slots_returns_empty_for_a_missing_file(
-    tmp_path, local_numbered_slots_allowed
+def test_local_slot_values_returns_empty_for_a_missing_file(
+    tmp_path, local_slot_discovery_allowed
 ):
     missing = tmp_path / "does-not-exist.env"
-    assert _override.local_numbered_slots("GROQ_API_KEY", env_path=str(missing)) == {}
+    assert _override.local_slot_values("GROQ_API_KEY", env_path=str(missing)) == {}
 
 
-def test_local_numbered_slots_does_not_match_a_different_base(
-    tmp_path, local_numbered_slots_allowed
+def test_local_slot_values_does_not_match_a_different_base(
+    tmp_path, local_slot_discovery_allowed
 ):
     env_file = tmp_path / ".env"
     env_file.write_text("GEMINI_API_KEY_1=gk_one\n")
-    assert _override.local_numbered_slots("GROQ_API_KEY", env_path=str(env_file)) == {}
+    assert _override.local_slot_values("GROQ_API_KEY", env_path=str(env_file)) == {}
 
 
 def test_local_value_index_0_reads_through_settings(monkeypatch):
@@ -53,14 +53,14 @@ def test_local_value_index_0_reads_through_settings(monkeypatch):
 
 def test_local_value_index_n_reads_the_scan(monkeypatch):
     monkeypatch.setattr(
-        _override, "local_numbered_slots",
+        _override, "local_slot_values",
         lambda base, env_path=".env": {"GROQ_API_KEY_2": "gsk_two"},
     )
     assert _override.local_value("groq", 2) == "gsk_two"
 
 
 def test_local_value_index_n_returns_empty_when_unprovisioned(monkeypatch):
-    monkeypatch.setattr(_override, "local_numbered_slots", lambda base, env_path=".env": {})
+    monkeypatch.setattr(_override, "local_slot_values", lambda base, env_path=".env": {})
     assert _override.local_value("groq", 3) == ""
 
 
@@ -189,3 +189,47 @@ def test_verify_render_slot_never_leaks_a_fetched_value(monkeypatch, db_url):
         )
         _, message = _override.verify_render_slot("groq", 2)
     assert "gsk_SUPER_SECRET_REMOTE" not in message
+
+
+def test_local_slot_indices_returns_indices_not_values(tmp_path, local_slot_discovery_allowed):
+    """Discovery answers a NAMES question, so it must not hand back values --
+    a caller cannot leak what it never received."""
+    from scripts import _override
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "GROQ_API_KEY=sentinel-zero\n"
+        "GROQ_API_KEY_1=sentinel-one\n"
+        "GROQ_API_KEY_2=sentinel-two\n"
+    )
+    indices = _override.local_slot_indices("GROQ_API_KEY", env_path=str(env))
+    assert indices == (1, 2)
+    assert all(isinstance(i, int) for i in indices)
+
+
+def test_local_slot_indices_skips_empty_slots(tmp_path, local_slot_discovery_allowed):
+    from scripts import _override
+
+    env = tmp_path / ".env"
+    env.write_text("GROQ_API_KEY_1=sentinel-one\nGROQ_API_KEY_2=\n")
+    assert _override.local_slot_indices("GROQ_API_KEY", env_path=str(env)) == (1,)
+
+
+def test_local_slot_indices_is_empty_for_a_missing_file(local_slot_discovery_allowed):
+    from scripts import _override
+
+    assert _override.local_slot_indices("GROQ_API_KEY", env_path="no-such-file") == ()
+
+
+def test_local_slot_values_still_carries_values_for_sync_env(
+    tmp_path, local_slot_discovery_allowed
+):
+    """The value-bearing variant survives, narrowly: --sync-env genuinely has
+    to push the values."""
+    from scripts import _override
+
+    env = tmp_path / ".env"
+    env.write_text("GROQ_API_KEY_1=sentinel-one\n")
+    assert _override.local_slot_values("GROQ_API_KEY", env_path=str(env)) == {
+        "GROQ_API_KEY_1": "sentinel-one"
+    }

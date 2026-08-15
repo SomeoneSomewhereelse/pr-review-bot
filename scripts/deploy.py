@@ -609,7 +609,7 @@ def _wanted_env() -> dict[str, str]:
         # so this can never trip the empty-value guard in sync_env().
         wanted[model_var] = getattr(settings, model_var.lower(), "")
     for credential, _ in _PROVIDERS.values():
-        wanted.update(_override.local_numbered_slots(credential))
+        wanted.update(_override.local_slot_values(credential))
     return wanted
 
 

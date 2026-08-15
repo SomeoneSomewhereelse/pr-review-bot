@@ -28,16 +28,42 @@ from scripts import _render
 _SLOT_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
 
-def local_numbered_slots(base: str, env_path: str = ".env") -> dict[str, str]:
-    """Every ``{base}_{N}`` key with a non-empty value in the local env file.
+def local_slot_indices(base: str, env_path: str = ".env") -> tuple[int, ...]:
+    """Ascending indices of every ``{base}_{N}`` slot with a non-empty value.
+
+    THE DEFAULT discovery entry point, and deliberately value-free: it answers
+    a names question, so values are discarded INSIDE this function and never
+    reach a caller. A caller cannot print, log, or leak what it never
+    received. Use local_slot_values() only where the values are genuinely the
+    point (--sync-env pushing them).
 
     N >= 1 only -- index 0 is the base var itself, read through Settings by
-    local_value() below, never through this scan. Reads the file directly
-    (python-dotenv, not os.environ or Settings) because Settings can't
-    declare an unbounded family of numbered fields -- mirrors
+    local_value() below. Returns () if env_path doesn't exist (dotenv_values
+    degrades gracefully) or nothing matches.
+    """
+    pattern = _SLOT_RE_CACHE.setdefault(base, re.compile(rf"^{re.escape(base)}_(\d+)$"))
+    return tuple(
+        sorted(
+            int(match.group(1))
+            for key, value in dotenv_values(env_path).items()
+            if value and (match := pattern.match(key))
+        )
+    )
+
+
+def local_slot_values(base: str, env_path: str = ".env") -> dict[str, str]:
+    """Every ``{base}_{N}`` key with a non-empty value, WITH its value.
+
+    Value-bearing on purpose and narrow on purpose: scripts/deploy.py's
+    _wanted_env() has to push these to Render, and nothing else should call
+    this. Same contract as scripts/_render.py::env_vars() -- reduce a returned
+    value to a boolean or an equality result immediately; never store it beyond
+    that computation, print it, or pass it to anything that might log it. When
+    you only need to know WHICH slots exist, call local_slot_indices().
+
+    Reads the file directly (python-dotenv, not os.environ or Settings) because
+    Settings can't declare an unbounded family of numbered fields -- mirrors
     app/providers/credentials.py's identical reasoning for the runtime side.
-    Returns {} if env_path doesn't exist (dotenv_values degrades gracefully)
-    or nothing matches.
     """
     pattern = _SLOT_RE_CACHE.setdefault(base, re.compile(rf"^{re.escape(base)}_(\d+)$"))
     values = dotenv_values(env_path)
@@ -51,8 +77,8 @@ def local_value(provider: str, index: int) -> str:
     base, _ = registry.PROVIDERS[provider]
     if index == 0:
         return getattr(settings, base.lower(), "")
-    env_name = f"{base}_{index}"
-    return local_numbered_slots(base).get(env_name, "")
+    env_name = registry.slot_env_name(provider, index)
+    return local_slot_values(base).get(env_name, "")
 
 
 def verify_render_slot(provider: str, index: int) -> tuple[bool, str]:
@@ -68,8 +94,7 @@ def verify_render_slot(provider: str, index: int) -> tuple[bool, str]:
     docs/superpowers/specs/2026-08-10-provider-live-credential-verification-design.md
     section 6 for the invariant this maintains.
     """
-    base, _ = registry.PROVIDERS[provider]
-    env_name = base if index == 0 else f"{base}_{index}"
+    env_name = registry.slot_env_name(provider, index)
     if not settings.render_api_key:
         return True, (
             "could not verify against Render (no RENDER_API_KEY); "

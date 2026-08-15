@@ -54,3 +54,11 @@ def test_vertex_owns_its_own_model_var():
     assert registry.PROVIDERS["groq"][1] == "GROQ_MODEL"
     model_vars = [model for _, model in registry.PROVIDERS.values()]
     assert len(model_vars) == len(set(model_vars)), "two providers share a model var"
+
+
+def test_slot_env_name_is_the_single_naming_seam():
+    from app.providers import registry
+
+    assert registry.slot_env_name("groq", 0) == "GROQ_API_KEY"
+    assert registry.slot_env_name("groq", 2) == "GROQ_API_KEY_2"
+    assert registry.slot_env_name("vertex", 1) == "GCP_SERVICE_ACCOUNT_KEY_B64_1"
