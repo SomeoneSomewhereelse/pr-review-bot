@@ -34,7 +34,7 @@ import sys
 from datetime import datetime, time, timezone
 
 from app.config import settings
-from app.queue import store, usage_cap_config
+from app.queue import store
 from scripts import _render
 
 
@@ -137,28 +137,42 @@ def main(argv: list[str] | None = None) -> int:
     new_cost = args.cost if args.cost is not None else current_cost
     new_reset = args.reset if args.reset is not None else current_reset
 
-    # Resolve the merged trio exactly like usage_cap_config.effective_caps()
-    # does at read time, and refuse outright if the result would be discarded --
-    # otherwise the write succeeds and is silently ignored on every read, and
-    # this script reports success for a no-op.
-    usage_cap_config.set_override_cache(new_tokens, new_cost, new_reset)
-    resolved = usage_cap_config.effective_caps()
-    usage_cap_config.reset_override_cache()
-    env_defaults = (
-        settings.key_usage_token_cap,
-        settings.key_usage_cost_cap_usd,
-        settings.key_usage_reset_time_utc,
-    )
-    intended_change = (new_tokens, new_cost, new_reset) != (None, None, None)
-    if intended_change and resolved == env_defaults:
+    # Check whether the merged trio would be discarded as invalid by
+    # effective_caps(). This mirrors effective_caps()'s own discard predicate:
+    # non-positive numeric caps, or an unparseable reset string. We refuse
+    # based on whether the merged trio *itself* is invalid, never based on
+    # whether it happens to equal env defaults (which would be a false positive
+    # if the operator's values coincidentally match the configured defaults).
+    if new_tokens is not None and new_tokens <= 0:
         print(
-            "refusing to write: the resulting override would resolve to "
-            f"tokens={new_tokens} cost={new_cost} reset={new_reset!r}, which "
-            "effective_caps() would discard entirely (needs positive caps and a "
-            "parseable HH:MM[:SS] reset) -- the write would be a no-op",
+            "refusing to write: the resulting override would have a "
+            f"non-positive token cap ({new_tokens}) -- effective_caps() would "
+            "discard the entire trio, leaving the override inert while this "
+            "script reported success",
             file=sys.stderr,
         )
         return 2
+    if new_cost is not None and new_cost <= 0:
+        print(
+            "refusing to write: the resulting override would have a "
+            f"non-positive cost cap ({new_cost}) -- effective_caps() would "
+            "discard the entire trio, leaving the override inert while this "
+            "script reported success",
+            file=sys.stderr,
+        )
+        return 2
+    if new_reset is not None:
+        try:
+            time.fromisoformat(new_reset)
+        except ValueError:
+            print(
+                "refusing to write: the resulting override would have an "
+                f"unparseable reset time ({new_reset!r}) -- effective_caps() "
+                "would discard the entire trio, leaving the override inert while "
+                "this script reported success",
+                file=sys.stderr,
+            )
+            return 2
 
     print(_verify_render_reachability())
     store.set_usage_cap_override(
