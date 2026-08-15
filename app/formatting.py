@@ -15,6 +15,7 @@ this file's control flow, only the ``_SECTION_CONFIG`` table.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from app.github_app import (
     COMMENT_MARKER,
@@ -133,18 +134,37 @@ def format_comment(result: ReviewResult) -> str:
     return f"{COMMENT_MARKER}\n{body}"
 
 
-def format_placeholder(pr_number: int, retry_after: float, now: datetime) -> str:
+def format_placeholder(
+    pr_number: int,
+    retry_after: float,
+    now: datetime,
+    reason: Literal["provider", "usage_cap"] = "provider",
+) -> str:
     """Marker-prefixed placeholder comment shown while a review is delayed.
 
     The real result later edits this same comment in place (found via the
-    marker). Wording is chosen by wait magnitude: short = per-minute rate
-    limit; long = daily quota, with an ETA computed from ``now + retry_after``.
+    marker). ``reason`` defaults to "provider", so every pre-existing call
+    site renders byte-identically to before:
+
+    - "provider": wording is chosen by wait magnitude -- short = per-minute
+      rate limit; long = the provider's daily quota, with an ETA computed
+      from ``now + retry_after``.
+    - "usage_cap": the bot's OWN per-key daily cap. Always the same wording
+      regardless of wait length (the cause doesn't change with magnitude),
+      and explicit that this is not the provider's limit -- an operator
+      debugging a stalled review must not go hunting at the provider.
     """
     header = f"## 🤖 Automated Code Review — PR #{pr_number}\n"
-    if retry_after < PLACEHOLDER_DAILY_THRESHOLD_SECONDS:
+    eta = (now + timedelta(seconds=retry_after)).strftime("%H:%M UTC")
+    if reason == "usage_cap":
+        note = (
+            "⏳ Bot's own daily usage limit reached for this key — review "
+            "queued, will post automatically after the limit resets "
+            f"(~{eta}). This is not a provider rate limit."
+        )
+    elif retry_after < PLACEHOLDER_DAILY_THRESHOLD_SECONDS:
         note = "⏳ Queued behind rate limit — review will appear shortly."
     else:
-        eta = (now + timedelta(seconds=retry_after)).strftime("%H:%M UTC")
         note = (
             "⏳ Daily model quota reached — review queued, will post "
             f"automatically after the provider's limit resets (~{eta})."
@@ -179,17 +199,30 @@ def format_failure_footnote(attempts: int) -> str:
     )
 
 
-def format_schedule_notice(not_before: datetime) -> str:
+def format_schedule_notice(
+    not_before: datetime, reason: Literal["provider", "usage_cap"] = "provider"
+) -> str:
     """Self-cleaning notice appended below a preserved good review when the
-    next re-review is scheduled (cooldown or rate-limit wait). Absolute UTC
-    time only -- GitHub's comment body can't be localized per viewer, and this
-    note is only edited on a re-arm event (not continuously updated), so a
-    relative string would go stale the moment it's posted. Requires a
-    timezone-aware ``not_before``: ``datetime.astimezone()`` silently treats a
-    naive datetime as system-local time rather than raising, so a naive value
-    is rejected explicitly here instead of producing a host-timezone-dependent
-    result."""
+    next re-review is scheduled (cooldown, rate-limit wait, or the bot's own
+    usage cap). Absolute UTC time only -- GitHub's comment body can't be
+    localized per viewer, and this note is only edited on a re-arm event (not
+    continuously updated), so a relative string would go stale the moment
+    it's posted. Requires a timezone-aware ``not_before``:
+    ``datetime.astimezone()`` silently treats a naive datetime as system-local
+    time rather than raising, so a naive value is rejected explicitly here
+    instead of producing a host-timezone-dependent result.
+
+    ``reason`` defaults to "provider", preserving today's exact wording for
+    every pre-existing call site.
+    """
     if not_before.tzinfo is None:
         raise ValueError("format_schedule_notice requires a timezone-aware datetime")
     eta = not_before.astimezone(timezone.utc).strftime("%H:%M UTC")
-    return f"{SCHEDULE_NOTE_START}\n🔄 Re-review scheduled ~{eta}\n{SCHEDULE_NOTE_END}"
+    if reason == "usage_cap":
+        body = (
+            f"🔄 Re-review scheduled ~{eta} (usage limit reached — resets "
+            "automatically, not a provider quota issue)"
+        )
+    else:
+        body = f"🔄 Re-review scheduled ~{eta}"
+    return f"{SCHEDULE_NOTE_START}\n{body}\n{SCHEDULE_NOTE_END}"
