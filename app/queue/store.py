@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     UNIQUE (repo_full_name, pr_number)
 );
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS defer_reason TEXT;
 CREATE TABLE IF NOT EXISTS runtime_config (
     id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     provider   TEXT,
@@ -112,6 +113,10 @@ class Ticket:
     cooldown_level: int
     notice_not_before: str | None
     last_error: str | None
+    # Why this ticket is deferred: NULL/'provider' = a provider rate limit or
+    # a re-review cooldown (today's only meaning); 'usage_cap' = the bot's own
+    # per-key daily cap. Drives which wording the PR notice uses.
+    defer_reason: str | None
 
 
 def _configure(conn) -> None:
@@ -275,7 +280,8 @@ def enqueue_or_update(
             )
             conn.execute(
                 "UPDATE tickets SET head_sha = %s, status = %s, not_before = %s, attempts = 0, "
-                "rereview_requested = 0, cooldown_level = %s, updated_at = %s WHERE id = %s",
+                "rereview_requested = 0, cooldown_level = %s, defer_reason = NULL, "
+                "updated_at = %s WHERE id = %s",
                 (head_sha, new_status, not_before, new_level, now, ticket_id),
             )
         return ticket_id
@@ -304,11 +310,31 @@ def claim_next_due(now: str) -> Ticket | None:
 
 
 def defer_rate_limited(ticket_id: int, not_before: str, now: str) -> None:
-    """Per-provider rate-limit deferral. Does NOT count toward the hard stop."""
+    """Per-provider rate-limit deferral. Does NOT count toward the hard stop.
+
+    Explicitly clears defer_reason: a stale 'usage_cap' left over from an
+    earlier deferral of this same row would mislabel this provider wait as
+    the bot's own cap in the PR notice.
+    """
     with _require_pool().connection() as conn:
         conn.execute(
             "UPDATE tickets SET status = 'deferred', not_before = %s, "
-            "updated_at = %s WHERE id = %s",
+            "defer_reason = NULL, updated_at = %s WHERE id = %s",
+            (not_before, now, ticket_id),
+        )
+
+
+def defer_usage_capped(ticket_id: int, not_before: str, now: str) -> None:
+    """Defer until the bot's own per-key daily usage cap resets.
+
+    The ONLY writer of defer_reason='usage_cap'. Like defer_rate_limited this
+    does NOT touch `attempts` -- a self-imposed wait is not a failure and must
+    never count toward the hard stop.
+    """
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "UPDATE tickets SET status = 'deferred', not_before = %s, "
+            "defer_reason = 'usage_cap', updated_at = %s WHERE id = %s",
             (not_before, now, ticket_id),
         )
 
@@ -352,6 +378,7 @@ def finalize_review(
               cooldown_level     = CASE WHEN rereview_requested = 1
                                         THEN %(new_level)s ELSE cooldown_level END,
               rereview_requested = 0,
+              defer_reason       = NULL,
               updated_at         = %(now)s
             WHERE id = %(id)s
             """,

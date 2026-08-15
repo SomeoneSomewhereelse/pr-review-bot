@@ -554,3 +554,54 @@ def test_schema_columns_match_the_ticket_dataclass(db_query):
         "WHERE table_schema = 'public' AND table_name = 'tickets'"
     )
     assert {row[0] for row in rows} == set(store.Ticket.__dataclass_fields__)
+
+
+def test_defer_usage_capped_defers_with_the_usage_cap_reason():
+    """The bot's own self-imposed cap must be distinguishable from a provider
+    rate-limit wait, because the PR notice wording differs (design doc §4.1).
+    The ticket row is the durable carrier of that distinction -- the notice
+    sweep has no other memory of why a ticket is deferred."""
+    tid = _enqueue()
+    store.defer_usage_capped(tid, not_before=FUTURE, now=T1)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"
+    assert t.not_before == FUTURE
+    assert t.defer_reason == "usage_cap"
+    assert t.attempts == 0            # a self-imposed wait is not a failure
+
+
+def test_defer_rate_limited_clears_a_stale_usage_cap_reason():
+    """A stale 'usage_cap' must never survive into a later, unrelated
+    deferral of the same row -- it would mislabel a genuine provider wait."""
+    tid = _enqueue()
+    store.defer_usage_capped(tid, not_before=FUTURE, now=T1)
+    store.defer_rate_limited(tid, not_before=FUTURE, now=T1)
+    assert store.get_ticket(tid).defer_reason is None
+
+
+def test_cooldown_re_arm_on_push_clears_a_stale_usage_cap_reason(db_exec):
+    tid = _enqueue()
+    store.defer_usage_capped(tid, not_before=FUTURE, now=T1)
+    # Terminal state + a recent completed review -> enqueue_or_update's
+    # done/failed re-arm branch, which re-defers for the cooldown.
+    db_exec(
+        "UPDATE tickets SET status='done', last_reviewed_at=%s WHERE id=%s", (T0, tid)
+    )
+    _enqueue(now=T1)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"      # still inside the 300s cooldown
+    assert t.defer_reason is None
+
+
+def test_finalize_review_clears_a_stale_usage_cap_reason(db_exec):
+    tid = _enqueue()
+    store.defer_usage_capped(tid, not_before=FUTURE, now=T1)
+    db_exec("UPDATE tickets SET status='running', rereview_requested=1 WHERE id=%s", (tid,))
+    store.finalize_review(tid, now=T1, rereview_not_before=FUTURE, rereview_cooldown_level=1)
+    t = store.get_ticket(tid)
+    assert t.status == "deferred"      # dirty-flag re-arm
+    assert t.defer_reason is None
+
+
+def test_new_ticket_has_no_defer_reason():
+    assert store.get_ticket(_enqueue()).defer_reason is None
