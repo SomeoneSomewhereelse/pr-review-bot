@@ -32,24 +32,31 @@ machinery so it costs no new state machine.
 ```python
 key_usage_token_cap: int | None = None
 key_usage_cost_cap_usd: float | None = None
-key_usage_reset_hour_utc: int = Field(default=4, ge=0, le=23)
+key_usage_reset_time_utc: time = Field(default=time(4, 0))
 ```
 
 Env vars: `KEY_USAGE_TOKEN_CAP`, `KEY_USAGE_COST_CAP_USD`,
-`KEY_USAGE_RESET_HOUR_UTC` — same `Settings`-field-name-uppercased
-convention as every other tunable here. Both caps default to `None`
-(feature off): an existing deployment that never sets either env var sees
-no behavior change. **`KEY_USAGE_TOKEN_CAP` takes precedence when both are
-set** — the cost cap is not consulted at all in that case, not merely a
-tiebreak. Test/demo value: `KEY_USAGE_TOKEN_CAP=20000`.
+`KEY_USAGE_RESET_TIME_UTC` — same `Settings`-field-name-uppercased
+convention as every other tunable here. `KEY_USAGE_RESET_TIME_UTC` is a
+plain `"HH:MM"` (or `"HH:MM:SS"`) string, parsed via `time.fromisoformat` —
+arbitrary UTC wall-clock granularity rather than a whole-hour-only reset,
+specifically so a demo/test run can set the reset a couple of minutes from
+now instead of waiting up to an hour for the next boundary.
+
+Both caps default to `None` (feature off): an existing deployment that
+never sets either env var sees no behavior change. **`KEY_USAGE_TOKEN_CAP`
+takes precedence when both are set** — the cost cap is not consulted at
+all in that case, not merely a tiebreak. Test/demo values:
+`KEY_USAGE_TOKEN_CAP=20000`, `KEY_USAGE_RESET_TIME_UTC` set a few minutes
+out for quick iteration.
 
 ### 2.2 Scope
 
 One independent running total per **(provider, active key/slot index)**,
 mirroring the granularity `key_index.active_key_index()` already tracks.
-Swapping to a sibling slot via `scripts/set_api_key.py` immediately grants a
-fresh budget — no special-case code, it falls out of the query being scoped
-to `key_index`.
+Swapping to a sibling slot via `scripts/set_override.py <provider> --index N`
+immediately grants a fresh budget — no special-case code, it falls out of
+the query being scoped to `key_index`.
 
 ### 2.3 Enforcement timing (check-before, not predict-before)
 
@@ -103,13 +110,17 @@ over `reviews` costs nothing meaningful at 20 PRs/day.)*
 ### 3.1 Usage-day bucket
 
 ```python
-def usage_bucket_start(now: datetime, reset_hour: int) -> datetime:
+def usage_bucket_start(now: datetime, reset_time: time) -> datetime:
     """UTC instant the current usage window began. If now's UTC
-    time-of-day is before reset_hour, the window started at *yesterday's*
-    reset_hour; otherwise today's."""
+    time-of-day is before reset_time, the window started at *yesterday's*
+    reset_time; otherwise today's."""
+    candidate = datetime.combine(now.date(), reset_time, tzinfo=timezone.utc)
+    if now.time() < reset_time:
+        candidate -= timedelta(days=1)
+    return candidate
 ```
 
-Pure function of `(now, reset_hour)` — no state, trivially unit-testable.
+Pure function of `(now, reset_time)` — no state, trivially unit-testable.
 Lives in `app/queue/store.py` alongside `effective_cooldown`/
 `next_cooldown_level`, the existing precedent for small pure helpers
 colocated with the module that calls them despite touching no DB state.
@@ -128,7 +139,7 @@ override here degrading to its safe default):
 ```python
 if settings.key_usage_token_cap is not None or settings.key_usage_cost_cap_usd is not None:
     try:
-        bucket_start = usage_bucket_start(now, settings.key_usage_reset_hour_utc)
+        bucket_start = usage_bucket_start(now, settings.key_usage_reset_time_utc)
         tokens, cost = await asyncio.to_thread(
             store.get_key_usage, provider, key_index.active_key_index(provider),
             bucket_start.isoformat(),
@@ -199,16 +210,17 @@ ticket is deferred.
 
 ## 5. Interplay with existing mechanics
 
-- **Key-slot swap** (`scripts/set_api_key.py`) mid-day: immediately fresh
-  budget for the new slot, no code change — the query is scoped to
-  whatever `key_index.active_key_index(provider)` resolves to *now*.
+- **Key-slot swap** (`scripts/set_override.py <provider> --index N`)
+  mid-day: immediately fresh budget for the new slot, no code change — the
+  query is scoped to whatever `key_index.active_key_index(provider)`
+  resolves to *now*.
 - **Restart recovery** (`store.recover_on_startup`): unaffected. Usage is
   derived from persisted `reviews` rows, not in-memory state, so a
   crash/redeploy never resets or loses the count — unlike `_blocked_until`,
   which is deliberately in-memory and does reset on restart.
 - **Dashboard**: not touched by this design. A "today's usage vs. cap per
   active slot" widget would be a natural follow-up but is out of scope
-  here (§7).
+  here (§8).
 
 ## 6. Surface
 
@@ -232,8 +244,9 @@ ticket is deferred.
 
 ## 7. Testing (deterministic-first, matches SPEC.md §8/§12's existing strategy)
 
-- `usage_bucket_start` — just-before/just-after the reset hour, exact
-  boundary instant, a reset hour of `0`.
+- `usage_bucket_start` — just-before/just-after the reset time at minute and
+  second granularity (not just top-of-hour), the exact boundary instant, a
+  reset time of `00:00`.
 - `store.get_key_usage` — sums only the matching `(provider, key_index)`
   rows within the window; a `NULL` `key_index` row counts as index 0;
   excludes rows before `since`.
@@ -256,7 +269,7 @@ ticket is deferred.
 ## 8. Non-goals
 
 - No auto-swap to a sibling key slot on breach — a human decides that via
-  `scripts/set_api_key.py`, exactly as key rotation works today.
+  `scripts/set_override.py`, exactly as key rotation works today.
 - No global or per-provider pooling across slots — strictly per
   `(provider, key_index)`, per the explicit scope decision.
 - No predictive/estimated pre-call check — check-before only (§2.3).
