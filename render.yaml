@@ -44,3 +44,9 @@ services:
         sync: false
       - key: DISPATCHER_REREVIEW_COOLDOWN_FACTOR
         sync: false
+      - key: KEY_USAGE_TOKEN_CAP
+        sync: false
+      - key: KEY_USAGE_COST_CAP_USD
+        sync: false
+      - key: KEY_USAGE_RESET_TIME_UTC
+        sync: false

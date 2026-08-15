@@ -12,7 +12,7 @@ import pytest
 
 from app.config import settings
 from app.providers import active
-from app.queue import cooldown_config, dispatcher, store
+from app.queue import cooldown_config, dispatcher, store, usage_cap_config
 import app.orchestrator as orchestrator
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
@@ -54,6 +54,13 @@ def _caps_off_by_default(monkeypatch):
     monkeypatch.setattr(settings, "key_usage_token_cap", None)
     monkeypatch.setattr(settings, "key_usage_cost_cap_usd", None)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _clean_usage_cap_cache():
+    usage_cap_config.reset_override_cache()
+    yield
+    usage_cap_config.reset_override_cache()
 
 
 def _enqueue(pr, now=NOW):

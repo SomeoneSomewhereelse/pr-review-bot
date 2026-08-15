@@ -34,7 +34,7 @@ from app.formatting import (
 from app.orchestrator import ReviewRateLimited, attempt_review
 from app.providers import active, active_model, key_index
 from app.providers.active import active_provider
-from app.queue import cooldown_config, store
+from app.queue import cooldown_config, store, usage_cap_config
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,18 @@ async def _refresh_model_overrides() -> None:
         active_model.reset_override_cache()
 
 
+async def _refresh_usage_cap_overrides() -> None:
+    """Refresh the usage-cap override once per claimed ticket, same cadence and
+    fail-safe shape as the refreshes above: degrade to the env defaults rather
+    than keep a stale cache."""
+    try:
+        tokens, cost, reset = await asyncio.to_thread(store.get_usage_cap_overrides)
+        usage_cap_config.set_override_cache(tokens, cost, reset)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to refresh usage-cap overrides; using env defaults")
+        usage_cap_config.reset_override_cache()
+
+
 async def process_next_due(now: datetime) -> StepResult:
     """Claim and process one due ticket. Returns what happened.
 
@@ -198,6 +210,8 @@ async def process_next_due(now: datetime) -> StepResult:
 
     await _refresh_model_overrides()
 
+    await _refresh_usage_cap_overrides()
+
     if ticket.notice_not_before is not None:
         try:
             await asyncio.to_thread(
@@ -228,9 +242,10 @@ async def process_next_due(now: datetime) -> StepResult:
     # That is why the whole computation — bucket, query, comparison, reset
     # instant — sits inside one try, and why nothing outside it is read.
     cap_reset_at: datetime | None = None
-    if settings.key_usage_token_cap is not None or settings.key_usage_cost_cap_usd is not None:
+    token_cap, cost_cap, reset_time = usage_cap_config.effective_caps()
+    if token_cap is not None or cost_cap is not None:
         try:
-            bucket_start = store.usage_bucket_start(now, settings.key_usage_reset_time_utc)
+            bucket_start = store.usage_bucket_start(now, reset_time)
             tokens, cost = await asyncio.to_thread(
                 store.get_key_usage,
                 provider,
@@ -240,9 +255,7 @@ async def process_next_due(now: datetime) -> StepResult:
             # The token cap WINS OUTRIGHT when both are set: the cost cap is
             # not consulted at all, not used as a tiebreak.
             over_cap = (
-                tokens >= settings.key_usage_token_cap
-                if settings.key_usage_token_cap is not None
-                else cost >= settings.key_usage_cost_cap_usd
+                tokens >= token_cap if token_cap is not None else cost >= cost_cap
             )
             if over_cap:
                 cap_reset_at = bucket_start + timedelta(hours=24)
