@@ -1,3 +1,5 @@
+from datetime import time
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -64,6 +66,18 @@ class Settings(BaseSettings):
     # "no limit" in SQLite, silently reverting to the unbounded pre-fix
     # behavior this setting exists to prevent.
     dispatcher_notice_sweep_batch_size: int = Field(default=20, gt=0)
+
+    # --- Proactive per-key daily usage cap. Both caps default to None
+    # (feature off): a deployment that sets neither env var behaves exactly
+    # as before. KEY_USAGE_TOKEN_CAP WINS OUTRIGHT when both are set -- the
+    # cost cap is then not consulted at all, not used as a tiebreak. The
+    # reset time is a plain "HH:MM" (or "HH:MM:SS") UTC wall-clock string;
+    # a `time` field makes pydantic parse it, giving arbitrary granularity
+    # rather than whole-hour-only resets, specifically so a demo can set the
+    # reset a couple of minutes out instead of waiting for the next hour.
+    key_usage_token_cap: int | None = None
+    key_usage_cost_cap_usd: float | None = None
+    key_usage_reset_time_utc: time = Field(default=time(4, 0))
 
     # --- Optional operator tooling: read only by scripts/deploy.py on the
     # operator's own machine. Never set on the deployed service, never added
