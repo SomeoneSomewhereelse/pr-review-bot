@@ -59,20 +59,23 @@ def test_parse_retry_after_missing_uses_default():
 
 async def test_groq_429_with_header_raises_rate_limited(monkeypatch):
     _groq_raising(FakeRateLimitError("30"), monkeypatch)
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RateLimited) as ei:
-        await GroqProvider(api_key="dummy-key-for-construction-only").complete("s", "u", Greeting)
+        await provider.complete("s", "u", Greeting)
     assert ei.value.retry_after == 30.0
 
 
 async def test_groq_429_without_header_uses_default(monkeypatch):
     monkeypatch.setattr(settings, "default_retry_after_seconds", 60.0)
     _groq_raising(FakeRateLimitError(None), monkeypatch)
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RateLimited) as ei:
-        await GroqProvider(api_key="dummy-key-for-construction-only").complete("s", "u", Greeting)
+        await provider.complete("s", "u", Greeting)
     assert ei.value.retry_after == 60.0
 
 
 async def test_groq_non_429_error_propagates_unchanged(monkeypatch):
     _groq_raising(RuntimeError("network down"), monkeypatch)
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     with pytest.raises(RuntimeError):
-        await GroqProvider(api_key="dummy-key-for-construction-only").complete("s", "u", Greeting)
+        await provider.complete("s", "u", Greeting)

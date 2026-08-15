@@ -38,7 +38,7 @@ def main() -> None:
     print(f"Provider: gemini   Model: {settings.llm_model}")
     print("(never printing the API key)")
 
-    provider = GeminiProvider(api_key=settings.gemini_api_key)
+    provider = GeminiProvider(api_key=settings.gemini_api_key, model=settings.llm_model)
 
     system = "Respond in the given JSON schema."
     user = "Say hello in one short sentence."

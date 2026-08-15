@@ -40,7 +40,7 @@ async def test_groq_provider_parses_valid_structured_output(monkeypatch):
         ),
     )
 
-    provider = GroqProvider(api_key="dummy-key-for-construction-only")
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -62,7 +62,7 @@ async def test_groq_provider_returns_none_parsed_on_malformed_json(monkeypatch):
         ),
     )
 
-    provider = GroqProvider(api_key="dummy-key-for-construction-only")
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -82,7 +82,7 @@ async def test_groq_provider_returns_none_parsed_on_off_schema_json(monkeypatch)
         ),
     )
 
-    provider = GroqProvider(api_key="dummy-key-for-construction-only")
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -98,7 +98,7 @@ async def test_groq_provider_includes_schema_in_system_prompt(monkeypatch):
         ),
     )
 
-    provider = GroqProvider(api_key="dummy-key-for-construction-only")
+    provider = GroqProvider(api_key="dummy-key-for-construction-only", model=settings.groq_model)
     await provider.complete("Be a helpful reviewer.", "user prompt", Greeting)
 
     _, kwargs = fake_create.call_args

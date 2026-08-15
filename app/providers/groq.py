@@ -45,7 +45,7 @@ def _schema_system_prompt(system: str, schema: type[BaseModel]) -> str:
 class GroqProvider:
     """``groq`` — cross-vendor fallback (Llama via Groq's OpenAI-compatible API)."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str) -> None:
         # max_retries=0: the SDK's own default (2) silently retries a 429
         # with backoff before this adapter's except clause ever sees it --
         # confirmed live (a 43.1s call, vs. ~5s normal, that never surfaced
@@ -60,7 +60,10 @@ class GroqProvider:
             max_retries=0,
             timeout=settings.llm_request_timeout_seconds,
         )
-        self._model = settings.groq_model
+        # Passed in, never read from Settings here: app/providers/active_model.py
+        # is the single resolver, so a DB model override and the model reported
+        # in the PR comment can never disagree with what actually runs.
+        self._model = model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
         async with translate_rate_limit(default=settings.default_retry_after_seconds):

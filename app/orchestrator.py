@@ -21,11 +21,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app import github_app
-from app.config import settings
 from app.diff_utils import annotate_and_cap
 from app.formatting import format_comment
-from app.providers import registry
 from app.providers.active import active_provider
+from app.providers.active_model import active_model
 from app.providers.base import RateLimited
 from app.providers.key_index import active_key_index
 from app.providers.pricing import estimate_cost_usd
@@ -43,16 +42,11 @@ _SPECIALIST_NAMES = ("Security", "Performance", "Code Quality")
 def _active_model() -> str:
     """The model name for whichever provider is actually active.
 
-    Each provider owns its own model var (registry.PROVIDERS) -- there is no
-    special case left to hardcode here. An unknown provider (a hand-edited DB
-    override, say) falls back to the gemini model rather than raising: this
-    value is reported in the PR comment, and a reporting path must not be able
-    to abort a review.
+    Delegates to app/providers/active_model.py, the single resolver shared with
+    factory.get_provider() -- so the model reported in the PR comment is
+    always the model the call actually used.
     """
-    entry = registry.PROVIDERS.get(active_provider())
-    if entry is None:
-        return settings.llm_model
-    return getattr(settings, entry[1].lower(), "")
+    return active_model(active_provider())
 
 
 @dataclass

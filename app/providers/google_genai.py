@@ -56,14 +56,17 @@ async def _complete(
 class GeminiProvider:
     """``gemini`` (AI-Studio) — the actually-live provider in this environment."""
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str) -> None:
         self._client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
                 timeout=int(settings.llm_request_timeout_seconds * 1000)
             ),
         )
-        self._model = settings.llm_model
+        # Passed in, never read from Settings here: app/providers/active_model.py
+        # is the single resolver, so a DB model override and the model reported
+        # in the PR comment can never disagree with what actually runs.
+        self._model = model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
         return await _complete(self._client, self._model, system, user, schema)
@@ -87,7 +90,7 @@ class VertexProvider:
     """
 
     def __init__(
-        self, project: str, location: str, service_account_info: dict | None
+        self, project: str, location: str, service_account_info: dict | None, model: str
     ) -> None:
         creds = None
         if service_account_info is not None:
@@ -103,7 +106,10 @@ class VertexProvider:
                 timeout=int(settings.llm_request_timeout_seconds * 1000)
             ),
         )
-        self._model = settings.llm_model
+        # Passed in, never read from Settings here: app/providers/active_model.py
+        # is the single resolver, so a DB model override and the model reported
+        # in the PR comment can never disagree with what actually runs.
+        self._model = model
 
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> LLMResponse:
         return await _complete(self._client, self._model, system, user, schema)

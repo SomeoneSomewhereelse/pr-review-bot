@@ -1112,6 +1112,23 @@ async def test_capped_ticket_with_a_visible_review_gets_no_placeholder(monkeypat
     assert posted == []
 
 
+async def test_model_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
+    """Same fail-safe shape as the provider/cooldown/key-index refreshes: a
+    failing refresh must never abort a review and never leave a stale cache."""
+    from app.providers import active_model
+    from app.queue import dispatcher, store
+
+    active_model.set_override_cache({"groq": "stale-model"})
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(store, "get_all_model_overrides", _boom)
+    await dispatcher._refresh_model_overrides()
+    assert active_model.active_model("groq") != "stale-model"
+    active_model.reset_override_cache()
+
+
 async def test_under_cap_still_respects_the_blocked_provider_gate(monkeypatch, db_exec):
     """The cap check and the reactive blocked-provider gate are two
     independent gates in sequence: when the cap is configured but current

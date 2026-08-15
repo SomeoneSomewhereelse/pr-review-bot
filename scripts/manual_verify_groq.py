@@ -39,7 +39,7 @@ def main() -> None:
     print(f"Provider: groq   Model: {settings.groq_model}")
     print("(never printing the API key)")
 
-    provider = GroqProvider(api_key=settings.groq_api_key)
+    provider = GroqProvider(api_key=settings.groq_api_key, model=settings.groq_model)
 
     system = "Respond in the given JSON schema."
     user = "Say hello in one short sentence."

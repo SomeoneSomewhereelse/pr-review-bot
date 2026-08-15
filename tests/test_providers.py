@@ -60,7 +60,7 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only")
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -81,7 +81,7 @@ async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only")
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -101,7 +101,7 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
         ),
     )
 
-    provider = GeminiProvider(api_key="dummy-key-for-construction-only")
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed is None
@@ -128,7 +128,10 @@ async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
         _fake_client_factory(captured, fake_generate),
     )
 
-    provider = VertexProvider(project="proj-x", location="us-central1", service_account_info=None)
+    provider = VertexProvider(
+        project="proj-x", location="us-central1", service_account_info=None,
+        model=settings.llm_model,
+    )
     result = await provider.complete("system prompt", "user prompt", Greeting)
 
     assert result.parsed == Greeting(message="hi")
@@ -151,7 +154,10 @@ def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
         _fake_client_factory(captured, AsyncMock()),
     )
 
-    VertexProvider(project="proj-x", location="us-central1", service_account_info=None)
+    VertexProvider(
+        project="proj-x", location="us-central1", service_account_info=None,
+        model=settings.llm_model,
+    )
 
     assert captured["credentials"] is None
 
@@ -181,7 +187,10 @@ def test_vertex_provider_builds_credentials_from_the_service_account_info(monkey
     )
 
     info = {"type": "service_account", "project_id": "proj-x"}
-    VertexProvider(project="proj-x", location="us-central1", service_account_info=info)
+    VertexProvider(
+        project="proj-x", location="us-central1", service_account_info=info,
+        model=settings.llm_model,
+    )
 
     assert captured["credentials"] is sentinel
     assert seen["type"] == "service_account"
@@ -566,3 +575,56 @@ def test_estimate_cost_usd_vertex_gemini_2_5_flash():
         "vertex", "gemini-2.5-flash", tokens_in=4_000, tokens_out=500
     )
     assert cost == pytest.approx(0.0012 + 0.00125)
+
+
+# --------------------------------------------------------------------------
+# active_model.py <-> factory.py -- model is part of the provider cache key
+# --------------------------------------------------------------------------
+
+
+def test_a_model_change_is_a_cache_miss(monkeypatch):
+    """Adapters bake the model in at construction and factory._instances is
+    process-lifetime, so a model override would silently no-op on a warm
+    process unless the model is part of the cache key."""
+    from app.config import settings
+    from app.providers import active, active_model, factory, key_index
+
+    factory.reset_provider_cache()
+    active.set_override_cache("groq")
+    key_index.reset_override_cache()
+    monkeypatch.setattr(settings, "groq_api_key", "sentinel-key")
+    monkeypatch.setattr(settings, "groq_model", "model-a")
+
+    first = factory.get_provider()
+    active_model.set_override_cache({"groq": "model-b"})
+    second = factory.get_provider()
+
+    assert first is not second
+    assert first._model == "model-a"
+    assert second._model == "model-b"
+
+    active.reset_override_cache()
+    active_model.reset_override_cache()
+    factory.reset_provider_cache()
+
+
+def test_reported_model_equals_executed_model(monkeypatch):
+    """orchestrator._active_model() feeds the PR comment; the adapter's
+    _model is what actually runs. If these diverge, the comment reports a
+    model that never ran -- a silent partial failure."""
+    from app import orchestrator
+    from app.config import settings
+    from app.providers import active, active_model, factory, key_index
+
+    factory.reset_provider_cache()
+    active.set_override_cache("groq")
+    key_index.reset_override_cache()
+    monkeypatch.setattr(settings, "groq_api_key", "sentinel-key")
+    monkeypatch.setattr(settings, "groq_model", "model-a")
+    active_model.set_override_cache({"groq": "model-b"})
+
+    assert orchestrator._active_model() == factory.get_provider()._model
+
+    active.reset_override_cache()
+    active_model.reset_override_cache()
+    factory.reset_provider_cache()

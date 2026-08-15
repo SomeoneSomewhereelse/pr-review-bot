@@ -8,14 +8,14 @@ rather than an API-key string and whose absence means "use implicit ADC"
 rather than "misconfigured"; app/providers/vertex_credentials.py owns that
 resolution, this module only branches on it.
 
-One instance per (provider name, key index) is cached for the process
+One instance per (provider name, key index, model) is cached for the process
 lifetime — each ``complete()`` call was previously paying a fresh SDK client
 construction (and its underlying HTTP client/connection) on every single
 specialist call. Settings are read once at import and provider adapters hold
-no per-call mutable state, so caching by (provider, index) is safe: a key
-swap becomes a cache miss on the new tuple, and the old entry for the
-previous index is simply never looked up again — trivial memory cost, no
-explicit teardown needed.
+no per-call mutable state, so caching by (provider, index, model) is safe: a
+key swap (or a model override) becomes a cache miss on the new tuple, and the
+old entry for the previous index/model is simply never looked up again --
+trivial memory cost, no explicit teardown needed.
 """
 
 from __future__ import annotations
@@ -23,14 +23,15 @@ from __future__ import annotations
 from app.config import settings
 from app.providers import credentials, key_index, registry, vertex_credentials
 from app.providers.active import active_provider
+from app.providers.active_model import active_model
 from app.providers.base import LLMProvider
 from app.providers.google_genai import GeminiProvider, VertexProvider
 from app.providers.groq import GroqProvider
 
-_instances: dict[tuple[str, int], LLMProvider] = {}
+_instances: dict[tuple[str, int, str], LLMProvider] = {}
 
 
-def _build(provider: str, index: int) -> LLMProvider:
+def _build(provider: str, index: int, model: str) -> LLMProvider:
     # Check membership BEFORE resolving any credential: resolve() does
     # registry.PROVIDERS[provider], an unguarded dict lookup that raises a
     # bare KeyError for an unknown name. test_factory_raises_for_unknown_provider
@@ -62,6 +63,7 @@ def _build(provider: str, index: int) -> LLMProvider:
             project=project,
             location=settings.gcp_location,
             service_account_info=info,
+            model=model,
         )
     env_name, api_key = credentials.resolve(provider, index)
     # Locally-detectable invalid state: no live call needed to know this slot
@@ -77,18 +79,25 @@ def _build(provider: str, index: int) -> LLMProvider:
             f"({env_name} not set)"
         )
     if provider == "gemini":
-        return GeminiProvider(api_key=api_key)
+        return GeminiProvider(api_key=api_key, model=model)
     if provider == "groq":
-        return GroqProvider(api_key=api_key)
+        return GroqProvider(api_key=api_key, model=model)
     raise ValueError(f"registry lists {provider!r} but _build cannot construct it")
 
 
 def get_provider() -> LLMProvider:
     provider = active_provider()
     index = key_index.active_key_index(provider)
-    cache_key = (provider, index)
+    # The model is part of the cache key, not just a constructor argument:
+    # adapters bake it in at construction and this cache is process-lifetime,
+    # so without it a DB model override would silently no-op on a warm process
+    # while the PR comment reported the new model. Same mechanism this cache
+    # already relies on for a key swap -- a changed value is simply a miss on a
+    # new tuple.
+    model = active_model(provider)
+    cache_key = (provider, index, model)
     if cache_key not in _instances:
-        _instances[cache_key] = _build(provider, index)
+        _instances[cache_key] = _build(provider, index, model)
     return _instances[cache_key]
 
 

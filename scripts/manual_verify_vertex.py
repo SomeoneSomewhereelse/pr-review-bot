@@ -52,7 +52,7 @@ def main() -> int:
     project = settings.gcp_project or (info or {}).get("project_id", "")
     source = "service-account key" if info is not None else "implicit ADC (gcloud)"
 
-    print(f"Provider: vertex   Model: {settings.llm_model}")
+    print(f"Provider: vertex   Model: {settings.vertex_model}")
     print(f"Credential source: {source}")
     print(f"Project: {project or '(none resolved)'}   Location: {settings.gcp_location}")
     print("(never printing the credential)")
@@ -69,6 +69,7 @@ def main() -> int:
         project=project,
         location=settings.gcp_location,
         service_account_info=info,
+        model=settings.vertex_model,
     )
 
     system = "Respond in the given JSON schema."
@@ -89,7 +90,7 @@ def main() -> int:
     assert result.tokens_in > 0, "expected non-zero real prompt token usage"
     assert result.tokens_out > 0, "expected non-zero real completion token usage"
 
-    cost = estimate_cost_usd("vertex", settings.llm_model, result.tokens_in, result.tokens_out)
+    cost = estimate_cost_usd("vertex", settings.vertex_model, result.tokens_in, result.tokens_out)
     print(f"estimated cost: ${cost:.6f}")
 
     print(
