@@ -70,6 +70,30 @@ docker build -t pr-review-engine .
 docker run -p 8000:8000 --env-file .env pr-review-engine
 ```
 
+### Changing operational config
+
+Operational settings — provider, model, usage caps, cooldown — live in
+`.env.config` (see `.env.config.example`), never in `.env`. `.env` holds
+credentials only, and nothing but a credential belongs there.
+
+Two ways to change a setting:
+
+- **Edit `.env.config`, then `uv run python -m scripts.deploy --sync-env`** —
+  changes the baseline the service boots with. Costs a redeploy.
+- **A DB override** — takes effect on the next claimed ticket, no restart, no
+  redeploy:
+
+  ```bash
+  uv run python -m scripts.set_override vertex --model gemini-2.5-flash
+  uv run python -m scripts.set_override --list
+  uv run python -m scripts.set_usage_cap --tokens 20000 --reset 06:30
+  uv run python -m scripts.set_cooldown --base 30 --factor 1.5
+  ```
+
+`--list` prints slot inventory, the active index, and the active model as names
+and booleans only — never a credential value — so it is safe to run and paste
+anywhere.
+
 ### Deploying to production (Render + Supabase)
 
 The bot runs as a Docker container on Render's free tier with its durable queue
@@ -207,6 +231,9 @@ uv run python -m scripts.set_override groq --clear-index --no-activate  # clear 
 uv run python -m scripts.set_override groq                  # activate only, keep the existing index override
 uv run python -m scripts.set_override --clear                # clear the provider override
 uv run python -m scripts.set_override groq --index 1 --force  # write despite a failed live check
+uv run python -m scripts.set_override vertex --model gemini-2.5-flash        # override this provider's model too
+uv run python -m scripts.set_override vertex --clear-model --no-activate     # clear the model override only
+uv run python -m scripts.set_override --list                 # slot inventory, active index, active model
 ```
 
 This writes a provider override and/or a provider's key-index override to

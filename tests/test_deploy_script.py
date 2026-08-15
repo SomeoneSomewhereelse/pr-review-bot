@@ -1665,3 +1665,43 @@ def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
     assert wanted["LLM_MODEL"] == "model-gemini"
     assert wanted["GROQ_MODEL"] == "model-groq"
     assert wanted["VERTEX_MODEL"] == "model-vertex"
+
+
+def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
+    """Symmetric with the provider-override refusal: an active model override
+    wins at runtime, so pushing a different model would report success while
+    the service kept running the overridden one."""
+    from app.config import settings
+    from scripts import deploy
+
+    monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
+    monkeypatch.setattr(settings, "database_url", "postgresql://localhost/x")
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
+    monkeypatch.setattr(deploy, "_resolved_model_override", lambda provider: "some-other-model")
+
+    assert deploy.sync_env() == 2
+    err = capsys.readouterr().err
+    assert "model override" in err
+    assert "--clear-model" in err
+
+
+def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
+    from app.config import settings
+    from scripts import deploy
+
+    monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
+    monkeypatch.setattr(settings, "database_url", "postgresql://localhost/x")
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
+    monkeypatch.setattr(deploy, "_resolved_model_override", lambda provider: "gemini-2.5-flash")
+    monkeypatch.setattr(deploy, "_wanted_env", lambda: {"LLM_PROVIDER": "vertex"})
+    # Mocked so this test makes no live Render call; returning None makes the
+    # script stop at "no such service" -- which proves it got PAST the model
+    # guard, the thing under test, without needing a full push to succeed.
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
+
+    assert deploy.sync_env() == 1
+    assert "no Render service named" in capsys.readouterr().err

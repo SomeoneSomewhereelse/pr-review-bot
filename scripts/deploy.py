@@ -287,6 +287,20 @@ def _resolved_provider() -> tuple[str, str | None]:
     return (override or settings.llm_provider), override
 
 
+def _resolved_model_override(provider: str) -> str | None:
+    """`provider`'s DB model override, or None when unset.
+
+    Reads via a raw short-timeout connection rather than store.init_pool(), for
+    the same reason _resolved_provider does. The column name comes from
+    registry.MODEL_COLUMNS -- a hardcoded whitelist -- and is never built from
+    `provider` directly.
+    """
+    column = registry.MODEL_COLUMNS[provider]
+    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+        row = conn.execute(f"SELECT {column} FROM runtime_config WHERE id = 1").fetchone()
+    return (row[0] if row else None) or None
+
+
 def check_provider() -> CheckResult:
     """Which provider will actually run, and whether its credential exists.
 
@@ -732,6 +746,26 @@ def sync_env() -> int:
                 f"refusing to sync: a DB provider override ({override}) is active and "
                 f"wins over the LLM_PROVIDER={settings.llm_provider} being pushed. "
                 "Clear it first: uv run python -m scripts.set_override --clear",
+                file=sys.stderr,
+            )
+            return 2
+        # Symmetric with the provider-override refusal above. An active model
+        # override wins at runtime, so pushing a different model var would
+        # report success while the service kept running the overridden model --
+        # "what you pushed is what runs" has to stay true, not nearly true.
+        try:
+            model_override = _resolved_model_override(settings.llm_provider)
+        # deliberate: the provider check reports DB trouble
+        except Exception:  # noqa: BLE001
+            model_override = None
+        model_var = _PROVIDERS[settings.llm_provider][1]
+        local_model = getattr(settings, model_var.lower(), "")
+        if model_override and model_override != local_model:
+            print(
+                f"refusing to sync: a DB model override ({model_override}) is active for "
+                f"{settings.llm_provider} and wins over the {model_var}={local_model} "
+                "being pushed. Clear it first: uv run python -m scripts.set_override "
+                f"{settings.llm_provider} --clear-model --no-activate",
                 file=sys.stderr,
             )
             return 2

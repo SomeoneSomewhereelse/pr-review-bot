@@ -575,6 +575,44 @@ rather than inventing a mismatch it has no way to check.
 - `.env.example` committed with placeholders for every var; `.env` itself and
   `github-app-private-key.pem` are real values, gitignored, never committed.
 
+### 4.1 Two config files: `.env` (secrets) and `.env.config` (operational)
+
+`app/config.py::Settings` reads both, in the order `env_file=(".env",
+".env.config")` — the **last** file wins on a key present in both, so
+`.env.config` is the designated home and always outranks a stale duplicate
+left behind in `.env`. `OPERATIONAL_KEYS` (`app/config.py`) is the exhaustive,
+hand-maintained list of which env-var names are operational (provider, model,
+usage caps, cooldown tuning, etc.) rather than credentials — everything not on
+that list is a secret by default.
+
+`.env.config` is safe to open and edit directly (by a human or an agent) —
+unlike `.env`, it never mixes in credential material, so none of CLAUDE.md's
+"never open a file that mixes secrets" restrictions apply to it.
+
+**Migrating an existing `.env`:**
+
+1. Copy `.env.config.example` to `.env.config` and fill in the values
+   currently sitting in `.env` for every name on `OPERATIONAL_KEYS`.
+2. Remove those same keys from `.env`.
+
+**This order matters**: `.env.config` wins by precedence, so creating it
+first and removing the old keys second means there is never a window where a
+setting reads as unset. Doing it in the other order would.
+
+`tests/test_config.py::test_no_operational_key_lives_in_the_secrets_file`
+enforces the split going forward — it fails, naming every misplaced key, if
+an `OPERATIONAL_KEYS` name is still found in `.env` (or if a key that is
+*not* on `OPERATIONAL_KEYS` is found in `.env.config`, catching drift in the
+other direction). Green on that test is how you confirm the migration above
+is complete.
+
+`KEY_USAGE_TOKEN_CAP`, `KEY_USAGE_COST_CAP_USD`, and `KEY_USAGE_RESET_TIME_UTC`
+are declared in `render.yaml` (a dashboard-set baseline) but are **never**
+pushed by `uv run python -m scripts.deploy --sync-env` — exactly like the
+`DISPATCHER_REREVIEW_COOLDOWN_*` cooldown vars, the live-change path for these
+is `uv run python -m scripts.set_usage_cap` (see README's "Changing
+operational config"), not a redeploy.
+
 ## Repo history note
 
 This repo was extracted from a course repository (Tov-learn), where it lived

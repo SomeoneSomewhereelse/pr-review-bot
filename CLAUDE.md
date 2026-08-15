@@ -79,18 +79,17 @@ which is why this section exists and is kept first in the file.
   itself: **never open a file that mixes secrets with other content (e.g.
   `.env`) at all, for any reason, full stop** — not even a single-line
   `Read`, not even an `Edit` whose `old_string`/`new_string` you believe are
-  both non-secret lines. If a config value that happens to live in such a
-  file needs to change (e.g. `LLM_PROVIDER`, `LLM_MODEL`, `KEY_USAGE_*` in
-  `.env`), ask the user to make that edit themselves rather than touching
-  the file yourself — treat this the same as asking them to check a value
-  you're not allowed to display. This is deliberately absolute rather than
-  "only touch the safe lines": it isn't fully verified that narrow access
-  prevents the harness from tracking (and later re-surfacing) the whole
-  file, so don't rely on scoped access as a mitigation for this specific
-  vector. (Note: this is a known tooling gap, not a fully solved problem —
-  this project's current CLI/scripts have no way to change some local
-  config without an agent touching `.env` directly; that gap is tracked as
-  a separate follow-up, not something this rule works around.)
+  both non-secret lines. If a value that happens to live in such a file
+  needs to change, ask the user to make that edit themselves rather than
+  touching the file yourself — treat this the same as asking them to check
+  a value you're not allowed to display. This is deliberately absolute
+  rather than "only touch the safe lines": it isn't fully verified that
+  narrow access prevents the harness from tracking (and later re-surfacing)
+  the whole file, so don't rely on scoped access as a mitigation for this
+  specific vector. (Operational config no longer requires this: non-secret
+  settings live in `.env.config`, which is safe to open and edit, and
+  provider/model/cap/cooldown changes also have redeploy-free CLI paths —
+  see README's "Changing operational config".)
   **If, despite this rule, such a file is ever opened anyway (e.g. an
   older path, a mistake, a subagent that didn't inherit this rule) and a
   later "changed externally" notification fires for it, treat that as a
