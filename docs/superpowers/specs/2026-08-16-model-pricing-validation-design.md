@@ -167,3 +167,7 @@ makes zero LLM calls itself.
   mean teaching `check_config()` to resolve the DB override before its pricing check, the
   same way `check_provider()` already does — a larger, separate change than this design's
   file-edit-path scope.
+
+  **Resolved by** `docs/superpowers/specs/2026-08-16-credential-convention-design.md` §2e,
+  which teaches `check_config()` to resolve `_resolved_model_overrides()` before checking
+  pricing — closing this residual as part of that design's implementation.

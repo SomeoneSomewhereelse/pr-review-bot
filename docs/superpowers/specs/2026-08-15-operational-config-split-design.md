@@ -369,6 +369,11 @@ Live calls: none required. Every behavior above is deterministic and mockable, p
   and `check_config()`'s "unreadable PEM" branch; the file-vs-b64 branch at
   `github_app.py:96-104`. ADC is unaffected — an empty var still means implicit ADC.
 
+  **Resolved by** `docs/superpowers/specs/2026-08-16-credential-convention-design.md`,
+  which also folds in a small unrelated fix (the model-pricing-validation design's own §9
+  residual: `check_config()` not resolving an active DB model override before its pricing
+  check) since both were small and already fully scoped.
+
   Two costs recorded deliberately: it moves `.env` *away* from bounding blast radius (the
   full PEM and SA JSON definitively live there), which in this project changes uniformity
   rather than real exposure, since the `_B64` forms were already present and are what the
