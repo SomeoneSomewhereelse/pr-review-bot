@@ -136,13 +136,12 @@ def _print_inventory() -> int:
     answer "is --index 2 valid?" without ever opening .env, which it may not do.
 
     Partial picture for vertex specifically: "local slots" here only reflects
-    GCP_SERVICE_ACCOUNT_KEY_B64 (and its numbered siblings) being set -- it says
-    nothing about a local service-account key FILE or implicit ADC (`gcloud auth
-    application-default login`), both of which app/providers/vertex_credentials.py
-    also accepts as valid ways to authenticate. So vertex can print "local slots
-    -" here even when a working local key file or ADC setup exists. This is
-    deliberately not fixed by adding file-existence or ADC-detection logic --
-    see the printed caveat on vertex's own line below.
+    GCP_SERVICE_ACCOUNT_KEY (and its numbered siblings) being set -- it says
+    nothing about implicit ADC (`gcloud auth application-default login`),
+    which app/providers/vertex_credentials.py also accepts as a valid way to
+    authenticate. So vertex can print "local slots -" here even when a
+    working ADC setup exists. This is deliberately not fixed by adding
+    ADC-detection logic -- see the printed caveat on vertex's own line below.
     """
     render_keys: set[str] = set()
     render_note = ""
@@ -192,12 +191,11 @@ def _print_inventory() -> int:
         index_source = "override" if provider in index_overrides else "default"
         model_source = "override" if provider in model_overrides else "env"
         # vertex-only caveat: "local slots" above only reflects
-        # GCP_SERVICE_ACCOUNT_KEY_B64 (and numbered siblings), never a local key
-        # file or implicit ADC -- both also valid per vertex_credentials.py --
-        # so "local slots -" here does not mean vertex is unusable.
+        # GCP_SERVICE_ACCOUNT_KEY (and numbered siblings), never implicit ADC
+        # -- also valid per vertex_credentials.py -- so "local slots -" here
+        # does not mean vertex is unusable.
         vertex_note = (
-            " (vertex: reflects GCP_SERVICE_ACCOUNT_KEY_B64 only, not a local "
-            "key file or ADC)"
+            " (vertex: reflects GCP_SERVICE_ACCOUNT_KEY only, not implicit ADC)"
             if provider == "vertex"
             else ""
         )
