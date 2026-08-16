@@ -30,6 +30,25 @@ def _reset_provider_cache():
     reset_provider_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_active_overrides():
+    """Several tests below set overrides in app.providers.active,
+    active_model, and factory to exercise the model-is-part-of-the-cache-key
+    behavior. Resetting only at the end of the test body means an earlier
+    assertion failure skips cleanup and pollutes every later test in the same
+    run -- reset both before and after, mirroring
+    tests/test_active_model.py's autouse fixture."""
+    from app.providers import active, active_model, factory
+
+    active.reset_override_cache()
+    active_model.reset_override_cache()
+    factory.reset_provider_cache()
+    yield
+    active.reset_override_cache()
+    active_model.reset_override_cache()
+    factory.reset_provider_cache()
+
+
 class Greeting(BaseModel):
     message: str
 
@@ -603,10 +622,6 @@ def test_a_model_change_is_a_cache_miss(monkeypatch):
     assert first._model == "model-a"
     assert second._model == "model-b"
 
-    active.reset_override_cache()
-    active_model.reset_override_cache()
-    factory.reset_provider_cache()
-
 
 def test_gemini_provider_uses_the_db_override_not_settings_llm_model(monkeypatch):
     """Tautology guard for GeminiProvider: test_gemini_provider_parses_valid_
@@ -633,9 +648,6 @@ def test_gemini_provider_uses_the_db_override_not_settings_llm_model(monkeypatch
     assert provider._model == "sentinel-gemini-model"
     assert provider._model != settings.llm_model
 
-    active_model.reset_override_cache()
-    factory.reset_provider_cache()
-
 
 def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypatch):
     """Same tautology guard as the gemini test above, for VertexProvider: a
@@ -661,9 +673,6 @@ def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypa
     assert provider._model == "sentinel-vertex-model"
     assert provider._model != settings.vertex_model
 
-    active_model.reset_override_cache()
-    factory.reset_provider_cache()
-
 
 def test_reported_model_equals_executed_model(monkeypatch):
     """orchestrator._active_model() feeds the PR comment; the adapter's
@@ -681,7 +690,3 @@ def test_reported_model_equals_executed_model(monkeypatch):
     active_model.set_override_cache({"groq": "model-b"})
 
     assert orchestrator._active_model() == factory.get_provider()._model
-
-    active.reset_override_cache()
-    active_model.reset_override_cache()
-    factory.reset_provider_cache()

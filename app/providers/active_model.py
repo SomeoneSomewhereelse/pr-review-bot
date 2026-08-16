@@ -12,7 +12,12 @@ Fail-safe by construction: the cache starts empty, so before the first refresh
 rather than to a crash or an empty string. An empty cached value (hand-edited
 row, or a future bug) is treated as "no override" for the same reason: an empty
 model name is not a model, and sending one to a provider SDK is a guaranteed
-failure where the env value is a working default.
+failure where the env value is a working default. The env-model lookup itself
+is guarded the same way: it can never return an empty string either, even
+though every registry model var maps to a real, non-empty-by-default Settings
+field today, so nothing currently exercises that fallback -- this value is
+handed straight to a live LLM provider SDK, not just formatted into a PR
+comment, so a defensive empty-string guard belongs here regardless.
 """
 
 from __future__ import annotations
@@ -37,7 +42,7 @@ def active_model(provider: str) -> str:
     entry = registry.PROVIDERS.get(provider)
     if entry is None:
         return settings.llm_model
-    return getattr(settings, entry[1].lower(), "")
+    return getattr(settings, entry[1].lower(), "") or settings.llm_model
 
 
 def set_override_cache(overrides: dict[str, str]) -> None:
