@@ -148,10 +148,6 @@ def _unpriced_models() -> list[tuple[str, str, str, str]]:
     pre-existing failure mode, and piling a second, confusing message onto it
     adds noise rather than clarity. In practice it never fires -- every
     Settings model field carries a non-empty, priced default.
-
-    Shared by check_config() (which reports all of them) and sync_env() (which
-    refuses on the first), so the two can never disagree about what counts as
-    unpriced.
     """
     unpriced: list[tuple[str, str, str, str]] = []
     for provider, (_credential, model_var) in sorted(_PROVIDERS.items()):
