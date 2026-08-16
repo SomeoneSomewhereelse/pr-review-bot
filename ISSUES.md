@@ -17,6 +17,20 @@ Format:
 
 ---
 
+## Controller mistake: a broad grep for an unrelated keyword printed a full secret value
+- **When:** Usage-cap live-test session (`test-usage-limit`), while checking whether `LLM_PROVIDER`/`LLM_MODEL` were set to `vertex`/a specific model in `.env`.
+- **What happened:** Ran `grep -n "GCP_SERVICE_ACCOUNT_KEY_B64\|vertex" .env` intending to confirm whether vertex-related config existed. The second alternative, `"vertex"`, matched a comment line near the credential, and `grep` prints the *whole line it matched on* — but the pattern was run against the file broadly rather than scoped to guarantee no secret-holding line could ever match, and the full base64-encoded GCP service-account private key (a separate, adjacent line matched by the first alternative, `GCP_SERVICE_ACCOUNT_KEY_B64`) was printed into the conversation transcript in its entirety.
+- **Cost:** A complete, live, unrotated GCP service-account private key exposed in a conversation transcript. Flagged to the user immediately with a rotation recommendation; user deferred rotation ("I'll rotate later") and asked to continue the session's actual task.
+- **Suggested CLAUDE.md change:** Made — see the new "Secret handling" section now at the top of `CLAUDE.md`: never run a `grep`/pattern-match against a file known or likely to hold secrets unless the pattern structurally cannot capture a value (e.g. `grep -oE '^[A-Z_0-9]+=' .env` for key names only). This is the same underlying failure as the earlier `tail -c 20` incident below, just via a different command.
+
+## Harness surfaced a full `.env` diff (every secret in the file) into the conversation with no command run
+- **When:** Same session, immediately after the user edited `.env` externally (adding/removing `KEY_USAGE_*` vars) mid-turn.
+- **What happened:** The harness's own "file changed externally" system-reminder mechanism included the complete before/after diff of `.env` as plain text in a tool result — not something triggered by any `cat`/`grep`/`Read` call. This dumped every secret in the file at once: `GITHUB_WEBHOOK_SECRET`, both `GEMINI_API_KEY` values, all three `GROQ_API_KEY*` values, the full `DATABASE_URL` (password embedded in the connection string), `RENDER_API_KEY`, `UPTIMEROBOT_API_KEY`, and the `GCP_SERVICE_ACCOUNT_KEY_B64` credential again.
+- **Cost:** Effectively every credential in the project exposed in one shot. Flagged to the user immediately, recommending rotation of the full set; no part of any value was repeated in the response. User acknowledged and asked to continue.
+- **Suggested CLAUDE.md change:** Made — the new "Secret handling" section documents this as a distinct exposure vector that command-level discipline cannot prevent (it's a harness behavior, not an agent action), with the required response: never compound it by repeating/quoting any part of the surfaced value, flag it plainly and immediately, recommend rotation, and log it here — same as a self-inflicted exposure.
+
+---
+
 ## Retrospective audit pass (below): issues found on review that weren't logged as they happened
 
 The entries above were logged in the moment. The following were found by a
