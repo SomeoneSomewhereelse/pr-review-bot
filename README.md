@@ -192,7 +192,7 @@ uv run python -m scripts.deploy --sync-env
 ```
 
 The push set is **provider-derived**, not a fixed list: it always pushes
-`DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
+`DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
 `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, and **every
 provider's model var** (`LLM_MODEL`, `GROQ_MODEL`, `VERTEX_MODEL`) — a DB
 override (see below) can activate any provider with no redeploy, so every
@@ -201,7 +201,7 @@ currently-selected one's. The **selected provider's** credential is always
 pushed too — e.g. `LLM_PROVIDER=groq` pushes `GROQ_API_KEY`, not
 `GEMINI_API_KEY`. Any *other* provider's credential is pushed too, but only
 if you happen to have it set locally — an unselected provider's key is never
-demanded (this includes vertex's `GCP_SERVICE_ACCOUNT_KEY_B64`, which now has
+demanded (this includes vertex's `GCP_SERVICE_ACCOUNT_KEY`, which now has
 its own `VERTEX_MODEL` rather than sharing gemini's `LLM_MODEL`). It refuses
 to start (exit 2)
 if any wanted value is empty locally, so a blank `.env` entry can never
@@ -256,9 +256,8 @@ Each provider's credential env var can have numbered siblings —
 `GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ... — provisioned ahead
 of time exactly like any other env var (one redeploy, via `--sync-env` or
 the Render dashboard, to add a new slot). `vertex` rides the identical
-mechanism with a differently-shaped credential: `GCP_SERVICE_ACCOUNT_KEY_B64`,
-`_1`, `_2`, ... on Render, and locally the same index instead selects among
-`GCP_SERVICE_ACCOUNT_KEY_PATH`, `_1`, `_2`, ... key files — so
+mechanism with a differently-shaped (but still verbatim, base64-encoded, no
+file path) credential: `GCP_SERVICE_ACCOUNT_KEY`, `_1`, `_2`, ... — so
 `uv run python -m scripts.set_override vertex --index 1` swaps service
 accounts with no redeploy and no CLI change. Each provider tracks its own
 key-index independently, so switching providers never disturbs the slot
@@ -425,8 +424,8 @@ the full history of runs and timings.
   2026-08-14 — it had been removed while this project's no-card constraint
   made it unrunnable, and came back once GCP billing/ADC access became
   available. Unlike the other two providers its credential is a GCP
-  service-account identity: `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted) → a local
-  key file → implicit ADC. Two bugs were found and fixed via real live calls
+  service-account identity: `GCP_SERVICE_ACCOUNT_KEY` (hosted, base64) →
+  implicit ADC. Two bugs were found and fixed via real live calls
   before it succeeded (see `SETUP.md` §2 for the full history): a missing
   OAuth scope on the service-account credential path, and the shared
   `LLM_MODEL` default (`gemini-flash-latest`) not existing as a Vertex

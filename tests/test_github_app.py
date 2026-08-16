@@ -49,25 +49,27 @@ def _pull_json():
 
 
 @pytest.fixture(autouse=True)
-def _throwaway_app_credentials(tmp_path, monkeypatch):
+def _throwaway_app_credentials(monkeypatch):
     """Point settings at a freshly generated, throwaway RSA key.
 
     Keeps these tests independent of the real (gitignored) App credentials —
     only JWT *signing* happens locally with this key; every HTTP call is
     mocked below, so nothing is ever sent anywhere with it.
     """
+    import base64
+
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
-    pem_path = tmp_path / "throwaway-key.pem"
-    pem_path.write_bytes(pem)
 
     monkeypatch.setattr(settings, "github_app_id", 999999)
     monkeypatch.setattr(settings, "github_app_installation_id", 123456)
-    monkeypatch.setattr(settings, "github_app_private_key_path", str(pem_path))
+    monkeypatch.setattr(
+        settings, "github_app_private_key", base64.b64encode(pem).decode()
+    )
 
 
 class FakeGithubTransport:
@@ -700,13 +702,13 @@ def test_clear_schedule_notice_returns_none_when_no_bot_comment_exists(fake_tran
     assert result is None
 
 
-def test_read_private_key_prefers_base64_env(monkeypatch):
+def test_read_private_key_decodes_the_base64_env(monkeypatch):
     import base64
 
     pem = "-----BEGIN KEY-----\nabc\n-----END KEY-----\n"
     monkeypatch.setattr(
         settings,
-        "github_app_private_key_b64",
+        "github_app_private_key",
         base64.b64encode(pem.encode()).decode(),
     )
     assert github_app._read_private_key() == pem

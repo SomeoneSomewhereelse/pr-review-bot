@@ -10,7 +10,7 @@ those belong to ``orchestrator.py`` / ``diff_utils.py``.
 
 from __future__ import annotations
 
-from pathlib import Path
+import base64
 
 from github import Auth, Github, GithubException
 from github.IssueComment import IssueComment
@@ -94,17 +94,8 @@ def _strip_existing_footnote(body: str) -> str:
 
 
 def _read_private_key() -> str:
-    """Prefer the base64 env var (host-portable); fall back to the PEM file for
-    local dev. Never logged."""
-    b64 = settings.github_app_private_key_b64
-    if b64:
-        import base64
-
-        return base64.b64decode(b64).decode()
-    key_path = Path(settings.github_app_private_key_path)
-    if not key_path.is_absolute():
-        key_path = Path.cwd() / key_path
-    return key_path.read_text()
+    """Decode the base64-encoded App private key. Never logged."""
+    return base64.b64decode(settings.github_app_private_key).decode()
 
 
 def get_installation_auth() -> Auth.AppInstallationAuth:

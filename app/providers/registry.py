@@ -17,15 +17,15 @@ PROVIDERS = {
     # vertex's credential is a base64-encoded service-account JSON key, not an
     # API-key string -- but it is resolved through the same numbered-slot
     # mechanism (credentials.resolve), so it belongs in the same table.
-    # app/providers/vertex_credentials.py layers the local-file and
-    # implicit-ADC fallbacks on top of what this entry resolves.
+    # app/providers/vertex_credentials.py layers the implicit-ADC fallback on
+    # top of what this entry resolves.
     #
     # VERTEX_MODEL, not LLM_MODEL: vertex and gemini are the same SDK but
     # different model catalogs -- gemini-flash-latest does not exist as a
     # Vertex publisher model (404). Sharing one var made a DB provider flip
     # between them guaranteed-broken. Completes the split whose reasoning
     # app/config.py already records for GROQ_MODEL.
-    "vertex": ("GCP_SERVICE_ACCOUNT_KEY_B64", "VERTEX_MODEL"),
+    "vertex": ("GCP_SERVICE_ACCOUNT_KEY", "VERTEX_MODEL"),
 }
 
 # provider -> the runtime_config column holding its active API-key-slot

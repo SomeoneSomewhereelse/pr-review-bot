@@ -17,12 +17,10 @@ explanations live in README.md.
 from __future__ import annotations
 
 import argparse
-import base64
 import os
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -52,7 +50,7 @@ _MAX_PINGER_INTERVAL_SECONDS = 600
 _ALWAYS_SYNCED = (
     "DATABASE_URL",
     "GITHUB_APP_ID",
-    "GITHUB_APP_PRIVATE_KEY_B64",
+    "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_TARGET_REPO",
     "GITHUB_WEBHOOK_SECRET",
 )
@@ -113,28 +111,6 @@ def resolve_base_url() -> str:
 _PROVIDERS = registry.PROVIDERS
 
 
-def _private_key_b64() -> tuple[str, str]:
-    """The PEM in the base64 form Render needs, plus a problem string
-    ("" when usable).
-
-    Reads rather than stats: an existing-but-unreadable PEM must not report as
-    available, because check_config would pass while _wanted_env raised on the
-    same file. Returning the problem instead of raising keeps the CLI's exit
-    contract intact -- a config problem is a FAIL row, not a traceback.
-    """
-    if settings.github_app_private_key_b64:
-        return settings.github_app_private_key_b64, ""
-    path = Path(settings.github_app_private_key_path)
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    try:
-        return base64.b64encode(path.read_bytes()).decode(), ""
-    except FileNotFoundError:
-        return "", "GITHUB_APP_PRIVATE_KEY_B64 or _PATH"
-    except OSError as exc:
-        return "", f"unreadable PEM {path} ({type(exc).__name__})"
-
-
 def _unpriced_models() -> list[tuple[str, str, str, str]]:
     """Every provider whose locally-configured model has no rate-table entry,
     as (provider, model_var, model, known-models string).
@@ -171,11 +147,8 @@ def check_config() -> CheckResult:
     problems: list[str] = []
     if not settings.github_app_id:
         missing.append("GITHUB_APP_ID")
-    key_b64, key_problem = _private_key_b64()
-    if key_problem and key_problem.startswith("unreadable"):
-        problems.append(key_problem)
-    elif key_problem:
-        missing.append(key_problem)
+    if not settings.github_app_private_key:
+        missing.append("GITHUB_APP_PRIVATE_KEY")
     if not settings.github_webhook_secret:
         missing.append("GITHUB_WEBHOOK_SECRET")
     if not settings.github_target_repo:
@@ -642,11 +615,10 @@ def _wanted_env() -> dict[str, str]:
     others empty, and must never be asked to fill them), plus every
     provider's model var.
     """
-    pem_b64, _ = _private_key_b64()
     wanted = {
         "DATABASE_URL": settings.database_url,
         "GITHUB_APP_ID": str(settings.github_app_id or ""),
-        "GITHUB_APP_PRIVATE_KEY_B64": pem_b64,
+        "GITHUB_APP_PRIVATE_KEY": settings.github_app_private_key,
         "GITHUB_TARGET_REPO": settings.github_target_repo,
         "GITHUB_WEBHOOK_SECRET": settings.github_webhook_secret,
         "LLM_PROVIDER": settings.llm_provider,

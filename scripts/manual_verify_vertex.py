@@ -2,9 +2,8 @@
 
 Not part of the pytest suite (CI never runs this) -- it depends on a real,
 live call to Vertex AI using whatever credential
-app/providers/vertex_credentials.py resolves: GCP_SERVICE_ACCOUNT_KEY_B64,
-then a local key file, then implicit ADC (`gcloud auth application-default
-login`).
+app/providers/vertex_credentials.py resolves: GCP_SERVICE_ACCOUNT_KEY, then
+implicit ADC (`gcloud auth application-default login`).
 
 Run it directly:
 
@@ -22,7 +21,8 @@ stop and investigate via docs rather than retrying.
 Resolves key-index slot 0 only: the DB key-index override is a dispatcher-
 runtime concern (it is refreshed into a process-local cache per claimed
 ticket), and a one-shot CLI has no such cache to read. To verify a different
-service account locally, point GCP_SERVICE_ACCOUNT_KEY_PATH at it.
+service account locally, set GCP_SERVICE_ACCOUNT_KEY to its base64 form
+(scripts/encode_credential.py).
 
 Never prints the credential. The GCP project id IS printed -- an operator
 needs to know which project was billed, and it is not a secret -- but no
@@ -60,7 +60,7 @@ def main() -> int:
     if not project:
         print(
             "\nno project to call with: set GCP_PROJECT, or provide a service-account "
-            "key via GCP_SERVICE_ACCOUNT_KEY_B64 / GCP_SERVICE_ACCOUNT_KEY_PATH",
+            "key via GCP_SERVICE_ACCOUNT_KEY",
             file=sys.stderr,
         )
         return 2

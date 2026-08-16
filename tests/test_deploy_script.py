@@ -28,7 +28,7 @@ def _no_real_provider_credentials(monkeypatch):
     """deploy.py's tests never need a real provider key, and _wanted_env now
     reads every provider's credential -- so without this, a developer's .env
     flows into mocked request bodies and out through any respx match failure."""
-    for name in ("gemini_api_key", "groq_api_key", "gcp_service_account_key_b64"):
+    for name in ("gemini_api_key", "groq_api_key", "gcp_service_account_key"):
         monkeypatch.setattr(settings, name, "")
 
 
@@ -103,36 +103,19 @@ def test_render_report_summary_when_everything_passes():
 
 
 @pytest.fixture
-def complete_config(monkeypatch, tmp_path):
+def complete_config(monkeypatch):
     """Every value check_config requires, present and valid."""
-    pem = tmp_path / "key.pem"
-    pem.write_text("-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n")
     monkeypatch.setattr(settings, "github_app_id", 999999)
-    monkeypatch.setattr(settings, "github_app_private_key_b64", "")
-    monkeypatch.setattr(settings, "github_app_private_key_path", str(pem))
+    monkeypatch.setattr(settings, "github_app_private_key", "aGVsbG8=")
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     monkeypatch.setattr(settings, "public_base_url", "https://x.onrender.com")
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
-    return pem
 
 
 def test_check_config_passes_when_everything_is_present(complete_config):
     assert deploy.check_config().status == "PASS"
-
-
-def test_check_config_accepts_base64_key_without_a_pem_file(complete_config, monkeypatch):
-    monkeypatch.setattr(settings, "github_app_private_key_path", "/nonexistent.pem")
-    monkeypatch.setattr(settings, "github_app_private_key_b64", "aGVsbG8=")
-    assert deploy.check_config().status == "PASS"
-
-
-def test_check_config_fails_when_the_pem_path_does_not_exist(complete_config, monkeypatch):
-    monkeypatch.setattr(settings, "github_app_private_key_path", "/nonexistent.pem")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "GITHUB_APP_PRIVATE_KEY" in result.detail
 
 
 def test_check_config_names_every_missing_key_at_once(complete_config, monkeypatch):
@@ -231,14 +214,14 @@ def test_check_config_reports_an_unpriced_model_alongside_other_missing_keys(
 
 
 def test_check_config_requires_the_gcp_key_when_vertex_selected(complete_config, monkeypatch):
-    """deploy.py answers "can this be DEPLOYED", and Render has neither a local
-    key file nor a `gcloud` ADC login -- so the base64 form is genuinely
-    required there even though a local run could resolve either fallback."""
+    """deploy.py answers "can this be DEPLOYED", and Render has no `gcloud`
+    ADC login -- so the credential is genuinely required there even though a
+    local run could fall back to implicit ADC."""
     monkeypatch.setattr(settings, "llm_provider", "vertex")
-    monkeypatch.setattr(settings, "gcp_service_account_key_b64", "")
+    monkeypatch.setattr(settings, "gcp_service_account_key", "")
     result = deploy.check_config()
     assert result.status == "FAIL"
-    assert "GCP_SERVICE_ACCOUNT_KEY_B64" in result.detail
+    assert "GCP_SERVICE_ACCOUNT_KEY" in result.detail
 
 
 def test_check_config_requires_the_gemini_key_when_gemini_selected(
@@ -258,46 +241,11 @@ def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
     assert "gsk_SUPER_SECRET_VALUE" not in result.detail
 
 
-@pytest.fixture
-def unreadable_pem(complete_config):
-    """chmod 000 -- root reads anything, so this cannot be tested as root."""
-    import os
-
-    if os.geteuid() == 0:
-        pytest.skip("root bypasses file permissions; cannot test an unreadable PEM")
-    complete_config.chmod(0o000)
-    yield complete_config
-    complete_config.chmod(0o600)
-
-
-def test_check_config_fails_on_an_unreadable_pem(unreadable_pem):
-    """is_file() said yes while read_bytes() raised, so config passed and the
-    failure surfaced later as a traceback."""
+def test_check_config_reports_a_missing_private_key_as_missing(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_private_key", "")
     result = deploy.check_config()
     assert result.status == "FAIL"
-    assert "unreadable" in result.detail
-
-
-def test_check_config_distinguishes_unreadable_from_missing(unreadable_pem):
-    """Different problems need different actions: fix permissions vs create a
-    key. Reporting both as 'missing' sends the operator to the wrong fix."""
-    detail = deploy.check_config().detail
-    assert "GITHUB_APP_PRIVATE_KEY_B64 or _PATH" not in detail
-
-
-def test_check_config_reports_a_missing_pem_as_missing(complete_config, monkeypatch):
-    monkeypatch.setattr(settings, "github_app_private_key_path", "/nope/absent.pem")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
-    assert "GITHUB_APP_PRIVATE_KEY_B64 or _PATH" in result.detail
-
-
-def test_check_config_uses_b64_without_touching_the_filesystem(
-    complete_config, monkeypatch
-):
-    monkeypatch.setattr(settings, "github_app_private_key_b64", "Zm9v")
-    monkeypatch.setattr(settings, "github_app_private_key_path", "/nope/absent.pem")
-    assert deploy.check_config().status == "PASS"
+    assert "GITHUB_APP_PRIVATE_KEY" in result.detail
 
 
 @pytest.fixture
@@ -901,16 +849,13 @@ def test_sync_env_refuses_when_the_selected_credential_is_empty(
 
 
 @pytest.fixture
-def sync_ready(monkeypatch, tmp_path):
+def sync_ready(monkeypatch):
     """Every value _wanted_env() reads, non-empty, plus a Render key."""
-    pem = tmp_path / "key.pem"
-    pem.write_bytes(b"-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n")
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
     monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h:5432/postgres")
     monkeypatch.setattr(settings, "github_app_id", 999999)
-    monkeypatch.setattr(settings, "github_app_private_key_b64", "")
-    monkeypatch.setattr(settings, "github_app_private_key_path", str(pem))
+    monkeypatch.setattr(settings, "github_app_private_key", "aGVsbG8=")
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "llm_provider", "groq")
@@ -929,22 +874,6 @@ def _env_var_list(values: dict):
 def test_sync_env_requires_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     assert deploy.sync_env() == 2
-
-
-def test_sync_env_exits_2_on_an_unreadable_pem_without_a_traceback(
-    unreadable_pem, monkeypatch, capsys
-):
-    """The parked residual: _wanted_env's OSError sat outside sync_env's try."""
-    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
-    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
-    monkeypatch.setattr(settings, "llm_provider", "groq")
-    monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
-    called = []
-    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
-    code = deploy.sync_env()
-    assert code == 2
-    assert "GITHUB_APP_PRIVATE_KEY_B64" in capsys.readouterr().err
-    assert called == []
 
 
 def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys):
@@ -1716,7 +1645,7 @@ def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
     monkeypatch.setattr(settings, "llm_model", "model-gemini")
     monkeypatch.setattr(settings, "groq_model", "model-groq")
     monkeypatch.setattr(settings, "vertex_model", "model-vertex")
-    monkeypatch.setattr(deploy, "_private_key_b64", lambda: ("pem-b64", ""))
+    monkeypatch.setattr(settings, "github_app_private_key", "pem-b64")
     wanted = deploy._wanted_env()
     assert wanted["LLM_MODEL"] == "model-gemini"
     assert wanted["GROQ_MODEL"] == "model-groq"

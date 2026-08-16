@@ -56,8 +56,7 @@ class Settings(BaseSettings):
 
     github_app_id: int = 0
     github_app_installation_id: int = 0
-    github_app_private_key_path: str = "./github-app-private-key.pem"
-    github_app_private_key_b64: str = ""
+    github_app_private_key: str = ""
     github_webhook_secret: str = ""
     github_target_repo: str = ""
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
@@ -81,8 +80,8 @@ class Settings(BaseSettings):
 
     # --- Vertex AI (LLM_PROVIDER=vertex). Unlike gemini/groq, the credential
     # is a GCP service-account identity rather than an API-key string:
-    # GCP_SERVICE_ACCOUNT_KEY_B64 (hosted) -> a local key file -> implicit ADC.
-    # See app/providers/vertex_credentials.py for the resolution order.
+    # GCP_SERVICE_ACCOUNT_KEY (hosted, always base64) -> implicit ADC. See
+    # app/providers/vertex_credentials.py for the resolution order.
     # An OPTIONAL override: unset means "use the project_id embedded in the
     # resolved service-account key", so an operator handed nothing but a JSON
     # key needs no separate project lookup.
@@ -90,8 +89,7 @@ class Settings(BaseSettings):
     # Which Vertex regional endpoint to call -- not an account property, so the
     # default needs no lookup either.
     gcp_location: str = "us-central1"
-    gcp_service_account_key_b64: str = ""
-    gcp_service_account_key_path: str = "./gcp-service-account-key.json"
+    gcp_service_account_key: str = ""
     # Ceiling on a single LLM request, in seconds. The dispatcher is a single
     # serial consumer of the whole queue (app/queue/dispatcher.py) -- a hung
     # call with no timeout would stall every pending PR's review, not just

@@ -63,18 +63,12 @@ def test_vertex_settings_default_to_derive_everything_from_the_key(monkeypatch):
     _env_file=None plus delenv because these defaults must be asserted against
     the code, not against whatever this working copy's .env or the developer's
     exported shell happens to say."""
-    for name in (
-        "GCP_PROJECT",
-        "GCP_LOCATION",
-        "GCP_SERVICE_ACCOUNT_KEY_B64",
-        "GCP_SERVICE_ACCOUNT_KEY_PATH",
-    ):
+    for name in ("GCP_PROJECT", "GCP_LOCATION", "GCP_SERVICE_ACCOUNT_KEY"):
         monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)
     assert settings.gcp_project == ""
     assert settings.gcp_location == "us-central1"
-    assert settings.gcp_service_account_key_b64 == ""
-    assert settings.gcp_service_account_key_path == "./gcp-service-account-key.json"
+    assert settings.gcp_service_account_key == ""
 
 
 def test_key_usage_caps_default_to_off(monkeypatch):

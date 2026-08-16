@@ -16,7 +16,7 @@ def test_registry_lists_all_providers():
 def test_registry_maps_each_provider_to_its_credential_and_model_env_vars():
     assert registry.PROVIDERS["gemini"] == ("GEMINI_API_KEY", "LLM_MODEL")
     assert registry.PROVIDERS["groq"] == ("GROQ_API_KEY", "GROQ_MODEL")
-    assert registry.PROVIDERS["vertex"] == ("GCP_SERVICE_ACCOUNT_KEY_B64", "VERTEX_MODEL")
+    assert registry.PROVIDERS["vertex"] == ("GCP_SERVICE_ACCOUNT_KEY", "VERTEX_MODEL")
 
 
 def test_registry_lists_a_key_index_column_per_provider():
@@ -61,4 +61,4 @@ def test_slot_env_name_is_the_single_naming_seam():
 
     assert registry.slot_env_name("groq", 0) == "GROQ_API_KEY"
     assert registry.slot_env_name("groq", 2) == "GROQ_API_KEY_2"
-    assert registry.slot_env_name("vertex", 1) == "GCP_SERVICE_ACCOUNT_KEY_B64_1"
+    assert registry.slot_env_name("vertex", 1) == "GCP_SERVICE_ACCOUNT_KEY_1"

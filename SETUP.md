@@ -21,9 +21,10 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   stable and set once by `uv run python -m scripts.deploy` (§3.4) — it does not
   need re-editing between runs.
 - Private key: downloaded as part of the manifest exchange, saved to
-  `github-app-private-key.pem` at the repo root (gitignored). Referenced by
-  path via `GITHUB_APP_PRIVATE_KEY_PATH` in `.env` (chosen over base64-encoding
-  the key inline).
+  `github-app-private-key.pem` at the repo root (gitignored). Set
+  `GITHUB_APP_PRIVATE_KEY` in `.env` to its base64 form (verbatim only, never
+  a file path) — encode it with
+  `uv run python -m scripts.encode_credential github-app-private-key.pem`.
 - **Obtaining the App ID** (needed as `GITHUB_APP_ID`): open the App's settings
   at `https://github.com/settings/apps/<your-app-slug>` → **General** → **App
   ID**, near the top. The manifest-conversion flow above also returns it
@@ -166,13 +167,11 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   own project's Vertex publisher-model catalog differs. Its credential is a GCP
   service-account identity, not an API key, resolved in three layers by
   `app/providers/vertex_credentials.py`:
-  1. `GCP_SERVICE_ACCOUNT_KEY_B64` (+ numbered `_1`/`_2` siblings) — the
-     hosted/Render path, selected by the same `vertex_key_index` override
-     gemini/groq use.
-  2. `GCP_SERVICE_ACCOUNT_KEY_PATH` (default `./gcp-service-account-key.json`,
-     gitignored; + numbered siblings) — local-dev only, for testing several
-     service accounts without touching Render or Supabase.
-  3. Implicit ADC — with neither of the above, `google-auth` discovers
+  1. `GCP_SERVICE_ACCOUNT_KEY` (+ numbered `_1`/`_2` siblings, base64-encoded,
+     verbatim only — encode a local key file with
+     `uv run python -m scripts.encode_credential path/to/key.json`) —
+     selected by the same `vertex_key_index` override gemini/groq use.
+  2. Implicit ADC — with the above unset, `google-auth` discovers
      `gcloud auth application-default login`'s local credentials on its own.
 
   `GCP_PROJECT` is an **optional** override: unset, the project is read from
@@ -180,12 +179,10 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   but a JSON key needs no separate project lookup. `GCP_LOCATION` defaults to
   `us-central1`.
 
-  **Deploying vertex to Render requires the base64 form.** Render has neither
-  a local key file nor a `gcloud` login, so `scripts/deploy.py`'s `config` and
-  `provider` checks FAIL for `LLM_PROVIDER=vertex` unless
-  `GCP_SERVICE_ACCOUNT_KEY_B64` is set locally — that is the value `--sync-env`
-  pushes. A file-only local setup is fine for running the app locally, but is
-  deliberately not considered deployable. `--sync-env` does not push
+  **Deploying vertex to Render requires the credential to be set.** Render
+  has no `gcloud` login, so `scripts/deploy.py`'s `config` and `provider`
+  checks FAIL for `LLM_PROVIDER=vertex` unless `GCP_SERVICE_ACCOUNT_KEY` is
+  set locally — that is the value `--sync-env` pushes. `--sync-env` does not push
   `GCP_PROJECT`/`GCP_LOCATION` — if you rely on non-default values for
   either, set them manually in the Render dashboard.
 
@@ -315,12 +312,12 @@ The production deployment uses:
 4. In the **Environment** tab, set these variables:
    - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
    - `GITHUB_APP_ID`: the numeric App ID — see §1 for where to find it
-   - `GITHUB_APP_PRIVATE_KEY_B64`: base64-encoded PEM (see "Secrets encoding" below)
+   - `GITHUB_APP_PRIVATE_KEY`: base64-encoded PEM (see "Secrets encoding" below)
    - `GITHUB_TARGET_REPO`: e.g., `<your-user>/pr-review-bot-testbed`
    - `GITHUB_WEBHOOK_SECRET`: (from `.env`)
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
-   - (Other provider creds as needed: `GEMINI_API_KEY`, `GCP_SERVICE_ACCOUNT_KEY_B64`, etc.)
+   - (Other provider creds as needed: `GEMINI_API_KEY`, `GCP_SERVICE_ACCOUNT_KEY`, etc.)
    - Do **not** set `GITHUB_APP_INSTALLATION_ID`. Leaving it unset is
      deliberate: the app auto-discovers it at boot from the App JWT.
    - `RENDER_API_KEY` is **not** a service env var. It is optional
@@ -341,14 +338,15 @@ value and click **Manual Deploy**.
 
 ### 3.3 Secrets encoding
 
-The PEM file must be base64-encoded for the `GITHUB_APP_PRIVATE_KEY_B64` env var:
+The PEM file must be base64-encoded for the `GITHUB_APP_PRIVATE_KEY` env var:
 
 ```bash
-base64 -w0 < github-app-private-key.pem
+uv run python -m scripts.encode_credential github-app-private-key.pem
 ```
 
-Copy the output and paste it into the Render dashboard's `GITHUB_APP_PRIVATE_KEY_B64`
-field (the app code will decode it at startup).
+(equivalently, `base64 -w0 < github-app-private-key.pem` — both produce the
+same output). Copy the output and paste it into the Render dashboard's
+`GITHUB_APP_PRIVATE_KEY` field (the app code will decode it at startup).
 
 ### 3.4 GitHub App installation, webhook registration, and verification
 
@@ -421,7 +419,7 @@ field (the app code will decode it at startup).
    PUBLIC_BASE_URL=https://pr-review-bot.onrender.com uv run python -m scripts.deploy --sync-env
    ```
    The set of vars pushed is **provider-derived**, not a fixed list: it
-   always pushes `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
+   always pushes `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
    `GITHUB_TARGET_REPO`, `GITHUB_WEBHOOK_SECRET`, `LLM_PROVIDER`, and **every
    provider's model var** — `LLM_MODEL`, `GROQ_MODEL`, and `VERTEX_MODEL` are
    all pushed regardless of which provider is selected, because a DB override

@@ -29,7 +29,7 @@ which is why this section exists and is kept first in the file.
   unrelated keyword can print a full secret value if it happens to occur on
   the same line — this has actually happened twice in this project (a
   `tail -c 20` on a `.env` line, and later a `grep` for an unrelated string
-  that shared a line with `GCP_SERVICE_ACCOUNT_KEY_B64`). The only safe way
+  that shared a line with `GCP_SERVICE_ACCOUNT_KEY`). The only safe way
   to check whether a secret-bearing file has a var *set at all* is a pattern
   that structurally cannot capture a value, e.g. `grep -oE '^[A-Z_0-9]+=' .env`
   (key names only, values discarded). Do not use the `Read` tool on a
@@ -162,9 +162,10 @@ when working under `app/`.
   later became available, so `vertex` is back as a real, live-runnable third
   provider, matching `SPEC.md`'s stated default. Its credential is a GCP
   service-account identity rather than an API-key string:
-  `GCP_SERVICE_ACCOUNT_KEY_B64` (hosted, numbered slots) → a local key file →
-  implicit ADC, resolved in `app/providers/vertex_credentials.py`. No secret
-  reaches Postgres — only the slot index, exactly as for gemini/groq.
+  `GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
+  see the 2026-08-16 credential-convention design) → implicit ADC, resolved
+  in `app/providers/vertex_credentials.py`. No secret reaches Postgres — only
+  the slot index, exactly as for gemini/groq.
 
 ## Cost
 
