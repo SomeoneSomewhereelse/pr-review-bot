@@ -415,3 +415,7 @@ Live calls: none required. Every behavior above is deterministic and mockable, p
   `scripts/deploy.py`'s `check_config()` (a local pre-flight check) or `sync_env()` (before
   pushing to Render) time too, so a bad model in `.env.config` is caught before it ever
   reaches a live dispatcher run.
+
+  **Resolved** by `docs/superpowers/specs/2026-08-16-model-pricing-validation-design.md`
+  — `check_config()` reports an unpriced model as a `FAIL`-row problem and
+  `sync_env()` refuses the push (exit 2), for all three model vars.

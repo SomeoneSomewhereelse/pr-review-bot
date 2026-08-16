@@ -140,7 +140,7 @@ surfaces every problem rather than only the first:
 
 | Check | Verifies | Required? |
 |---|---|---|
-| `config` | Every setting the service needs is resolvable locally | yes |
+| `config` | Every setting the service needs is resolvable locally, and every provider's model var has a pricing-table entry | yes |
 | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
 | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
@@ -160,7 +160,7 @@ whichever one is actually active, not just the env var.
 | --- | --- |
 | 0 | every check passed (skipped checks do not fail the run) |
 | 1 | at least one check failed |
-| 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, or an active DB override that would mask the push) |
+| 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, or an active DB override that would mask the push) |
 
 In short: exit 0 means trust the table as-is, exit 1 means read the table for
 what to fix, exit 2 means the run never really started.
@@ -212,6 +212,15 @@ If a **DB override** (see below) is active and disagrees with the
 `LLM_PROVIDER` being pushed, `--sync-env` refuses (exit 2) rather than push a
 value the override would silently ignore at runtime — clear it first with
 `uv run python -m scripts.set_override --clear`.
+
+`--sync-env` also refuses (exit 2, before any request) if **any** provider's
+model var — `LLM_MODEL`, `GROQ_MODEL`, or `VERTEX_MODEL`, not just the active
+provider's — names a model with no entry in `app/providers/pricing.py`'s rate
+table; `config` reports the same thing as a `FAIL` row. An unpriced model only
+fails at cost-estimation time, *after* all three specialists have already made
+real, paid calls, so it is caught here instead. There is no `--force`: either
+fix `.env.config` to a model the table knows, or add the new model's rate to
+`pricing.py` first.
 
 Before triggering anything, it waits for any deploy already in progress to
 settle (it never stacks a second deploy on top of one still building) —
