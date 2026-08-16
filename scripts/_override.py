@@ -55,11 +55,13 @@ def local_slot_values(base: str, env_path: str = ".env") -> dict[str, str]:
     """Every ``{base}_{N}`` key with a non-empty value, WITH its value.
 
     Value-bearing on purpose and narrow on purpose: scripts/deploy.py's
-    _wanted_env() has to push these to Render, and nothing else should call
-    this. Same contract as scripts/_render.py::env_vars() -- reduce a returned
-    value to a boolean or an equality result immediately; never store it beyond
-    that computation, print it, or pass it to anything that might log it. When
-    you only need to know WHICH slots exist, call local_slot_indices().
+    _wanted_env() has to push these to Render, and local_value() below has to
+    feed one into an in-memory equality check that is never printed -- no
+    other caller should call this. Same contract as
+    scripts/_render.py::env_vars() -- reduce a returned value to a boolean or
+    an equality result immediately; never store it beyond that computation,
+    print it, or pass it to anything that might log it. When you only need to
+    know WHICH slots exist, call local_slot_indices().
 
     Reads the file directly (python-dotenv, not os.environ or Settings) because
     Settings can't declare an unbounded family of numbered fields -- mirrors

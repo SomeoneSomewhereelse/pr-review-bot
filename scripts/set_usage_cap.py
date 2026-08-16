@@ -14,12 +14,17 @@ is set) whether the local DATABASE_URL matches the live Render service's, purely
 as an informational signal that the write will actually reach production; that
 check never refuses the write, so there is no --force flag.
 
-It DOES refuse the write (exit 2) if the merged trio -- resolved against env
-defaults for any unset field, exactly the way usage_cap_config.effective_caps()
-resolves it at read time -- would be discarded as invalid. Writing such a value
-would succeed and then be silently ignored on every read, leaving the override
-inert while this script reported success. That matters more here than for the
-cooldown override: a cap the dispatcher does honour but which is wrong-way-round
+It DOES refuse the write (exit 2) if the merged trio -- each unset field
+filled in from the EXISTING DB override rather than an env default -- is
+directly invalid: a non-positive numeric cap, or an unparseable reset string.
+This is a direct validity check on the merged trio itself, not a comparison
+against env defaults (matching env defaults is not the criterion -- an
+operator's values could legitimately coincide with the configured defaults
+without that making them wrong). Writing an invalid trio would succeed and
+then be silently discarded on every read by
+usage_cap_config.effective_caps(), leaving the override inert while this
+script reported success. That matters more here than for the cooldown
+override: a cap the dispatcher does honour but which is wrong-way-round
 (non-positive) defers EVERY ticket, and the deferral is STICKY -- a ticket's
 not_before is already a real future timestamp by then, so correcting the
 override afterwards does not release already-deferred tickets.

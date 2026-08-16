@@ -1136,6 +1136,25 @@ async def test_model_override_refresh_degrades_to_env_on_db_failure(monkeypatch)
     active_model.reset_override_cache()
 
 
+async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
+    """Mirrors test_model_override_refresh_degrades_to_env_on_db_failure above,
+    exact same shape, for _refresh_usage_cap_overrides (added by Task 5): a
+    failing DB read must degrade the cache to "no override" rather than keep a
+    stale token cap in force."""
+    from app.queue import dispatcher, store, usage_cap_config
+
+    usage_cap_config.set_override_cache(999, None, None)
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(store, "get_usage_cap_overrides", _boom)
+    await dispatcher._refresh_usage_cap_overrides()
+    tokens, _cost, _reset = usage_cap_config.effective_caps()
+    assert tokens != 999
+    usage_cap_config.reset_override_cache()
+
+
 async def test_under_cap_still_respects_the_blocked_provider_gate(monkeypatch, db_exec):
     """The cap check and the reactive blocked-provider gate are two
     independent gates in sequence: when the cap is configured but current
