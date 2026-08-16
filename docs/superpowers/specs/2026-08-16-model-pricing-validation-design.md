@@ -154,3 +154,16 @@ makes zero LLM calls itself.
   comments already document that rates are pinned, representative values verified manually
   at build time; this design does not change that maintenance model, only adds a consumer
   of `is_known()`.
+- **Validating an active DB model override against the pricing table.** Identified at final
+  review (2026-08-16), named as a known residual rather than fixed: `check_config()`'s
+  pricing check reads `Settings`/`.env.config` only, matching this design's stated scope
+  (§2, "a value set directly in `.env.config`"). An operator who forces an unpriced value
+  past `set_override.py --model --force` produces a runtime-active unpriced model that
+  `check_config` still reports `PASS` for — `check_config()` never resolves the DB override
+  the way its sibling `check_provider()` does. The push path is not fully exposed —
+  `sync_env()`'s pre-existing model-override-disagreement guard still blocks pushing a
+  different, priced local value once such an override is active — but `check_config`'s
+  local report can be misleadingly green for this one operator-opt-in case. Closing it would
+  mean teaching `check_config()` to resolve the DB override before its pricing check, the
+  same way `check_provider()` already does — a larger, separate change than this design's
+  file-edit-path scope.

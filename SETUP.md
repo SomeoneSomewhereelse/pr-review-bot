@@ -376,7 +376,7 @@ field (the app code will decode it at startup).
 
    | Check | Verifies | Required? |
    |---|---|---|
-   | `config` | Every setting the service needs is resolvable locally | yes |
+   | `config` | Every setting the service needs is resolvable locally, and every provider's model var has a pricing-table entry | yes |
    | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
    | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
    | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
@@ -396,7 +396,7 @@ field (the app code will decode it at startup).
    | --- | --- |
    | 0 | every check passed (skipped checks do not fail the run) |
    | 1 | at least one check failed |
-   | 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, or an active DB override that would mask the push) |
+   | 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, or an active DB override that would mask the push) |
 
    So: exit 0 means every check is green (or intentionally skipped), exit 1
    means the printed table has at least one `FAIL` row to act on, and exit 2
