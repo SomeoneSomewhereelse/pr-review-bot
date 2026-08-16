@@ -732,7 +732,7 @@ def test_discover_installation_id_raises_when_not_installed(fake_transport):
 
 
 def test_discover_installation_id_non_404_is_not_misdiagnosed_as_not_installed(fake_transport):
-    """A 401 (e.g. a malformed GITHUB_APP_PRIVATE_KEY_B64) or other non-404
+    """A 401 (e.g. a malformed GITHUB_APP_PRIVATE_KEY) or other non-404
     status must not be reported as "not installed" -- that's a misdiagnosis
     that would send an operator chasing the wrong fix."""
     from app import github_app

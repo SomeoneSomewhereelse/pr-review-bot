@@ -136,7 +136,7 @@ def discover_installation_id(repo_full_name: str) -> int:
     not installed -- GitHub does not permit an App to install itself; a repo
     admin must authorize it once in the GitHub UI. Only a 404 is interpreted
     this way -- any other status (e.g. a 401 from a malformed
-    GITHUB_APP_PRIVATE_KEY_B64, or a transient 5xx) raises a plain
+    GITHUB_APP_PRIVATE_KEY, or a transient 5xx) raises a plain
     RuntimeError instead, so a genuine auth/API error is never misdiagnosed as
     a missing installation. `AppNotInstalledError` subclasses RuntimeError, so
     a caller that only catches RuntimeError still sees both cases, but one
@@ -161,7 +161,7 @@ def discover_installation_id(repo_full_name: str) -> int:
         raise RuntimeError(
             f"GitHub App installation lookup for {repo_full_name} failed with "
             f"{exc.status} ({exc.data}) -- likely a bad GITHUB_APP_ID or "
-            f"GITHUB_APP_PRIVATE_KEY_B64, not a missing App installation."
+            f"GITHUB_APP_PRIVATE_KEY, not a missing App installation."
         ) from exc
     return int(data["id"])
 
