@@ -815,6 +815,21 @@ def sync_env() -> int:
                     file=sys.stderr,
                 )
                 return 2
+    # Deliberately NOT inside the `if settings.database_url:` block above: this
+    # is a pure local pricing-table lookup, so it must run whether or not a
+    # database is configured. Like every other pre-push guard here it runs
+    # before any HTTP request, so refusing can never leave a partial push
+    # behind. No --force escape hatch, unlike set_override.py --model: that is
+    # a deliberate one-shot operator action, this is the automated push path,
+    # and forcing an unpriced model past it is the exact mistake this guard
+    # exists to prevent.
+    for provider, model_var, model, known in _unpriced_models():
+        print(
+            f"refusing to sync: {model_var}={model!r} has no pricing-table entry for "
+            f"{provider} (known: {known}); fix .env.config or add a pricing.py entry first",
+            file=sys.stderr,
+        )
+        return 2
     wanted = _wanted_env()
     empty = sorted(key for key, value in wanted.items() if not value)
     if empty:

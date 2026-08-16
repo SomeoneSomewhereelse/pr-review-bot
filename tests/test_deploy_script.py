@@ -1814,3 +1814,50 @@ def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
     assert "vertex" in err
     assert "VERTEX_MODEL" in err
     assert "--clear-model" in err
+
+
+@pytest.mark.parametrize("model_var", ["LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
+def test_sync_env_refuses_to_push_an_unpriced_model(
+    sync_ready, monkeypatch, capsys, model_var
+):
+    """Pushing an unpriced model would burn real, paid specialist calls on
+    every PR review until someone noticed the KeyError in the logs -- and the
+    dispatcher retries a hard failure, so one bad value repeats it. The
+    refusal must fire before any HTTP request, so nothing is half-pushed."""
+    monkeypatch.setattr(settings, model_var.lower(), "totally-made-up-model")
+    called = []
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
+    code = deploy.sync_env()
+    assert code == 2                       # "could not run", not a partial failure
+    err = capsys.readouterr().err
+    assert model_var in err
+    assert "totally-made-up-model" in err
+    assert ".env.config" in err            # names the file to fix
+    assert called == []                    # refused before any HTTP
+
+
+def test_sync_env_refuses_on_a_non_active_providers_unpriced_model(
+    sync_ready, monkeypatch, capsys
+):
+    """sync_ready selects groq, whose own model is fine -- but VERTEX_MODEL is
+    pushed by _wanted_env() too, and a DB provider flip can activate vertex
+    with no redeploy. An unpriced value there must block the push exactly as
+    the active provider's would; the refusal must name vertex specifically."""
+    assert settings.llm_provider == "groq"
+    monkeypatch.setattr(settings, "vertex_model", "totally-made-up-model")
+    called = []
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
+    assert deploy.sync_env() == 2
+    err = capsys.readouterr().err
+    assert "VERTEX_MODEL" in err
+    assert "vertex" in err
+    assert called == []
+
+
+def test_sync_env_allows_a_priced_model(sync_ready, monkeypatch, capsys):
+    """The guard must not false-positive on the shipped defaults. Returning
+    None from find_service_id stops the run at "no such service" -- which
+    proves it got PAST the pricing guard without needing a full push."""
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
+    assert deploy.sync_env() == 1
+    assert "no Render service named" in capsys.readouterr().err
