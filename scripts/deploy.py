@@ -287,18 +287,24 @@ def _resolved_provider() -> tuple[str, str | None]:
     return (override or settings.llm_provider), override
 
 
-def _resolved_model_override(provider: str) -> str | None:
-    """`provider`'s DB model override, or None when unset.
-
-    Reads via a raw short-timeout connection rather than store.init_pool(), for
-    the same reason _resolved_provider does. The column name comes from
-    registry.MODEL_COLUMNS -- a hardcoded whitelist -- and is never built from
-    `provider` directly.
+def _resolved_model_overrides() -> dict[str, str | None]:
+    """{provider: DB model override or None} for every provider in
+    registry.PROVIDERS, in ONE connection -- mirrors
+    app/queue/store.py::get_all_model_overrides()'s single-query shape, via
+    this file's raw short-timeout connection rather than the pool, for the
+    same reason _resolved_provider does. Used by sync_env()'s model-override
+    guard, which used to call a per-provider version of this (one connection
+    per provider, in a loop) -- an unreachable DB then cost ~3x the connect
+    timeout instead of 1x. Column names come from registry.MODEL_COLUMNS -- a
+    hardcoded whitelist -- and are never built from a caller-supplied string.
     """
-    column = registry.MODEL_COLUMNS[provider]
+    columns = registry.MODEL_COLUMNS
+    select = ", ".join(columns.values())
     with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
-        row = conn.execute(f"SELECT {column} FROM runtime_config WHERE id = 1").fetchone()
-    return (row[0] if row else None) or None
+        row = conn.execute(f"SELECT {select} FROM runtime_config WHERE id = 1").fetchone()
+    if row is None:
+        return dict.fromkeys(columns, None)
+    return {provider: (value or None) for provider, value in zip(columns, row)}
 
 
 def check_provider() -> CheckResult:
@@ -757,13 +763,15 @@ def sync_env() -> int:
         # _wanted_env() pushes every provider's model var (a DB provider flip
         # can activate any of them with no redeploy), so a non-active
         # provider's own DB model override can just as easily diverge from
-        # what is about to be pushed for it.
+        # what is about to be pushed for it. Resolved in ONE connection (not
+        # one per provider in the loop below) via _resolved_model_overrides().
+        try:
+            model_overrides = _resolved_model_overrides()
+        # deliberate: the provider check reports DB trouble
+        except Exception:  # noqa: BLE001
+            model_overrides = {}
         for provider in sorted(_PROVIDERS):
-            try:
-                model_override = _resolved_model_override(provider)
-            # deliberate: the provider check reports DB trouble
-            except Exception:  # noqa: BLE001
-                model_override = None
+            model_override = model_overrides.get(provider)
             model_var = _PROVIDERS[provider][1]
             local_model = getattr(settings, model_var.lower(), "")
             if model_override and model_override != local_model:
