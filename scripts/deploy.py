@@ -127,9 +127,10 @@ def _unpriced_models(
     active override, else the local value) is what gets checked, so a
     --force'd unpriced override is caught too. check_config() passes this (it
     must report what will actually run); sync_env() omits it (it is refusing
-    a PUSH of the local value -- an active override's own pricing is that
-    override's own already-checked concern, from set_override.py --model's
-    own refusal).
+    a PUSH of the local value -- its own model-override-disagreement guard
+    already refuses when an active override differs from the local value
+    about to be pushed, and when they're equal, the plain local-value check
+    below catches the unpriced case).
 
     An empty model is skipped deliberately: that is a distinct, pre-existing
     failure mode, and piling a second, confusing message onto it adds noise
@@ -195,7 +196,8 @@ def check_config() -> CheckResult:
         if overrides.get(provider):
             problems.append(
                 f"{provider} model override {model!r} has no pricing-table entry "
-                f"(known {provider} models: {known}); clear it or add a pricing.py "
+                f"(known {provider} models: {known}); {model_var} is not consulted "
+                "while this override is active. Clear it or add a pricing.py "
                 f"entry: uv run python -m scripts.set_override {provider} "
                 "--clear-model --no-activate"
             )

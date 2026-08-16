@@ -714,6 +714,21 @@ def test_read_private_key_decodes_the_base64_env(monkeypatch):
     assert github_app._read_private_key() == pem
 
 
+def test_read_private_key_rejects_malformed_base64(monkeypatch):
+    """A mis-pasted raw PEM (plausible now that there's no more `_PATH`
+    fallback signaling "this should be a path") must fail clearly instead of
+    silently decoding to garbage. The error must name the var but never echo
+    the malformed input itself (CLAUDE.md's rule on secret-bearing validation
+    errors)."""
+    not_base64 = "-----BEGIN KEY-----\nnot valid base64!!!\n-----END KEY-----\n"
+    monkeypatch.setattr(settings, "github_app_private_key", not_base64)
+    with pytest.raises(ValueError) as exc_info:
+        github_app._read_private_key()
+    message = str(exc_info.value)
+    assert "GITHUB_APP_PRIVATE_KEY" in message
+    assert not_base64 not in message
+
+
 def test_discover_installation_id_returns_id(fake_transport):
     from app import github_app
 

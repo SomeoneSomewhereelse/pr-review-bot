@@ -10,7 +10,7 @@ services:
         sync: false
       - key: GITHUB_APP_ID
         sync: false
-      - key: GITHUB_APP_PRIVATE_KEY_B64
+      - key: GITHUB_APP_PRIVATE_KEY
         sync: false
       - key: GITHUB_WEBHOOK_SECRET
         sync: false
@@ -32,7 +32,11 @@ services:
         sync: false
       - key: VERTEX_MODEL
         sync: false
-      - key: GCP_SERVICE_ACCOUNT_KEY_B64
+      - key: GCP_SERVICE_ACCOUNT_KEY
+        sync: false
+      - key: GCP_SERVICE_ACCOUNT_KEY_1
+        sync: false
+      - key: GCP_SERVICE_ACCOUNT_KEY_2
         sync: false
       - key: GCP_PROJECT
         sync: false

@@ -348,6 +348,34 @@ uv run python -m scripts.encode_credential github-app-private-key.pem
 same output). Copy the output and paste it into the Render dashboard's
 `GITHUB_APP_PRIVATE_KEY` field (the app code will decode it at startup).
 
+**Migrating an existing `.env`** (verbatim-only credential convention,
+`GITHUB_APP_PRIVATE_KEY_B64`/`_PATH` → `GITHUB_APP_PRIVATE_KEY`,
+`GCP_SERVICE_ACCOUNT_KEY_B64[_n]`/`_PATH[_n]` → `GCP_SERVICE_ACCOUNT_KEY[_n]`):
+
+1. Rename `GITHUB_APP_PRIVATE_KEY_B64` → `GITHUB_APP_PRIVATE_KEY` and
+   `GCP_SERVICE_ACCOUNT_KEY_B64[_n]` → `GCP_SERVICE_ACCOUNT_KEY[_n]` in your
+   local `.env`.
+2. If you were relying on `GITHUB_APP_PRIVATE_KEY_PATH` or
+   `GCP_SERVICE_ACCOUNT_KEY_PATH[_n]` (a raw file, not yet base64'd), encode
+   that file yourself first: `uv run python -m scripts.encode_credential
+   path/to/file` (or the equivalent `base64 -w0` one-liner), and paste the
+   result into the renamed var.
+3. Remove `GITHUB_APP_PRIVATE_KEY_PATH` and `GCP_SERVICE_ACCOUNT_KEY_PATH[_n]`
+   from `.env` entirely.
+4. **After your next `uv run python -m scripts.deploy --sync-env`**, the new
+   names will be pushed to Render alongside the old ones (`--sync-env` only
+   adds/updates, it never deletes a Render env var) — go into the Render
+   dashboard and manually delete `GITHUB_APP_PRIVATE_KEY_B64` /
+   `GCP_SERVICE_ACCOUNT_KEY_B64` (and any numbered `_B64_1`/`_B64_2`
+   siblings) once you've confirmed the new names work, so a retired
+   credential-bearing value doesn't sit unused on the live service
+   indefinitely.
+
+`tests/test_config.py::test_no_legacy_credential_var_lives_in_the_secrets_file`
+is the guard that confirms your local `.env` migration is complete (mirroring
+how §4.1's own "Migrating an existing `.env`" block, for the operational-config
+split, names its own guard test).
+
 ### 3.4 GitHub App installation, webhook registration, and verification
 
 1. **Install the GitHub App** on your test repo:

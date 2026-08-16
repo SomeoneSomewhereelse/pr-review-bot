@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
+import yaml
 
 from app.config import Settings, settings
 from app.providers import pricing
@@ -1259,6 +1260,21 @@ def test_env_var_names_match_the_docs():
     for name in sorted(names):
         assert name in readme, f"{name} missing from README.md"
         assert name in setup, f"{name} missing from SETUP.md"
+
+
+def test_render_yaml_declares_every_synced_var():
+    """A fresh Blueprint provision only creates env-var slots for names
+    render.yaml declares -- a name --sync-env can push but render.yaml omits
+    would silently fail to authenticate on a brand-new deploy."""
+    render = yaml.safe_load((_REPO_ROOT / "render.yaml").read_text())
+    declared = {
+        entry["key"] for entry in render["services"][0]["envVars"] if "key" in entry
+    }
+    names = set(deploy._ALWAYS_SYNCED) | {"LLM_PROVIDER"}
+    for credential, model_var in deploy._PROVIDERS.values():
+        names.add(credential)
+        names.add(model_var)
+    assert names <= declared, f"missing from render.yaml: {sorted(names - declared)}"
 
 
 def test_exit_codes_are_documented():

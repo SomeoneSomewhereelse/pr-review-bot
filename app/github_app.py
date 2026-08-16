@@ -11,6 +11,7 @@ those belong to ``orchestrator.py`` / ``diff_utils.py``.
 from __future__ import annotations
 
 import base64
+import binascii
 
 from github import Auth, Github, GithubException
 from github.IssueComment import IssueComment
@@ -95,7 +96,13 @@ def _strip_existing_footnote(body: str) -> str:
 
 def _read_private_key() -> str:
     """Decode the base64-encoded App private key. Never logged."""
-    return base64.b64decode(settings.github_app_private_key).decode()
+    try:
+        return base64.b64decode(settings.github_app_private_key, validate=True).decode()
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(
+            "GITHUB_APP_PRIVATE_KEY is not valid base64 -- encode the PEM with: "
+            "uv run python -m scripts.encode_credential github-app-private-key.pem"
+        ) from exc
 
 
 def get_installation_auth() -> Auth.AppInstallationAuth:

@@ -6,12 +6,11 @@ credential shape ("one env var, one string") and stays that way for the two
 providers that need nothing more. The JSON parsing lives here instead of
 complicating it for them.
 
-One index, two real meanings depending on environment. On Render, where the
-numbered GCP_SERVICE_ACCOUNT_KEY_{n} slots are actually provisioned, the
-index selects among env-var blobs. Locally, exporting the same numbered
-slots lets a developer test against several different service accounts (a
-quota-exhausted one vs. a healthy one) without touching Render or Supabase
-at all.
+One index, one meaning everywhere: it selects among the numbered
+GCP_SERVICE_ACCOUNT_KEY_{n} env-var slots -- provisioned on Render, exported
+locally when a developer wants to test against several different service
+accounts (a quota-exhausted one vs. a healthy one) without touching Render
+or Supabase at all.
 
 A malformed value raises rather than falling through to implicit ADC: a
 corrupt env var must surface as a failure, not silently run the review
