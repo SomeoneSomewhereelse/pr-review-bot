@@ -1696,7 +1696,14 @@ def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
     monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
-    monkeypatch.setattr(deploy, "_resolved_model_override", lambda provider: "gemini-2.5-flash")
+    # The guard now loops over every provider, not just the active one, so
+    # only vertex may have an (agreeing) override here -- the others must
+    # report "no override" (None), or a naive same-value-for-any-provider
+    # stub would falsely disagree with their own (untouched) local models.
+    monkeypatch.setattr(
+        deploy, "_resolved_model_override",
+        lambda provider: "gemini-2.5-flash" if provider == "vertex" else None,
+    )
     monkeypatch.setattr(deploy, "_wanted_env", lambda: {"LLM_PROVIDER": "vertex"})
     # Mocked so this test makes no live Render call; returning None makes the
     # script stop at "no such service" -- which proves it got PAST the model
@@ -1705,3 +1712,37 @@ def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
 
     assert deploy.sync_env() == 1
     assert "no Render service named" in capsys.readouterr().err
+
+
+def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
+    monkeypatch, capsys
+):
+    """The gap-fix: gemini (the ACTIVE provider) agrees, but vertex -- not
+    active, but still pushed by _wanted_env() -- has its own DB model
+    override diverging from the VERTEX_MODEL value about to be pushed. The
+    old guard only ever checked the active provider and would have missed
+    this; the refusal must name vertex specifically."""
+    from app.config import settings
+    from scripts import deploy
+
+    monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
+    monkeypatch.setattr(settings, "database_url", "postgresql://localhost/x")
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "llm_model", "gemini-flash-latest")
+    monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
+    monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("gemini", None))
+
+    def _model_override(provider):
+        if provider == "gemini":
+            return "gemini-flash-latest"  # agrees -- must not trip the guard
+        if provider == "vertex":
+            return "some-other-vertex-model"  # disagrees -- must trip it
+        return None
+
+    monkeypatch.setattr(deploy, "_resolved_model_override", _model_override)
+
+    assert deploy.sync_env() == 2
+    err = capsys.readouterr().err
+    assert "vertex" in err
+    assert "VERTEX_MODEL" in err
+    assert "--clear-model" in err

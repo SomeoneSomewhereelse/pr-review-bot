@@ -18,6 +18,12 @@ exist on Render, the active index, and the active model -- and never a
 credential value, so it is safe to run and to paste anywhere (including into
 an agent's own transcript).
 
+--model refuses a value with no app/providers/pricing.py rate-table entry for
+this provider (exit 2, naming the models that ARE known), unless --force is
+also given -- an unpriced model would otherwise only fail with a KeyError
+inside app/orchestrator.py's cost estimation, after all three specialists have
+already made real, paid calls.
+
 The model override is per-provider, not global: setting one only changes the
 model used when that specific provider is active, so flipping the active
 provider carries each one's own correct model along with it. This is what
@@ -58,7 +64,7 @@ import sys
 from datetime import datetime, timezone
 
 from app.config import settings
-from app.providers import active_model, registry
+from app.providers import active_model, pricing, registry
 from app.queue import store
 from scripts import _override, _render
 
@@ -107,7 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="write despite a failed live-verification refusal",
+        help=(
+            "write despite a failed live-verification refusal, or despite "
+            "--model naming a model with no pricing-table entry"
+        ),
     )
     parser.add_argument(
         "--list",
@@ -240,6 +249,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.model is not None and not args.model.strip():
         print("--model must not be empty", file=sys.stderr)
         return 2
+    if args.model is not None:
+        stripped_model = args.model.strip()
+        # Refuse an unpriced model before it can ever reach a paid call: without
+        # this, app/orchestrator.py's cost-estimation KeyError only surfaces
+        # AFTER all three specialists already ran, and the dispatcher retries a
+        # hard failure up to dispatcher_max_failure_attempts times -- one bad
+        # --model command could otherwise burn ~15 paid completions with no
+        # review ever posted. --force is the same escape hatch used for a
+        # failed Render live-verification below.
+        if not pricing.is_known(args.provider, stripped_model) and not args.force:
+            known = pricing.models_for(args.provider)
+            known_str = ", ".join(known) if known else "(none known for this provider)"
+            print(
+                f"refusing to set {args.provider} model to {stripped_model!r}: no "
+                f"pricing-table entry for it (known {args.provider} models: {known_str}); "
+                "pass --force to set it anyway",
+                file=sys.stderr,
+            )
+            return 2
     if (
         args.no_activate
         and args.index is None

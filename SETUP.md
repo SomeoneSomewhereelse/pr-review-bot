@@ -593,7 +593,19 @@ unlike `.env`, it never mixes in credential material, so none of CLAUDE.md's
 
 1. Copy `.env.config.example` to `.env.config` and fill in the values
    currently sitting in `.env` for every name on `OPERATIONAL_KEYS`.
-2. Remove those same keys from `.env`.
+2. If you previously set `LLM_MODEL` to a Vertex-specific model while testing
+   with `LLM_PROVIDER=vertex` (see section 2 above — a prior live Vertex
+   verification ran with `LLM_MODEL=gemini-2.5-flash`, before `VERTEX_MODEL`
+   existed as its own var) that value belongs in `VERTEX_MODEL`, not
+   `LLM_MODEL` — check which one you're carrying forward, and restore
+   `LLM_MODEL` to a gemini model (e.g. `gemini-flash-latest`) if needed.
+   Carrying a Vertex model into gemini's `LLM_MODEL` would make gemini call
+   AI-Studio with a Vertex-specific model ID (which costs money if that ID
+   happens to also exist in AI-Studio's catalog, then hits a pricing
+   `KeyError` once gemini+that model turns out not to be in the rate table),
+   and `--sync-env` pushes `LLM_MODEL` unconditionally, so the wrong value
+   would propagate to the deployed service too.
+3. Remove those same keys from `.env`.
 
 **This order matters**: `.env.config` wins by precedence, so creating it
 first and removing the old keys second means there is never a window where a

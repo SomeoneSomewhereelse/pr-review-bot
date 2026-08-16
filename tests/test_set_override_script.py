@@ -288,11 +288,11 @@ def test_sets_model_without_activating():
 
 
 def test_clear_model_leaves_other_providers_alone():
-    set_override.main(["groq", "--model", "llama-3.1-8b-instant", "--no-activate"])
+    set_override.main(["groq", "--model", "llama-3.3-70b-versatile", "--no-activate"])
     set_override.main(["vertex", "--model", "gemini-2.5-flash", "--no-activate"])
     assert set_override.main(["vertex", "--clear-model", "--no-activate"]) == 0
     assert store.get_model_override("vertex") is None
-    assert store.get_model_override("groq") == "llama-3.1-8b-instant"
+    assert store.get_model_override("groq") == "llama-3.3-70b-versatile"
 
 
 def test_model_and_clear_model_are_mutually_exclusive(capsys):
@@ -303,6 +303,40 @@ def test_model_and_clear_model_are_mutually_exclusive(capsys):
 def test_no_activate_alone_still_requires_something_to_do(capsys):
     assert set_override.main(["vertex", "--no-activate"]) == 2
     assert "--no-activate requires" in capsys.readouterr().err
+
+
+def test_known_model_is_accepted():
+    """(provider, model) has a pricing.py rate-table entry -- the write must
+    proceed with no --force needed."""
+    assert set_override.main(
+        ["vertex", "--model", "gemini-2.5-flash", "--no-activate"]
+    ) == 0
+    assert store.get_model_override("vertex") == "gemini-2.5-flash"
+
+
+def test_unknown_model_is_refused(capsys):
+    """No pricing-table entry for (vertex, this model) -- must refuse (exit 2)
+    before ever writing the override, and the refusal must name the models
+    this table actually knows for vertex so an operator/agent can see the
+    valid options immediately."""
+    code = set_override.main(
+        ["vertex", "--model", "no-such-model", "--no-activate"]
+    )
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "no-such-model" in err
+    assert "gemini-2.5-flash" in err
+    assert store.get_model_override("vertex") is None
+
+
+def test_force_overrides_the_unknown_model_refusal():
+    """--force is the shared escape hatch for both this refusal and the
+    Render live-verification refusal above -- it must let an unpriced model
+    through when an operator genuinely wants one."""
+    assert set_override.main(
+        ["vertex", "--model", "no-such-model", "--no-activate", "--force"]
+    ) == 0
+    assert store.get_model_override("vertex") == "no-such-model"
 
 
 def test_empty_model_is_refused(capsys):

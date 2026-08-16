@@ -45,10 +45,10 @@ _UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
 _MAX_PINGER_INTERVAL_SECONDS = 600
 
 # The service env vars --sync-env always pushes, regardless of provider.
-# Authoritative: tests/test_deploy_script.py asserts README.md and SETUP.md
-# each mention every name here. (Widening that check to every _PROVIDERS name
-# too is deferred -- README.md and SETUP.md do not yet document every
-# provider's model var, and updating those docs is a later task's deliverable.)
+# Authoritative: tests/test_deploy_script.py's test_env_var_names_match_the_docs
+# asserts README.md and SETUP.md each mention every name here, AND every
+# credential/model var named in _PROVIDERS -- both docs already cover every
+# provider's model var.
 _ALWAYS_SYNCED = (
     "DATABASE_URL",
     "GITHUB_APP_ID",
@@ -753,22 +753,28 @@ def sync_env() -> int:
         # override wins at runtime, so pushing a different model var would
         # report success while the service kept running the overridden model --
         # "what you pushed is what runs" has to stay true, not nearly true.
-        try:
-            model_override = _resolved_model_override(settings.llm_provider)
-        # deliberate: the provider check reports DB trouble
-        except Exception:  # noqa: BLE001
-            model_override = None
-        model_var = _PROVIDERS[settings.llm_provider][1]
-        local_model = getattr(settings, model_var.lower(), "")
-        if model_override and model_override != local_model:
-            print(
-                f"refusing to sync: a DB model override ({model_override}) is active for "
-                f"{settings.llm_provider} and wins over the {model_var}={local_model} "
-                "being pushed. Clear it first: uv run python -m scripts.set_override "
-                f"{settings.llm_provider} --clear-model --no-activate",
-                file=sys.stderr,
-            )
-            return 2
+        # Checked for EVERY provider, not just the currently-active one:
+        # _wanted_env() pushes every provider's model var (a DB provider flip
+        # can activate any of them with no redeploy), so a non-active
+        # provider's own DB model override can just as easily diverge from
+        # what is about to be pushed for it.
+        for provider in sorted(_PROVIDERS):
+            try:
+                model_override = _resolved_model_override(provider)
+            # deliberate: the provider check reports DB trouble
+            except Exception:  # noqa: BLE001
+                model_override = None
+            model_var = _PROVIDERS[provider][1]
+            local_model = getattr(settings, model_var.lower(), "")
+            if model_override and model_override != local_model:
+                print(
+                    f"refusing to sync: a DB model override ({model_override}) is active for "
+                    f"{provider} and wins over the {model_var}={local_model} "
+                    "being pushed. Clear it first: uv run python -m scripts.set_override "
+                    f"{provider} --clear-model --no-activate",
+                    file=sys.stderr,
+                )
+                return 2
     wanted = _wanted_env()
     empty = sorted(key for key, value in wanted.items() if not value)
     if empty:

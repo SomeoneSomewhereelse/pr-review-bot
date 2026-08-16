@@ -19,7 +19,7 @@ from __future__ import annotations
 # vertex/gemini-2.5-flash: confirmed live 2026-08-14 (see ISSUES.md) that
 # `gemini-flash-latest` does not exist as a Vertex publisher model for this
 # project/region -- only the 2.5 generation is available there, so a real
-# vertex deployment needs LLM_MODEL=gemini-2.5-flash, not the shared default.
+# vertex deployment needs VERTEX_MODEL=gemini-2.5-flash, not the shared default.
 # Rate is representative (Gemini 2.5 Flash's published per-token price at
 # launch); verify at build time against current Vertex AI pricing before
 # relying on it for real spend, same caveat as the groq entry below.
@@ -38,3 +38,21 @@ def estimate_cost_usd(provider: str, model: str, tokens_in: int, tokens_out: int
 
     rate_in, rate_out = rates
     return (tokens_in / 1_000_000) * rate_in + (tokens_out / 1_000_000) * rate_out
+
+
+def is_known(provider: str, model: str) -> bool:
+    """Whether (provider, model) has a rate entry -- i.e. whether
+    estimate_cost_usd would succeed instead of raising KeyError for it.
+
+    scripts/set_override.py's --model validation is the reason this exists:
+    without it, an operator/agent could set a model with no pricing entry,
+    and the KeyError would only surface in app/orchestrator.py's cost
+    estimation -- AFTER all three specialists already made real, paid calls.
+    """
+    return (provider, model) in _RATES
+
+
+def models_for(provider: str) -> tuple[str, ...]:
+    """Every model this rate table knows for `provider`, sorted -- lets a
+    refusal message name the valid options instead of just saying "unknown"."""
+    return tuple(sorted(model for (p, model) in _RATES if p == provider))

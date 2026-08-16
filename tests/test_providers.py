@@ -608,6 +608,63 @@ def test_a_model_change_is_a_cache_miss(monkeypatch):
     factory.reset_provider_cache()
 
 
+def test_gemini_provider_uses_the_db_override_not_settings_llm_model(monkeypatch):
+    """Tautology guard for GeminiProvider: test_gemini_provider_parses_valid_
+    structured_output above asserts kwargs["model"] == settings.llm_model on
+    BOTH sides of the comparison, so it would not catch a regression where
+    GeminiProvider.__init__ silently went back to reading settings.llm_model
+    internally instead of using its constructor argument. Setting a DB model
+    override to a sentinel that DIFFERS from settings.llm_model, and asserting
+    the constructed instance's _model equals the sentinel (not settings.llm_model),
+    proves the constructor argument is what actually populates self._model --
+    the single most important correctness property this branch adds (the model
+    reported in the PR comment must equal the model actually sent)."""
+    from app.providers import active_model, factory
+
+    factory.reset_provider_cache()
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "dummy-key-for-construction-only")
+    monkeypatch.setattr(settings, "llm_model", "settings-model-must-not-be-used")
+    active_model.set_override_cache({"gemini": "sentinel-gemini-model"})
+
+    provider = factory.get_provider()
+
+    assert isinstance(provider, GeminiProvider)
+    assert provider._model == "sentinel-gemini-model"
+    assert provider._model != settings.llm_model
+
+    active_model.reset_override_cache()
+    factory.reset_provider_cache()
+
+
+def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypatch):
+    """Same tautology guard as the gemini test above, for VertexProvider: a
+    regression to reading settings.vertex_model internally would go uncaught
+    by the existing vertex tests, which all pass settings.llm_model/whatever
+    the ambient value is on both sides of their assertions."""
+    from app.providers import active_model, factory
+
+    factory.reset_provider_cache()
+    _mock_vertex_client(monkeypatch)
+    monkeypatch.setattr(settings, "llm_provider", "vertex")
+    monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
+    monkeypatch.setattr(settings, "vertex_model", "settings-model-must-not-be-used")
+    monkeypatch.setattr(
+        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        lambda index: None,
+    )
+    active_model.set_override_cache({"vertex": "sentinel-vertex-model"})
+
+    provider = factory.get_provider()
+
+    assert isinstance(provider, VertexProvider)
+    assert provider._model == "sentinel-vertex-model"
+    assert provider._model != settings.vertex_model
+
+    active_model.reset_override_cache()
+    factory.reset_provider_cache()
+
+
 def test_reported_model_equals_executed_model(monkeypatch):
     """orchestrator._active_model() feeds the PR comment; the adapter's
     _model is what actually runs. If these diverge, the comment reports a
