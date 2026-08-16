@@ -52,9 +52,7 @@ class Settings(BaseSettings):
     # a key present in both, so .env.config -- the designated home -- outranks a
     # stale line left in .env. A real process env var still beats both, which is
     # why Render is unaffected: neither file exists in the container.
-    model_config = SettingsConfigDict(
-        env_file=(".env", ".env.config"), extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=(".env", ".env.config"), extra="ignore")
 
     github_app_id: int = 0
     github_app_installation_id: int = 0

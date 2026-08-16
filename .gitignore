@@ -10,6 +10,7 @@ gcp-service-account-key*.json
 
 # Operational config (no secrets, but machine-specific)
 .env.config
+
 .venv/
 __pycache__/
 **/__pycache__/

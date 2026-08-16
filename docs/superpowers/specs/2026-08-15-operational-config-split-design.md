@@ -401,3 +401,17 @@ Live calls: none required. Every behavior above is deterministic and mockable, p
   no way to change some local config without an agent touching `.env` directly; that gap is
   tracked as a separate follow-up." That sentence becomes false when this lands, and
   removing it is part of the work.
+
+- **A model set directly in `.env.config` still has no pricing-table guard.** `LLM_MODEL`,
+  `GROQ_MODEL`, and `VERTEX_MODEL` are all `OPERATIONAL_KEYS`, freely hand-editable in
+  `.env.config` — and unlike `scripts/set_override.py --model` (validated against
+  `app/providers/pricing.py` as of this branch's final-review fix wave, which refuses an
+  unpriced value unless `--force` is given), a value set this way is never checked against
+  the pricing table at all. An unpriced or dated-alias model reaches an uncaught `KeyError`
+  at `app/orchestrator.py`'s `estimate_cost_usd()` call — only after all three specialists
+  have already made real, paid LLM calls, since cost estimation happens after the fan-out
+  completes, not before it. `set_override.py --model`'s validation closes this for the
+  DB-override path but not the file-edit path; a full fix would validate at
+  `scripts/deploy.py`'s `check_config()` (a local pre-flight check) or `sync_env()` (before
+  pushing to Render) time too, so a bad model in `.env.config` is caught before it ever
+  reaches a live dispatcher run.
