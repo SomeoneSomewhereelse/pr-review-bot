@@ -15,7 +15,8 @@ import httpx
 import pytest
 import respx
 
-from app.config import settings
+from app.config import Settings, settings
+from app.providers import pricing
 from scripts import deploy
 
 BASE = "https://x.onrender.com"
@@ -29,6 +30,20 @@ def _no_real_provider_credentials(monkeypatch):
     flows into mocked request bodies and out through any respx match failure."""
     for name in ("gemini_api_key", "groq_api_key", "gcp_service_account_key_b64"):
         monkeypatch.setattr(settings, name, "")
+
+
+@pytest.fixture(autouse=True)
+def _shipped_model_defaults(monkeypatch):
+    """Pin every provider's model var to its Settings class default, so these
+    tests describe the SHIPPED configuration rather than whatever the
+    developer's local .env.config happens to say. Same reason
+    _no_real_provider_credentials exists: settings is a module-level singleton
+    loaded from real env files, and deploy.py's pricing guards read every
+    model var -- so a locally-edited model value would otherwise silently
+    change what these tests assert."""
+    for _credential, model_var in deploy._PROVIDERS.values():
+        field = model_var.lower()
+        monkeypatch.setattr(settings, field, Settings.model_fields[field].default)
 
 
 def test_resolve_base_url_prefers_settings_and_strips_trailing_slash(monkeypatch):
@@ -172,6 +187,47 @@ def test_check_config_reports_a_bad_provider_alongside_other_missing_keys(
     detail = deploy.check_config().detail
     assert "GITHUB_WEBHOOK_SECRET" in detail
     assert "unknown" in detail
+
+
+@pytest.mark.parametrize("model_var", ["LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
+def test_check_config_fails_on_an_unpriced_model(complete_config, monkeypatch, model_var):
+    """A model with no pricing.py rate entry reaches an uncaught KeyError in
+    app/orchestrator.py's estimate_cost_usd() -- AFTER all three specialists
+    already made real, paid calls. check_config is the local pre-flight that
+    catches it first, for EVERY provider's var, not just the active one's."""
+    monkeypatch.setattr(settings, model_var.lower(), "totally-made-up-model")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert model_var in result.detail
+    assert "totally-made-up-model" in result.detail
+    provider = next(p for p, (_c, mv) in deploy._PROVIDERS.items() if mv == model_var)
+    assert provider in result.detail
+    for known in pricing.models_for(provider):
+        assert known in result.detail      # the fix is named, not just the fault
+
+
+def test_check_config_ignores_default_models(complete_config):
+    """Regression guard against default/pricing-table drift: if a shipped
+    model default ever stops being priced, a fresh clone would FAIL config out
+    of the box with nothing edited."""
+    for provider, (_credential, model_var) in deploy._PROVIDERS.items():
+        default = Settings.model_fields[model_var.lower()].default
+        assert pricing.is_known(provider, default), (
+            f"{model_var}'s shipped default {default!r} has no {provider} pricing entry"
+        )
+    assert deploy.check_config().status == "PASS"
+
+
+def test_check_config_reports_an_unpriced_model_alongside_other_missing_keys(
+    complete_config, monkeypatch
+):
+    """An unpriced model must not mask problems already collected -- one run
+    surfaces every problem, per this module's own contract."""
+    monkeypatch.setattr(settings, "github_webhook_secret", "")
+    monkeypatch.setattr(settings, "groq_model", "totally-made-up-model")
+    detail = deploy.check_config().detail
+    assert "GITHUB_WEBHOOK_SECRET" in detail
+    assert "GROQ_MODEL" in detail
 
 
 def test_check_config_requires_the_gcp_key_when_vertex_selected(complete_config, monkeypatch):

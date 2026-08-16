@@ -32,7 +32,7 @@ from github import GithubException
 
 from app import github_app
 from app.config import settings
-from app.providers import registry
+from app.providers import pricing, registry
 from scripts import _override, _render
 
 _NAME_WIDTH = 18
@@ -135,6 +135,33 @@ def _private_key_b64() -> tuple[str, str]:
         return "", f"unreadable PEM {path} ({type(exc).__name__})"
 
 
+def _unpriced_models() -> list[tuple[str, str, str, str]]:
+    """Every provider whose locally-configured model has no rate-table entry,
+    as (provider, model_var, model, known-models string).
+
+    Checked for EVERY provider, not just the active one -- exactly as
+    _wanted_env() pushes every provider's model var: a DB provider override
+    can activate any of them with no redeploy, so an unpriced value sitting in
+    a currently-inactive provider's var is a live landmine, not a harmless one.
+
+    An empty model var is skipped deliberately: that is a distinct,
+    pre-existing failure mode, and piling a second, confusing message onto it
+    adds noise rather than clarity. In practice it never fires -- every
+    Settings model field carries a non-empty, priced default.
+
+    Shared by check_config() (which reports all of them) and sync_env() (which
+    refuses on the first), so the two can never disagree about what counts as
+    unpriced.
+    """
+    unpriced: list[tuple[str, str, str, str]] = []
+    for provider, (_credential, model_var) in sorted(_PROVIDERS.items()):
+        model = getattr(settings, model_var.lower(), "")
+        if model and not pricing.is_known(provider, model):
+            known = ", ".join(pricing.models_for(provider)) or "(none known for this provider)"
+            unpriced.append((provider, model_var, model, known))
+    return unpriced
+
+
 def check_config() -> CheckResult:
     """Every value the deployed service needs, resolvable locally.
 
@@ -165,6 +192,15 @@ def check_config() -> CheckResult:
         credential = entry[0]
         if not getattr(settings, credential.lower(), ""):
             missing.append(credential)
+
+    # A problem, not a missing key: the var HAS a value, it is simply not one
+    # the pricing table recognizes. Existing detail_lines assembly (missing,
+    # then problems) needs no change.
+    for provider, model_var, model, known in _unpriced_models():
+        problems.append(
+            f"{model_var}={model!r} has no pricing-table entry for {provider} "
+            f"(known: {known})"
+        )
 
     detail_lines = []
     if missing:
