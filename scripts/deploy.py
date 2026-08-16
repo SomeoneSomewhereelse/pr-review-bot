@@ -111,27 +111,40 @@ def resolve_base_url() -> str:
 _PROVIDERS = registry.PROVIDERS
 
 
-def _unpriced_models() -> list[tuple[str, str, str, str]]:
-    """Every provider whose locally-configured model has no rate-table entry,
-    as (provider, model_var, model, known-models string).
+def _unpriced_models(
+    overrides: dict[str, str | None] | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """Every provider whose EFFECTIVE model has no rate-table entry, as
+    (provider, model_var, model, known-models string).
 
     Checked for EVERY provider, not just the active one -- exactly as
     _wanted_env() pushes every provider's model var: a DB provider override
     can activate any of them with no redeploy, so an unpriced value sitting in
     a currently-inactive provider's var is a live landmine, not a harmless one.
 
-    An empty model var is skipped deliberately: that is a distinct,
-    pre-existing failure mode, and piling a second, confusing message onto it
-    adds noise rather than clarity. In practice it never fires -- every
-    Settings model field carries a non-empty, priced default.
+    `overrides`, when given, is a {provider: DB model override or None} map
+    (as returned by _resolved_model_overrides()) -- the EFFECTIVE model (an
+    active override, else the local value) is what gets checked, so a
+    --force'd unpriced override is caught too. check_config() passes this (it
+    must report what will actually run); sync_env() omits it (it is refusing
+    a PUSH of the local value -- an active override's own pricing is that
+    override's own already-checked concern, from set_override.py --model's
+    own refusal).
+
+    An empty model is skipped deliberately: that is a distinct, pre-existing
+    failure mode, and piling a second, confusing message onto it adds noise
+    rather than clarity. In practice it never fires -- every Settings model
+    field carries a non-empty, priced default.
 
     Shared by check_config() (which reports all of them) and sync_env()
     (which refuses on the first), so the two can never disagree about what
     counts as unpriced.
     """
+    overrides = overrides or {}
     unpriced: list[tuple[str, str, str, str]] = []
     for provider, (_credential, model_var) in sorted(_PROVIDERS.items()):
-        model = getattr(settings, model_var.lower(), "")
+        local_model = getattr(settings, model_var.lower(), "")
+        model = overrides.get(provider) or local_model
         if model and not pricing.is_known(provider, model):
             known = ", ".join(pricing.models_for(provider)) or "(none known for this provider)"
             unpriced.append((provider, model_var, model, known))
@@ -170,11 +183,27 @@ def check_config() -> CheckResult:
     # A problem, not a missing key: the var HAS a value, it is simply not one
     # the pricing table recognizes. Existing detail_lines assembly (missing,
     # then problems) needs no change.
-    for provider, model_var, model, known in _unpriced_models():
-        problems.append(
-            f"{model_var}={model!r} has no pricing-table entry for {provider} "
-            f"(known: {known})"
-        )
+    overrides: dict[str, str | None] = {}
+    if settings.database_url:
+        try:
+            overrides = _resolved_model_overrides()
+        # deliberate: DB trouble degrades to a local-only pricing check, never
+        # a crash -- mirrors check_provider()'s own degrade-on-exception
+        except Exception:  # noqa: BLE001
+            overrides = {}
+    for provider, model_var, model, known in _unpriced_models(overrides):
+        if overrides.get(provider):
+            problems.append(
+                f"{provider} model override {model!r} has no pricing-table entry "
+                f"(known {provider} models: {known}); clear it or add a pricing.py "
+                f"entry: uv run python -m scripts.set_override {provider} "
+                "--clear-model --no-activate"
+            )
+        else:
+            problems.append(
+                f"{model_var}={model!r} has no pricing-table entry for {provider} "
+                f"(known: {known})"
+            )
 
     detail_lines = []
     if missing:

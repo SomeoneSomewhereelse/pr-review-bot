@@ -140,7 +140,7 @@ surfaces every problem rather than only the first:
 
 | Check | Verifies | Required? |
 |---|---|---|
-| `config` | Every setting the service needs is resolvable locally, and every provider's model var has a pricing-table entry | yes |
+| `config` | Every setting the service needs is resolvable locally, and every provider's model var (including an active DB override) has a pricing-table entry | yes |
 | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
 | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |

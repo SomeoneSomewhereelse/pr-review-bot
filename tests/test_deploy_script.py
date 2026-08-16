@@ -213,6 +213,55 @@ def test_check_config_reports_an_unpriced_model_alongside_other_missing_keys(
     assert "GROQ_MODEL" in detail
 
 
+def test_check_config_uses_the_local_value_without_a_database_url(
+    complete_config, monkeypatch
+):
+    """No DATABASE_URL -> no override to resolve -> local-only check, exactly
+    the pre-existing behavior."""
+    monkeypatch.setattr(settings, "database_url", "")
+    assert deploy.check_config().status == "PASS"
+
+
+def test_check_config_fails_on_an_unpriced_db_model_override(complete_config, monkeypatch):
+    """The residual gap this fixes: set_override.py --model --force can put an
+    unpriced model into live rotation, and check_config must not report PASS
+    for it just because .env.config's own value is fine."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(
+        deploy, "_resolved_model_overrides",
+        lambda: {"gemini": None, "groq": None, "vertex": "totally-made-up-model"},
+    )
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "totally-made-up-model" in result.detail
+    assert "vertex" in result.detail
+    assert "override" in result.detail.lower()
+
+
+def test_check_config_passes_a_priced_db_model_override(complete_config, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(
+        deploy, "_resolved_model_overrides",
+        lambda: {"gemini": None, "groq": None, "vertex": "gemini-2.5-flash"},
+    )
+    assert deploy.check_config().status == "PASS"
+
+
+def test_check_config_degrades_to_local_only_when_the_db_read_fails(
+    complete_config, monkeypatch
+):
+    """A DB-read failure must degrade to the local-only check, never crash the
+    whole config row for an unrelated reason -- mirrors check_provider()'s own
+    degrade-on-exception behavior."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+
+    def _boom():
+        raise RuntimeError("db unreachable")
+
+    monkeypatch.setattr(deploy, "_resolved_model_overrides", _boom)
+    assert deploy.check_config().status == "PASS"
+
+
 def test_check_config_requires_the_gcp_key_when_vertex_selected(complete_config, monkeypatch):
     """deploy.py answers "can this be DEPLOYED", and Render has no `gcloud`
     ADC login -- so the credential is genuinely required there even though a
