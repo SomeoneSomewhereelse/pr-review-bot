@@ -192,6 +192,38 @@ def test_no_unlisted_key_lives_in_the_config_file():
     )
 
 
+_RETIRED_CREDENTIAL_KEYS = frozenset(
+    {
+        "GITHUB_APP_PRIVATE_KEY_B64",
+        "GITHUB_APP_PRIVATE_KEY_PATH",
+        "GCP_SERVICE_ACCOUNT_KEY_B64",
+        "GCP_SERVICE_ACCOUNT_KEY_PATH",
+    }
+)
+_RETIRED_NUMBERED_RE = re.compile(r"^(GCP_SERVICE_ACCOUNT_KEY_B64|GCP_SERVICE_ACCOUNT_KEY_PATH)_\d+$")
+
+
+def test_no_legacy_credential_var_lives_in_the_secrets_file():
+    """Migration checklist for the verbatim-only credential convention
+    (docs/superpowers/specs/2026-08-16-credential-convention-design.md):
+    these four names, and vertex's numbered _B64_n/_PATH_n siblings, are
+    retired and no Settings field reads them anymore. Reports NAMES only --
+    see CLAUDE.md's "Secret handling" section."""
+    names = _key_names(_REPO_ROOT / ".env")
+    legacy = {
+        name
+        for name in names
+        if name in _RETIRED_CREDENTIAL_KEYS or _RETIRED_NUMBERED_RE.match(name)
+    }
+    assert not legacy, (
+        f"retired credential var(s) still in .env, no longer read: {sorted(legacy)} -- "
+        "rename GITHUB_APP_PRIVATE_KEY_B64 to GITHUB_APP_PRIVATE_KEY, "
+        "GCP_SERVICE_ACCOUNT_KEY_B64[_n] to GCP_SERVICE_ACCOUNT_KEY[_n] (base64-encode any "
+        "local key file first with scripts/encode_credential.py), and remove the _PATH "
+        "variants entirely"
+    )
+
+
 def test_vertex_model_defaults_to_the_confirmed_working_vertex_model(monkeypatch):
     """gemini-flash-latest 404s on Vertex; gemini-2.5-flash is the value this
     project confirmed live (ISSUES.md). A non-empty default also keeps
