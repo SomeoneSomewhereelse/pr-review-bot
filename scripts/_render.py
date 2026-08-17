@@ -1,5 +1,6 @@
-"""Shared Render API access for scripts/deploy.py, scripts/_override.py
-(used by scripts/set_override.py), and scripts/set_cooldown.py.
+"""Shared Render API access for scripts/deploy.py (including its
+sync_config_db() reachability check) and scripts/_override.py (used by
+scripts/set_override.py).
 
 Not a CLI entry point -- support code for the scripts/ CLIs. Consolidates
 what was previously duplicated Render-fetch logic (service lookup, env-var

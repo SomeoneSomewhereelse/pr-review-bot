@@ -72,23 +72,37 @@ docker run -p 8000:8000 --env-file .env pr-review-engine
 
 ### Changing operational config
 
-Operational settings — provider, model, usage caps, cooldown — live in
-`.env.config` (see `.env.config.example`), never in `.env`. `.env` holds
-credentials only, and nothing but a credential belongs there.
+Operational settings — provider, model, GCP project/location, timeouts,
+dispatcher retry/backoff tuning, usage caps, cooldown — live in `.env.config`
+(see `.env.config.example`), never in `.env`. `.env` holds credentials only,
+and nothing but a credential belongs there. `.env.config` is the source of
+truth for all of it; every setting always ends up in exactly one of two
+places once synced:
 
-Two ways to change a setting:
-
-- **Edit `.env.config`, then `uv run python -m scripts.deploy --sync-env`** —
-  changes the baseline the service boots with. Costs a redeploy.
-- **A DB override** — takes effect on the next claimed ticket, no restart, no
-  redeploy:
+- **Most settings become a Render env var.** `uv run python -m scripts.deploy
+  --sync-env` pushes `.env.config` to the Render service, then redeploys.
+- **Usage caps and the re-review cooldown are never a Render env var at
+  all** — they live only in the database (the same `runtime_config` table the
+  provider/model overrides below use), because the dispatcher needs to be
+  able to change them with no redeploy. `--sync-env` also pushes these into
+  the database as one of its steps, or push just this part on its own,
+  skipping the Render/redeploy machinery entirely:
 
   ```bash
-  uv run python -m scripts.set_override vertex --model gemini-2.5-flash
-  uv run python -m scripts.set_override --list
-  uv run python -m scripts.set_usage_cap --tokens 20000 --reset 06:30
-  uv run python -m scripts.set_cooldown --base 30 --factor 1.5
+  uv run python -m scripts.deploy --sync-config-db
   ```
+
+  Needs only `DATABASE_URL` — no `RENDER_API_KEY`, no checklist, no redeploy.
+  Takes effect on the next claimed ticket.
+
+Provider/model/API-key-slot selection has its own, separate live-override
+mechanism (also DB-backed, also redeploy-free) for switching *which*
+already-deployed credential is active:
+
+```bash
+uv run python -m scripts.set_override vertex --model gemini-2.5-flash
+uv run python -m scripts.set_override --list
+```
 
 `--list` prints slot inventory, the active index, and the active model as names
 and booleans only — never a credential value — so it is safe to run and paste
@@ -303,34 +317,46 @@ the DB says index 2, but nobody ever pushed `GROQ_API_KEY_2` to Render.
 #### Tuning the re-review cooldown without a redeploy
 
 ```bash
-uv run python -m scripts.set_cooldown --base 30 --factor 1.5   # tune for a demo
-uv run python -m scripts.set_cooldown --clear                  # remove the override
+# .env.config
+DISPATCHER_REREVIEW_COOLDOWN_SECONDS=30
+DISPATCHER_REREVIEW_COOLDOWN_FACTOR=1.5
 ```
 
-Same shape as `set_override.py` above: it writes a base/cap/factor override
-to the `runtime_config` table and takes effect on the **next ticket the
-dispatcher claims** — no restart, no redeploy — so the escalating cooldown
-can be sped up on stage instead of waiting out the 300s/3600s production
-defaults. It writes to whatever `DATABASE_URL` currently resolves to, so a
-local `.env` run sets a local override only. Unlike `set_override.py` there's
-no credential at stake, so a non-cleared write is never refused for a
-Render-verification reason — only refused if the resulting base/cap/factor
-would resolve to something invalid (`factor < 1.0`, `base > cap`, or a
-non-positive base/cap), since that combination would write successfully but
-be silently discarded on every read. **A DB override in force also masks env
-var changes** — editing `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
-`_FACTOR` in the Render dashboard will appear to do nothing until you run
-`--clear`.
+```bash
+uv run python -m scripts.deploy --sync-config-db   # push it into the database
+```
+
+These three settings (`DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/
+`_FACTOR`) are **never a Render env var** — they live only in the
+`runtime_config` table (the same one `set_override.py` writes to), because the
+dispatcher needs to change them with no redeploy. `.env.config` is the source
+of truth: `--sync-config-db` reads it and writes the resolved values straight
+into the database, unconditionally, taking effect on the **next ticket the
+dispatcher claims**. It refuses (exit 2, nothing written) if the resolved
+base/cap/factor would be invalid (`factor < 1.0`, `base > cap`, or a
+non-positive base/cap) — that combination would write successfully but be
+silently discarded on every read otherwise. To go back to the built-in
+defaults (300s/3600s/2.0), remove the lines from `.env.config` and re-run
+`--sync-config-db`.
 
 #### Capping how much one API key may spend per day
 
 ```bash
+# .env.config
 KEY_USAGE_TOKEN_CAP=20000        # tokens/day for the ACTIVE key slot
 KEY_USAGE_COST_CAP_USD=0.50      # or a dollar ceiling instead
 KEY_USAGE_RESET_TIME_UTC=04:00   # when the day rolls over (default 04:00 UTC)
 ```
 
-Both caps are **unset by default** — set neither and nothing changes. When a
+```bash
+uv run python -m scripts.deploy --sync-config-db   # push it into the database
+```
+
+Like the cooldown settings above, these three are database-only, never a
+Render env var — `.env.config` plus `--sync-config-db` (or `--sync-env`,
+which runs the same push as one of its steps) is the only way to change them,
+live, with no redeploy. Both caps are **unset by default** — set neither and
+nothing changes. When a
 cap is in force, the dispatcher checks the currently-active `(provider, key
 slot)`'s usage so far today *before* starting a review; at or over the cap it
 defers the ticket to the next reset rather than making the call, and the PR

@@ -657,9 +657,10 @@ def set_cooldown_override(
     """Set the (base, cap, factor) override triple, or clear a field with None.
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
-    set_provider_override. Writes exactly the three values it's given; a
-    caller wanting to change only one field is responsible for reading the
-    current triple first (see scripts/set_cooldown.py).
+    set_provider_override. Writes exactly the three values it's given; the
+    only caller, scripts/deploy.py::sync_config_db(), always writes the full
+    triple straight from .env.config's resolved Settings values -- there is
+    no partial-field write to merge with a current value for.
     """
     with _require_pool().connection() as conn:
         conn.execute(
@@ -800,9 +801,10 @@ def set_usage_cap_override(
     field with None.
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
-    set_provider_override. Writes exactly the three values it's given; a caller
-    wanting to change only one field is responsible for reading the current
-    trio first (see scripts/set_usage_cap.py).
+    set_provider_override. Writes exactly the three values it's given; the
+    only caller, scripts/deploy.py::sync_config_db(), always writes the full
+    trio straight from .env.config's resolved Settings values -- there is no
+    partial-field write to merge with a current value for.
     """
     with _require_pool().connection() as conn:
         conn.execute(

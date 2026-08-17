@@ -16,7 +16,7 @@ import pytest
 import respx
 import yaml
 
-from app.config import Settings, settings
+from app.config import OPERATIONAL_KEYS, Settings, settings
 from app.providers import pricing
 from scripts import deploy
 
@@ -31,6 +31,24 @@ def _no_real_provider_credentials(monkeypatch):
     flows into mocked request bodies and out through any respx match failure."""
     for name in ("gemini_api_key", "groq_api_key", "gcp_service_account_key"):
         monkeypatch.setattr(settings, name, "")
+
+
+@pytest.fixture(autouse=True)
+def _shipped_db_synced_defaults(monkeypatch):
+    """Pin the 6 usage-cap/cooldown settings to their Settings class defaults,
+    for the same reason _shipped_model_defaults exists: sync_env() now also
+    writes these to runtime_config via sync_config_db(), so a locally-edited
+    .env.config value could otherwise make a test non-deterministic, or trip
+    sync_config_db()'s cooldown validity guard by accident."""
+    for field in (
+        "dispatcher_rereview_cooldown_seconds",
+        "dispatcher_rereview_cooldown_max_seconds",
+        "dispatcher_rereview_cooldown_factor",
+        "key_usage_token_cap",
+        "key_usage_cost_cap_usd",
+        "key_usage_reset_time_utc",
+    ):
+        monkeypatch.setattr(settings, field, Settings.model_fields[field].default)
 
 
 @pytest.fixture(autouse=True)
@@ -1150,6 +1168,77 @@ def test_wanted_env_omits_installation_id_when_unset(gemini_only_config, monkeyp
     assert "GITHUB_APP_INSTALLATION_ID" not in deploy._wanted_env()
 
 
+def test_wanted_env_pushes_every_generic_operational_setting(gemini_only_config, monkeypatch):
+    """ISSUES.md 2026-08-17: these 12 keys used to be silently dropped by
+    _wanted_env() -- editing them in .env.config and running --sync-env did
+    nothing, with no error. Each must round-trip through _wanted_env() as its
+    stringified Settings value."""
+    values = {
+        "gcp_project": "my-project",
+        "gcp_location": "europe-west1",
+        "llm_request_timeout_seconds": 30.0,
+        "dispatcher_idle_sleep_seconds": 2.0,
+        "default_retry_after_seconds": 90.0,
+        "dispatcher_failure_base_backoff_seconds": 3.0,
+        "dispatcher_failure_max_backoff_seconds": 400.0,
+        "dispatcher_max_failure_attempts": 7,
+        "dispatcher_max_notice_post_attempts": 4,
+        "dispatcher_min_retry_after_seconds": 2.0,
+        "dispatcher_backoff_jitter_seconds": 5.0,
+        "dispatcher_notice_sweep_batch_size": 30,
+    }
+    for field, value in values.items():
+        monkeypatch.setattr(settings, field, value)
+    wanted = deploy._wanted_env()
+    for env_name, attr in deploy._GENERIC_OPERATIONAL_ENV_ATTRS.items():
+        assert wanted[env_name] == str(values[attr])
+
+
+def test_wanted_env_never_includes_the_never_synced_operational_keys(gemini_only_config):
+    """RENDER_SERVICE_NAME/PUBLIC_BASE_URL are operator-machine-only settings
+    (app/config.py's own field comments) -- they must never reach Render."""
+    wanted = deploy._wanted_env()
+    for key in deploy._NEVER_SYNCED_OPERATIONAL_KEYS:
+        assert key not in wanted
+
+
+def test_wanted_env_never_includes_the_db_synced_operational_keys(gemini_only_config):
+    """Usage-cap/cooldown settings sync straight into runtime_config (see
+    sync_config_db()) -- they have no Render env var at all, so _wanted_env()
+    (which only ever describes what --sync-env pushes to Render) must never
+    mention them."""
+    wanted = deploy._wanted_env()
+    for key in deploy._DB_SYNCED_OPERATIONAL_KEYS:
+        assert key not in wanted
+
+
+def test_operational_keys_partition_cleanly_across_every_sync_destination():
+    """CI-enforced version of the ISSUES.md 2026-08-17 ask: every name in
+    OPERATIONAL_KEYS must land in exactly one sync destination, so a future
+    setting added to OPERATIONAL_KEYS but forgotten everywhere else fails a
+    test instead of silently never syncing anywhere, the way the original 12
+    did."""
+    handled_directly_in_wanted_env = {
+        "LLM_PROVIDER", "LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL", "GITHUB_TARGET_REPO",
+    }
+    groups = {
+        "handled directly in _wanted_env()": handled_directly_in_wanted_env,
+        "_GENERIC_OPERATIONAL_ENV_ATTRS": set(deploy._GENERIC_OPERATIONAL_ENV_ATTRS),
+        "_DB_SYNCED_OPERATIONAL_KEYS": set(deploy._DB_SYNCED_OPERATIONAL_KEYS),
+        "_NEVER_SYNCED_OPERATIONAL_KEYS": set(deploy._NEVER_SYNCED_OPERATIONAL_KEYS),
+    }
+    union = set().union(*groups.values())
+    missing = OPERATIONAL_KEYS - union
+    extra = union - OPERATIONAL_KEYS
+    assert not missing, f"in OPERATIONAL_KEYS but in no sync destination: {sorted(missing)}"
+    assert not extra, f"in a sync destination but not OPERATIONAL_KEYS: {sorted(extra)}"
+    seen: set[str] = set()
+    for label, group in groups.items():
+        overlap = seen & group
+        assert not overlap, f"{label} overlaps an earlier group on: {sorted(overlap)}"
+        seen |= group
+
+
 def test_sync_env_does_not_demand_other_providers_keys(
     gemini_only_config, monkeypatch, capsys
 ):
@@ -1366,7 +1455,12 @@ def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_read
         respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
         wanted = deploy._wanted_env()
         current = dict.fromkeys(wanted, "stale")
-        current["GITHUB_TARGET_REPO"] = wanted["GITHUB_TARGET_REPO"]       # already correct
+        # Already correct -- these two default to empty (GITHUB_TARGET_REPO:
+        # track-all; GCP_PROJECT: derived from the service-account key), and
+        # an empty wanted value takes the DELETE branch, not this test's PUT
+        # endpoint (see test_sync_env_deletes_rather_than_puts_an_empty_target_repo).
+        for optional_empty_key in deploy._OPTIONAL_EMPTY_ENV_KEYS:
+            current[optional_empty_key] = wanted[optional_empty_key]
         respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
             return_value=httpx.Response(200, json=_env_var_list(current))
         )
@@ -1387,8 +1481,8 @@ def test_sync_env_pushes_only_changed_keys_via_the_single_key_endpoint(sync_read
         )
         assert deploy.sync_env() == 0
         assert not bulk.called          # the bulk PUT would delete DATABASE_URL
-        # All but GITHUB_TARGET_REPO differ.
-        assert single.call_count == len(wanted) - 1
+        # All but the already-correct _OPTIONAL_EMPTY_ENV_KEYS differ.
+        assert single.call_count == len(wanted) - len(deploy._OPTIONAL_EMPTY_ENV_KEYS)
 
 
 def test_sync_env_skips_the_deploy_when_nothing_changed(sync_ready, capsys):
@@ -1578,6 +1672,135 @@ def test_sync_env_never_prints_a_secret_value(sync_ready, monkeypatch, capsys):
     assert "gsk_SUPER_SECRET" not in captured.out + captured.err
 
 
+def test_sync_config_db_requires_a_database_url(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "")
+    assert deploy.sync_config_db() == 2
+    assert "DATABASE_URL" in capsys.readouterr().err
+
+
+def test_sync_config_db_refuses_a_base_above_the_cap(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 4000.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 3600.0)
+    assert deploy.sync_config_db() == 2
+    assert "refusing to sync" in capsys.readouterr().err
+
+
+def test_sync_config_db_refuses_a_non_positive_base(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
+    assert deploy.sync_config_db() == 2
+    assert "refusing to sync" in capsys.readouterr().err
+
+
+def test_sync_config_db_refuses_a_non_positive_cap(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", -1.0)
+    assert deploy.sync_config_db() == 2
+    assert "refusing to sync" in capsys.readouterr().err
+
+
+def test_sync_config_db_never_reaches_the_database_when_invalid(monkeypatch, capsys):
+    """The guard runs before any connection attempt -- mirrors sync_env()'s
+    own 'refuse before touching anything' guards."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 0.0)
+    called = []
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: called.append(1))
+    assert deploy.sync_config_db() == 2
+    assert called == []
+
+
+def test_sync_config_db_writes_settings_values_into_runtime_config(db, db_query, monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 45.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 900.0)
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 1.5)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 20000)
+    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", 0.5)
+    assert deploy.sync_config_db() == 0
+    row = db_query(
+        "SELECT cooldown_base_seconds, cooldown_max_seconds, cooldown_factor, "
+        "key_usage_token_cap, key_usage_cost_cap_usd, key_usage_reset_time_utc "
+        "FROM runtime_config WHERE id = 1"
+    )[0]
+    assert row == (45.0, 900.0, 1.5, 20000, 0.5, "04:00:00")
+
+
+def test_sync_config_db_reports_already_in_sync_on_a_second_run(db, capsys):
+    assert deploy.sync_config_db() == 0
+    capsys.readouterr()
+    assert deploy.sync_config_db() == 0
+    assert "already in sync" in capsys.readouterr().out
+
+
+def test_sync_config_db_reports_only_the_fields_that_changed(db, monkeypatch, capsys):
+    assert deploy.sync_config_db() == 0
+    capsys.readouterr()
+    monkeypatch.setattr(settings, "key_usage_token_cap", 50000)
+    assert deploy.sync_config_db() == 0
+    out = capsys.readouterr().out
+    assert "key_usage_token_cap" in out
+    assert "cooldown_base_seconds" not in out  # unchanged, not reported
+
+
+def test_sync_config_db_an_existing_db_override_is_overwritten(db, db_exec, db_query, monkeypatch):
+    """.env.config is the source of truth (2026-08-17 design note): a
+    previously-set live override (however it got there) is unconditionally
+    replaced by whatever settings currently resolves to."""
+    db_exec(
+        "INSERT INTO runtime_config (id, key_usage_token_cap, updated_at) "
+        "VALUES (1, 999999, '2026-01-01T00:00:00+00:00')"
+    )
+    monkeypatch.setattr(settings, "key_usage_token_cap", None)
+    assert deploy.sync_config_db() == 0
+    row = db_query("SELECT key_usage_token_cap FROM runtime_config WHERE id = 1")[0]
+    assert row == (None,)
+
+
+def test_sync_config_db_prints_a_render_reachability_line_without_a_key(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(settings, "render_api_key", "")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    assert deploy.sync_config_db() == 0
+    assert "no RENDER_API_KEY" in capsys.readouterr().out
+
+
+def test_main_sync_config_db_runs_without_a_public_base_url(monkeypatch):
+    """Unlike every other mode, --sync-config-db needs no PUBLIC_BASE_URL --
+    it never talks to the deployed app itself, only the database."""
+    monkeypatch.setattr(deploy, "sync_config_db", lambda: 0)
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    monkeypatch.setattr(settings, "public_base_url", "")
+    assert deploy.main(["--sync-config-db"]) == 0
+
+
+def test_main_sync_config_db_propagates_a_nonzero_exit_code(monkeypatch):
+    monkeypatch.setattr(deploy, "sync_config_db", lambda: 2)
+    assert deploy.main(["--sync-config-db"]) == 2
+
+
+def test_main_sync_config_db_skips_the_checklist(monkeypatch):
+    """Only sync_config_db() runs -- no health/render/database/etc. checks."""
+    monkeypatch.setattr(deploy, "sync_config_db", lambda: 0)
+    called = []
+    monkeypatch.setattr(deploy, "run_checks", lambda *a, **k: called.append(1))
+    deploy.main(["--sync-config-db"])
+    assert called == []
+
+
+def test_main_rejects_sync_config_db_combined_with_sync_env(monkeypatch, capsys):
+    assert deploy.main(["--sync-config-db", "--sync-env"]) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_main_rejects_sync_config_db_combined_with_health_only(monkeypatch, capsys):
+    assert deploy.main(["--sync-config-db", "--health-only"]) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
 def test_wanted_env_is_always_a_superset_of_the_always_synced_names():
     """_ALWAYS_SYNCED is what the docs test validates against, so _wanted_env()
     must always include it regardless of the selected provider -- otherwise the
@@ -1645,11 +1868,27 @@ def test_render_yaml_declares_every_synced_var():
     declared = {
         entry["key"] for entry in render["services"][0]["envVars"] if "key" in entry
     }
-    names = set(deploy._ALWAYS_SYNCED) | {"LLM_PROVIDER"}
+    names = (
+        set(deploy._ALWAYS_SYNCED)
+        | {"LLM_PROVIDER"}
+        | set(deploy._GENERIC_OPERATIONAL_ENV_ATTRS)
+    )
     for credential, model_var in deploy._PROVIDERS.values():
         names.add(credential)
         names.add(model_var)
     assert names <= declared, f"missing from render.yaml: {sorted(names - declared)}"
+
+
+def test_render_yaml_never_declares_a_db_synced_key():
+    """The 6 usage-cap/cooldown keys are never a Render env var at all (see
+    _DB_SYNCED_OPERATIONAL_KEYS) -- re-declaring one here would silently
+    resurrect the two-sources-of-truth problem this design eliminated."""
+    render = yaml.safe_load((_REPO_ROOT / "render.yaml").read_text())
+    declared = {
+        entry["key"] for entry in render["services"][0]["envVars"] if "key" in entry
+    }
+    overlap = declared & deploy._DB_SYNCED_OPERATIONAL_KEYS
+    assert not overlap, f"declared in render.yaml but DB-synced only: {sorted(overlap)}"
 
 
 def test_exit_codes_are_documented():
@@ -2167,6 +2406,10 @@ def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
         lambda: {"gemini": None, "groq": None, "vertex": "gemini-2.5-flash"},
     )
     monkeypatch.setattr(deploy, "_wanted_env", lambda: {"LLM_PROVIDER": "vertex"})
+    # sync_config_db() (run as part of sync_env() now) reads/writes
+    # runtime_config via a raw psycopg.connect() -- stub it so this test's
+    # fake postgresql://localhost/x is never actually dialed.
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
     # Mocked so this test makes no live Render call; returning None makes the
     # script stop at "no such service" -- which proves it got PAST the model
     # guard, the thing under test, without needing a full push to succeed.

@@ -595,38 +595,44 @@ must not be blockable by a Render/local mismatch. `scripts/deploy.py`'s
 this guard, and both are built on the same `GET /v1/services/{id}/env-vars`
 call.
 
-### 3.7 Tuning the re-review cooldown live: `scripts/set_cooldown.py`
+### 3.7 Tuning the re-review cooldown live: `scripts/deploy.py --sync-config-db`
 
 ```bash
-uv run python -m scripts.set_cooldown --base 30 --factor 1.5   # tune for a demo
-uv run python -m scripts.set_cooldown --cap 600
-uv run python -m scripts.set_cooldown --clear                  # remove the override
+# .env.config
+DISPATCHER_REREVIEW_COOLDOWN_SECONDS=30
+DISPATCHER_REREVIEW_COOLDOWN_FACTOR=1.5
 ```
 
-Same pattern as `set_override.py` above: this writes the base/cap/factor
-override to the `runtime_config` table in whatever database `DATABASE_URL`
-currently resolves to — a local `.env` run sets a purely local override.
-It takes effect on the **next ticket the dispatcher claims** — no restart,
-no redeploy — which is what makes it useful for showing the escalating
-cooldown speed up on stage instead of waiting out the 300s/3600s production
-defaults.
+```bash
+uv run python -m scripts.deploy --sync-config-db
+```
 
-Unlike `set_override.py` there's no credential at stake, only numbers, so a
-non-cleared write is never refused for a credential reason; before writing,
-it only checks (when `RENDER_API_KEY` is set) whether the local
-`DATABASE_URL` matches the live Render service's, purely as an informational
-signal, and proceeds regardless. It *does* refuse the write (exit 2) if the
-resulting base/cap/factor would resolve to something `cooldown_config.
+`DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/`_FACTOR` are **never a
+Render env var** — see the 2026-08-17 "two sources of truth" design note.
+They live only in the `runtime_config` table (the same one `set_override.py`
+above writes to); `.env.config` is the source of truth, and
+`--sync-config-db` is what pushes its current values into that table,
+unconditionally, in whatever database `DATABASE_URL` currently resolves to —
+a local `.env`/`.env.config` run pushes to a purely local database. It takes
+effect on the **next ticket the dispatcher claims** — no restart, no
+redeploy — which is what makes it useful for showing the escalating cooldown
+speed up on stage instead of waiting out the 300s/3600s built-in defaults.
+
+Unlike `set_override.py` there's no credential at stake, only numbers, so the
+write is never refused for a credential reason; it only checks (when
+`RENDER_API_KEY` is set) whether the local `DATABASE_URL` matches the live
+Render service's, purely as an informational signal, and proceeds regardless.
+It *does* refuse the write (exit 2, nothing written) if the resolved
+base/cap/factor would resolve to something `cooldown_config.
 effective_config()` discards at read time (`factor < 1.0`, `base > cap`, or
-a non-positive base/cap) — a single `--cap` below the env-configured base
-would otherwise write successfully but be silently inert on every read.
+a non-positive base/cap) — a `.env.config` cap below the base would otherwise
+write successfully but be silently inert on every read. To go back to the
+built-in defaults, remove the three lines from `.env.config` and re-run
+`--sync-config-db`.
 
-**A DB override in force masks env-var changes.** If you change
-`DISPATCHER_REREVIEW_COOLDOWN_SECONDS`/`_MAX_SECONDS`/`_FACTOR` in the Render
-dashboard while a DB override is still set, the redeploy will appear to do
-nothing — the override still wins at read time. Run
-`uv run python -m scripts.set_cooldown --clear` first if you want the
-env-var values to take effect again.
+`--sync-env` (§3.4) runs this same push as one of its own steps, so a normal
+full deploy keeps the database in sync too — `--sync-config-db` is only the
+fast, redeploy-free path for changing just this.
 
 ### 3.8 Deploying an image, for a service with no connected repo
 
@@ -697,12 +703,15 @@ an `OPERATIONAL_KEYS` name is still found in `.env` (or if a key that is
 other direction). Green on that test is how you confirm the migration above
 is complete.
 
-`KEY_USAGE_TOKEN_CAP`, `KEY_USAGE_COST_CAP_USD`, and `KEY_USAGE_RESET_TIME_UTC`
-are declared in `render.yaml` (a dashboard-set baseline) but are **never**
-pushed by `uv run python -m scripts.deploy --sync-env` — exactly like the
-`DISPATCHER_REREVIEW_COOLDOWN_*` cooldown vars, the live-change path for these
-is `uv run python -m scripts.set_usage_cap` (see README's "Changing
-operational config"), not a redeploy.
+`KEY_USAGE_TOKEN_CAP`, `KEY_USAGE_COST_CAP_USD`, `KEY_USAGE_RESET_TIME_UTC`,
+and the three `DISPATCHER_REREVIEW_COOLDOWN_*` cooldown settings are on
+`OPERATIONAL_KEYS` (`.env.config` is still where you edit them) but are
+**never** declared in `render.yaml` and never pushed as a Render env var by
+`--sync-env` — they live only in the `runtime_config` database table. Both
+`--sync-env` and the narrower `uv run python -m scripts.deploy
+--sync-config-db` push `.env.config`'s current values into that table (see
+README's "Changing operational config" and §3.7 above); a hand-edited value
+in these six only ever takes effect once one of those two commands runs.
 
 ## Repo history note
 

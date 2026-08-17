@@ -44,15 +44,23 @@ services:
         sync: false
       - key: GCP_LOCATION
         sync: false
-      - key: DISPATCHER_REREVIEW_COOLDOWN_SECONDS
+      - key: LLM_REQUEST_TIMEOUT_SECONDS
         sync: false
-      - key: DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS
+      - key: DISPATCHER_IDLE_SLEEP_SECONDS
         sync: false
-      - key: DISPATCHER_REREVIEW_COOLDOWN_FACTOR
+      - key: DEFAULT_RETRY_AFTER_SECONDS
         sync: false
-      - key: KEY_USAGE_TOKEN_CAP
+      - key: DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS
         sync: false
-      - key: KEY_USAGE_COST_CAP_USD
+      - key: DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS
         sync: false
-      - key: KEY_USAGE_RESET_TIME_UTC
+      - key: DISPATCHER_MAX_FAILURE_ATTEMPTS
+        sync: false
+      - key: DISPATCHER_MAX_NOTICE_POST_ATTEMPTS
+        sync: false
+      - key: DISPATCHER_MIN_RETRY_AFTER_SECONDS
+        sync: false
+      - key: DISPATCHER_BACKOFF_JITTER_SECONDS
+        sync: false
+      - key: DISPATCHER_NOTICE_SWEEP_BATCH_SIZE
         sync: false

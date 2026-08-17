@@ -10,7 +10,7 @@ a LOCAL database and nothing reaches production. Never touches `runtime_config`
 (provider/model/cooldown overrides), only the queue and review-history tables.
 No FKs reference either table, so no CASCADE is needed.
 
-Mirrors scripts/set_cooldown.py / scripts/set_usage_cap.py: never prints
+Mirrors scripts/deploy.py::sync_config_db()'s reachability check: never prints
 DATABASE_URL, only a presence/equality check against the live Render service
 when RENDER_API_KEY is available, and row counts -- never row content.
 """

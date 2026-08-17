@@ -21,6 +21,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -57,8 +58,58 @@ _ALWAYS_SYNCED = (
 # GITHUB_TARGET_REPO empty is a valid, deliberate "track all repos" config
 # (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md), not a
 # missing required value -- exempt from sync_env()'s "refuse to push empty
-# values" guard below.
-_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GITHUB_TARGET_REPO"})
+# values" guard below. GCP_PROJECT is the same shape: unset means "use the
+# project_id embedded in the service-account key" (see app/config.py), not a
+# missing one.
+_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GITHUB_TARGET_REPO", "GCP_PROJECT"})
+
+# OPERATIONAL_KEYS (app/config.py) names, mapped to the Settings attribute
+# holding their local value, for every one that has NO other sync path here:
+# not LLM_PROVIDER/GITHUB_TARGET_REPO (handled directly in _wanted_env()
+# below), not a provider credential/model var (handled via _PROVIDERS), not a
+# _DB_SYNCED_OPERATIONAL_KEYS or _NEVER_SYNCED_OPERATIONAL_KEYS name (both
+# below). Before this existed, editing any of these in .env.config and
+# running --sync-env silently pushed nothing -- see ISSUES.md's 2026-08-17
+# "--sync-env silently never pushes 12 of the documented operational env
+# vars" entry.
+_GENERIC_OPERATIONAL_ENV_ATTRS = {
+    "GCP_PROJECT": "gcp_project",
+    "GCP_LOCATION": "gcp_location",
+    "LLM_REQUEST_TIMEOUT_SECONDS": "llm_request_timeout_seconds",
+    "DISPATCHER_IDLE_SLEEP_SECONDS": "dispatcher_idle_sleep_seconds",
+    "DEFAULT_RETRY_AFTER_SECONDS": "default_retry_after_seconds",
+    "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS": "dispatcher_failure_base_backoff_seconds",
+    "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS": "dispatcher_failure_max_backoff_seconds",
+    "DISPATCHER_MAX_FAILURE_ATTEMPTS": "dispatcher_max_failure_attempts",
+    "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS": "dispatcher_max_notice_post_attempts",
+    "DISPATCHER_MIN_RETRY_AFTER_SECONDS": "dispatcher_min_retry_after_seconds",
+    "DISPATCHER_BACKOFF_JITTER_SECONDS": "dispatcher_backoff_jitter_seconds",
+    "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE": "dispatcher_notice_sweep_batch_size",
+}
+
+# These 6 have their own DB-backed live-override mechanism (runtime_config,
+# via cooldown_config.py/usage_cap_config.py) -- unlike every other
+# operational key, they are never a Render env var at all (see render.yaml
+# and the 2026-08-17 "two sources of truth" design note): --sync-config-db
+# (and --sync-env, which calls the same push) mirrors .env.config straight
+# into runtime_config instead, which is what the app actually reads.
+_DB_SYNCED_OPERATIONAL_KEYS = frozenset(
+    {
+        "KEY_USAGE_TOKEN_CAP",
+        "KEY_USAGE_COST_CAP_USD",
+        "KEY_USAGE_RESET_TIME_UTC",
+        "DISPATCHER_REREVIEW_COOLDOWN_SECONDS",
+        "DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS",
+        "DISPATCHER_REREVIEW_COOLDOWN_FACTOR",
+    }
+)
+
+# Operator-machine-only settings: which Render service to check/deploy, and
+# what public URL to hit. app/config.py's own field comments say these must
+# NEVER be set on the deployed service itself -- pushing them would just
+# create dead env vars, not fix anything.
+_NEVER_SYNCED_OPERATIONAL_KEYS = frozenset({"RENDER_SERVICE_NAME", "PUBLIC_BASE_URL"})
+
 _DEPLOY_POLL_SECONDS = 10
 # A cold Docker build with a full dependency install runs well past five
 # minutes; the measured ~60s redeploys had warm layers. Too short a timeout
@@ -755,6 +806,8 @@ def _wanted_env() -> dict[str, str]:
     # "webhook handling fails on the next PR" instead of crashing the app.
     if settings.github_app_installation_id:
         wanted["GITHUB_APP_INSTALLATION_ID"] = str(settings.github_app_installation_id)
+    for env_name, attr in _GENERIC_OPERATIONAL_ENV_ATTRS.items():
+        wanted[env_name] = str(getattr(settings, attr))
     return wanted
 
 
@@ -848,6 +901,134 @@ def _trigger_and_wait(service_id: str) -> int:
     return 1
 
 
+def _verify_database_url_reachable() -> str:
+    """A human-readable status line about whether this write reaches the
+    Render-hosted production database. Purely informational -- RENDER_API_KEY
+    is optional for --sync-config-db, unlike --sync-env, so this never blocks
+    the write. Never returns, prints, or logs a fetched Render value, only
+    presence/absence and in-memory equality results (mirrors
+    check_boot_credentials_live's and the former set_cooldown.py/
+    set_usage_cap.py scripts' identical guard)."""
+    if not settings.render_api_key:
+        return (
+            "could not verify against Render (no RENDER_API_KEY); "
+            "writing without live verification"
+        )
+    try:
+        service_id = _render.find_service_id()
+        if service_id is None:
+            return (
+                f"could not verify against Render (no service named "
+                f"{settings.render_service_name}); writing without live verification"
+            )
+        env_vars = _render.env_vars(service_id)
+    # deliberate: inability to verify degrades to a warning, never a refusal
+    except Exception as exc:  # noqa: BLE001
+        return (
+            f"could not verify against Render ({type(exc).__name__}); "
+            "writing without live verification"
+        )
+    if env_vars.get("DATABASE_URL") != settings.database_url:
+        return (
+            "could not confirm this DATABASE_URL is the one the Render "
+            "service reads -- writing anyway"
+        )
+    return "DATABASE_URL verified against the live Render service"
+
+
+# Column order shared by the SELECT and the INSERT ... ON CONFLICT below, so
+# the two can never drift apart -- a name added to one without the other
+# would silently read or write the wrong value.
+_DB_SYNCED_COLUMNS = (
+    "cooldown_base_seconds",
+    "cooldown_max_seconds",
+    "cooldown_factor",
+    "key_usage_token_cap",
+    "key_usage_cost_cap_usd",
+    "key_usage_reset_time_utc",
+)
+
+
+def sync_config_db() -> int:
+    """Push .env.config's usage-cap/cooldown values into runtime_config,
+    unconditionally -- these 6 keys are never a Render env var (see
+    render.yaml and _DB_SYNCED_OPERATIONAL_KEYS above), so this is their only
+    sync path. .env.config is the source of truth; the DB is only a mirror of
+    it that the dispatcher actually reads (app/queue/cooldown_config.py,
+    app/queue/usage_cap_config.py) -- see ISSUES.md's 2026-08-17 "two sources
+    of truth" entry for why a Render env var was the wrong mirror target.
+
+    Uses a raw, short-timeout connection rather than store.init_pool() /
+    store.set_cooldown_override() -- same reason as _resolved_provider():
+    a one-shot CLI must not pay the pool's 30s connect timeout.
+
+    No CLI arguments: unlike the operator scripts this replaces
+    (set_usage_cap.py, set_cooldown.py), there is exactly one source of
+    truth (.env.config) and exactly one thing this does with it -- a partial,
+    CLI-argument-driven write no longer exists, so there is nothing left to
+    merge with the current DB value.
+
+    key_usage_token_cap/cost_cap_usd (gt=0) and dispatcher_rereview_cooldown_
+    factor (ge=1.0) already have pydantic Field constraints -- an invalid
+    value there fails at Settings() construction, long before this runs. The
+    one invariant pydantic CANNOT express (it spans two fields) is
+    base <= cap, so that -- plus the redundant-but-harmless base/cap
+    positivity check, kept for a 1:1 match with
+    cooldown_config.effective_config()'s own discard predicate -- is the only
+    thing checked here.
+    """
+    if not settings.database_url:
+        print("--sync-config-db requires DATABASE_URL", file=sys.stderr)
+        return 2
+    base = settings.dispatcher_rereview_cooldown_seconds
+    cap = settings.dispatcher_rereview_cooldown_max_seconds
+    factor = settings.dispatcher_rereview_cooldown_factor
+    if factor < 1.0 or base > cap or base <= 0 or cap <= 0:
+        print(
+            f"refusing to sync: cooldown would resolve to base={base} cap={cap} "
+            f"factor={factor}, which effective_config() discards entirely (needs "
+            "factor >= 1.0, 0 < base <= cap) -- fix .env.config first",
+            file=sys.stderr,
+        )
+        return 2
+    tokens = settings.key_usage_token_cap
+    cost = settings.key_usage_cost_cap_usd
+    reset = settings.key_usage_reset_time_utc.isoformat()
+    wanted = (base, cap, factor, tokens, cost, reset)
+
+    print(_verify_database_url_reachable())
+    now = datetime.now(timezone.utc).isoformat()
+    columns = ", ".join(_DB_SYNCED_COLUMNS)
+    placeholders = ", ".join(["%s"] * len(_DB_SYNCED_COLUMNS))
+    assignments = ", ".join(f"{c} = EXCLUDED.{c}" for c in _DB_SYNCED_COLUMNS)
+    try:
+        with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+            row = conn.execute(
+                f"SELECT {columns} FROM runtime_config WHERE id = 1"
+            ).fetchone()
+            conn.execute(
+                f"INSERT INTO runtime_config (id, {columns}, updated_at) "
+                f"VALUES (1, {placeholders}, %s) "
+                f"ON CONFLICT (id) DO UPDATE SET {assignments}, updated_at = EXCLUDED.updated_at",
+                (*wanted, now),
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"database error ({type(exc).__name__})", file=sys.stderr)
+        return 2
+
+    current = row if row is not None else (None,) * len(_DB_SYNCED_COLUMNS)
+    changed = [
+        f"{name} {old} -> {new}"
+        for name, old, new in zip(_DB_SYNCED_COLUMNS, current, wanted)
+        if old != new
+    ]
+    if changed:
+        print("config->DB sync: " + ", ".join(changed))
+    else:
+        print("config->DB sync: already in sync")
+    return 0
+
+
 def sync_env() -> int:
     """Push local config to the Render service, then deploy and wait.
 
@@ -938,6 +1119,14 @@ def sync_env() -> int:
             file=sys.stderr,
         )
         return 2
+    # Usage-cap/cooldown settings have no Render env var to push (see
+    # _DB_SYNCED_OPERATIONAL_KEYS) -- this is their sync path. Deliberately
+    # last of the pre-push guards, not first: sync_config_db() itself makes an
+    # (informational, non-refusing) Render call, and every guard above this
+    # promises to refuse before any HTTP request at all.
+    config_db_exit = sync_config_db()
+    if config_db_exit != 0:
+        return config_db_exit
     try:
         service_id = _render.find_service_id()
         if service_id is None:
@@ -1084,16 +1273,30 @@ def build_parser() -> argparse.ArgumentParser:
             "RENDER_EXTERNAL_URL, no credential"
         ),
     )
+    parser.add_argument(
+        "--sync-config-db",
+        action="store_true",
+        help=(
+            "push .env.config's usage-cap/cooldown values into the runtime_config "
+            "database only -- no Render calls, no checklist, no redeploy; takes "
+            "effect on the next claimed ticket. Needs only DATABASE_URL"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    if sum([args.sync_env, args.health_only, args.sync_config_db]) > 1:
+        print(
+            "--sync-env, --health-only, and --sync-config-db are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
+    if args.sync_config_db:
+        return sync_config_db()
     base = resolve_base_url()
     if args.health_only:
-        if args.sync_env:
-            print("--health-only and --sync-env are mutually exclusive", file=sys.stderr)
-            return 2
         if not base:
             print(
                 "a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) is required",

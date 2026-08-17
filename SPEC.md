@@ -391,19 +391,20 @@ a churning PR from ~288 to ~26 reviews/day without ever abandoning it. The two
 escalation sites are: (1) `enqueue_or_update` done/failed re-arm, and
 (2) `finalize_review`'s dirty-flag branch.
 
-**Tuning base/cap/factor.** All three are env vars
+**Tuning base/cap/factor.** All three are `.env.config` settings
 (`DISPATCHER_REREVIEW_COOLDOWN_SECONDS` default 300s,
 `DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` default 3600s,
-`DISPATCHER_REREVIEW_COOLDOWN_FACTOR` default 2.0, must be `>= 1.0`), declared
-in `render.yaml` and editable in the Render dashboard (redeploys on change).
-For live tuning without a redeploy — e.g. shrinking the base to a few seconds
-for a demo — `scripts/set_cooldown.py` writes a DB-backed override to the same
-`runtime_config` singleton row the LLM-provider override already uses
-(`scripts/set_override.py`); it takes effect on the next claimed ticket. A
-read of the override that comes back invalid (`factor < 1.0`, or `base > cap`)
-is discarded as a whole triple and falls back to the env defaults —
-`app/queue/cooldown_config.py` mirrors `app/providers/active.py`'s fail-safe
-cache pattern.
+`DISPATCHER_REREVIEW_COOLDOWN_FACTOR` default 2.0, must be `>= 1.0`) that live
+in the same `runtime_config` singleton row the LLM-provider override already
+uses (`scripts/set_override.py`), not a Render env var — the dispatcher reads
+them from the database only, never from `Settings`, so there is exactly one
+live value at all times (see the 2026-08-17 "two sources of truth" design
+note). `scripts/deploy.py --sync-config-db` pushes `.env.config`'s current
+values into that row with no redeploy (also runs automatically as part of
+`--sync-env`); it takes effect on the next claimed ticket. A row that comes
+back invalid (`factor < 1.0`, or `base > cap`) is discarded as a whole triple
+and falls back to `app/queue/cooldown_config.py`'s built-in defaults —
+mirroring `app/providers/active.py`'s fail-safe cache pattern.
 
 **Swapping API-key slots.** Each provider's credential env var can have
 numbered siblings (`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ...),
@@ -428,8 +429,11 @@ review, the dispatcher sums `total_tokens_in + total_tokens_out` (or
 (default `04:00` UTC, any `HH:MM`/`HH:MM:SS` granularity). At or over the
 cap, the ticket is deferred to the next reset instead of run — no call is
 made at all. Both caps are unset by default, so a deployment that sets
-neither env var is unaffected; `KEY_USAGE_TOKEN_CAP` wins outright when both
-are set (the cost cap is then not consulted at all). Usage is *derived*
+neither in `.env.config` is unaffected; `KEY_USAGE_TOKEN_CAP` wins outright
+when both are set (the cost cap is then not consulted at all). Like the
+cooldown settings above, these three live only in the `runtime_config` row
+(`scripts/deploy.py --sync-config-db` pushes `.env.config` into it) — never a
+Render env var. Usage is *derived*
 from the persisted `reviews` history rather than counted in memory, so a
 restart or redeploy never resets or loses it; a new `reviews.key_index`
 column records which slot paid for each review, so swapping slots with

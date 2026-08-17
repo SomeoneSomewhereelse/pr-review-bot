@@ -98,10 +98,13 @@ which is why this section exists and is kept first in the file.
   single time it happens, not just the first.**
 - **To change state, reach for this project's CLI — never for a file that
   holds secrets.** Operational state (which provider and model are active,
-  which API-key slot, cooldown parameters, usage caps) is changed through
-  the `scripts/` entry points — `set_override.py`, `set_cooldown.py`, and
-  their successors — never by hand-editing a secret-bearing file. Those
-  scripts are agent-runnable *precisely because* of how they handle
+  which API-key slot) is changed through the `scripts/` entry points --
+  `set_override.py` and its successors. Cooldown parameters and usage caps
+  are edited in `.env.config` (not secret-bearing, safe to open directly)
+  and pushed into the database with `scripts/deploy.py --sync-config-db`
+  (also runs automatically as part of `--sync-env`) -- never by hand-editing
+  a secret-bearing file. Those scripts are agent-runnable *precisely because*
+  of how they handle
   credentials: they read them programmatically through `Settings` and emit
   names, lengths, and equality results only (`scripts/_render.py::env_vars()`
   and `scripts/deploy.py::sync_env()` document that contract), so no value
