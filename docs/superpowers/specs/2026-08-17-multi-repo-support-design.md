@@ -114,8 +114,20 @@ def list_installation_repos() -> list[str]:
     legitimacy guarantee comes from HMAC verification, not from this list."""
 ```
 
+(Implementation note: this function needs an installation token, not just the
+App JWT the rest of this check uses — which means it must be called with the
+installation id `discover_installation_id_for_app()` just resolved, not with
+whatever `settings.github_app_installation_id` currently holds. An earlier
+implementation missed this and read the setting instead, breaking the
+first-deploy bootstrap path whenever that id isn't already pinned locally;
+`list_installation_repos` takes `installation_id` as an explicit parameter to
+make this impossible to get wrong silently.)
+
 `discover_installation_id(repo)` (existing, repo-scoped) is unchanged and keeps its
-docstring/behavior; its only caller becomes `scripts/deploy.py`.
+docstring/behavior. (As implemented, it ended up with no production caller —
+`scripts/deploy.py`'s verification check uses the same app-level
+`discover_installation_id_for_app()` as the boot path — so it is exercised by
+its own unit tests only.)
 
 ### 3d. `app/main.py`
 
