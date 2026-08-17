@@ -32,10 +32,21 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   - **App ID** → `GITHUB_APP_ID`. A short integer. `app/config.py` types it as
     `int`, so a non-numeric paste fails config validation at startup, and
     `app/github_app.py` reports "likely a bad `GITHUB_APP_ID`" on a 401.
-  - **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Optional** — the app
-    auto-discovers it at boot when unset. Capture it manually via
-    `GET /app/installations` (signed with a short-lived JWT) if you want it
-    pinned.
+  - **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Optional but
+    recommended on Render** — the app auto-discovers it at boot when unset,
+    but that auto-discovery is exactly the code path
+    (`app/github_app.py::discover_installation_id`) that reads
+    `GITHUB_APP_PRIVATE_KEY` and crashes the whole app at startup if that
+    credential is ever missing or wrong (e.g. renamed and not yet synced to
+    Render — see `ISSUES.md`'s 2026-08-17 entry). Pinning it removes that
+    read from the unconditional boot path entirely: a bad private key then
+    only breaks webhook handling the next time a PR event arrives, not the
+    whole service. Not a secret (a plain integer) — safe to capture and set
+    directly. Easiest way to get the value: run `scripts/deploy.py`, whose
+    `github-app` check prints it (`installation=<id>`); or query it manually
+    via `GET /app/installations` (signed with a short-lived JWT). Once it's
+    in your local `.env`, `scripts/deploy.py --sync-env` pushes it to Render
+    automatically alongside everything else.
   - **Client ID** — not used by this project at all. Easy to grab by mistake,
     since it sits on the same page.
 
@@ -318,8 +329,11 @@ The production deployment uses:
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
    - (Other provider creds as needed: `GEMINI_API_KEY`, `GCP_SERVICE_ACCOUNT_KEY`, etc.)
-   - Do **not** set `GITHUB_APP_INSTALLATION_ID`. Leaving it unset is
-     deliberate: the app auto-discovers it at boot from the App JWT.
+   - `GITHUB_APP_INSTALLATION_ID`: recommended (not required) — see §1's note
+     above on why pinning it is safer than leaving it to auto-discover at
+     every boot. Get the value from `scripts/deploy.py`'s `github-app` check
+     output, or push it automatically via `scripts/deploy.py --sync-env`
+     once it's in your local `.env`.
    - `RENDER_API_KEY` is **not** a service env var. It is optional
      operator-local tooling (Account Settings → API Keys) that lets deploy
      scripts set env vars and read logs from your machine. Never add it to
@@ -375,6 +389,20 @@ same output). Copy the output and paste it into the Render dashboard's
 is the guard that confirms your local `.env` migration is complete (mirroring
 how §4.1's own "Migrating an existing `.env`" block, for the operational-config
 split, names its own guard test).
+
+**Renaming a boot-critical var is a live-outage risk until Render is
+updated to match.** `git push` (which auto-deploys new code) and
+`scripts/deploy.py --sync-env` (which pushes renamed/changed env vars) are
+independent, unordered actions — nothing requires them to happen together.
+For `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, and
+`DATABASE_URL` specifically, that drift window is a hard outage: `app/main.py`
+reads them unconditionally at every boot, so new code running against Render's
+still-old var name crashes the whole app at startup (see `ISSUES.md`'s
+2026-08-17 entry, where exactly this happened during the verbatim-only
+credential-convention migration above). Run `scripts/deploy.py`'s
+`boot-creds-live` check *before* pushing a rename like this one — it verifies
+the current names are genuinely present on the live Render service, not just
+locally, and would FAIL in advance instead of finding out via a crash loop.
 
 ### 3.4 GitHub App installation, webhook registration, and verification
 

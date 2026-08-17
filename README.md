@@ -135,12 +135,13 @@ Run it from your own machine, not inside the Render container — `scripts/` is 
 copied into the Docker image, and `RENDER_EXTERNAL_URL` only exists inside
 Render's own container, which is why `PUBLIC_BASE_URL` is passed explicitly here.
 
-It prints one line per check and always runs all nine, so a single run
+It prints one line per check and always runs all ten, so a single run
 surfaces every problem rather than only the first:
 
 | Check | Verifies | Required? |
 |---|---|---|
 | `config` | Every setting the service needs is resolvable locally, and every provider's model var (including an active DB override) has a pricing-table entry | yes |
+| `boot-creds-live` | The vars the service reads unconditionally at every boot (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `DATABASE_URL`) are present on the deployed Render service under their current names — not just locally | optional |
 | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
 | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
@@ -171,12 +172,13 @@ refused (exit 2) — they're separate modes, not composable.
 In short: exit 0 means trust the table as-is, exit 1 means read the table for
 what to fix, exit 2 means the run never really started.
 
-Six checks are skipped with a hint unless you set the matching
+Seven checks are skipped with a hint unless you set the matching
 operator-local key. None of these keys is ever set on the Render service
 itself:
 
 - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables
-  `render-service`, `provider-live`, `api-key-live`, and `--sync-env`.
+  `boot-creds-live`, `render-service`, `provider-live`, `api-key-live`, and
+  `--sync-env`.
 - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
 - `DATABASE_URL` enables both `database` and `provider` (the override lives
   in the same database). It is normally a Render dashboard secret; export it
@@ -212,7 +214,10 @@ its own `VERTEX_MODEL` rather than sharing gemini's `LLM_MODEL`). It refuses
 to start (exit 2)
 if any wanted value is empty locally, so a blank `.env` entry can never
 overwrite a working secret on the service; only changed variables are
-pushed, and if nothing differs no deploy is triggered.
+pushed, and if nothing differs no deploy is triggered. `GITHUB_APP_INSTALLATION_ID`
+is pushed too, but only opportunistically — once it's set locally (see
+SETUP.md §1 on why pinning it is recommended); it is never required to be
+non-empty like the always-pushed vars above.
 
 If a **DB override** (see below) is active and disagrees with the
 `LLM_PROVIDER` being pushed, `--sync-env` refuses (exit 2) rather than push a

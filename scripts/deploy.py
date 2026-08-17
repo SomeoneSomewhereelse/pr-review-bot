@@ -1,6 +1,6 @@
 """Deploy verification CLI for the hosted Render + Supabase deployment.
 
-Runs nine independent checks and prints one aligned table. Every check runs
+Runs ten independent checks and prints one aligned table. Every check runs
 regardless of earlier failures, so a single run surfaces every problem rather
 than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
 CLI could not run at all.
@@ -214,6 +214,47 @@ def check_config() -> CheckResult:
     if detail_lines:
         return CheckResult("config", "FAIL", "\n".join(detail_lines))
     return CheckResult("config", "PASS", "")
+
+
+# The vars app/main.py's lifespan touches unconditionally at every boot
+# (GITHUB_WEBHOOK_SECRET always; GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY via
+# discover_installation_id() whenever GITHUB_APP_INSTALLATION_ID is unset;
+# DATABASE_URL via init_pool()) -- a rename/drop of any of these that never
+# reached Render crashes the whole ASGI app at startup, not just one feature.
+_BOOT_CREDENTIAL_NAMES = (
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_WEBHOOK_SECRET",
+    "DATABASE_URL",
+)
+
+
+def check_boot_credentials_live() -> CheckResult:
+    """Whether the vars the service needs at every boot are genuinely present
+    on the live Render service -- not just locally.
+
+    `config` validates the local `.env`; this is the check that would have
+    caught the GITHUB_APP_PRIVATE_KEY_B64 -> GITHUB_APP_PRIVATE_KEY rename
+    that crashed a live deploy (Render still had the old name, the new code
+    read the new one, got an empty string, and PyGithub's own assertion
+    crashed the whole app during startup).
+    """
+    name = "boot-creds-live"
+    if not settings.render_api_key:
+        return CheckResult(
+            name, "SKIPPED", "set RENDER_API_KEY to verify credentials against the live service"
+        )
+    try:
+        service_id = _render.find_service_id()
+        if service_id is None:
+            return CheckResult(name, "FAIL", f"no service named {settings.render_service_name}")
+        live = _render.env_vars(service_id)
+    except Exception as exc:  # noqa: BLE001
+        return CheckResult(name, "FAIL", f"Render API error ({type(exc).__name__})")
+    missing = [key for key in _BOOT_CREDENTIAL_NAMES if not live.get(key)]
+    if missing:
+        return CheckResult(name, "FAIL", "not present on Render: " + ", ".join(missing))
+    return CheckResult(name, "PASS", "present on Render: " + ", ".join(_BOOT_CREDENTIAL_NAMES))
 
 
 def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
@@ -670,6 +711,13 @@ def _wanted_env() -> dict[str, str]:
         wanted[model_var] = getattr(settings, model_var.lower(), "")
     for credential, _ in _PROVIDERS.values():
         wanted.update(_override.local_slot_values(credential))
+    # Optional and pushed only once an operator has captured it locally (0 is
+    # the auto-discover-at-boot sentinel, never a real installation id) --
+    # pinning it removes discover_installation_id()'s private-key read from
+    # the unconditional boot path, so a future credential rename degrades to
+    # "webhook handling fails on the next PR" instead of crashing the app.
+    if settings.github_app_installation_id:
+        wanted["GITHUB_APP_INSTALLATION_ID"] = str(settings.github_app_installation_id)
     return wanted
 
 
@@ -923,10 +971,12 @@ def _safe(name: str, fn, *args) -> CheckResult:
 
 
 def run_checks(repo: str, base: str) -> list[CheckResult]:
-    """All nine, cheapest and most foundational first, so a misconfiguration
-    is reported before the checks that would fail as a consequence of it."""
+    """All ten, foundational (and cheap, where possible) first, so a
+    misconfiguration is reported before the checks that would fail as a
+    consequence of it."""
     return [
         _safe("config", check_config),
+        _safe("boot-creds-live", check_boot_credentials_live),
         _safe("github-app", check_installation_and_webhook, repo, base),
         _safe("health", check_health_endpoint, base),
         _safe("database", check_database),
@@ -946,11 +996,12 @@ def build_parser() -> argparse.ArgumentParser:
         # deploy against live infrastructure during development.
         allow_abbrev=False,
         description=(
-            "Verify the hosted deployment: configuration, GitHub App installation "
-            "and webhook, health endpoint, database, active provider, whether that "
-            "provider's credential is actually live on Render, whether its active "
-            "API-key slot is actually live on Render, Render service, and keep-warm "
-            "pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
+            "Verify the hosted deployment: configuration, whether the credentials the "
+            "service needs at every boot are actually live on Render, GitHub App "
+            "installation and webhook, health endpoint, database, active provider, "
+            "whether that provider's credential is actually live on Render, whether its "
+            "active API-key slot is actually live on Render, Render service, and "
+            "keep-warm pinger. Exit 0 all passed, 1 a check failed, 2 could not run."
         ),
     )
     parser.add_argument(

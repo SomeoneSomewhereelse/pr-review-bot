@@ -298,6 +298,102 @@ def test_check_config_reports_a_missing_private_key_as_missing(complete_config, 
     assert "GITHUB_APP_PRIVATE_KEY" in result.detail
 
 
+def test_boot_credentials_live_skips_without_a_render_api_key(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "")
+    assert deploy.check_boot_credentials_live().status == "SKIPPED"
+
+
+def test_boot_credentials_live_fails_when_no_service_found(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=_service_list(name="something-else"))
+        )
+        result = deploy.check_boot_credentials_live()
+    assert result.status == "FAIL"
+    assert "no service named" in result.detail
+
+
+def test_boot_credentials_live_passes_when_all_present(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(
+                200,
+                json=_env_var_list(
+                    {
+                        "GITHUB_APP_ID": "999999",
+                        "GITHUB_APP_PRIVATE_KEY": "aGVsbG8=",
+                        "GITHUB_WEBHOOK_SECRET": "s3cret",
+                        "DATABASE_URL": "postgresql://u:p@h/db",
+                    }
+                ),
+            )
+        )
+        result = deploy.check_boot_credentials_live()
+    assert result.status == "PASS"
+
+
+def test_boot_credentials_live_fails_naming_exactly_the_missing_ones(monkeypatch):
+    """The exact failure mode this check exists to catch: a renamed
+    boot-critical var (e.g. GITHUB_APP_PRIVATE_KEY_B64 -> GITHUB_APP_PRIVATE_KEY)
+    left the new name empty on Render while the old one lingered unused."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(
+                200,
+                json=_env_var_list(
+                    {
+                        "GITHUB_APP_ID": "999999",
+                        "GITHUB_WEBHOOK_SECRET": "s3cret",
+                        "DATABASE_URL": "postgresql://u:p@h/db",
+                    }
+                ),
+            )
+        )
+        result = deploy.check_boot_credentials_live()
+    assert result.status == "FAIL"
+    assert "GITHUB_APP_PRIVATE_KEY" in result.detail
+    assert "GITHUB_APP_ID" not in result.detail
+
+
+def test_boot_credentials_live_never_leaks_a_fetched_value(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(
+                200,
+                json=_env_var_list(
+                    {
+                        "GITHUB_APP_ID": "999999",
+                        "GITHUB_APP_PRIVATE_KEY": "SUPER_SECRET_PEM_B64",
+                        "GITHUB_WEBHOOK_SECRET": "SUPER_SECRET_WEBHOOK",
+                        "DATABASE_URL": "postgresql://u:SUPER_SECRET_PW@h/db",
+                    }
+                ),
+            )
+        )
+        result = deploy.check_boot_credentials_live()
+    assert "SUPER_SECRET" not in result.detail
+
+
+def test_boot_credentials_live_fails_on_render_api_error(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(500))
+        result = deploy.check_boot_credentials_live()
+    assert result.status == "FAIL"
+
+
 @pytest.fixture
 def github_seam(monkeypatch):
     """Monkeypatch the github_app boundary and record webhook writes.
@@ -730,13 +826,14 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
 
 
 def _stub_all_checks(monkeypatch, statuses):
-    """Replace all nine checks with constant results, in report order."""
+    """Replace all ten checks with constant results, in report order."""
     names = [
-        "config", "github-app", "health", "database", "provider",
+        "config", "boot-creds-live", "github-app", "health", "database", "provider",
         "provider-live", "api-key-live", "render-service", "uptime-pinger",
     ]
     fns = [
         "check_config",
+        "check_boot_credentials_live",
         "check_installation_and_webhook",
         "check_health_endpoint",
         "check_database",
@@ -759,7 +856,7 @@ def runnable(monkeypatch):
 
 
 def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
@@ -767,7 +864,7 @@ def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
 def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
     _stub_all_checks(
         monkeypatch,
-        ["PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"],
+        ["PASS", "PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"],
     )
     assert deploy.main([]) == 1
     assert "1 failed" in capsys.readouterr().out
@@ -778,7 +875,7 @@ def test_main_with_sync_env_falls_through_to_the_checklist_on_success(
 ):
     """Spec section 8 step 7: a successful sync must not skip the post-sync
     checklist -- it is the thing that proves the sync actually took."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 0)
     assert deploy.main(["--sync-env"]) == 0
     assert "all checks passed" in capsys.readouterr().out
@@ -790,7 +887,7 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     """A non-zero sync_env() must short-circuit main() before run_checks/
     render_report ever run -- printing the table after a failed sync would
     misleadingly suggest the sync itself is fine."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 5 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 2)
     assert deploy.main(["--sync-env"]) == 2
     assert "all checks passed" not in capsys.readouterr().out
@@ -850,25 +947,25 @@ def test_main_rejects_health_only_combined_with_sync_env(monkeypatch, capsys):
     assert "mutually exclusive" in capsys.readouterr().err
 
 
-def test_run_checks_reports_all_nine_in_order(runnable, monkeypatch):
-    _stub_all_checks(monkeypatch, ["PASS"] * 9)
+def test_run_checks_reports_all_ten_in_order(runnable, monkeypatch):
+    _stub_all_checks(monkeypatch, ["PASS"] * 10)
     results = deploy.run_checks("owner/repo", BASE)
     assert [r.name for r in results] == [
-        "config", "github-app", "health", "database", "provider",
+        "config", "boot-creds-live", "github-app", "health", "database", "provider",
         "provider-live", "api-key-live", "render-service", "uptime-pinger",
     ]
 
 
 def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, monkeypatch):
     """A complete table is the deliverable; one broken check must not deprive
-    the operator of the other eight diagnoses (spec section 7.3)."""
+    the operator of the other nine diagnoses (spec section 7.3)."""
     def _boom():
         raise ValueError("unexpected")
 
-    _stub_all_checks(monkeypatch, ["PASS"] * 9)
+    _stub_all_checks(monkeypatch, ["PASS"] * 10)
     monkeypatch.setattr(deploy, "check_database", _boom)
     results = deploy.run_checks("owner/repo", BASE)
-    assert len(results) == 9
+    assert len(results) == 10
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
     assert "ValueError" in database.detail
@@ -913,6 +1010,21 @@ def test_wanted_env_includes_other_credentials_that_are_set(
     """Pushed when locally filled, so a later dashboard-side switch works."""
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
     assert deploy._wanted_env()["GROQ_API_KEY"] == "gsk_x"
+
+
+def test_wanted_env_includes_installation_id_when_set_locally(
+    gemini_only_config, monkeypatch
+):
+    """Optional -- pushed only once an operator has captured and pinned it."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 148449134)
+    assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == "148449134"
+
+
+def test_wanted_env_omits_installation_id_when_unset(gemini_only_config, monkeypatch):
+    """The default (0, meaning auto-discover at boot) must never be pushed
+    as a literal value -- that would defeat auto-discovery entirely."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 0)
+    assert "GITHUB_APP_INSTALLATION_ID" not in deploy._wanted_env()
 
 
 def test_sync_env_does_not_demand_other_providers_keys(
@@ -1666,6 +1778,7 @@ def test_run_checks_includes_the_api_key_live_row(monkeypatch):
                         lambda: deploy.CheckResult("api-key-live", "PASS", ""))
     for fn, row in (
         ("check_config", "config"),
+        ("check_boot_credentials_live", "boot-creds-live"),
         ("check_installation_and_webhook", "github-app"),
         ("check_health_endpoint", "health"),
         ("check_database", "database"),
@@ -1685,6 +1798,7 @@ def test_run_checks_includes_the_provider_live_row(monkeypatch):
                         lambda: deploy.CheckResult("provider-live", "PASS", ""))
     for fn, row in (
         ("check_config", "config"),
+        ("check_boot_credentials_live", "boot-creds-live"),
         ("check_installation_and_webhook", "github-app"),
         ("check_health_endpoint", "health"),
         ("check_database", "database"),
@@ -1705,6 +1819,7 @@ def test_run_checks_includes_the_provider_row(monkeypatch):
     # fn -> the row name it reports as, mirroring _stub_all_checks above.
     for fn, row in (
         ("check_config", "config"),
+        ("check_boot_credentials_live", "boot-creds-live"),
         ("check_installation_and_webhook", "github-app"),
         ("check_health_endpoint", "health"),
         ("check_database", "database"),
@@ -1718,6 +1833,27 @@ def test_run_checks_includes_the_provider_row(monkeypatch):
     names = [r.name for r in deploy.run_checks("owner/repo", BASE)]
     assert "provider" in names
     assert names.index("provider") > names.index("database")
+
+
+def test_run_checks_includes_the_boot_creds_live_row(monkeypatch):
+    monkeypatch.setattr(deploy, "check_boot_credentials_live",
+                        lambda: deploy.CheckResult("boot-creds-live", "PASS", ""))
+    for fn, row in (
+        ("check_config", "config"),
+        ("check_installation_and_webhook", "github-app"),
+        ("check_health_endpoint", "health"),
+        ("check_database", "database"),
+        ("check_provider", "provider"),
+        ("check_provider_live", "provider-live"),
+        ("check_api_key_live", "api-key-live"),
+        ("check_render_service", "render-service"),
+        ("check_uptime_pinger", "uptime-pinger"),
+    ):
+        monkeypatch.setattr(deploy, fn,
+                            lambda *a, _n=row: deploy.CheckResult(_n, "PASS", ""))
+    names = [r.name for r in deploy.run_checks("owner/repo", BASE)]
+    assert "boot-creds-live" in names
+    assert names.index("boot-creds-live") > names.index("config")
 
 
 def test_sync_env_refuses_when_an_override_would_mask_the_push(
