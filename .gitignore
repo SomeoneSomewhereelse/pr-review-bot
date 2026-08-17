@@ -33,4 +33,4 @@ queue.db-shm
 # Local git worktrees (superpowers subagent-driven-development scratch)
 .worktrees/
 
-tmp.json
+vertex-ai-private-key.json
