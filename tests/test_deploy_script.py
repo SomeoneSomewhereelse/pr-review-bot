@@ -1156,6 +1156,20 @@ def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys
     assert "GROQ_API_KEY" in capsys.readouterr().err
 
 
+def test_sync_env_pushes_an_empty_target_repo_without_tripping_the_empty_guard(
+    sync_ready, monkeypatch, capsys
+):
+    """Track-all mode (design doc §3e): an empty GITHUB_TARGET_REPO is a
+    deliberate, valid config value, not a missing one -- sync_env must not
+    refuse to push it the way it refuses a genuinely missing required value."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
+    code = deploy.sync_env()
+    err = capsys.readouterr().err
+    assert "GITHUB_TARGET_REPO" not in err
+    assert code == 1          # got past the empty-value guard, failed on the missing service
+
+
 def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
     sync_ready, monkeypatch, capsys
 ):

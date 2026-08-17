@@ -54,6 +54,11 @@ _ALWAYS_SYNCED = (
     "GITHUB_TARGET_REPO",
     "GITHUB_WEBHOOK_SECRET",
 )
+# GITHUB_TARGET_REPO empty is a valid, deliberate "track all repos" config
+# (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md), not a
+# missing required value -- exempt from sync_env()'s "refuse to push empty
+# values" guard below.
+_OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GITHUB_TARGET_REPO"})
 _DEPLOY_POLL_SECONDS = 10
 # A cold Docker build with a full dependency install runs well past five
 # minutes; the measured ~60s redeploys had warm layers. Too short a timeout
@@ -916,7 +921,10 @@ def sync_env() -> int:
         )
         return 2
     wanted = _wanted_env()
-    empty = sorted(key for key, value in wanted.items() if not value)
+    empty = sorted(
+        key for key, value in wanted.items()
+        if not value and key not in _OPTIONAL_EMPTY_ENV_KEYS
+    )
     if empty:
         # This guard alone runs before any HTTP request, so refusing here
         # can never leave a partial push behind. Only the keys this provider
