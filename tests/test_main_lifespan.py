@@ -89,10 +89,12 @@ async def test_lifespan_skips_discovery_when_installation_id_already_set(monkeyp
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
     monkeypatch.setattr(settings, "github_app_installation_id", 123456)
 
-    def _boom(repo_full_name: str) -> int:
-        raise AssertionError("discover_installation_id must not be called when already set")
+    def _boom() -> int:
+        raise AssertionError(
+            "discover_installation_id_for_app must not be called when already set"
+        )
 
-    monkeypatch.setattr(main.github_app, "discover_installation_id", _boom)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", _boom)
 
     async with main.lifespan(main.app):
         pass
@@ -103,24 +105,26 @@ async def test_lifespan_skips_discovery_when_installation_id_already_set(monkeyp
 async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
     """When GITHUB_APP_INSTALLATION_ID is unset (0, e.g. on Render — see design
     spec §6, "becomes optional (auto-discovered)"), lifespan must resolve it
-    via github_app.discover_installation_id before the dispatcher starts, and
-    assign the resolved id onto settings."""
+    via github_app.discover_installation_id_for_app before the dispatcher
+    starts, and assign the resolved id onto settings -- app-level discovery,
+    so this works regardless of whether GITHUB_TARGET_REPO is set (multi-repo
+    support design doc §3d)."""
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
     monkeypatch.setattr(settings, "github_app_installation_id", 0)
-    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(settings, "github_target_repo", "")
 
     calls = []
 
-    def _fake_discover(repo_full_name: str) -> int:
-        calls.append(repo_full_name)
+    def _fake_discover() -> int:
+        calls.append(1)
         return 999999
 
-    monkeypatch.setattr(main.github_app, "discover_installation_id", _fake_discover)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", _fake_discover)
 
     async with main.lifespan(main.app):
         pass
 
-    assert calls == ["owner/repo"]
+    assert calls == [1]
     assert settings.github_app_installation_id == 999999
 
 
