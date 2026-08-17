@@ -129,3 +129,45 @@ async def test_webhook_ignores_non_target_repo(monkeypatch, db_query):
                             headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-nonmatch"})
     assert resp.status_code == 202                      # accepted, but...
     assert db_query("SELECT count(*) FROM tickets") == [(0,)]   # ...no ticket enqueued
+
+
+async def test_webhook_accepts_repo_listed_in_comma_separated_allowlist(monkeypatch, db_query):
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo-a,owner/repo-b")
+    payload = {"action": "opened",
+               "repository": {"full_name": "owner/repo-b"},
+               "pull_request": {"number": 9, "head": {"sha": "def"}}}
+    body = json.dumps(payload).encode()
+    sig = _sign(body)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.post("/webhook", content=body,
+                            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-multi-match"})
+    assert resp.status_code == 202
+    assert db_query("SELECT count(*) FROM tickets") == [(1,)]
+
+
+async def test_webhook_rejects_repo_not_in_comma_separated_allowlist(monkeypatch, db_query):
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo-a,owner/repo-b")
+    payload = {"action": "opened",
+               "repository": {"full_name": "owner/OTHER-repo"},
+               "pull_request": {"number": 9, "head": {"sha": "def"}}}
+    body = json.dumps(payload).encode()
+    sig = _sign(body)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.post("/webhook", content=body,
+                            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-multi-nonmatch"})
+    assert resp.status_code == 202
+    assert db_query("SELECT count(*) FROM tickets") == [(0,)]
+
+
+async def test_webhook_accepts_any_repo_when_target_repo_unset(monkeypatch, db_query):
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    payload = {"action": "opened",
+               "repository": {"full_name": "someone/any-repo"},
+               "pull_request": {"number": 3, "head": {"sha": "xyz"}}}
+    body = json.dumps(payload).encode()
+    sig = _sign(body)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.post("/webhook", content=body,
+                            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-trackall"})
+    assert resp.status_code == 202
+    assert db_query("SELECT count(*) FROM tickets") == [(1,)]
