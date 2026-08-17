@@ -962,13 +962,34 @@ def build_parser() -> argparse.ArgumentParser:
             "then up to 900s for the newly triggered one)"
         ),
     )
+    parser.add_argument(
+        "--health-only",
+        action="store_true",
+        help=(
+            "check only /healthz and exit -- needs just PUBLIC_BASE_URL/"
+            "RENDER_EXTERNAL_URL, no GITHUB_TARGET_REPO or any credential"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-    repo = settings.github_target_repo
     base = resolve_base_url()
+    if args.health_only:
+        if args.sync_env:
+            print("--health-only and --sync-env are mutually exclusive", file=sys.stderr)
+            return 2
+        if not base:
+            print(
+                "a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) is required",
+                file=sys.stderr,
+            )
+            return 2
+        result = check_health_endpoint(base)
+        print(render_report([result]))
+        return 1 if result.status == "FAIL" else 0
+    repo = settings.github_target_repo
     if not repo or not base:
         print(
             "GITHUB_TARGET_REPO and a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) "

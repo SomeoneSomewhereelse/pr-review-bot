@@ -809,6 +809,47 @@ def test_main_returns_two_without_a_base_url(monkeypatch):
     assert deploy.main([]) == 2
 
 
+def test_main_health_only_passes_when_healthy(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(200))
+        respx.head(HEALTH).mock(return_value=httpx.Response(200))
+        assert deploy.main(["--health-only"]) == 0
+    assert "all checks passed" in capsys.readouterr().out
+
+
+def test_main_health_only_fails_when_unhealthy(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(500))
+        respx.head(HEALTH).mock(return_value=httpx.Response(500))
+        assert deploy.main(["--health-only"]) == 1
+    assert "1 failed" in capsys.readouterr().out
+
+
+def test_main_health_only_works_without_a_target_repo(monkeypatch):
+    """The whole point of --health-only: no GITHUB_TARGET_REPO needed."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(200))
+        respx.head(HEALTH).mock(return_value=httpx.Response(200))
+        assert deploy.main(["--health-only"]) == 0
+
+
+def test_main_health_only_requires_a_base_url(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "public_base_url", "")
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    assert deploy.main(["--health-only"]) == 2
+    assert "base URL" in capsys.readouterr().err
+
+
+def test_main_rejects_health_only_combined_with_sync_env(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    assert deploy.main(["--health-only", "--sync-env"]) == 2
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
 def test_run_checks_reports_all_nine_in_order(runnable, monkeypatch):
     _stub_all_checks(monkeypatch, ["PASS"] * 9)
     results = deploy.run_checks("owner/repo", BASE)
