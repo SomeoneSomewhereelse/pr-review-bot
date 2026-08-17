@@ -173,6 +173,50 @@ def discover_installation_id(repo_full_name: str) -> int:
     return int(data["id"])
 
 
+def discover_installation_id_for_app() -> int:
+    """Return the App's single installation id (GET /app/installations, App JWT).
+
+    This project's scope (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md)
+    is one GitHub account/org per App installation -- so, unlike
+    discover_installation_id(repo), this needs no repo to seed the lookup and
+    works whether or not GITHUB_TARGET_REPO is configured.
+
+    Raises `AppNotInstalledError` if the App has no installations at all.
+    Raises a plain `RuntimeError` naming every installation's account login if
+    there is more than one -- that's the out-of-scope cross-org case; an
+    operator must pin GITHUB_APP_INSTALLATION_ID explicitly rather than have
+    one silently chosen for them.
+    """
+    gh = _app_jwt_client()
+    _, data = gh.requester.requestJsonAndCheck("GET", "/app/installations")
+    if not data:
+        raise AppNotInstalledError(
+            "GitHub App has no installations: install it once via the GitHub UI "
+            "(repo or org Settings -> GitHub Apps), then redeploy."
+        )
+    if len(data) > 1:
+        accounts = ", ".join(installation["account"]["login"] for installation in data)
+        raise RuntimeError(
+            f"GitHub App has multiple installations ({accounts}) -- set "
+            "GITHUB_APP_INSTALLATION_ID explicitly to pick one."
+        )
+    return int(data[0]["id"])
+
+
+def list_installation_repos() -> list[str]:
+    """Full names of repos the installation token can access (GET
+    /installation/repositories, first page only).
+
+    Used by scripts/deploy.py's github-app check for display/verification of a
+    configured GITHUB_TARGET_REPO allowlist -- not a security boundary. The
+    webhook's legitimacy guarantee comes from HMAC verification
+    (app/webhook.py), not from this list.
+    """
+    gh = get_installation_client()
+    _, data = gh.requester.requestJsonAndCheck("GET", "/installation/repositories")
+    return [repo["full_name"] for repo in data.get("repositories", [])]
+
+
 def set_webhook_url(url: str) -> None:
     """Idempotently point the App's webhook at `url` (PATCH /app/hook/config, App JWT)."""
     gh = _app_jwt_client()

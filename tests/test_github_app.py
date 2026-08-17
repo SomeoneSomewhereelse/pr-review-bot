@@ -787,6 +787,51 @@ def test_discover_installation_id_non_404_is_not_app_not_installed(fake_transpor
     assert not isinstance(excinfo.value, github_app.AppNotInstalledError)
 
 
+def test_discover_installation_id_for_app_returns_id_with_one_installation(fake_transport):
+    fake_transport.route(
+        "GET", "/app/installations", [{"id": 555, "account": {"login": "someone"}}]
+    )
+    assert github_app.discover_installation_id_for_app() == 555
+
+
+def test_discover_installation_id_for_app_raises_app_not_installed_when_empty(fake_transport):
+    fake_transport.route("GET", "/app/installations", [])
+    with pytest.raises(github_app.AppNotInstalledError):
+        github_app.discover_installation_id_for_app()
+
+
+def test_discover_installation_id_for_app_raises_when_ambiguous(fake_transport):
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [
+            {"id": 1, "account": {"login": "org-a"}},
+            {"id": 2, "account": {"login": "org-b"}},
+        ],
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        github_app.discover_installation_id_for_app()
+    message = str(exc_info.value)
+    assert "org-a" in message
+    assert "org-b" in message
+    assert "GITHUB_APP_INSTALLATION_ID" in message
+
+
+def test_list_installation_repos_returns_full_names(fake_transport):
+    fake_transport.route(
+        "GET",
+        "/installation/repositories",
+        {
+            "total_count": 2,
+            "repositories": [
+                {"full_name": "someone/repo-a"},
+                {"full_name": "someone/repo-b"},
+            ],
+        },
+    )
+    assert github_app.list_installation_repos() == ["someone/repo-a", "someone/repo-b"]
+
+
 def test_get_webhook_url_returns_the_configured_url(fake_transport):
     fake_transport.route("GET", "/app/hook/config", {"url": "https://x.test/webhook"})
     assert github_app.get_webhook_url() == "https://x.test/webhook"
