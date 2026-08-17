@@ -142,5 +142,17 @@ class Settings(BaseSettings):
     render_api_key: str = ""
     render_service_name: str = "pr-review-engine"
 
+    def target_repos(self) -> frozenset[str]:
+        """Configured repo allowlist, or empty (= no restriction -- act on
+        every repo this App's installation is registered with).
+
+        ',' is a safe delimiter: GitHub repo names may only contain ASCII
+        letters, digits, '.', '-', and '_', and account/org names only
+        alphanumeric characters and '-' -- a comma can never occur inside a
+        genuine "owner/repo" value, so splitting on it can't misinterpret a
+        real repo's name.
+        """
+        return frozenset(r.strip() for r in self.github_target_repo.split(",") if r.strip())
+
 
 settings = Settings()

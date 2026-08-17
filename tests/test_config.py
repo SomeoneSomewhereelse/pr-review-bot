@@ -232,3 +232,23 @@ def test_vertex_model_defaults_to_the_confirmed_working_vertex_model(monkeypatch
     --sync-env's empty-value guard from ever tripping on it."""
     monkeypatch.delenv("VERTEX_MODEL", raising=False)
     assert Settings(_env_file=None).vertex_model == "gemini-2.5-flash"
+
+
+def test_target_repos_splits_comma_separated_list():
+    settings = Settings(github_target_repo="org/repo-a,org/repo-b", _env_file=None)
+    assert settings.target_repos() == frozenset({"org/repo-a", "org/repo-b"})
+
+
+def test_target_repos_strips_whitespace_around_entries():
+    settings = Settings(github_target_repo=" org/repo-a , org/repo-b ", _env_file=None)
+    assert settings.target_repos() == frozenset({"org/repo-a", "org/repo-b"})
+
+
+def test_target_repos_empty_string_means_no_restriction():
+    settings = Settings(github_target_repo="", _env_file=None)
+    assert settings.target_repos() == frozenset()
+
+
+def test_target_repos_single_value_has_no_comma():
+    settings = Settings(github_target_repo="org/repo", _env_file=None)
+    assert settings.target_repos() == frozenset({"org/repo"})
