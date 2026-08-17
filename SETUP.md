@@ -324,7 +324,10 @@ The production deployment uses:
    - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
    - `GITHUB_APP_ID`: the numeric App ID — see §1 for where to find it
    - `GITHUB_APP_PRIVATE_KEY`: base64-encoded PEM (see "Secrets encoding" below)
-   - `GITHUB_TARGET_REPO`: e.g., `<your-user>/pr-review-bot-testbed`
+   - `GITHUB_TARGET_REPO`: optional. Comma-separated allowlist, e.g.
+     `<your-user>/pr-review-bot-testbed,<your-user>/pr-review-bot-testbed-2`.
+     Leave unset to have the bot act on every repo the App installation
+     covers (see §1's install step) instead of a specific subset.
    - `GITHUB_WEBHOOK_SECRET`: (from `.env`)
    - `LLM_PROVIDER`: `groq` (or your chosen provider)
    - `GROQ_API_KEY`: (if using Groq)
@@ -449,14 +452,14 @@ locally, and would FAIL in advance instead of finding out via a crash loop.
    For a narrower, credential-free check — "is the service up?" and nothing
    else — `uv run python -m scripts.deploy --health-only` runs only the
    `health` check, needing just `PUBLIC_BASE_URL`/`RENDER_EXTERNAL_URL` and no
-   `GITHUB_TARGET_REPO` or any credential. Combining it with `--sync-env` is
+   credential. Combining it with `--sync-env` is
    refused (exit 2) — they're separate modes, not composable.
 
    | Exit | Meaning |
    | --- | --- |
    | 0 | every check passed (skipped checks do not fail the run) |
    | 1 | at least one check failed |
-   | 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, or an active DB override that would mask the push) |
+   | 2 | the run could not proceed: a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values other than an intentionally-empty `GITHUB_TARGET_REPO`, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, or an active DB override that would mask the push) |
 
    So: exit 0 means every check is green (or intentionally skipped), exit 1
    means the printed table has at least one `FAIL` row to act on, and exit 2

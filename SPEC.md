@@ -278,7 +278,9 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
   script (one-time, no manual edits on restart).
 - **Secrets/env**: `DATABASE_URL` (Supabase pooler connection string),
   `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64` (base64-encoded PEM),
-  `GITHUB_TARGET_REPO`, `LLM_PROVIDER`, plus provider creds (`GROQ_API_KEY`, etc.).
+  `GITHUB_TARGET_REPO` (optional, comma-separated allowlist — unset tracks every
+  repo the App installation covers), `LLM_PROVIDER`, plus provider creds
+  (`GROQ_API_KEY`, etc.).
 - **Cost**: see `cost.md`. Documented production total ≈ $8–10/mo at brief scale;
   the demo runs at $0 on free tiers + the $300 GCP trial credit.
 
@@ -354,7 +356,8 @@ confirmed correct as deliberate tradeoffs at free-tier scale and per the
 Trust & Safety pacing discipline in CLAUDE.md — no change made.
 
 **Durable Postgres ticket, one per PR.** `app/queue/store.py` keeps one row per
-`(repo_full_name, pr_number)` (from `GITHUB_TARGET_REPO` env var) with a `UNIQUE` constraint.
+`(repo_full_name, pr_number)` (`repo_full_name` from the incoming webhook payload,
+optionally narrowed by `GITHUB_TARGET_REPO`'s allowlist) with a `UNIQUE` constraint.
 The same module also owns a `reviews` table (one insert-only row per completed
 review — provider, model, timing, tokens, cost, and findings) that backs the
 `GET /` / `GET /api/dashboard` ops/demo page (`app/dashboard.py`); it

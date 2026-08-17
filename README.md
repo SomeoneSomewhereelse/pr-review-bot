@@ -106,8 +106,11 @@ needs no editor, assistant, or Claude Code.
 These four steps need a browser and cannot be automated — the first is
 *structurally* impossible, since GitHub does not permit an App to install itself.
 
-1. **Install the GitHub App on the target repo** — repo Settings → GitHub Apps.
-   A repo admin authorizes it once.
+1. **Install the GitHub App on your account/org** — repo Settings → GitHub Apps
+   (or org Settings, if installing org-wide). Choose "All repositories" or
+   select specific repos; an admin authorizes it once. `GITHUB_TARGET_REPO`
+   (below) is a separate, optional allowlist that can further narrow which of
+   the installed repos the bot actually acts on.
 2. **Create the Supabase project**, wait until it reports ready, and copy the
    **Session-mode pooler** connection string (port 5432, not 6543) as
    `DATABASE_URL`.
@@ -142,7 +145,7 @@ surfaces every problem rather than only the first:
 |---|---|---|
 | `config` | Every setting the service needs is resolvable locally, and every provider's model var (including an active DB override) has a pricing-table entry | yes |
 | `boot-creds-live` | The vars the service reads unconditionally at every boot (`GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `DATABASE_URL`) are present on the deployed Render service under their current names — not just locally | optional |
-| `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
+| `github-app` | The App has exactly one installation; every repo in `GITHUB_TARGET_REPO` (if set) is actually covered by it; and its webhook points here (set only if wrong) | yes |
 | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
 | `provider` | The provider that will actually run — `LLM_PROVIDER`, or an active **DB override** — has its credential set | optional |
@@ -160,14 +163,14 @@ whichever one is actually active, not just the env var.
 For a narrower, credential-free check — "is the service up?" and nothing
 else — `uv run python -m scripts.deploy --health-only` runs only the
 `health` check, needing just `PUBLIC_BASE_URL`/`RENDER_EXTERNAL_URL` and no
-`GITHUB_TARGET_REPO` or any credential. Combining it with `--sync-env` is
-refused (exit 2) — they're separate modes, not composable.
+credential. Combining it with `--sync-env` is refused (exit 2) — they're
+separate modes, not composable.
 
 | Exit | Meaning |
 | --- | --- |
 | 0 | every check passed (skipped checks do not fail the run) |
 | 1 | at least one check failed |
-| 2 | the run could not proceed: `GITHUB_TARGET_REPO` or a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, or an active DB override that would mask the push) |
+| 2 | the run could not proceed: a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; or a sync refused before any request (empty values other than an intentionally-empty `GITHUB_TARGET_REPO`, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, or an active DB override that would mask the push) |
 
 In short: exit 0 means trust the table as-is, exit 1 means read the table for
 what to fix, exit 2 means the run never really started.
