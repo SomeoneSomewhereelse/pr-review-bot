@@ -332,6 +332,10 @@ The production deployment uses:
    `Dockerfile` as-is — there is no separate Build/Start command to configure;
    the container's entrypoint is the Dockerfile's own `CMD`
    (`uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port 8000`).
+   `render.yaml` also sets `buildFilter.ignoredPaths: ["**/*.md"]` — a push
+   that only touches a Markdown file (`README.md`, `ISSUES.md`, anything
+   under `docs/`, etc.) never triggers a build/deploy, since the Dockerfile
+   never copies any of it into the image.
 4. In the **Environment** tab, set these variables:
    - `DATABASE_URL`: the Supabase Session-mode pooler string (from above)
    - `GITHUB_APP_ID`: the numeric App ID — see §1 for where to find it
