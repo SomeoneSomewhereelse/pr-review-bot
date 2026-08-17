@@ -196,10 +196,20 @@ def discover_installation_id_for_app() -> int:
     Raises a plain `RuntimeError` naming every installation's account login if
     there is more than one -- that's the out-of-scope cross-org case; an
     operator must pin GITHUB_APP_INSTALLATION_ID explicitly rather than have
-    one silently chosen for them.
+    one silently chosen for them. Any other API failure (e.g. a 401 from a
+    malformed GITHUB_APP_PRIVATE_KEY, or a transient 5xx) also raises a plain
+    RuntimeError, chained from the underlying GithubException so a caller can
+    still recover the HTTP status -- mirroring discover_installation_id's own
+    non-404 handling, so a genuine auth/API error is never misdiagnosed.
     """
     gh = _app_jwt_client()
-    _, data = gh.requester.requestJsonAndCheck("GET", "/app/installations")
+    try:
+        _, data = gh.requester.requestJsonAndCheck("GET", "/app/installations")
+    except GithubException as exc:
+        raise RuntimeError(
+            f"GitHub App installations lookup failed with {exc.status} ({exc.data}) -- "
+            "likely a bad GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY."
+        ) from exc
     if not data:
         raise AppNotInstalledError(
             "GitHub App has no installations: install it once via the GitHub UI "

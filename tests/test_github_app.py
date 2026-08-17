@@ -817,6 +817,18 @@ def test_discover_installation_id_for_app_raises_when_ambiguous(fake_transport):
     assert "GITHUB_APP_INSTALLATION_ID" in message
 
 
+def test_discover_installation_id_for_app_wraps_a_non_404_github_error(fake_transport):
+    """Mirrors discover_installation_id's own non-404 handling: a 401/5xx must
+    become an actionable RuntimeError, not propagate as a raw PyGithub
+    exception (which scripts/deploy.py's github-app check would otherwise
+    only be able to report as an opaque 'unexpected <ExceptionType>')."""
+    fake_transport.route("GET", "/app/installations", {"message": "Bad credentials"}, 401)
+    with pytest.raises(RuntimeError) as exc_info:
+        github_app.discover_installation_id_for_app()
+    assert not isinstance(exc_info.value, github_app.AppNotInstalledError)
+    assert "401" in str(exc_info.value)
+
+
 def test_list_installation_repos_returns_full_names(fake_transport):
     fake_transport.route(
         "GET",

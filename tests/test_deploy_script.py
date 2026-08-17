@@ -543,6 +543,32 @@ def test_installation_lookup_non_404_reports_the_underlying_status(github_seam, 
     assert github_seam["written"] == []
 
 
+def test_multiple_installations_error_renders_the_actionable_message(github_seam, monkeypatch):
+    """The 'multiple installations' RuntimeError has no GithubException cause
+    (it's raised directly, not chained) -- check_installation_and_webhook's
+    else branch must surface its actual message (naming the ambiguous
+    accounts) rather than falling back to the generic
+    'installation lookup failed; check App ID / private key' text, which
+    would misdiagnose an ambiguous-installation state as a credentials
+    problem."""
+    from app import github_app
+
+    def _raise():
+        raise RuntimeError(
+            "GitHub App has multiple installations (org-a, org-b) -- set "
+            "GITHUB_APP_INSTALLATION_ID explicitly to pick one."
+        )
+
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", _raise)
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
+    assert result.status == "FAIL"
+    assert "org-a" in result.detail
+    assert "org-b" in result.detail
+    assert "installation lookup failed" not in result.detail
+
+
 def test_installation_and_webhook_track_all_reports_installed_repo_count(github_seam):
     github_seam["repos"] = ["owner/a", "owner/b", "owner/c"]
     github_seam["current_url"] = "https://x.onrender.com/webhook"
