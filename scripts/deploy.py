@@ -944,7 +944,12 @@ def sync_env() -> int:
             print(f"no Render service named {settings.render_service_name}", file=sys.stderr)
             return 1
         current = _render.env_vars(service_id)
-        changed = [key for key, value in wanted.items() if current.get(key) != value]
+        # `current.get(key)` is None for a var absent on Render -- normalize
+        # to "" before comparing so an already-unset _OPTIONAL_EMPTY_ENV_KEYS
+        # entry reads as in-sync instead of "changed" on every single run
+        # (Render's API has no way to *store* an empty string -- see the PUT
+        # vs. DELETE branch below -- so absent IS how empty is represented).
+        changed = [key for key, value in wanted.items() if (current.get(key) or "") != value]
     # deliberate: nothing has been pushed yet, so a crashed lookup really is
     # "could not run at all"
     except Exception as exc:  # noqa: BLE001
@@ -959,13 +964,31 @@ def sync_env() -> int:
     pushed: list[str] = []
     for key in changed:
         try:
-            put = httpx.put(
-                f"{_render.RENDER_API}/services/{service_id}/env-vars/{key}",
-                headers=_render.headers(),
-                json={"value": wanted[key]},
-                timeout=_HTTP_TIMEOUT,
-            )
-            put.raise_for_status()
+            if wanted[key]:
+                resp = httpx.put(
+                    f"{_render.RENDER_API}/services/{service_id}/env-vars/{key}",
+                    headers=_render.headers(),
+                    json={"value": wanted[key]},
+                    timeout=_HTTP_TIMEOUT,
+                )
+            else:
+                # Render's PUT rejects an empty string outright (400: "must
+                # provide a value or generateValue must be set to true") --
+                # only reachable for an _OPTIONAL_EMPTY_ENV_KEYS entry (the
+                # empty-value guard above refuses every other key), so unset
+                # the var entirely instead; Settings' own field default
+                # ("") applies when it's absent. A 404 here means it was
+                # already absent -- also success, not a real failure.
+                resp = httpx.delete(
+                    f"{_render.RENDER_API}/services/{service_id}/env-vars/{key}",
+                    headers=_render.headers(),
+                    timeout=_HTTP_TIMEOUT,
+                )
+                if resp.status_code == 404:
+                    pushed.append(key)
+                    print(f"pushed {key} (len 0)")
+                    continue
+            resp.raise_for_status()
         except Exception as exc:  # noqa: BLE001
             if pushed:
                 return _report_partial_push(pushed, exc)

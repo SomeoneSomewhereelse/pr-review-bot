@@ -1229,6 +1229,91 @@ def test_sync_env_pushes_an_empty_target_repo_without_tripping_the_empty_guard(
     assert code == 1          # got past the empty-value guard, failed on the missing service
 
 
+def test_sync_env_deletes_rather_than_puts_an_empty_target_repo(sync_ready, monkeypatch):
+    """Render's PUT env-vars endpoint rejects an empty string outright (400:
+    "must provide a value or generateValue must be set to true"), confirmed
+    live -- an _OPTIONAL_EMPTY_ENV_KEYS entry with an empty wanted value must
+    be unset via DELETE, never PUT with value=""."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        wanted = deploy._wanted_env()
+        current = dict(wanted)
+        current["GITHUB_TARGET_REPO"] = "owner/stale-repo"  # stale non-empty value on Render
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list(current))
+        )
+        delete_route = respx.delete(
+            f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO"
+        ).mock(return_value=httpx.Response(204))
+        put_route = respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "created"}})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
+            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "live"}})
+        )
+        code = deploy.sync_env()
+    assert delete_route.called
+    assert not put_route.called
+    assert code == 0
+
+
+def test_sync_env_treats_a_404_on_delete_as_already_unset(sync_ready, monkeypatch):
+    """A 404 deleting an already-absent var is success, not a failure -- the
+    var ends up unset either way, which is the actual goal."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        wanted = deploy._wanted_env()
+        current = dict(wanted)
+        current["GITHUB_TARGET_REPO"] = "owner/stale-repo"
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list(current))
+        )
+        respx.delete(f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO").mock(
+            return_value=httpx.Response(404, json={"message": "not found"})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "created"}})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
+            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "live"}})
+        )
+        code = deploy.sync_env()
+    assert code == 0
+
+
+def test_sync_env_treats_an_already_absent_target_repo_as_in_sync(sync_ready, monkeypatch, capsys):
+    """An empty local GITHUB_TARGET_REPO and no such key on Render at all
+    (never in `current`, not merely empty -- Render can't store an empty
+    string) must read as already-in-sync, not as a change needing a DELETE
+    and a redeploy on every single --sync-env run."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        wanted = deploy._wanted_env()
+        current = {k: v for k, v in wanted.items() if k != "GITHUB_TARGET_REPO"}
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list(current))
+        )
+        delete_route = respx.delete(
+            f"{RENDER_SERVICES}/srv-1/env-vars/GITHUB_TARGET_REPO"
+        ).mock(return_value=httpx.Response(204))
+        code = deploy.sync_env()
+    assert not delete_route.called
+    assert code == 0
+    assert "already in sync" in capsys.readouterr().out
+
+
 def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
     sync_ready, monkeypatch, capsys
 ):
