@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -9,6 +10,22 @@ from app.config import settings
 from app.dashboard import router as dashboard_router
 from app.queue import dispatcher, store
 from app.webhook import router as webhook_router
+
+# The root logger defaults to WARNING when nothing configures it, so every
+# module's logging.getLogger(__name__).info(...) call (app/webhook.py,
+# app/orchestrator.py, app/dashboard.py, app/queue/dispatcher.py) was
+# silently unreachable in production -- confirmed live via Render's Logs API
+# returning no match for a line known to have fired (ISSUES.md 2026-08-17).
+# uvicorn's own --log-level flag does NOT fix this: it only configures
+# loggers named "uvicorn"/"uvicorn.access"/"uvicorn.error" with
+# propagate=False, never the root logger this app's own loggers propagate to.
+# force=True is load-bearing, not decoration: basicConfig() is a silent no-op
+# if the root logger already has a handler (confirmed under pytest, whose own
+# logging plugin attaches one before this module ever imports) -- the exact
+# "silently does nothing" failure mode this fix exists to eliminate, just
+# from a different cause. Safe in production too: root has no handler there
+# until this runs, so force=True removes nothing that wasn't already ours.
+logging.basicConfig(level=logging.INFO, force=True)
 
 
 @contextlib.asynccontextmanager

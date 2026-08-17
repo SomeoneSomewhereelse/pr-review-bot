@@ -9,6 +9,7 @@ of spinning up a real ASGI transport — no new runtime/dev dependency needed.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -34,6 +35,22 @@ async def _hang_forever() -> None:
     # Stands in for the real infinite dispatcher loop without doing any real
     # work or real sleeping; cancelled cleanly on shutdown.
     await asyncio.Event().wait()
+
+
+def test_importing_app_main_configures_the_root_logger_for_info_output():
+    """ISSUES.md 2026-08-17: the root logger defaults to WARNING when
+    unconfigured, which made every logger.info(...) call in the app
+    (app/webhook.py included) permanently unreachable in production --
+    confirmed live via Render's Logs API returning no match for a line known
+    to have fired. force=True matters specifically: a plain basicConfig() is
+    a silent no-op once any handler already exists on root, which is exactly
+    what happens under pytest itself (its own logging plugin attaches one) --
+    the same failure shape this fix exists to eliminate, from a different
+    cause. Not scoped to a fresh import: app.main is already imported (by
+    this file, above) by the time this runs, which is the real-world case
+    every other test file in this suite relies on too.
+    """
+    assert logging.getLogger("app.webhook").isEnabledFor(logging.INFO)
 
 
 async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(monkeypatch):
