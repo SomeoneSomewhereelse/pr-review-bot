@@ -305,7 +305,10 @@ def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckRes
         )
 
     if repos:
-        missing = sorted(r for r in repos if r not in covered)
+        # GitHub repo names are case-insensitive, so an allowlist entry's
+        # casing need not match the installation's reported casing exactly.
+        covered_casefold = {c.casefold() for c in covered}
+        missing = sorted(r for r in repos if r.casefold() not in covered_casefold)
         if missing:
             return CheckResult(
                 name, "FAIL",
@@ -1055,7 +1058,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "check only /healthz and exit -- needs just PUBLIC_BASE_URL/"
-            "RENDER_EXTERNAL_URL, no GITHUB_TARGET_REPO or any credential"
+            "RENDER_EXTERNAL_URL, no credential"
         ),
     )
     return parser

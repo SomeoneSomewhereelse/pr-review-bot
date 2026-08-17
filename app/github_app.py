@@ -139,7 +139,10 @@ def _app_jwt_client() -> Github:
 
 
 class AppNotInstalledError(RuntimeError):
-    """The App is not installed on the target repo (GitHub returned 404).
+    """The App has no installation covering what a caller asked about: either
+    a specific repo (discover_installation_id, GitHub returned 404) or the
+    App as a whole (discover_installation_id_for_app, an empty
+    GET /app/installations response -- no 404 involved).
 
     Subclasses RuntimeError so existing callers and tests that catch
     RuntimeError keep working; the distinct type exists so a caller can branch

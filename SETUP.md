@@ -17,6 +17,12 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   (created via `gh repo create --private`). Installation ID captured via
   `GET /app/installations` (signed with a short-lived JWT built from the PEM)
   → stored as `GITHUB_APP_INSTALLATION_ID`.
+- **Keep this App private** (not published to the GitHub Marketplace) —
+  leaving `GITHUB_TARGET_REPO` unset makes the bot act on every repo the
+  installation covers (see the multi-repo support design doc), and that's
+  only a safe default because only accounts *you* choose can install a
+  private App in the first place. A public App would let any third party
+  self-install and get their events accepted in that track-all mode.
 - **Webhook URL**: set to the deployed service's `<public-url>/webhook`. This is
   stable and set once by `uv run python -m scripts.deploy` (§3.4) — it does not
   need re-editing between runs.
@@ -35,7 +41,7 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
   - **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Optional but
     recommended on Render** — the app auto-discovers it at boot when unset,
     but that auto-discovery is exactly the code path
-    (`app/github_app.py::discover_installation_id`) that reads
+    (`app/github_app.py::discover_installation_id_for_app`) that reads
     `GITHUB_APP_PRIVATE_KEY` and crashes the whole app at startup if that
     credential is ever missing or wrong (e.g. renamed and not yet synced to
     Render — see `ISSUES.md`'s 2026-08-17 entry). Pinning it removes that
@@ -46,7 +52,13 @@ included here — see the (gitignored) `.env` and `github-app-private-key.pem`.
     `github-app` check prints it (`installation=<id>`); or query it manually
     via `GET /app/installations` (signed with a short-lived JWT). Once it's
     in your local `.env`, `scripts/deploy.py --sync-env` pushes it to Render
-    automatically alongside everything else.
+    automatically alongside everything else. **Upgrade hazard:** this
+    project's scope is one App installation (see the multi-repo support
+    design doc) — if a second installation of this same App ever appears
+    (e.g. a stray personal-account install), auto-discovery at boot becomes
+    ambiguous and the service now refuses to start rather than silently
+    picking one, which is a behavior change for anyone upgrading from an
+    older single-repo build with an unpinned installation ID.
   - **Client ID** — not used by this project at all. Easy to grab by mistake,
     since it sits on the same page.
 
@@ -409,10 +421,14 @@ locally, and would FAIL in advance instead of finding out via a crash loop.
 
 ### 3.4 GitHub App installation, webhook registration, and verification
 
-1. **Install the GitHub App** on your test repo:
+1. **Install the GitHub App** on your account/org:
    - Go to https://github.com/settings/apps/<your-app-slug>
    - Click **Install App** (if not already installed)
-   - Select the test repo (e.g., `<your-user>/pr-review-bot-testbed`)
+   - Choose **All repositories**, or select specific repos (e.g.,
+     `<your-user>/pr-review-bot-testbed`) — `GITHUB_TARGET_REPO` (§3.2) is a
+     separate, optional allowlist that can further narrow which of the
+     installed repos the bot actually acts on; it doesn't affect which repos
+     the App itself can see
 
 2. **Verify the deployment and register the webhook** (one-time, after Render
    deployment): Once Render finishes deploying, you'll have a public URL (e.g.,
@@ -434,7 +450,7 @@ locally, and would FAIL in advance instead of finding out via a crash loop.
    | Check | Verifies | Required? |
    |---|---|---|
    | `config` | Every setting the service needs is resolvable locally, and every provider's model var (including an active DB override) has a pricing-table entry | yes |
-   | `github-app` | The App is installed, and its webhook points here (set only if wrong) | yes |
+   | `github-app` | The App has exactly one installation; every repo in `GITHUB_TARGET_REPO` (if set) is actually covered by it; and its webhook points here (set only if wrong) | yes |
    | `health` | `/healthz` answers **both** `GET` and `HEAD` — UptimeRobot's free tier sends `HEAD`, so a `GET`-only endpoint lets the instance sleep | yes |
    | `database` | Postgres is reachable **and** the app has provisioned its `tickets` table there | optional |
    | `provider` | The provider that will actually run — `LLM_PROVIDER`, or an active **DB override** — has its credential set | optional |
