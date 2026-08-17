@@ -56,6 +56,11 @@ the App installation is registered with.
 `"GITHUB_TARGET_REPO"`. A single existing value (no comma) keeps working unchanged, so no
 currently-deployed single-repo config needs to change.
 
+`,` is safe as a delimiter because it can never occur inside a genuine `owner/repo` value:
+GitHub restricts repo names to ASCII letters, digits, `.`, `-`, and `_`, and account/org
+names to alphanumeric characters and `-` — a comma is illegal in either segment, so
+splitting on it can never misinterpret a real repo's name.
+
 New method:
 
 ```python
