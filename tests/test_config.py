@@ -200,7 +200,9 @@ _RETIRED_CREDENTIAL_KEYS = frozenset(
         "GCP_SERVICE_ACCOUNT_KEY_PATH",
     }
 )
-_RETIRED_NUMBERED_RE = re.compile(r"^(GCP_SERVICE_ACCOUNT_KEY_B64|GCP_SERVICE_ACCOUNT_KEY_PATH)_\d+$")
+_RETIRED_NUMBERED_RE = re.compile(
+    r"^(GCP_SERVICE_ACCOUNT_KEY_B64|GCP_SERVICE_ACCOUNT_KEY_PATH)_\d+$"
+)
 
 
 def test_no_legacy_credential_var_lives_in_the_secrets_file():
