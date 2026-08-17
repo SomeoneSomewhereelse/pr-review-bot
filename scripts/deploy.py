@@ -330,6 +330,20 @@ def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckRes
     `repos` is empty (track-all mode), nothing is configured to verify, so the
     installation id and covered-repo count are reported as PASS.
 
+    A FAIL here is deliberately not split into severities, even though it
+    covers two functionally different situations: a genuine typo (the App was
+    never installed on this repo) and a config-hygiene nit (it was installed
+    and later removed via GitHub's own UI -- zero runtime risk, since GitHub
+    simply stops delivering webhooks for a repo the App isn't installed on;
+    see app/webhook.py's target_repos() filter and CLAUDE.md's process notes
+    for the 2026-08-17 analysis). `list_installation_repos()` has no notion of
+    "was covered, now isn't" versus "never was" -- GitHub's API cannot
+    distinguish them server-side -- so a severity split here could only ever
+    soften *both* cases at once, weakening the real-typo signal to avoid
+    alarming on the harmless one. The detail message names both possible
+    causes instead, so an operator reading a FAIL knows what to check before
+    treating it as urgent.
+
     Reads the current webhook URL before writing so a re-run reports "already
     correct" rather than silently re-PATCHing, and so a failed read never
     triggers a blind write that could clobber a good URL.
@@ -364,7 +378,10 @@ def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckRes
             return CheckResult(
                 name, "FAIL",
                 f"installation={installation_id}; not covered by the installation: "
-                + ", ".join(missing),
+                + ", ".join(missing)
+                + "\neither a typo in GITHUB_TARGET_REPO, or the App was removed from "
+                "this repo after it was added (GitHub can't tell the two apart) -- "
+                "check the App's Installed repositories list on GitHub first",
             )
         repo_detail = f"installation={installation_id}; allowlist covered ({len(repos)} repo(s))"
     else:

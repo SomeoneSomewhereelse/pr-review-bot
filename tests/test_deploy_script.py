@@ -604,6 +604,20 @@ def test_installation_and_webhook_flags_allowlist_entry_not_covered(github_seam)
     assert "owner/missing-repo" in result.detail
 
 
+def test_installation_and_webhook_names_both_possible_causes_of_a_missing_repo(github_seam):
+    """ISSUES.md 2026-08-17: a missing allowlist entry could be a typo (never
+    installed) or a config-hygiene nit (installed, later removed) -- GitHub's
+    API can't tell them apart, so the detail must name both rather than
+    implying only one."""
+    github_seam["repos"] = []
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/missing-repo"}), "https://x.onrender.com"
+    )
+    assert result.status == "FAIL"
+    assert "typo" in result.detail
+    assert "removed" in result.detail
+
+
 def test_installation_and_webhook_matches_allowlist_case_insensitively(github_seam):
     """GitHub repo names are case-insensitive; an allowlist entry need not
     match the installation's reported casing exactly."""
