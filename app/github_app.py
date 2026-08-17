@@ -105,21 +105,32 @@ def _read_private_key() -> str:
         ) from exc
 
 
-def get_installation_auth() -> Auth.AppInstallationAuth:
+def get_installation_auth(installation_id: int | None = None) -> Auth.AppInstallationAuth:
     """Build the installation-level auth object (JWT -> installation token).
 
     Uses ``Auth.AppAuth`` (signs a JWT with the App's private key) wrapped in
     ``Auth.AppInstallationAuth``, which PyGithub transparently exchanges for
     a short-lived installation access token and refreshes as needed. This is
     NOT a JWT-only auth and NOT a personal-access-token auth.
+
+    `installation_id`, when given, overrides `settings.github_app_installation_id`
+    -- used by callers (e.g. list_installation_repos) that just discovered a
+    fresh id and must not depend on that setting having been assigned yet.
     """
     app_auth = Auth.AppAuth(settings.github_app_id, _read_private_key())
-    return app_auth.get_installation_auth(settings.github_app_installation_id)
+    resolved_id = (
+        installation_id if installation_id is not None else settings.github_app_installation_id
+    )
+    return app_auth.get_installation_auth(resolved_id)
 
 
-def get_installation_client() -> Github:
-    """Build a ``Github`` client authenticated as the App installation."""
-    return Github(auth=get_installation_auth())
+def get_installation_client(installation_id: int | None = None) -> Github:
+    """Build a ``Github`` client authenticated as the App installation.
+
+    `installation_id` overrides `settings.github_app_installation_id` when
+    given -- see get_installation_auth.
+    """
+    return Github(auth=get_installation_auth(installation_id))
 
 
 def _app_jwt_client() -> Github:
@@ -203,17 +214,29 @@ def discover_installation_id_for_app() -> int:
     return int(data[0]["id"])
 
 
-def list_installation_repos() -> list[str]:
-    """Full names of repos the installation token can access (GET
-    /installation/repositories, first page only).
+def list_installation_repos(installation_id: int) -> list[str]:
+    """Full names of repos `installation_id`'s token can access (GET
+    /installation/repositories, up to 100 per page -- still first page only,
+    a cheap mitigation against a false "not covered" report for an
+    allowlisted repo that happens to sit past the default page size, not a
+    full pagination implementation).
+
+    Takes `installation_id` explicitly rather than reading
+    `settings.github_app_installation_id` -- scripts/deploy.py's
+    check_installation_and_webhook calls this immediately after discovering a
+    fresh id via discover_installation_id_for_app(), before that setting is
+    ever assigned (only app/main.py's boot path assigns it). Reading the
+    setting here would 404 on every unpinned first deploy.
 
     Used by scripts/deploy.py's github-app check for display/verification of a
     configured GITHUB_TARGET_REPO allowlist -- not a security boundary. The
     webhook's legitimacy guarantee comes from HMAC verification
     (app/webhook.py), not from this list.
     """
-    gh = get_installation_client()
-    _, data = gh.requester.requestJsonAndCheck("GET", "/installation/repositories")
+    gh = get_installation_client(installation_id)
+    _, data = gh.requester.requestJsonAndCheck(
+        "GET", "/installation/repositories", parameters={"per_page": 100}
+    )
     return [repo["full_name"] for repo in data.get("repositories", [])]
 
 

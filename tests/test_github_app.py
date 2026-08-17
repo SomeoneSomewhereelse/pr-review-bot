@@ -829,7 +829,39 @@ def test_list_installation_repos_returns_full_names(fake_transport):
             ],
         },
     )
-    assert github_app.list_installation_repos() == ["someone/repo-a", "someone/repo-b"]
+    assert github_app.list_installation_repos(123456) == ["someone/repo-a", "someone/repo-b"]
+
+
+def test_list_installation_repos_uses_the_given_installation_id_not_settings(
+    fake_transport, monkeypatch
+):
+    """Regression test: list_installation_repos() must use the installation_id
+    it was given, not settings.github_app_installation_id -- scripts/deploy.py
+    calls this immediately after discovering a fresh id via
+    discover_installation_id_for_app(), before that setting is ever assigned.
+    Reading the setting instead 404s on every unpinned first deploy."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 999999)  # deliberately wrong
+    fake_transport.route(
+        "POST",
+        "/app/installations/555/access_tokens",
+        {"token": "fake-installation-token-for-555", "expires_at": "2099-01-01T00:00:00Z"},
+        201,
+    )
+    fake_transport.route(
+        "GET",
+        "/installation/repositories",
+        {"total_count": 1, "repositories": [{"full_name": "someone/repo-a"}]},
+    )
+
+    result = github_app.list_installation_repos(555)
+
+    assert result == ["someone/repo-a"]
+    token_requests = [
+        r for r in fake_transport.requests
+        if r.method == "POST" and "access_tokens" in r.url
+    ]
+    assert any("/app/installations/555/access_tokens" in r.url for r in token_requests)
+    assert not any("/app/installations/999999/access_tokens" in r.url for r in token_requests)
 
 
 def test_get_webhook_url_returns_the_configured_url(fake_transport):

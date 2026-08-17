@@ -139,8 +139,10 @@ async def test_webhook_accepts_repo_listed_in_comma_separated_allowlist(monkeypa
     body = json.dumps(payload).encode()
     sig = _sign(body)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        resp = await c.post("/webhook", content=body,
-                            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-multi-match"})
+        resp = await c.post(
+            "/webhook", content=body,
+            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-multi-match"},
+        )
     assert resp.status_code == 202
     assert db_query("SELECT count(*) FROM tickets") == [(1,)]
 
@@ -153,8 +155,10 @@ async def test_webhook_rejects_repo_not_in_comma_separated_allowlist(monkeypatch
     body = json.dumps(payload).encode()
     sig = _sign(body)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
-        resp = await c.post("/webhook", content=body,
-                            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-multi-nonmatch"})
+        resp = await c.post(
+            "/webhook", content=body,
+            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-multi-nonmatch"},
+        )
     assert resp.status_code == 202
     assert db_query("SELECT count(*) FROM tickets") == [(0,)]
 

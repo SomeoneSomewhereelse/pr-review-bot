@@ -298,7 +298,7 @@ def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckRes
         return CheckResult(name, "FAIL", detail)
 
     try:
-        covered = github_app.list_installation_repos()
+        covered = github_app.list_installation_repos(installation_id)
     except GithubException as exc:
         return CheckResult(
             name, "FAIL", f"installation={installation_id}; repo list failed ({exc.status})"

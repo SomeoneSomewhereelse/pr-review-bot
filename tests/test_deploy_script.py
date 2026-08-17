@@ -408,6 +408,12 @@ def github_seam(monkeypatch):
     The check's job is the decision logic (read -> compare -> conditionally
     write); github_app's own HTTP behavior is covered in tests/test_github_app.py
     with the requests-level fake_transport harness, which respx cannot replace.
+
+    `list_installation_repos` records the installation_id it was called with
+    in state["list_repos_called_with"] -- a regression guard for the bug
+    where check_installation_and_webhook used to call it with no argument
+    (reading a stale/unset settings value internally) instead of passing
+    through the id it just discovered.
     """
     from app import github_app
 
@@ -416,12 +422,17 @@ def github_seam(monkeypatch):
         "current_url": "",
         "written": [],
         "repos": ["owner/repo"],
+        "list_repos_called_with": None,
     }
+
+    def _list_installation_repos(installation_id):
+        state["list_repos_called_with"] = installation_id
+        return state["repos"]
 
     monkeypatch.setattr(
         github_app, "discover_installation_id_for_app", lambda: state["installation_id"]
     )
-    monkeypatch.setattr(github_app, "list_installation_repos", lambda: state["repos"])
+    monkeypatch.setattr(github_app, "list_installation_repos", _list_installation_repos)
     monkeypatch.setattr(github_app, "get_webhook_url", lambda: state["current_url"])
     monkeypatch.setattr(github_app, "set_webhook_url", lambda url: state["written"].append(url))
     return state
@@ -549,12 +560,24 @@ def test_installation_and_webhook_flags_allowlist_entry_not_covered(github_seam)
     assert "owner/missing-repo" in result.detail
 
 
+def test_installation_and_webhook_passes_the_discovered_id_to_list_installation_repos(
+    github_seam,
+):
+    """Regression guard: list_installation_repos must be called with the id
+    discover_installation_id_for_app() just returned, not read internally
+    from settings (that was the bug -- see app/github_app.py's
+    list_installation_repos docstring)."""
+    github_seam["installation_id"] = 777777
+    deploy.check_installation_and_webhook(frozenset(), "https://x.onrender.com")
+    assert github_seam["list_repos_called_with"] == 777777
+
+
 def test_installation_and_webhook_repo_list_failure_reports_status(github_seam, monkeypatch):
     from github import GithubException
 
     from app import github_app
 
-    def _raise():
+    def _raise(installation_id):
         raise GithubException(500, {"message": "boom"}, None)
 
     monkeypatch.setattr(github_app, "list_installation_repos", _raise)
