@@ -165,8 +165,6 @@ def check_config() -> CheckResult:
         missing.append("GITHUB_APP_PRIVATE_KEY")
     if not settings.github_webhook_secret:
         missing.append("GITHUB_WEBHOOK_SECRET")
-    if not settings.github_target_repo:
-        missing.append("GITHUB_TARGET_REPO")
     if not resolve_base_url():
         missing.append("PUBLIC_BASE_URL or RENDER_EXTERNAL_URL")
     entry = _PROVIDERS.get(settings.llm_provider)
@@ -257,8 +255,24 @@ def check_boot_credentials_live() -> CheckResult:
     return CheckResult(name, "PASS", "present on Render: " + ", ".join(_BOOT_CREDENTIAL_NAMES))
 
 
-def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
-    """Installation discovery plus an idempotent webhook registration.
+def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckResult:
+    """Installation discovery, allowlist verification, plus an idempotent
+    webhook registration.
+
+    Resolves the installation id at the App level (github_app.
+    discover_installation_id_for_app) -- this project's scope is one App
+    installation per account/org, so no specific repo is needed to seed the
+    lookup (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md).
+
+    If `repos` (the GITHUB_TARGET_REPO allowlist) is non-empty, every entry is
+    verified against the installation's actual repo list
+    (github_app.list_installation_repos) -- an entry the installation does not
+    cover is reported as a FAIL naming it: unlike a repo simply excluded from
+    the allowlist (silently and correctly dropped by the webhook filter), a
+    repo listed here but not installed never generates a webhook at all, so
+    this check is the only place that misconfiguration is ever visible. If
+    `repos` is empty (track-all mode), nothing is configured to verify, so the
+    installation id and covered-repo count are reported as PASS.
 
     Reads the current webhook URL before writing so a re-run reports "already
     correct" rather than silently re-PATCHing, and so a failed read never
@@ -266,36 +280,51 @@ def check_installation_and_webhook(repo: str, base: str) -> CheckResult:
     """
     name = "github-app"
     try:
-        installation_id = github_app.discover_installation_id(repo)
+        installation_id = github_app.discover_installation_id_for_app()
     except github_app.AppNotInstalledError:
-        return CheckResult(name, "FAIL", f"App not installed on {repo}; install via GitHub UI")
+        return CheckResult(name, "FAIL", "App not installed; install via GitHub UI")
     except RuntimeError as exc:
         status = getattr(exc.__cause__, "status", None)
         detail = "installation lookup failed; check App ID / private key"
         if status is not None:
             detail += f" ({status})"
+        else:
+            detail = str(exc)
         return CheckResult(name, "FAIL", detail)
+
+    try:
+        covered = github_app.list_installation_repos()
+    except GithubException as exc:
+        return CheckResult(
+            name, "FAIL", f"installation={installation_id}; repo list failed ({exc.status})"
+        )
+
+    if repos:
+        missing = sorted(r for r in repos if r not in covered)
+        if missing:
+            return CheckResult(
+                name, "FAIL",
+                f"installation={installation_id}; not covered by the installation: "
+                + ", ".join(missing),
+            )
+        repo_detail = f"installation={installation_id}; allowlist covered ({len(repos)} repo(s))"
+    else:
+        repo_detail = f"installation={installation_id}; tracking all {len(covered)} repo(s)"
 
     wanted = f"{base}/webhook"
     try:
         current = github_app.get_webhook_url()
     except GithubException as exc:
-        return CheckResult(
-            name, "FAIL", f"installation={installation_id}; webhook read failed ({exc.status})"
-        )
+        return CheckResult(name, "FAIL", f"{repo_detail}; webhook read failed ({exc.status})")
     if current == wanted:
-        return CheckResult(name, "PASS", f"installation={installation_id}; webhook already correct")
+        return CheckResult(name, "PASS", f"{repo_detail}; webhook already correct")
     try:
         github_app.set_webhook_url(wanted)
     except GithubException as exc:
-        return CheckResult(
-            name, "FAIL", f"installation={installation_id}; webhook write failed ({exc.status})"
-        )
+        return CheckResult(name, "FAIL", f"{repo_detail}; webhook write failed ({exc.status})")
     if current:
-        return CheckResult(
-            name, "PASS", f"installation={installation_id}; webhook updated from {current}"
-        )
-    return CheckResult(name, "PASS", f"installation={installation_id}; webhook set")
+        return CheckResult(name, "PASS", f"{repo_detail}; webhook updated from {current}")
+    return CheckResult(name, "PASS", f"{repo_detail}; webhook set")
 
 
 def check_health_endpoint(base: str) -> CheckResult:
@@ -970,14 +999,14 @@ def _safe(name: str, fn, *args) -> CheckResult:
         return CheckResult(name, "FAIL", f"unexpected {type(exc).__name__}")
 
 
-def run_checks(repo: str, base: str) -> list[CheckResult]:
+def run_checks(repos: frozenset[str], base: str) -> list[CheckResult]:
     """All ten, foundational (and cheap, where possible) first, so a
     misconfiguration is reported before the checks that would fail as a
     consequence of it."""
     return [
         _safe("config", check_config),
         _safe("boot-creds-live", check_boot_credentials_live),
-        _safe("github-app", check_installation_and_webhook, repo, base),
+        _safe("github-app", check_installation_and_webhook, repos, base),
         _safe("health", check_health_endpoint, base),
         _safe("database", check_database),
         _safe("provider", check_provider),
@@ -1040,11 +1069,9 @@ def main(argv: list[str] | None = None) -> int:
         result = check_health_endpoint(base)
         print(render_report([result]))
         return 1 if result.status == "FAIL" else 0
-    repo = settings.github_target_repo
-    if not repo or not base:
+    if not base:
         print(
-            "GITHUB_TARGET_REPO and a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) "
-            "are required",
+            "a public base URL (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) is required",
             file=sys.stderr,
         )
         return 2
@@ -1052,7 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = sync_env()
         if exit_code != 0:
             return exit_code
-    results = run_checks(repo, base)
+    results = run_checks(settings.target_repos(), base)
     print(render_report(results))
     return 1 if any(r.status == "FAIL" for r in results) else 0
 

@@ -122,11 +122,18 @@ def test_check_config_passes_when_everything_is_present(complete_config):
 def test_check_config_names_every_missing_key_at_once(complete_config, monkeypatch):
     """One run should surface all of them, not the first alphabetically."""
     monkeypatch.setattr(settings, "github_webhook_secret", "")
-    monkeypatch.setattr(settings, "github_target_repo", "")
+    monkeypatch.setattr(settings, "github_app_private_key", "")
     result = deploy.check_config()
     assert result.status == "FAIL"
     assert "GITHUB_WEBHOOK_SECRET" in result.detail
-    assert "GITHUB_TARGET_REPO" in result.detail
+    assert "GITHUB_APP_PRIVATE_KEY" in result.detail
+
+
+def test_check_config_passes_with_an_empty_target_repo(complete_config, monkeypatch):
+    """GITHUB_TARGET_REPO is optional (multi-repo support design doc §3e) --
+    an empty value (track-all mode) must not be reported as missing."""
+    monkeypatch.setattr(settings, "github_target_repo", "")
+    assert deploy.check_config().status == "PASS"
 
 
 def test_check_config_requires_the_key_for_the_selected_provider(complete_config, monkeypatch):
@@ -404,11 +411,17 @@ def github_seam(monkeypatch):
     """
     from app import github_app
 
-    state = {"installation_id": 424242, "current_url": "", "written": []}
+    state = {
+        "installation_id": 424242,
+        "current_url": "",
+        "written": [],
+        "repos": ["owner/repo"],
+    }
 
     monkeypatch.setattr(
-        github_app, "discover_installation_id", lambda repo: state["installation_id"]
+        github_app, "discover_installation_id_for_app", lambda: state["installation_id"]
     )
+    monkeypatch.setattr(github_app, "list_installation_repos", lambda: state["repos"])
     monkeypatch.setattr(github_app, "get_webhook_url", lambda: state["current_url"])
     monkeypatch.setattr(github_app, "set_webhook_url", lambda url: state["written"].append(url))
     return state
@@ -416,7 +429,9 @@ def github_seam(monkeypatch):
 
 def test_webhook_already_correct_passes_without_writing(github_seam):
     github_seam["current_url"] = "https://x.onrender.com/webhook"
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "PASS"
     assert "already correct" in result.detail
     assert github_seam["written"] == []          # no PATCH issued
@@ -424,7 +439,9 @@ def test_webhook_already_correct_passes_without_writing(github_seam):
 
 def test_webhook_mismatch_is_updated(github_seam):
     github_seam["current_url"] = "https://old.example/webhook"
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "PASS"
     assert github_seam["written"] == ["https://x.onrender.com/webhook"]
     assert "https://old.example/webhook" in result.detail
@@ -432,7 +449,9 @@ def test_webhook_mismatch_is_updated(github_seam):
 
 def test_webhook_absent_is_set_on_first_deploy(github_seam):
     github_seam["current_url"] = ""
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "PASS"
     assert github_seam["written"] == ["https://x.onrender.com/webhook"]
 
@@ -440,11 +459,13 @@ def test_webhook_absent_is_set_on_first_deploy(github_seam):
 def test_app_not_installed_fails_with_an_actionable_detail(github_seam, monkeypatch):
     from app import github_app
 
-    def _raise(repo):
+    def _raise():
         raise github_app.AppNotInstalledError("not installed")
 
-    monkeypatch.setattr(github_app, "discover_installation_id", _raise)
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", _raise)
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "FAIL"
     assert "install" in result.detail.lower()
     assert github_seam["written"] == []
@@ -460,7 +481,9 @@ def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
         raise GithubException(500, {"message": "boom"}, None)
 
     monkeypatch.setattr(github_app, "get_webhook_url", _raise)
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "FAIL"
     assert "500" in result.detail
     assert github_seam["written"] == []
@@ -479,7 +502,9 @@ def test_failed_webhook_write_fails_with_the_status(github_seam, monkeypatch):
         raise GithubException(502, {"message": "boom"}, None)
 
     monkeypatch.setattr(github_app, "set_webhook_url", _raise)
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "FAIL"
     assert "502" in result.detail
     assert "webhook write failed" in result.detail
@@ -492,17 +517,52 @@ def test_installation_lookup_non_404_reports_the_underlying_status(github_seam, 
 
     from app import github_app
 
-    def _raise(repo):
+    def _raise():
         try:
             raise GithubException(401, {"message": "bad credentials"}, None)
         except GithubException as exc:
             raise RuntimeError("installation lookup failed") from exc
 
-    monkeypatch.setattr(github_app, "discover_installation_id", _raise)
-    result = deploy.check_installation_and_webhook("owner/repo", "https://x.onrender.com")
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", _raise)
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
     assert result.status == "FAIL"
     assert "401" in result.detail
     assert github_seam["written"] == []
+
+
+def test_installation_and_webhook_track_all_reports_installed_repo_count(github_seam):
+    github_seam["repos"] = ["owner/a", "owner/b", "owner/c"]
+    github_seam["current_url"] = "https://x.onrender.com/webhook"
+    result = deploy.check_installation_and_webhook(frozenset(), "https://x.onrender.com")
+    assert result.status == "PASS"
+    assert "tracking all 3" in result.detail
+
+
+def test_installation_and_webhook_flags_allowlist_entry_not_covered(github_seam):
+    github_seam["repos"] = ["owner/repo"]
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo", "owner/missing-repo"}), "https://x.onrender.com"
+    )
+    assert result.status == "FAIL"
+    assert "owner/missing-repo" in result.detail
+
+
+def test_installation_and_webhook_repo_list_failure_reports_status(github_seam, monkeypatch):
+    from github import GithubException
+
+    from app import github_app
+
+    def _raise():
+        raise GithubException(500, {"message": "boom"}, None)
+
+    monkeypatch.setattr(github_app, "list_installation_repos", _raise)
+    result = deploy.check_installation_and_webhook(
+        frozenset({"owner/repo"}), "https://x.onrender.com"
+    )
+    assert result.status == "FAIL"
+    assert "500" in result.detail
 
 
 def test_health_passes_when_get_and_head_both_return_200():
@@ -893,10 +953,14 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     assert "all checks passed" not in capsys.readouterr().out
 
 
-def test_main_returns_two_without_a_target_repo(monkeypatch):
+def test_main_proceeds_without_a_target_repo_track_all_mode(monkeypatch, capsys):
+    """GITHUB_TARGET_REPO is optional (track-all mode) -- its absence alone
+    must not block main() the way a missing base URL does."""
     monkeypatch.setattr(settings, "github_target_repo", "")
     monkeypatch.setattr(settings, "public_base_url", BASE)
-    assert deploy.main([]) == 2
+    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
+    assert deploy.main([]) == 0
+    assert "all checks passed" in capsys.readouterr().out
 
 
 def test_main_returns_two_without_a_base_url(monkeypatch):
@@ -949,7 +1013,7 @@ def test_main_rejects_health_only_combined_with_sync_env(monkeypatch, capsys):
 
 def test_run_checks_reports_all_ten_in_order(runnable, monkeypatch):
     _stub_all_checks(monkeypatch, ["PASS"] * 10)
-    results = deploy.run_checks("owner/repo", BASE)
+    results = deploy.run_checks(frozenset({"owner/repo"}), BASE)
     assert [r.name for r in results] == [
         "config", "boot-creds-live", "github-app", "health", "database", "provider",
         "provider-live", "api-key-live", "render-service", "uptime-pinger",
@@ -964,7 +1028,7 @@ def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, 
 
     _stub_all_checks(monkeypatch, ["PASS"] * 10)
     monkeypatch.setattr(deploy, "check_database", _boom)
-    results = deploy.run_checks("owner/repo", BASE)
+    results = deploy.run_checks(frozenset({"owner/repo"}), BASE)
     assert len(results) == 10
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
