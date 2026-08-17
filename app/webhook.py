@@ -55,7 +55,7 @@ async def _enqueue_from_payload(payload: dict) -> None:
         logger.warning("pull_request webhook missing repo/pr number; skipping enqueue")
         return
     target_repos = settings.target_repos()
-    if target_repos and repo_full_name not in target_repos:
+    if target_repos and repo_full_name.casefold() not in {r.casefold() for r in target_repos}:
         logger.info("Ignoring webhook for non-target repo %s", repo_full_name)
         return
     head_sha = (pull_request.get("head") or {}).get("sha")

@@ -586,6 +586,16 @@ def test_installation_and_webhook_flags_allowlist_entry_not_covered(github_seam)
     assert "owner/missing-repo" in result.detail
 
 
+def test_installation_and_webhook_matches_allowlist_case_insensitively(github_seam):
+    """GitHub repo names are case-insensitive; an allowlist entry need not
+    match the installation's reported casing exactly."""
+    github_seam["repos"] = ["owner/repo"]
+    result = deploy.check_installation_and_webhook(
+        frozenset({"Owner/Repo"}), "https://x.onrender.com"
+    )
+    assert result.status == "PASS"
+
+
 def test_installation_and_webhook_passes_the_discovered_id_to_list_installation_repos(
     github_seam,
 ):

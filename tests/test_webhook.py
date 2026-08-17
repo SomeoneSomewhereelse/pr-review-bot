@@ -163,6 +163,24 @@ async def test_webhook_rejects_repo_not_in_comma_separated_allowlist(monkeypatch
     assert db_query("SELECT count(*) FROM tickets") == [(0,)]
 
 
+async def test_webhook_matches_allowlist_entry_case_insensitively(monkeypatch, db_query):
+    """GitHub repo names are case-insensitive; a webhook payload's casing need
+    not match GITHUB_TARGET_REPO's casing exactly."""
+    monkeypatch.setattr(settings, "github_target_repo", "Owner/Repo-A")
+    payload = {"action": "opened",
+               "repository": {"full_name": "owner/repo-a"},
+               "pull_request": {"number": 11, "head": {"sha": "ghi"}}}
+    body = json.dumps(payload).encode()
+    sig = _sign(body)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+        resp = await c.post(
+            "/webhook", content=body,
+            headers={"X-Hub-Signature-256": sig, "X-GitHub-Delivery": "d-casefold"},
+        )
+    assert resp.status_code == 202
+    assert db_query("SELECT count(*) FROM tickets") == [(1,)]
+
+
 async def test_webhook_accepts_any_repo_when_target_repo_unset(monkeypatch, db_query):
     monkeypatch.setattr(settings, "github_target_repo", "")
     payload = {"action": "opened",
