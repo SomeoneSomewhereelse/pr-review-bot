@@ -100,6 +100,26 @@ def test_merge_env_on_empty_existing_text_just_renders_updates(tmp_path):
     assert init_env.merge_env("", {"A": "1"}) == "A=1\n"
 
 
+def test_merge_env_drops_a_stale_duplicate_key_untouched_by_updates(tmp_path):
+    """A malformed existing .env with the same key on two lines must not
+    survive as a duplicate -- the second, unreplaced line could shadow the
+    first under a "last occurrence wins" dotenv loader."""
+    existing = "GITHUB_APP_ID=1\nGITHUB_APP_ID=2\n"
+    merged = init_env.merge_env(existing, {})
+    assert merged.count("GITHUB_APP_ID=") == 1
+    assert "GITHUB_APP_ID=1\n" in merged
+    assert "GITHUB_APP_ID=2" not in merged
+
+
+def test_merge_env_drops_a_stale_duplicate_when_the_second_occurrence_is_updated(tmp_path):
+    """The update must apply once, at the first occurrence, and the stale
+    second occurrence must not linger afterward with the old value."""
+    existing = "A=old\nA=old2\n"
+    merged = init_env.merge_env(existing, {"A": "new"})
+    assert merged.count("A=") == 1
+    assert merged == "A=new\n"
+
+
 def test_merge_env_reproduces_the_kept_app_credentials_bug_scenario(tmp_path):
     """This is the exact scenario from the bug report: an operator ran
     create_github_app.py, then re-ran init_env.py answering "keep it?" for

@@ -4,6 +4,7 @@ never the repo's real .env."""
 from __future__ import annotations
 
 import base64
+import html
 import json
 
 import httpx
@@ -109,3 +110,81 @@ def test_no_default_path_points_at_the_repo_root():
 
     signature = inspect.signature(cga.write_credentials)
     assert signature.parameters["path"].default is inspect.Parameter.empty
+
+
+def test_main_reports_a_clear_message_when_the_callback_port_is_taken(monkeypatch, capsys):
+    """A bare OSError (e.g. 'Address already in use') must not surface as an
+    unhandled traceback -- main() should return 1 with an operator-friendly
+    message, and never even reach the browser-opening step."""
+
+    def _raise(*_args, **_kwargs):
+        raise OSError("Address already in use")
+
+    monkeypatch.setattr(cga.http.server, "HTTPServer", _raise)
+    monkeypatch.setattr(
+        cga.webbrowser, "open",
+        lambda *_a, **_k: pytest.fail("must not open a browser after a bind failure"),
+    )
+
+    result = cga.main(["--base-url", "https://e.com"])
+
+    assert result == 1
+    err = capsys.readouterr().err
+    assert str(cga._CALLBACK_PORT) in err
+    assert "OSError" in err
+
+
+def test_do_get_state_mismatch_sets_the_flag_and_leaves_code_none():
+    """On a state mismatch, do_GET must record WHY (state_mismatch=True) and
+    leave code None, so main() can report the real reason instead of the
+    generic 'no code' message."""
+    cga._CallbackHandler.state = "expected-state"
+    cga._CallbackHandler.code = None
+    cga._CallbackHandler.state_mismatch = False
+    cga._CallbackHandler.received.clear()
+
+    handler = cga._CallbackHandler.__new__(cga._CallbackHandler)
+    handler.path = "/callback?state=wrong&code=abc123"
+    replies: list[tuple[int, str]] = []
+    handler._reply = lambda status, body: replies.append((status, body))
+
+    handler.do_GET()
+
+    assert cga._CallbackHandler.state_mismatch is True
+    assert cga._CallbackHandler.code is None
+    assert cga._CallbackHandler.received.is_set()
+    assert replies and replies[0][0] == 400
+
+
+def test_do_get_matching_state_clears_the_mismatch_flag_and_sets_code():
+    cga._CallbackHandler.state = "expected-state"
+    cga._CallbackHandler.code = None
+    cga._CallbackHandler.state_mismatch = False
+    cga._CallbackHandler.received.clear()
+
+    handler = cga._CallbackHandler.__new__(cga._CallbackHandler)
+    handler.path = "/callback?state=expected-state&code=abc123"
+    handler._reply = lambda status, body: None
+
+    handler.do_GET()
+
+    assert cga._CallbackHandler.code == "abc123"
+    assert cga._CallbackHandler.state_mismatch is False
+
+
+def test_manifest_json_is_html_escaped_not_just_quote_escaped():
+    """The old `.replace("'", "&#39;")` only handled single quotes; an `&` or
+    `<` in an operator-supplied --name could still corrupt the HTML attribute
+    or break the page."""
+    manifest = cga.build_manifest("A & B <img onerror=alert(1)>", "https://e.com", "http://l/c")
+    raw = json.dumps(manifest)
+    escaped = html.escape(raw, quote=True)
+
+    cga._CallbackHandler.manifest_json = escaped
+    cga._CallbackHandler.state = "st"
+    handler = cga._CallbackHandler.__new__(cga._CallbackHandler)
+    form = handler._form()
+
+    assert escaped in form
+    assert "<img" not in form
+    assert html.unescape(escaped) == raw

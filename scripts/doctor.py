@@ -173,7 +173,9 @@ def check_local_config() -> deploy.CheckResult:
 
     Reports NAMES and a decode boolean only -- never a value, never a length in
     the failure path. Pasting the PEM verbatim instead of its base64 form is the
-    single most common setup mistake, so it gets its own line.
+    single most common setup mistake, so it gets its own line. The FAIL detail
+    also names which credentials ARE present (via a `(have: ...)` clause) --
+    never their values, just like the missing list.
     """
     present = _probes.present_secrets()
     missing = [name for name in _APP_CREDENTIALS if name not in present]

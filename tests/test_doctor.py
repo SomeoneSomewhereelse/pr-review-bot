@@ -168,6 +168,27 @@ def test_hosted_step_eight_is_reachable_when_public_url_clears_but_pinger_fails(
     assert step.number == 8
 
 
+def test_main_runs_the_full_wiring_and_prints_plain_text(capsys):
+    """Exercises main()'s own wiring end-to-end -- resolve_track,
+    deploy.resolve_base_url, build_state, current_step, render -- which no
+    other test drives together. Runs against whatever local state exists;
+    the point is the wiring succeeding and returning 0, not a specific
+    check outcome."""
+    result = doctor.main([])
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "step" in out.lower() or "complete" in out.lower()
+
+
+def test_main_json_variant_prints_well_formed_json(capsys):
+    result = doctor.main(["--json"])
+    assert result == 0
+    out = capsys.readouterr().out
+    parsed = json.loads(out)
+    assert "track" in parsed
+    assert "checks" in parsed
+
+
 def test_main_rejects_an_unknown_track(capsys):
     """argparse's choices= exits 2 itself, the same shape
     tests/test_deploy_script.py::test_main_rejects_an_unknown_flag asserts."""

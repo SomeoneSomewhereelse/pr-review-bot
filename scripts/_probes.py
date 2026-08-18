@@ -28,7 +28,7 @@ from app.providers import registry
 # than derived from a prefix, for the same reason app/config.py's
 # OPERATIONAL_KEYS is: a pattern would silently pick up future names.
 PROBED_SECRETS: tuple[str, ...] = (
-    "GITHUB_APP_ID",
+    "GITHUB_APP_ID",  # not itself a secret, but doctor.py needs to know if it's configured
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_WEBHOOK_SECRET",
     "DATABASE_URL",

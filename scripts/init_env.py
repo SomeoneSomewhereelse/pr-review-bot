@@ -92,16 +92,27 @@ def merge_env(existing_text: str, updates: dict[str, str]) -> str:
     the order `updates` was given. This is how a "keep it? [Y]" answer for an
     already-set secret survives a re-run: this function never inspects that
     secret's value, only its line's key name.
+
+    If `existing_text` is already malformed and defines the same key on two
+    different lines, only the first occurrence is kept -- the stale duplicate
+    is dropped rather than passed through, because a duplicate key surviving
+    into the written file could shadow the fresh value under a dotenv-style
+    "last occurrence wins" loader.
     """
     remaining = dict(updates)
+    seen: set[str] = set()
     lines: list[str] = []
     for line in existing_text.splitlines():
         match = _KEY_LINE.match(line)
-        if match and match.group(1) in remaining:
-            name = match.group(1)
+        name = match.group(1) if match else None
+        if name is not None and name in seen:
+            continue  # stale duplicate of a key already written above -- drop it
+        if match and name in remaining:
             lines.append(f"{name}={remaining.pop(name)}")
         else:
             lines.append(line)
+        if name is not None:
+            seen.add(name)
     for name, value in remaining.items():
         lines.append(f"{name}={value}")
     return "".join(f"{line}\n" for line in lines)
@@ -112,7 +123,7 @@ def write_env(text: str, path: Path, overwrite: bool = False) -> None:
     unless overwrite=True -- so neither a test nor a mis-run can destroy a
     working credential file."""
     if path.exists() and not overwrite:
-        raise SystemExit(f"{path} already exists; re-run with --overwrite to replace it.")
+        raise SystemExit(f"{path} already exists; pass overwrite=True to replace it.")
     path.write_text(text, encoding="utf-8", newline="\n")
 
 

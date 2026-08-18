@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import http.server
 import json
 import secrets
@@ -140,6 +141,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
     manifest_json = ""
     state = ""
     code: str | None = None
+    state_mismatch: bool = False
     received = threading.Event()
 
     def do_GET(self) -> None:  # noqa: N802 -- stdlib naming
@@ -148,6 +150,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         if parsed.path == "/callback":
             if params.get("state", [""])[0] != type(self).state:
                 self._reply(400, "<h1>State mismatch -- start over.</h1>")
+                type(self).state_mismatch = True
                 type(self).received.set()  # unblock main(); code stays None
                 return
             type(self).code = params.get("code", [""])[0]
@@ -190,12 +193,21 @@ def main(argv: list[str] | None = None) -> int:
 
     redirect = f"http://localhost:{_CALLBACK_PORT}/callback"
     manifest = build_manifest(args.name, args.base_url, redirect)
-    _CallbackHandler.manifest_json = json.dumps(manifest).replace("'", "&#39;")
+    _CallbackHandler.manifest_json = html.escape(json.dumps(manifest), quote=True)
     _CallbackHandler.state = secrets.token_urlsafe(16)
     _CallbackHandler.code = None
+    _CallbackHandler.state_mismatch = False
     _CallbackHandler.received.clear()
 
-    server = http.server.HTTPServer(("localhost", _CALLBACK_PORT), _CallbackHandler)
+    try:
+        server = http.server.HTTPServer(("localhost", _CALLBACK_PORT), _CallbackHandler)
+    except OSError as exc:
+        print(
+            f"could not bind to localhost:{_CALLBACK_PORT} ({type(exc).__name__}) -- "
+            "close whatever else is using that port and try again",
+            file=sys.stderr,
+        )
+        return 1
     threading.Thread(target=server.serve_forever, daemon=True).start()
     start = f"http://localhost:{_CALLBACK_PORT}/"
     print(f"opening {start} -- approve the App in your browser")
@@ -217,7 +229,10 @@ def main(argv: list[str] | None = None) -> int:
         server.shutdown()
 
     if not _CallbackHandler.code:
-        print("no code in GitHub's redirect", file=sys.stderr)
+        if _CallbackHandler.state_mismatch:
+            print("state mismatch in GitHub's redirect -- start over", file=sys.stderr)
+        else:
+            print("no code in GitHub's redirect", file=sys.stderr)
         return 1
 
     creds = exchange_code(_CallbackHandler.code)
