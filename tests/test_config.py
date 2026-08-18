@@ -251,3 +251,36 @@ def test_cost_cap_is_gone_entirely():
     open -- worse than no cap (design spec 2026-08-18 section 6c)."""
     assert "KEY_USAGE_COST_CAP_USD" not in OPERATIONAL_KEYS
     assert not hasattr(Settings(_env_file=None), "key_usage_cost_cap_usd")
+
+
+def test_llm_provider_has_no_implicit_default(monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    assert Settings(_env_file=None).llm_provider == ""
+
+
+def test_importing_config_with_llm_provider_unset_does_not_raise(monkeypatch):
+    """A pydantic *required* field would raise at import, because
+    app/config.py builds Settings() at module scope -- which would break
+    pytest and scripts/doctor.py before either could report the problem
+    (design spec 2026-08-18 section 6e). This pins that trap shut.
+
+    reload() rebinds app.config's module-level `settings` to a brand-new
+    Settings() instance -- every OTHER already-imported module's own
+    `from app.config import settings` still points at the pre-reload
+    singleton, so leaving the swap in place desyncs the two for the rest of
+    the process (a later test doing a fresh in-function `from app.config
+    import settings` would silently pick up the orphaned new instance while
+    e.g. app/providers/credentials.py keeps reading the old one -- confirmed
+    by 7 unrelated full-suite failures before this restore was added). The
+    try/finally restores the original singleton so reload is exercised (and
+    a genuine raise there still fails this test) without leaking a second,
+    diverging Settings object into the rest of the suite.
+    """
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    import importlib
+    import app.config
+    original_settings = app.config.settings
+    try:
+        importlib.reload(app.config)  # must not raise
+    finally:
+        app.config.settings = original_settings

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app import github_app
 from app.config import settings
 from app.dashboard import router as dashboard_router
+from app.providers import registry
 from app.queue import dispatcher, store
 from app.webhook import router as webhook_router
 
@@ -30,6 +31,12 @@ logging.basicConfig(level=logging.INFO, force=True)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.llm_provider not in registry.PROVIDERS:
+        raise RuntimeError(
+            f"LLM_PROVIDER={settings.llm_provider!r} is not a supported provider "
+            f"-- refusing to start. Set it in .env.config to one of: "
+            f"{', '.join(sorted(registry.PROVIDERS))}."
+        )
     if not settings.github_webhook_secret:
         raise RuntimeError(
             "GITHUB_WEBHOOK_SECRET is unset -- refusing to start "

@@ -206,6 +206,20 @@ def test_check_config_reports_a_bad_provider_alongside_other_missing_keys(
     assert "unknown" in detail
 
 
+def test_check_config_reports_an_unset_provider_distinctly_from_unsupported(
+    complete_config, monkeypatch
+):
+    """LLM_PROVIDER lost its implicit "gemini" default (design spec
+    2026-08-18 section 6e) -- an empty value must read as "unset, no
+    default" rather than reusing the "not supported" wording written for a
+    non-empty but unrecognized value."""
+    monkeypatch.setattr(settings, "llm_provider", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "unset" in result.detail
+    assert "gemini" in result.detail
+
+
 @pytest.mark.parametrize("model_var", ["LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
 def test_check_pricing_warns_on_an_unpriced_model(complete_config, monkeypatch, model_var):
     """A model with no pricing.py rate entry no longer crashes anything --
@@ -1447,10 +1461,11 @@ def test_sync_env_treats_an_already_absent_target_repo_as_in_sync(sync_ready, mo
 def test_sync_env_refuses_gemini_provider_with_no_synced_gemini_key(
     sync_ready, monkeypatch, capsys
 ):
-    """settings.llm_provider defaults to 'gemini'; if the selected provider's
-    own credential is empty locally, syncing would push a service that boots
-    and answers /healthz while failing every real review, with every
-    checklist check reporting green. The guard must fire before any request."""
+    """gemini selected (LLM_PROVIDER has no implicit default anymore -- design
+    spec 2026-08-18 section 6e); if the selected provider's own credential is
+    empty locally, syncing would push a service that boots and answers
+    /healthz while failing every real review, with every checklist check
+    reporting green. The guard must fire before any request."""
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "")
     with respx.mock:

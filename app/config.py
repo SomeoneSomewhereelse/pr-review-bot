@@ -60,7 +60,13 @@ class Settings(BaseSettings):
     github_target_repo: str = ""
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
-    llm_provider: str = "gemini"
+    # No implicit default: guessing a provider means silently running (and
+    # billing) against one the operator never chose. Validated in
+    # app/main.py's lifespan rather than as a pydantic required field --
+    # `settings = Settings()` below is module-scope, so a required field would
+    # raise at IMPORT, breaking pytest and scripts/doctor.py before either
+    # could report the problem (design spec 2026-08-18 section 6e).
+    llm_provider: str = ""
     # ``llm_model`` is consumed by the gemini provider only. Groq is a
     # different model family (Llama, via a different vendor), so it
     # gets its own var — a single shared LLM_MODEL became ambiguous the moment

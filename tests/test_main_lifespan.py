@@ -26,6 +26,11 @@ def _env(db, monkeypatch):
     # every test that isn't specifically exercising that check needs a
     # non-empty stand-in.
     monkeypatch.setattr(settings, "github_webhook_secret", "test-webhook-secret")
+    # Same reasoning for LLM_PROVIDER, which lost its implicit "gemini"
+    # default (design spec 2026-08-18 section 6e) -- lifespan now refuses to
+    # start with an empty/unsupported provider too, so every test that isn't
+    # specifically exercising that check needs a valid stand-in.
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
     dispatcher.reset_blocked_until()
     yield
     dispatcher.reset_blocked_until()
@@ -143,6 +148,23 @@ async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
 
     assert calls == [1]
     assert settings.github_app_installation_id == 999999
+
+
+async def test_lifespan_refuses_to_start_without_llm_provider(monkeypatch):
+    """LLM_PROVIDER lost its implicit "gemini" default (design spec
+    2026-08-18 section 6e) -- guessing a provider would mean silently
+    running (and billing) against one the operator never chose. Checked
+    before the webhook-secret check, so a non-empty secret alone isn't
+    enough to reach it."""
+    monkeypatch.setattr(settings, "llm_provider", "")
+    monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
+    with pytest.raises(RuntimeError) as exc:
+        async with main.lifespan(main.app):
+            pass
+    message = str(exc.value)
+    assert "LLM_PROVIDER" in message
+    for provider in ("gemini", "groq", "vertex"):
+        assert provider in message
 
 
 async def test_lifespan_fails_loudly_when_webhook_secret_is_empty(monkeypatch):

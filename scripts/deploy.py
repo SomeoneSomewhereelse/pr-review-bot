@@ -222,8 +222,12 @@ def check_config() -> CheckResult:
         missing.append("GITHUB_WEBHOOK_SECRET")
     if not resolve_base_url():
         missing.append("PUBLIC_BASE_URL or RENDER_EXTERNAL_URL")
-    entry = _PROVIDERS.get(settings.llm_provider)
-    if entry is None:
+    if not settings.llm_provider:
+        problems.append(
+            "LLM_PROVIDER is unset -- there is no default. Set it in .env.config "
+            f"to one of: {', '.join(sorted(_PROVIDERS))}"
+        )
+    elif (entry := _PROVIDERS.get(settings.llm_provider)) is None:
         accepted = ", ".join(sorted(_PROVIDERS))
         problems.append(
             f"LLM_PROVIDER={settings.llm_provider!r} is not supported "
