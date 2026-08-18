@@ -1,6 +1,6 @@
 """Deploy verification CLI for the hosted Render + Supabase deployment.
 
-Runs ten independent checks and prints one aligned table. Every check runs
+Runs eleven independent checks and prints one aligned table. Every check runs
 regardless of earlier failures, so a single run surfaces every problem rather
 than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
 CLI could not run at all.
@@ -145,7 +145,7 @@ class CheckResult:
     indented continuation line, used only to enumerate observed values."""
 
     name: str
-    status: Literal["PASS", "FAIL", "SKIPPED"]
+    status: Literal["PASS", "WARN", "FAIL", "SKIPPED"]
     detail: str = ""
 
 
@@ -235,32 +235,6 @@ def check_config() -> CheckResult:
         if not getattr(settings, credential.lower(), ""):
             missing.append(credential)
 
-    # A problem, not a missing key: the var HAS a value, it is simply not one
-    # the pricing table recognizes. Existing detail_lines assembly (missing,
-    # then problems) needs no change.
-    overrides: dict[str, str | None] = {}
-    if settings.database_url:
-        try:
-            overrides = _resolved_model_overrides()
-        # deliberate: DB trouble degrades to a local-only pricing check, never
-        # a crash -- mirrors check_provider()'s own degrade-on-exception
-        except Exception:  # noqa: BLE001
-            overrides = {}
-    for provider, model_var, model, known in _unpriced_models(overrides):
-        if overrides.get(provider):
-            problems.append(
-                f"{provider} model override {model!r} has no pricing-table entry "
-                f"(known {provider} models: {known}); {model_var} is not consulted "
-                "while this override is active. Clear it or add a pricing.py "
-                f"entry: uv run python -m scripts.set_override {provider} "
-                "--clear-model --no-activate"
-            )
-        else:
-            problems.append(
-                f"{model_var}={model!r} has no pricing-table entry for {provider} "
-                f"(known: {known})"
-            )
-
     detail_lines = []
     if missing:
         detail_lines.append("missing: " + ", ".join(missing))
@@ -268,6 +242,31 @@ def check_config() -> CheckResult:
     if detail_lines:
         return CheckResult("config", "FAIL", "\n".join(detail_lines))
     return CheckResult("config", "PASS", "")
+
+
+def check_pricing() -> CheckResult:
+    """Whether every provider's effective model has a rate-table entry.
+
+    WARN, never FAIL: an unpriced model runs fine, it simply produces no cost
+    estimate on the comment (app/providers/pricing.py::estimate_cost_usd
+    returns None). This used to be folded into check_config as a FAIL, back
+    when an unpriced model crashed the review after three paid calls
+    (design spec 2026-08-18 section 6b).
+    """
+    overrides: dict[str, str | None] = {}
+    if settings.database_url:
+        try:
+            overrides = _resolved_model_overrides()
+        except Exception:  # noqa: BLE001
+            overrides = {}
+    lines = [
+        f"{model_var}={model!r} has no pricing-table entry for {provider} "
+        f"(known: {known}) -- reviews run, with no cost estimate"
+        for provider, model_var, model, known in _unpriced_models(overrides)
+    ]
+    if lines:
+        return CheckResult("pricing", "WARN", "\n".join(lines))
+    return CheckResult("pricing", "PASS", "")
 
 
 # The vars app/main.py's lifespan touches unconditionally at every boot
@@ -772,12 +771,20 @@ def render_report(results: list[CheckResult]) -> str:
         )
         lines.extend(" " * (_NAME_WIDTH + _STATUS_WIDTH) + line for line in rest)
     failed = sum(1 for r in results if r.status == "FAIL")
+    warned = sum(1 for r in results if r.status == "WARN")
     skipped = sum(1 for r in results if r.status == "SKIPPED")
     lines.append("")
+    parts = []
     if failed:
-        lines.append(f"{failed} failed, {skipped} skipped -- see {_README_ANCHOR}")
-    elif skipped:
-        lines.append(f"all checks passed, {skipped} skipped")
+        parts.append(f"{failed} failed")
+    if warned:
+        parts.append(f"{warned} warning" + ("s" if warned != 1 else ""))
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    if failed:
+        lines.append(", ".join(parts) + f" -- see {_README_ANCHOR}")
+    elif parts:
+        lines.append("all checks passed, " + ", ".join(parts))
     else:
         lines.append("all checks passed")
     return "\n".join(lines)
@@ -1108,19 +1115,17 @@ def sync_env() -> int:
                 return 2
     # Deliberately NOT inside the `if settings.database_url:` block above: this
     # is a pure local pricing-table lookup, so it must run whether or not a
-    # database is configured. Like every other pre-push guard here it runs
-    # before any HTTP request, so refusing can never leave a partial push
-    # behind. No --force escape hatch, unlike set_override.py --model: that is
-    # a deliberate one-shot operator action, this is the automated push path,
-    # and forcing an unpriced model past it is the exact mistake this guard
-    # exists to prevent.
+    # database is configured. A warning, not a refusal (design spec 2026-08-18
+    # section 6b): an unpriced model runs fine, it simply produces no cost
+    # estimate on the review comment (app/providers/pricing.py::
+    # estimate_cost_usd returns None), so there is nothing here worth blocking
+    # the push over.
     for provider, model_var, model, known in _unpriced_models():
         print(
-            f"refusing to sync: {model_var}={model!r} has no pricing-table entry for "
-            f"{provider} (known: {known}); fix .env.config or add a pricing.py entry first",
+            f"warning: {model_var}={model!r} has no pricing-table entry for {provider} "
+            f"(known: {known}); reviews will run without a cost estimate",
             file=sys.stderr,
         )
-        return 2
     wanted = _wanted_env()
     empty = sorted(
         key for key, value in wanted.items()
@@ -1240,11 +1245,12 @@ def _safe(name: str, fn, *args) -> CheckResult:
 
 
 def run_checks(repos: frozenset[str], base: str) -> list[CheckResult]:
-    """All ten, foundational (and cheap, where possible) first, so a
+    """All eleven, foundational (and cheap, where possible) first, so a
     misconfiguration is reported before the checks that would fail as a
     consequence of it."""
     return [
         _safe("config", check_config),
+        _safe("pricing", check_pricing),
         _safe("boot-creds-live", check_boot_credentials_live),
         _safe("github-app", check_installation_and_webhook, repos, base),
         _safe("health", check_health_endpoint, base),

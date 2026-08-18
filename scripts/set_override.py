@@ -18,11 +18,11 @@ exist on Render, the active index, and the active model -- and never a
 credential value, so it is safe to run and to paste anywhere (including into
 an agent's own transcript).
 
---model refuses a value with no app/providers/pricing.py rate-table entry for
-this provider (exit 2, naming the models that ARE known), unless --force is
-also given -- an unpriced model would otherwise only fail with a KeyError
-inside app/orchestrator.py's cost estimation, after all three specialists have
-already made real, paid calls.
+--model warns, rather than refuses, a value with no app/providers/pricing.py
+rate-table entry for this provider -- naming the models that ARE known -- and
+still sets the override: an unpriced model runs fine, it simply produces no
+cost estimate on the review comment (app/providers/pricing.py::
+estimate_cost_usd returns None; design spec 2026-08-18 section 6b).
 
 The model override is per-provider, not global: setting one only changes the
 model used when that specific provider is active, so flipping the active
@@ -269,23 +269,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.model is not None:
         stripped_model = args.model.strip()
-        # Refuse an unpriced model before it can ever reach a paid call: without
-        # this, app/orchestrator.py's cost-estimation KeyError only surfaces
-        # AFTER all three specialists already ran, and the dispatcher retries a
-        # hard failure up to dispatcher_max_failure_attempts times -- one bad
-        # --model command could otherwise burn ~15 paid completions with no
-        # review ever posted. --force is the same escape hatch used for a
-        # failed Render live-verification below.
-        if not pricing.is_known(args.provider, stripped_model) and not args.force:
+        # Warn on an unpriced model rather than refuse it (design spec
+        # 2026-08-18 section 6b): an unpriced model runs fine, it simply
+        # produces no cost estimate on the review comment
+        # (app/providers/pricing.py::estimate_cost_usd returns None) -- there
+        # is nothing here worth blocking an operator's explicit, one-shot
+        # command over. --force still governs the separate live-credential
+        # check below, unrelated to pricing.
+        if not pricing.is_known(args.provider, stripped_model):
             known = pricing.models_for(args.provider)
             known_str = ", ".join(known) if known else "(none known for this provider)"
             print(
-                f"refusing to set {args.provider} model to {stripped_model!r}: no "
-                f"pricing-table entry for it (known {args.provider} models: {known_str}); "
-                "pass --force to set it anyway",
+                f"warning: {args.provider} model {stripped_model!r} has no "
+                f"pricing-table entry (known {args.provider} models: {known_str}); "
+                "the override is set anyway -- reviews will run without a cost estimate",
                 file=sys.stderr,
             )
-            return 2
     if (
         args.no_activate
         and args.index is None

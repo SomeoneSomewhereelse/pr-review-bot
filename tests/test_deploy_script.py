@@ -121,6 +121,15 @@ def test_render_report_summary_when_everything_passes():
     assert report.split("\n")[-1] == "all checks passed"
 
 
+def test_a_warn_row_does_not_count_as_a_failure():
+    report = deploy.render_report([
+        deploy.CheckResult("config", "PASS"),
+        deploy.CheckResult("pricing", "WARN", "GROQ_MODEL='x' has no pricing-table entry"),
+    ])
+    assert "1 warning" in report
+    assert "failed" not in report
+
+
 @pytest.fixture
 def complete_config(monkeypatch):
     """Every value check_config requires, present and valid."""
@@ -199,20 +208,35 @@ def test_check_config_reports_a_bad_provider_alongside_other_missing_keys(
 
 
 @pytest.mark.parametrize("model_var", ["LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
-def test_check_config_fails_on_an_unpriced_model(complete_config, monkeypatch, model_var):
-    """A model with no pricing.py rate entry reaches an uncaught KeyError in
-    app/orchestrator.py's estimate_cost_usd() -- AFTER all three specialists
-    already made real, paid calls. check_config is the local pre-flight that
-    catches it first, for EVERY provider's var, not just the active one's."""
+def test_check_pricing_warns_on_an_unpriced_model(complete_config, monkeypatch, model_var):
+    """A model with no pricing.py rate entry no longer crashes anything --
+    estimate_cost_usd() returns None for it (spec section 6a) -- so this is a
+    WARN, not a FAIL, reported for EVERY provider's var, not just the active
+    one's (design spec 2026-08-18 section 6b)."""
     monkeypatch.setattr(settings, model_var.lower(), "totally-made-up-model")
-    result = deploy.check_config()
-    assert result.status == "FAIL"
+    result = deploy.check_pricing()
+    assert result.status == "WARN"
     assert model_var in result.detail
     assert "totally-made-up-model" in result.detail
     provider = next(p for p, (_c, mv) in deploy._PROVIDERS.items() if mv == model_var)
     assert provider in result.detail
     for known in pricing.models_for(provider):
         assert known in result.detail      # the fix is named, not just the fault
+
+
+def test_unpriced_model_warns_and_does_not_fail_the_run(monkeypatch):
+    """An unpriced model is a missing nice-to-have, not a blocker: the review
+    still runs, it just carries no cost estimate (spec section 6b)."""
+    monkeypatch.setattr(settings, "groq_model", "llama-3.1-8b-instant")
+    result = deploy.check_pricing()
+    assert result.status == "WARN"
+    assert "llama-3.1-8b-instant" in result.detail
+    assert "GROQ_MODEL" in result.detail
+
+
+def test_pricing_check_passes_when_every_model_is_priced(monkeypatch):
+    monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
+    assert deploy.check_pricing().status == "PASS"
 
 
 def test_check_config_ignores_default_models(complete_config):
@@ -227,57 +251,59 @@ def test_check_config_ignores_default_models(complete_config):
     assert deploy.check_config().status == "PASS"
 
 
-def test_check_config_reports_an_unpriced_model_alongside_other_missing_keys(
+def test_check_config_and_check_pricing_each_report_their_own_problem(
     complete_config, monkeypatch
 ):
-    """An unpriced model must not mask problems already collected -- one run
-    surfaces every problem, per this module's own contract."""
+    """An unpriced model is check_pricing's problem to report, not
+    check_config's (design spec 2026-08-18 section 6b) -- one run still
+    surfaces every problem, just split across two rows instead of one."""
     monkeypatch.setattr(settings, "github_webhook_secret", "")
     monkeypatch.setattr(settings, "groq_model", "totally-made-up-model")
-    detail = deploy.check_config().detail
-    assert "GITHUB_WEBHOOK_SECRET" in detail
-    assert "GROQ_MODEL" in detail
+    config_detail = deploy.check_config().detail
+    assert "GITHUB_WEBHOOK_SECRET" in config_detail
+    assert "GROQ_MODEL" not in config_detail
+    pricing_detail = deploy.check_pricing().detail
+    assert "GROQ_MODEL" in pricing_detail
 
 
-def test_check_config_uses_the_local_value_without_a_database_url(
+def test_check_pricing_uses_the_local_value_without_a_database_url(
     complete_config, monkeypatch
 ):
     """No DATABASE_URL -> no override to resolve -> local-only check, exactly
     the pre-existing behavior."""
     monkeypatch.setattr(settings, "database_url", "")
-    assert deploy.check_config().status == "PASS"
+    assert deploy.check_pricing().status == "PASS"
 
 
-def test_check_config_fails_on_an_unpriced_db_model_override(complete_config, monkeypatch):
-    """The residual gap this fixes: set_override.py --model --force can put an
-    unpriced model into live rotation, and check_config must not report PASS
+def test_check_pricing_warns_on_an_unpriced_db_model_override(complete_config, monkeypatch):
+    """The residual gap this fixes: set_override.py --model can put an
+    unpriced model into live rotation, and check_pricing must not report PASS
     for it just because .env.config's own value is fine."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(
         deploy, "_resolved_model_overrides",
         lambda: {"gemini": None, "groq": None, "vertex": "totally-made-up-model"},
     )
-    result = deploy.check_config()
-    assert result.status == "FAIL"
+    result = deploy.check_pricing()
+    assert result.status == "WARN"
     assert "totally-made-up-model" in result.detail
     assert "vertex" in result.detail
-    assert "override" in result.detail.lower()
 
 
-def test_check_config_passes_a_priced_db_model_override(complete_config, monkeypatch):
+def test_check_pricing_passes_a_priced_db_model_override(complete_config, monkeypatch):
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(
         deploy, "_resolved_model_overrides",
         lambda: {"gemini": None, "groq": None, "vertex": "gemini-2.5-flash"},
     )
-    assert deploy.check_config().status == "PASS"
+    assert deploy.check_pricing().status == "PASS"
 
 
-def test_check_config_degrades_to_local_only_when_the_db_read_fails(
+def test_check_pricing_degrades_to_local_only_when_the_db_read_fails(
     complete_config, monkeypatch
 ):
     """A DB-read failure must degrade to the local-only check, never crash the
-    whole config row for an unrelated reason -- mirrors check_provider()'s own
+    whole pricing row for an unrelated reason -- mirrors check_provider()'s own
     degrade-on-exception behavior."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
 
@@ -285,7 +311,7 @@ def test_check_config_degrades_to_local_only_when_the_db_read_fails(
         raise RuntimeError("db unreachable")
 
     monkeypatch.setattr(deploy, "_resolved_model_overrides", _boom)
-    assert deploy.check_config().status == "PASS"
+    assert deploy.check_pricing().status == "PASS"
 
 
 def test_check_config_requires_the_gcp_key_when_vertex_selected(complete_config, monkeypatch):
@@ -977,13 +1003,14 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
 
 
 def _stub_all_checks(monkeypatch, statuses):
-    """Replace all ten checks with constant results, in report order."""
+    """Replace all eleven checks with constant results, in report order."""
     names = [
-        "config", "boot-creds-live", "github-app", "health", "database", "provider",
-        "provider-live", "api-key-live", "render-service", "uptime-pinger",
+        "config", "pricing", "boot-creds-live", "github-app", "health", "database",
+        "provider", "provider-live", "api-key-live", "render-service", "uptime-pinger",
     ]
     fns = [
         "check_config",
+        "check_pricing",
         "check_boot_credentials_live",
         "check_installation_and_webhook",
         "check_health_endpoint",
@@ -1007,7 +1034,7 @@ def runnable(monkeypatch):
 
 
 def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
@@ -1015,7 +1042,8 @@ def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
 def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
     _stub_all_checks(
         monkeypatch,
-        ["PASS", "PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "SKIPPED", "SKIPPED"],
+        ["PASS", "PASS", "PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS",
+         "SKIPPED", "SKIPPED"],
     )
     assert deploy.main([]) == 1
     assert "1 failed" in capsys.readouterr().out
@@ -1026,7 +1054,7 @@ def test_main_with_sync_env_falls_through_to_the_checklist_on_success(
 ):
     """Spec section 8 step 7: a successful sync must not skip the post-sync
     checklist -- it is the thing that proves the sync actually took."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 0)
     assert deploy.main(["--sync-env"]) == 0
     assert "all checks passed" in capsys.readouterr().out
@@ -1038,7 +1066,7 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     """A non-zero sync_env() must short-circuit main() before run_checks/
     render_report ever run -- printing the table after a failed sync would
     misleadingly suggest the sync itself is fine."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 2)
     assert deploy.main(["--sync-env"]) == 2
     assert "all checks passed" not in capsys.readouterr().out
@@ -1049,7 +1077,7 @@ def test_main_proceeds_without_a_target_repo_track_all_mode(monkeypatch, capsys)
     must not block main() the way a missing base URL does."""
     monkeypatch.setattr(settings, "github_target_repo", "")
     monkeypatch.setattr(settings, "public_base_url", BASE)
-    _stub_all_checks(monkeypatch, ["PASS"] * 6 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
@@ -1102,25 +1130,25 @@ def test_main_rejects_health_only_combined_with_sync_env(monkeypatch, capsys):
     assert "mutually exclusive" in capsys.readouterr().err
 
 
-def test_run_checks_reports_all_ten_in_order(runnable, monkeypatch):
-    _stub_all_checks(monkeypatch, ["PASS"] * 10)
+def test_run_checks_reports_all_eleven_in_order(runnable, monkeypatch):
+    _stub_all_checks(monkeypatch, ["PASS"] * 11)
     results = deploy.run_checks(frozenset({"owner/repo"}), BASE)
     assert [r.name for r in results] == [
-        "config", "boot-creds-live", "github-app", "health", "database", "provider",
-        "provider-live", "api-key-live", "render-service", "uptime-pinger",
+        "config", "pricing", "boot-creds-live", "github-app", "health", "database",
+        "provider", "provider-live", "api-key-live", "render-service", "uptime-pinger",
     ]
 
 
 def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, monkeypatch):
     """A complete table is the deliverable; one broken check must not deprive
-    the operator of the other nine diagnoses (spec section 7.3)."""
+    the operator of the other ten diagnoses (spec section 7.3)."""
     def _boom():
         raise ValueError("unexpected")
 
-    _stub_all_checks(monkeypatch, ["PASS"] * 10)
+    _stub_all_checks(monkeypatch, ["PASS"] * 11)
     monkeypatch.setattr(deploy, "check_database", _boom)
     results = deploy.run_checks(frozenset({"owner/repo"}), BASE)
-    assert len(results) == 10
+    assert len(results) == 11
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
     assert "ValueError" in database.detail
@@ -2467,41 +2495,56 @@ def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
 
 
 @pytest.mark.parametrize("model_var", ["LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL"])
-def test_sync_env_refuses_to_push_an_unpriced_model(
+def test_sync_env_warns_but_proceeds_past_an_unpriced_model(
     sync_ready, monkeypatch, capsys, model_var
 ):
-    """Pushing an unpriced model would burn real, paid specialist calls on
-    every PR review until someone noticed the KeyError in the logs -- and the
-    dispatcher retries a hard failure, so one bad value repeats it. The
-    refusal must fire before any HTTP request, so nothing is half-pushed."""
+    """An unpriced model no longer crashes anything -- estimate_cost_usd()
+    returns None for it (spec section 6a) -- so this is now a non-blocking
+    warning; the push proceeds past it. Returning None from find_service_id
+    stops the run one guard later, at "no such service", which proves it got
+    PAST the pricing guard without needing a full push."""
     monkeypatch.setattr(settings, model_var.lower(), "totally-made-up-model")
-    called = []
-    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
     code = deploy.sync_env()
-    assert code == 2                       # "could not run", not a partial failure
+    assert code == 1                       # "no Render service", not "refused"
     err = capsys.readouterr().err
+    assert "warning:" in err
     assert model_var in err
     assert "totally-made-up-model" in err
-    assert ".env.config" in err            # names the file to fix
-    assert called == []                    # refused before any HTTP
+    assert "no Render service named" in err
 
 
-def test_sync_env_refuses_on_a_non_active_providers_unpriced_model(
+def test_sync_env_warns_on_a_non_active_providers_unpriced_model(
     sync_ready, monkeypatch, capsys
 ):
     """sync_ready selects groq, whose own model is fine -- but VERTEX_MODEL is
     pushed by _wanted_env() too, and a DB provider flip can activate vertex
-    with no redeploy. An unpriced value there must block the push exactly as
-    the active provider's would; the refusal must name vertex specifically."""
+    with no redeploy. An unpriced value there warns exactly as the active
+    provider's would; the warning must name vertex specifically."""
     assert settings.llm_provider == "groq"
     monkeypatch.setattr(settings, "vertex_model", "totally-made-up-model")
-    called = []
-    monkeypatch.setattr(deploy._render, "find_service_id", lambda: called.append(1))
-    assert deploy.sync_env() == 2
+    monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
+    assert deploy.sync_env() == 1
     err = capsys.readouterr().err
+    assert "warning:" in err
     assert "VERTEX_MODEL" in err
     assert "vertex" in err
-    assert called == []
+
+
+def test_sync_env_no_longer_refuses_an_unpriced_model(monkeypatch):
+    """The old exit-2 existed only because estimate_cost_usd raised. It does
+    not any more (spec section 6a), so the guard is now a warning.
+
+    Asserted against the source because sync_env's other pre-push guards make
+    a behavioural test require mocking the whole Render API surface. The
+    matched fragment is the f-string literal unique to the removed refusal."""
+    import inspect
+
+    monkeypatch.setattr(settings, "groq_model", "llama-3.1-8b-instant")
+    assert deploy._unpriced_models(), "precondition: the model must be unpriced"
+    source = inspect.getsource(deploy.sync_env)
+    assert "refusing to sync: {model_var}" not in source
+    assert "warning: {model_var}" in source
 
 
 def test_sync_env_allows_a_priced_model(sync_ready, monkeypatch, capsys):

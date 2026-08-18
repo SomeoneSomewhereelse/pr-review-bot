@@ -314,25 +314,26 @@ def test_known_model_is_accepted():
     assert store.get_model_override("vertex") == "gemini-2.5-flash"
 
 
-def test_unknown_model_is_refused(capsys):
-    """No pricing-table entry for (vertex, this model) -- must refuse (exit 2)
-    before ever writing the override, and the refusal must name the models
-    this table actually knows for vertex so an operator/agent can see the
-    valid options immediately."""
+def test_unknown_model_warns_but_still_sets_the_override(capsys):
+    """No pricing-table entry for (vertex, this model) is a warning, not a
+    refusal (design spec 2026-08-18 section 6b): the override is still
+    written, and the warning must name the models this table actually knows
+    for vertex so an operator/agent can see the valid options immediately."""
     code = set_override.main(
         ["vertex", "--model", "no-such-model", "--no-activate"]
     )
     err = capsys.readouterr().err
-    assert code == 2
+    assert code == 0
     assert "no-such-model" in err
     assert "gemini-2.5-flash" in err
-    assert store.get_model_override("vertex") is None
+    assert store.get_model_override("vertex") == "no-such-model"
 
 
-def test_force_overrides_the_unknown_model_refusal():
-    """--force is the shared escape hatch for both this refusal and the
-    Render live-verification refusal above -- it must let an unpriced model
-    through when an operator genuinely wants one."""
+def test_force_is_harmless_for_an_unpriced_model():
+    """--force is no longer needed to get an unpriced model set (that refusal
+    is gone -- it's a warning now), but it must not be rejected or change the
+    outcome either: --force still governs the separate live-credential check
+    below, unrelated to pricing."""
     assert set_override.main(
         ["vertex", "--model", "no-such-model", "--no-activate", "--force"]
     ) == 0
@@ -402,3 +403,9 @@ def test_list_never_prints_a_credential_value(capsys, monkeypatch):
 def test_list_must_be_used_alone(capsys):
     assert set_override.main(["--list", "groq"]) == 2
     assert "--list must be used alone" in capsys.readouterr().err
+
+
+def test_model_override_warns_instead_of_refusing_an_unpriced_model(capsys):
+    exit_code = set_override.main(["groq", "--model", "llama-3.1-8b-instant", "--no-activate"])
+    assert exit_code == 0
+    assert "no pricing-table entry" in capsys.readouterr().err
