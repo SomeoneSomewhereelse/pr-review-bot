@@ -6,29 +6,42 @@ of truth for cost calculations.
 
 from __future__ import annotations
 
-# USD per 1M tokens: (rate_in, rate_out), keyed by (provider, model).
-# gemini/gemini-flash-latest: AI-Studio's per-token rate (see cost.md).
-# groq/llama-3.3-70b-versatile: taken from Groq's live /openai/v1/models
-# response (`pricing.prompt` / `pricing.completion`, USD per token) on
-# 2026-07-23 — $0.59 / $0.79 per 1M tokens. Representative; verify at build
-# time against https://groq.com/pricing before relying on it for real spend.
-# vertex/gemini-flash-latest: the same model at the same published rate as the
-# gemini entry below -- Vertex and AI-Studio differ in the auth path, not in
-# what a token costs. Kept as a separate key because estimate_cost_usd is
-# called with the ACTIVE provider name, and a missing entry is a hard KeyError.
-# vertex/gemini-2.5-flash: confirmed live 2026-08-14 (see ISSUES.md) that
-# `gemini-flash-latest` does not exist as a Vertex publisher model for this
-# project/region -- only the 2.5 generation is available there, so a real
-# vertex deployment needs VERTEX_MODEL=gemini-2.5-flash, not the shared default.
-# Rate is representative (Gemini 2.5 Flash's published per-token price at
-# launch); verify at build time against current Vertex AI pricing before
-# relying on it for real spend, same caveat as the groq entry below.
-_RATES: dict[tuple[str, str], tuple[float, float]] = {
-    ("gemini", "gemini-flash-latest"): (0.30, 2.50),
-    ("vertex", "gemini-flash-latest"): (0.30, 2.50),
-    ("vertex", "gemini-2.5-flash"): (0.30, 2.50),
-    ("groq", "llama-3.3-70b-versatile"): (0.59, 0.79),
+from typing import NamedTuple
+
+
+class Rate(NamedTuple):
+    """One (provider, model) price, with the provenance needed to tell whether
+    it is still true. ``verified`` is an ISO date; ``source_url`` is where the
+    number came from and where to re-check it. scripts/pricing_check.py reads
+    both."""
+
+    rate_in: float   # USD per 1M input tokens
+    rate_out: float  # USD per 1M output tokens
+    source_url: str
+    verified: str    # ISO date, YYYY-MM-DD
+
+
+_GROQ_PRICING = "https://groq.com/pricing"
+_GEMINI_PRICING = "https://ai.google.dev/gemini-api/docs/pricing"
+_VERTEX_PRICING = "https://cloud.google.com/vertex-ai/generative-ai/pricing"
+
+# Rates are representative (see cost.md). Vertex and AI-Studio differ in the
+# auth path, not in what a token costs, which is why the same model appears
+# under both provider keys -- estimate_cost_usd is called with the ACTIVE
+# provider name. vertex/gemini-2.5-flash exists because gemini-flash-latest is
+# not a Vertex publisher model for this project (confirmed live 2026-08-14,
+# see ISSUES.md).
+_RATES: dict[tuple[str, str], Rate] = {
+    ("gemini", "gemini-flash-latest"): Rate(0.30, 2.50, _GEMINI_PRICING, "2026-07-23"),
+    ("vertex", "gemini-flash-latest"): Rate(0.30, 2.50, _VERTEX_PRICING, "2026-07-23"),
+    ("vertex", "gemini-2.5-flash"): Rate(0.30, 2.50, _VERTEX_PRICING, "2026-08-14"),
+    ("groq", "llama-3.3-70b-versatile"): Rate(0.59, 0.79, _GROQ_PRICING, "2026-07-23"),
 }
+
+
+def rate_for(provider: str, model: str) -> Rate | None:
+    """The rate entry for (provider, model), or None when unpriced."""
+    return _RATES.get((provider, model))
 
 
 def estimate_cost_usd(provider: str, model: str, tokens_in: int, tokens_out: int) -> float:
@@ -36,7 +49,7 @@ def estimate_cost_usd(provider: str, model: str, tokens_in: int, tokens_out: int
     if rates is None:
         raise KeyError(f"No pricing entry for provider={provider!r} model={model!r}")
 
-    rate_in, rate_out = rates
+    rate_in, rate_out = rates.rate_in, rates.rate_out
     return (tokens_in / 1_000_000) * rate_in + (tokens_out / 1_000_000) * rate_out
 
 
