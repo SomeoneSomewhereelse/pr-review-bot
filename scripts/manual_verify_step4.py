@@ -61,7 +61,7 @@ def main() -> None:
     assert result.tokens_out > 0, "expected non-zero real completion token usage"
 
     cost = estimate_cost_usd("gemini", settings.llm_model, result.tokens_in, result.tokens_out)
-    print(f"estimated cost: ${cost:.6f}")
+    print(f"est. cost: ${cost:.6f}" if cost is not None else "est. cost: n/a (unpriced model)")
 
     print(
         "\nSUCCESS: live Gemini structured-output call verified "

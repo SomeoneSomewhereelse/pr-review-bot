@@ -46,3 +46,17 @@ def test_schema_contains_no_alter_statements():
         "_SCHEMA must declare the final shape via CREATE TABLE only -- an ALTER "
         "is migration code, which a fresh clone must not carry (spec section 6d)"
     )
+
+
+def test_est_cost_usd_is_nullable(db, db_query):
+    # db_query (not db_exec) is this file's actual raw-query fixture --
+    # tests/conftest.py's db_exec only executes/commits, it returns nothing to
+    # index into. Rows come back as tuples, matching this file's other tests.
+    rows = db_query(
+        "SELECT is_nullable FROM information_schema.columns "
+        "WHERE table_name = 'reviews' AND column_name = 'est_cost_usd'"
+    )
+    assert rows[0][0] == "YES", (
+        "an unpriced review records NULL, not 0.0 -- 0.0 would corrupt the "
+        "dashboard's SUM(est_cost_usd) aggregate"
+    )

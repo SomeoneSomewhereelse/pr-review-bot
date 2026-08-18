@@ -59,4 +59,4 @@ class ReviewResult(BaseModel):
     total_elapsed_ms: int
     total_tokens_in: int
     total_tokens_out: int
-    est_cost_usd: float
+    est_cost_usd: float | None = None

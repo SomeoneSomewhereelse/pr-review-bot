@@ -153,3 +153,30 @@ def test_format_comment_does_not_hardcode_specialist_count():
     body = format_comment(result)
     assert "3 specialists" not in body
     assert "1 specialist" in body
+
+
+def _review_result(est_cost_usd: float | None) -> ReviewResult:
+    return ReviewResult(
+        pr_number=1,
+        provider="groq",
+        model="llama-3.1-8b-instant",
+        results=[SpecialistResult(name="Security", status="ok", findings=[], elapsed_ms=100)],
+        total_elapsed_ms=100,
+        total_tokens_in=10,
+        total_tokens_out=5,
+        est_cost_usd=est_cost_usd,
+    )
+
+
+def test_comment_omits_the_cost_when_the_model_is_unpriced():
+    result = _review_result(est_cost_usd=None)  # see the module's existing helper
+    body = format_comment(result)
+    assert "$" not in body
+    assert "tok in" in body and "tok out" in body
+    assert "provider:" in body
+
+
+def test_comment_still_shows_the_cost_when_the_model_is_priced():
+    body = format_comment(_review_result(est_cost_usd=0.0004))
+    assert "~$0.0004" in body
+    assert "est. $0.0004" in body

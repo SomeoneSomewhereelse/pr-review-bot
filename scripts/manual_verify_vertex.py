@@ -91,7 +91,7 @@ def main() -> int:
     assert result.tokens_out > 0, "expected non-zero real completion token usage"
 
     cost = estimate_cost_usd("vertex", settings.vertex_model, result.tokens_in, result.tokens_out)
-    print(f"estimated cost: ${cost:.6f}")
+    print(f"est. cost: ${cost:.6f}" if cost is not None else "est. cost: n/a (unpriced model)")
 
     print(
         "\nSUCCESS: live Vertex AI structured-output call verified "

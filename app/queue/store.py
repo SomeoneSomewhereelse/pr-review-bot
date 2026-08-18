@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     total_elapsed_ms   INTEGER NOT NULL,
     total_tokens_in    INTEGER NOT NULL,
     total_tokens_out   INTEGER NOT NULL,
-    est_cost_usd       DOUBLE PRECISION NOT NULL,
+    est_cost_usd       DOUBLE PRECISION,  -- NULL when the model has no rate entry
     results            JSONB   NOT NULL,
     key_index          INTEGER
 );

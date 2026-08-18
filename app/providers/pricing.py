@@ -44,23 +44,33 @@ def rate_for(provider: str, model: str) -> Rate | None:
     return _RATES.get((provider, model))
 
 
-def estimate_cost_usd(provider: str, model: str, tokens_in: int, tokens_out: int) -> float:
+def estimate_cost_usd(
+    provider: str, model: str, tokens_in: int, tokens_out: int
+) -> float | None:
+    """Estimated USD cost, or None when (provider, model) has no rate entry.
+
+    Returning None rather than raising is deliberate. This is called from
+    app/orchestrator.py AFTER all three specialists have already made real,
+    paid calls, so a KeyError here threw away completed, paid work. Pricing is
+    a nice-to-have on the comment, not a gate on which models may run --
+    scripts/deploy.py reports an unpriced model as a WARN row instead
+    (design spec 2026-08-18 sections 6a and 6b).
+    """
     rates = _RATES.get((provider, model))
     if rates is None:
-        raise KeyError(f"No pricing entry for provider={provider!r} model={model!r}")
+        return None
 
-    rate_in, rate_out = rates.rate_in, rates.rate_out
-    return (tokens_in / 1_000_000) * rate_in + (tokens_out / 1_000_000) * rate_out
+    return (tokens_in / 1_000_000) * rates.rate_in + (tokens_out / 1_000_000) * rates.rate_out
 
 
 def is_known(provider: str, model: str) -> bool:
     """Whether (provider, model) has a rate entry -- i.e. whether
-    estimate_cost_usd would succeed instead of raising KeyError for it.
+    estimate_cost_usd would return a real number instead of None for it.
 
     scripts/set_override.py's --model validation is the reason this exists:
     without it, an operator/agent could set a model with no pricing entry,
-    and the KeyError would only surface in app/orchestrator.py's cost
-    estimation -- AFTER all three specialists already made real, paid calls.
+    and that would only surface as a silently missing cost in the PR comment
+    -- AFTER all three specialists already made real, paid calls.
     """
     return (provider, model) in _RATES
 

@@ -558,9 +558,8 @@ def test_estimate_cost_usd_gemini_flash():
     assert cost == pytest.approx(0.0012 + 0.00125)
 
 
-def test_estimate_cost_usd_unknown_model_raises():
-    with pytest.raises(KeyError):
-        pricing.estimate_cost_usd("gemini", "no-such-model", tokens_in=1, tokens_out=1)
+def test_estimate_cost_usd_unknown_model_returns_none():
+    assert pricing.estimate_cost_usd("gemini", "no-such-model", tokens_in=1, tokens_out=1) is None
 
 
 def test_estimate_cost_usd_groq_llama():
@@ -571,9 +570,8 @@ def test_estimate_cost_usd_groq_llama():
     assert cost == pytest.approx(0.00236 + 0.000395)
 
 
-def test_estimate_cost_usd_groq_unknown_model_raises():
-    with pytest.raises(KeyError):
-        pricing.estimate_cost_usd("groq", "no-such-model", tokens_in=1, tokens_out=1)
+def test_estimate_cost_usd_groq_unknown_model_returns_none():
+    assert pricing.estimate_cost_usd("groq", "no-such-model", tokens_in=1, tokens_out=1) is None
 
 
 def test_estimate_cost_usd_vertex_flash():

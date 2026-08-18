@@ -28,3 +28,10 @@ def test_estimate_cost_usd_is_unchanged_by_the_provenance_fields():
     assert pricing.estimate_cost_usd(
         "groq", "llama-3.3-70b-versatile", 1_000_000, 1_000_000
     ) == pytest.approx(1.38)
+
+
+def test_estimate_cost_usd_returns_none_for_an_unpriced_model():
+    """An unpriced model must not raise: it used to KeyError inside
+    orchestrator.run_review AFTER all three specialists had already made real,
+    paid calls (design spec 2026-08-18 section 6a)."""
+    assert pricing.estimate_cost_usd("groq", "llama-3.1-8b-instant", 100, 100) is None

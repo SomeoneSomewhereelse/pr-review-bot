@@ -114,11 +114,14 @@ def format_comment(result: ReviewResult) -> str:
     n = len(result.results)
     plural = "specialist" if n == 1 else "specialists"
     runtime_s = result.total_elapsed_ms / 1000
-    cost_str = f"~${result.est_cost_usd:.4f}"
+    cost_str = f" · ~${result.est_cost_usd:.4f}" if result.est_cost_usd is not None else ""
+    cost_footer = (
+        f"est. ${result.est_cost_usd:.4f} · " if result.est_cost_usd is not None else ""
+    )
 
     header = (
         f"## 🤖 Automated Code Review — PR #{result.pr_number}\n"
-        f"_{n} {plural} · {result.model} ({result.provider}) · {runtime_s:.1f}s · {cost_str}_\n"
+        f"_{n} {plural} · {result.model} ({result.provider}) · {runtime_s:.1f}s{cost_str}_\n"
     )
 
     sections = "\n".join(_render_section(spec) for spec in result.results)
@@ -126,7 +129,7 @@ def format_comment(result: ReviewResult) -> str:
     footer = (
         "\n---\n"
         f"<sub>Runtime {runtime_s:.1f}s · {result.total_tokens_in:,} tok in / "
-        f"{result.total_tokens_out:,} tok out · est. ${result.est_cost_usd:.4f} · "
+        f"{result.total_tokens_out:,} tok out · {cost_footer}"
         f"provider: {result.provider}</sub>\n"
     )
 
