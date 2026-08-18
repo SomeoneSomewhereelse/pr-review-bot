@@ -173,3 +173,70 @@ an error"). Ordered roughly chronologically by when they actually occurred.
 - **What happened:** Task 3 made `reviews.est_cost_usd` nullable so an unpriced model's review can persist without a cost estimate. The plan's own file-structure table listed `app/formatting.py` as the only render-side consumer needing a null-guard, and its Task 3 brief gave exact snippets for both cost fragments there — but `app/static/dashboard.html`'s reviews-table JS (`review.est_cost_usd.toFixed(4)`, outside every task's file list) was never touched by the plan or any task brief, and calling `.toFixed` on a JSON `null` throws inside `renderReviews`, which crashes the *entire* reviews table on any dashboard poll where one of the most-recent 50 reviews is unpriced — silently, as an unlabelled error banner. Separately, Task 7's plan-provided `scripts/pricing_check.py` snippet converts Groq's per-token USD price to per-1M via a bare `* 1e6`, which is not exact in floating point (`7.9e-7 * 1e6 == 0.7899999999999999`, not `0.79`) — so the shipped script would report false "drift" on the very rate entry it exists to confirm, on a perfectly matching catalog. Neither bug could have been caught by any single task's reviewer: the first was never in a diff any task touched, and the second's unit tests (also plan-provided) fed already-converted per-1M values, never exercising the lossy conversion path. Both surfaced only because the final whole-branch review (dispatched after all 9 tasks, per this project's subagent-driven-development process) was asked to specifically check cross-task interactions the plan's own reasoning might have missed, not just per-task conformance. Two smaller, lower-severity instances of the same root pattern (a plan-provided *test* snippet, not production code, being wrong) surfaced and were caught mid-task instead: Task 6's literal `importlib.reload(app.config)` test orphaned a `Settings` singleton and broke 7 unrelated tests order-dependently; Task 7's literal test assertion `"0.70" in lines[0]` doesn't match Python's actual float-to-string formatting (`"0.7"`). Both were fixed by their own task's implementer and independently re-verified before that task was marked complete, rather than surfacing at the final review.
 - **Cost:** None reached production — caught before merge by the final whole-branch review, fixed in one follow-up commit (`113a932`) with new regression tests for both, and independently re-verified by a scoped re-review before this stage was considered done. Had the final whole-branch review been skipped or scoped only to "does each task's diff match its own brief" (the per-task review's actual job), the dashboard crash in particular would have shipped: it required tracing a data-shape change (Task 3) forward into a file that same task's brief never mentioned.
 - **Suggested CLAUDE.md change:** Reinforces the existing "Plan-execution / multi-agent process hygiene" section's point that a plan's own provided code needs the same scrutiny as any other code, and extends it: the exposure isn't limited to the *task* that receives the buggy snippet — a data-shape change in one task (nullable cost) can break a consumer the plan never listed as touched by any task, so the check that catches it has to be the whole-branch review, not a sharper per-task one. No new rule needed beyond following the existing subagent-driven-development skill's mandatory final whole-branch review step, which is precisely what caught both instances here — worth noting as a concrete case where skipping that step (e.g. to save time on a plan that already had 9/9 clean per-task reviews) would have shipped a real, user-visible crash.
+
+## Parked Issues
+
+Low-severity findings from Stage 1's final whole-branch review (see the entry
+above), deliberately deferred rather than fixed on that branch — the
+reviewer's own recommendation was to fold only the Critical/Important items
+into a fix commit and let these wait for Stage 2/3. None of these block
+Stage 1; none have been independently re-verified since parking. Listed here
+so they aren't lost to a conversation transcript once this session ends.
+
+- **`scripts/deploy.py`: `check_pricing()`/`_unpriced_models()` docstrings
+  describe pre-Task-4 behavior in three places** — they still talk about
+  `check_config()` FAILing and `sync_env()` refusing on an unpriced model,
+  both of which are now warnings, and one still implies `--force` gates
+  pricing (it no longer does). Cosmetic (behavior is correct), but stale
+  enough to mislead a future reader. Natural fit alongside Stage 2's
+  `doctor.py`, which composes `check_pricing`.
+- **`tests/test_pricing_check.py`: the original drift-assertion test is
+  weaker than intended** — `assert "0.7" in lines[0]` is trivially satisfied
+  by the untouched `0.79` that appears on the same line, so it no longer
+  proves the *drifted* value specifically is reported. Low priority: the
+  fix-wave commit (`113a932`) added a dedicated, stronger test for the
+  underlying rounding behavior this test was meant to guard, so the real
+  risk is already covered — this is just a leftover weak assertion.
+- **`tests/test_formatting.py`: no test pins `est_cost_usd=0.0` (falsy but
+  present) rendering the cost string**, distinct from `None` omitting it.
+  The code is correct (`is not None` guard, confirmed by the final review),
+  just not pinned by its own test against a future regression to a
+  truthiness check.
+- **`tests/test_formatting.py`: a leaked plan-instruction comment** —
+  `# see the module's existing helper` next to a `_review_result(...)` call,
+  where the helper is defined a few lines above in the same commit. The
+  comment was Task 3's plan brief telling the implementer where to look;
+  it should have been deleted before commit.
+- **`scripts/pricing_check.py`: `compare()` reports every unknown Groq
+  catalog model as `missing:` and `main()` exits 1** on a normal run against
+  Groq's full model catalog (dozens of models this project will never use —
+  whisper, guard, etc.), producing a wall of paste-ready lines and a
+  nonzero exit on every routine check. This makes the script noisy enough
+  to train an operator to ignore it. Consider limiting `missing:` to models
+  the project could plausibly use, or reserving exit 1 for genuine *drift*
+  and exit 0 for merely *missing*. Natural fit for Stage 2's `doctor.py`
+  scoping work, which will likely wrap this script.
+- **`app/queue/store.py::get_key_usage()`: the cost half of its return value
+  is now dead weight** — its only consumer was the removed
+  `KEY_USAGE_COST_CAP_USD` cap (Task 5), and `dispatcher.py` already
+  discards it as `_cost`. Not in Task 5's removal list because it wasn't
+  scoped there; a follow-up could narrow the return type to just the token
+  count.
+- **`app/providers/pricing.py`: `vertex/gemini-flash-latest`'s `Rate`
+  carries a `verified` date (`2026-07-23`) that was never independently
+  checked** — it was inherited from the `gemini` (AI-Studio) entry on a
+  same-token-price rationale, not confirmed against Vertex's own pricing
+  page on that date. Since Task 2's whole point is a `verified` field an
+  operator can trust, an inherited-not-verified rate should say so
+  explicitly rather than implying a real check happened.
+- **`app/providers/pricing.py::is_known()`: docstring still frames itself
+  as backing a "validation"** (`scripts/set_override.py --model`'s refusal),
+  which Task 4 turned into a warning. The function's behavior is unchanged
+  and correct; only the docstring's framing is stale.
+- **`SPEC.md` still documents `KEY_USAGE_COST_CAP_USD` as a live feature**
+  (at minimum two locations). README/SETUP are explicitly Stage 3's
+  responsibility and deliberately untouched by Stage 1, but `SPEC.md` is
+  this project's design-of-record and isn't named in either Stage 1's or
+  Stage 3's explicit in-scope/out-of-scope lists — it can fall through the
+  seam between stages unless someone deliberately claims it. Flagged here so
+  whoever scopes Stage 3's documentation pass sees it.
