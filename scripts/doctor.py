@@ -153,14 +153,17 @@ def check_prereqs(track: str) -> deploy.CheckResult:
 
 
 def check_test_database() -> deploy.CheckResult:
-    """Whether `uv run pytest` can get a Postgres: Docker present, or
-    DATABASE_URL set. WARN, not FAIL -- it blocks the test suite, never the
-    service itself, so it must not stop an operator from deploying."""
+    """Whether `uv run pytest` can get a Postgres: Docker present, or a
+    DATABASE_URL that looks like a local/CI Postgres already set. WARN, not
+    FAIL -- it blocks the test suite, never the service itself, so it must
+    not stop an operator from deploying."""
     if _prereqs.database_available():
         return deploy.CheckResult("test-db", "PASS", "")
     return deploy.CheckResult(
         "test-db", "WARN",
-        "DB-touching tests need Docker running or DATABASE_URL set; "
+        "DB-touching tests need Docker running or a local DATABASE_URL set; "
+        "a remote DATABASE_URL (e.g. Supabase) doesn't count -- tests refuse "
+        "to run against it unless ALLOW_REMOTE_TEST_DB=1 is set; "
         f"{_prereqs.install_hint(_prereqs.DOCKER)}",
     )
 
@@ -303,18 +306,30 @@ def build_state(track: str, base: str) -> tuple[State, list[deploy.CheckResult]]
         app_installed=ok("github-install"),
         llm_ready=ok("llm-provider"),
         database=ok("database"),
-        # Gated on credential-FREE rows on purpose. render-service and
-        # uptime-pinger both SKIP without an operator-local API key
-        # (RENDER_API_KEY / UPTIMEROBOT_API_KEY), and a SKIPPED row counts as
-        # unsatisfied -- so gating hosted's public_url/keepalive on them would
-        # strand an operator who never sets those local keys on step 6/8
-        # forever. /healthz answering is the credential-free proof the service
-        # exists AND is warm, so both steps gate on "health" for the hosted
-        # track. render-service and uptime-pinger still run and appear as
-        # their own rows above; they just aren't what decides these two.
+        # public_url and keepalive must NOT share one signal for the hosted
+        # track -- they gate two different steps (6 and 8), and current_step()
+        # reports only the EARLIEST unsatisfied one, so two steps driven by
+        # the same boolean can never both be reported: the moment it flips
+        # true, both clear at once and step 8 becomes unreachable. public_url
+        # still gates on "health" for hosted (credential-free proof the
+        # Render service exists at all) -- unchanged. Hosted's keepalive now
+        # gates on the "uptime-pinger" row instead, treating SKIPPED as
+        # satisfied (not just PASS/WARN): uptime-pinger SKIPs without an
+        # operator-local UPTIMEROBOT_API_KEY, and stranding an operator who
+        # never sets that key on step 8 forever would be exactly the dead end
+        # doctor exists to prevent. Only an ACTIVE FAIL (the monitor exists
+        # but is misconfigured, e.g. wrong URL) blocks step 8. Locally there
+        # is no uptime-pinger row at all -- nothing needs to stay warm, so the
+        # running uvicorn process is what keepalive means, and "health"
+        # answering is exactly that proof, unchanged from before.
         public_url=ok("tunnel") if track == "local" else ok("health"),
         webhook=ok("webhook"),
-        keepalive=ok("health"),
+        keepalive=(
+            ok("health") if track == "local"
+            else by_name.get(
+                "uptime-pinger", deploy.CheckResult("uptime-pinger", "SKIPPED")
+            ).status != "FAIL"
+        ),
     )
     return state, results
 
@@ -323,7 +338,12 @@ def render(track: str, step: Step | None, results: list[deploy.CheckResult]) -> 
     """deploy.py's table, plus the one line doctor exists to print."""
     report = deploy.render_report(results)
     if step is None:
-        return f"{report}\n\ntrack: {track} -- setup complete, every step satisfied."
+        failing = [r.name for r in results if r.status == "FAIL"]
+        note = (
+            f" ({len(failing)} check(s) still reporting FAIL -- see the table "
+            f"above: {', '.join(failing)})" if failing else ""
+        )
+        return f"{report}\n\ntrack: {track} -- setup complete, every step satisfied.{note}"
     return (
         f"{report}\n\ntrack: {track} -- you are at step {step.number} of 8: "
         f"{step.title}\nnext: {step.command}"

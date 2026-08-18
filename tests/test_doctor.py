@@ -35,8 +35,15 @@ def test_llm_provider_row_does_not_depend_on_a_database(bare, monkeypatch):
     assert state.llm_ready is True
 
 
-def test_a_bare_checkout_reports_step_two_not_a_crash(bare):
-    """Render not existing yet is the NORMAL state at the start, not a failure."""
+def test_a_bare_checkout_reports_step_two_not_a_crash(bare, monkeypatch):
+    """Render not existing yet is the NORMAL state at the start, not a failure.
+
+    Prereqs must PASS deterministically regardless of what tools happen to be
+    installed on the machine running the suite -- cloudflared in particular
+    is an unusual tool that a bare fixture alone does not guarantee, so PATH
+    is monkeypatched the same way tests/test_prereqs.py does.
+    """
+    monkeypatch.setattr(doctor._prereqs.shutil, "which", lambda name: "/usr/bin/" + name)
     track = doctor.resolve_track(None)
     assert track == "local"
     state, results = doctor.build_state(track, "")
@@ -105,6 +112,60 @@ def test_render_includes_the_you_are_here_line(bare):
 def test_render_reports_completion_when_every_step_is_satisfied():
     text = doctor.render("local", None, [deploy.CheckResult("config", "PASS")])
     assert "complete" in text.lower()
+
+
+def test_render_completion_message_omits_the_caveat_when_nothing_fails():
+    text = doctor.render("local", None, [deploy.CheckResult("config", "PASS")])
+    assert "FAIL" not in text
+
+
+def test_render_completion_message_notes_any_remaining_fail_row():
+    """Step 8 being structurally unreachable used to let 'setup complete'
+    print alongside a table with a FAIL row still showing -- self-
+    contradictory. render() must call that out when it happens."""
+    results = [
+        deploy.CheckResult("config", "PASS"),
+        deploy.CheckResult("uptime-pinger", "FAIL", "wrong URL"),
+    ]
+    text = doctor.render("hosted", None, results)
+    assert "complete" in text.lower()
+    assert "FAIL" in text
+    assert "uptime-pinger" in text
+
+
+def test_hosted_keepalive_is_satisfied_when_uptime_pinger_is_skipped(bare, monkeypatch):
+    """uptime-pinger SKIPs without a local UPTIMEROBOT_API_KEY -- that must
+    not strand an operator on step 8 forever."""
+    monkeypatch.setattr(settings, "public_base_url", "https://x.onrender.com")
+    state, results = doctor.build_state("hosted", "https://x.onrender.com")
+    by_name = {r.name: r for r in results}
+    assert by_name["uptime-pinger"].status == "SKIPPED"
+    assert state.keepalive is True
+
+
+def test_hosted_keepalive_is_false_when_uptime_pinger_actively_fails(bare, monkeypatch):
+    """An active FAIL (the monitor exists but is misconfigured) is the one
+    case that must still block step 8."""
+    monkeypatch.setattr(deploy, "check_uptime_pinger", lambda base: deploy.CheckResult(
+        "uptime-pinger", "FAIL", "points at the wrong URL"
+    ))
+    state, results = doctor.build_state("hosted", "https://x.onrender.com")
+    by_name = {r.name: r for r in results}
+    assert by_name["uptime-pinger"].status == "FAIL"
+    assert state.keepalive is False
+
+
+def test_hosted_step_eight_is_reachable_when_public_url_clears_but_pinger_fails():
+    """The bug this guards: step 6 and step 8 used to share one boolean, so
+    the moment public_url/health cleared, step 8 cleared with it -- making it
+    structurally unreachable as the reported current_step."""
+    state = doctor.State(
+        prereqs=True, app_credentials=True, app_installed=True, llm_ready=True,
+        database=True, public_url=True, webhook=True, keepalive=False,
+    )
+    step = doctor.current_step("hosted", state)
+    assert step is not None
+    assert step.number == 8
 
 
 def test_main_rejects_an_unknown_track(capsys):

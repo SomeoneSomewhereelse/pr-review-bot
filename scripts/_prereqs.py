@@ -17,10 +17,23 @@ import platform
 import shutil
 import sys
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 from app.config import settings
 
 MINIMUM_PYTHON = (3, 12)
+
+# Hosts treated as "local/CI Postgres" for the purpose of this prerequisite.
+# Mirrors tests/conftest.py::_looks_like_local_test_db -- kept in sync
+# manually since scripts/ must not import from tests/.
+_LOCAL_TEST_DB_HOSTS = {"localhost", "127.0.0.1"}
+
+
+def _looks_like_local_test_db(url: str) -> bool:
+    """Mirrors tests/conftest.py::_looks_like_local_test_db -- kept in sync
+    manually since scripts/ must not import from tests/."""
+    host = urlsplit(url).hostname or ""
+    return host in _LOCAL_TEST_DB_HOSTS or host.endswith(".internal")
 
 
 class Tool(NamedTuple):
@@ -89,7 +102,10 @@ def python_version_ok() -> bool:
 
 def database_available() -> bool:
     """Whether the test suite can get a Postgres: Docker present (testcontainers
-    spins one up) OR DATABASE_URL already set. tests/conftest.py's db_url
-    fixture needs exactly one of these, so it is one conditional prerequisite
-    rather than two independent ones."""
-    return bool(settings.database_url) or is_available(DOCKER)
+    spins one up) OR a DATABASE_URL that looks like a local/CI Postgres already
+    set. A remote DATABASE_URL (e.g. a Supabase pooler string) does NOT satisfy
+    this on its own -- tests/conftest.py refuses to run destructive tests
+    against a non-local host, so reporting PASS there would be misleading."""
+    if settings.database_url and _looks_like_local_test_db(settings.database_url):
+        return True
+    return is_available(DOCKER)

@@ -20,8 +20,13 @@ Then, in a loop until `step` is `null`:
 3. Treat `SKIPPED` as normal, not as a problem. A skipped row means its
    precondition does not exist yet (no Render service, no `RENDER_API_KEY`),
    which is the expected state early in setup.
-4. Run the next command **only if it neither writes a credential nor opens a
-   browser** — see the handoff rule below. Otherwise hand it to the user.
+4. Run the next command **only if it neither writes a credential, nor opens a
+   browser, nor stays running in the foreground** (a tunnel, a server) — see
+   the handoff rule below. A foreground process never returns control, so
+   running one yourself would hang this session indefinitely; hand it to the
+   user instead, the same way as a credential-writing command, e.g.: "Run
+   this yourself in a separate terminal: `cloudflared tunnel --url
+   http://localhost:8000`". Otherwise hand it to the user.
 5. Re-run the doctor and repeat.
 
 ## Credential handoff — not optional

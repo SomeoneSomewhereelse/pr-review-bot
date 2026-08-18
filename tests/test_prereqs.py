@@ -51,6 +51,20 @@ def test_python_version_floor_matches_the_project():
     assert _prereqs.python_version_ok() is True  # the suite runs on a supported one
 
 
+def test_database_available_rejects_a_remote_database_url_without_docker(monkeypatch):
+    """A remote DATABASE_URL (e.g. Supabase's pooler) must NOT satisfy this
+    prerequisite on its own -- tests/conftest.py refuses to run destructive
+    tests against a non-local host, so reporting PASS here would be
+    misleading for the hosted track's own doctor step 5."""
+    remote = "postgresql://user:pass@db.abcxyz.supabase.co:5432/postgres"
+    monkeypatch.setattr(settings, "database_url", remote)
+    monkeypatch.setattr(_prereqs.shutil, "which", lambda name: None)
+    assert _prereqs.database_available() is False
+
+    monkeypatch.setattr(_prereqs.shutil, "which", lambda name: "/usr/bin/docker")
+    assert _prereqs.database_available() is True
+
+
 @pytest.mark.parametrize("system", ["Linux", "Darwin", "Windows"])
 def test_install_hint_never_selects_behavior_only_text(system):
     """A regression guard on the rule: platform.system() may pick a MESSAGE,

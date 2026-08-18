@@ -5,11 +5,15 @@
 HUMAN-RUN ONLY -- it prompts for and writes real credentials. An agent must
 never invoke it (same rule as scripts/encode_credential.py).
 
-It is idempotent, and does that WITHOUT ever reading an existing value: to
+It is idempotent, and does that WITHOUT ever reading an existing VALUE: to
 decide whether a key is already set it reads key NAMES only, via the
 '^[A-Z_0-9]+=' idiom CLAUDE.md prescribes (see tests/test_config.py's
-_key_names for the same shape). So re-running is safe, and no existing secret
-is ever held in memory by this script.
+_key_names for the same shape). Re-running is safe because every write is a
+MERGE, not a replace: any key the operator chose to keep (answered "keep it?
+[Y]") is passed through into the written file exactly as its line already
+read, verbatim and unexamined -- see merge_env(). Only keys the operator typed
+a fresh value for this run are changed. No existing secret is ever held in
+memory by this script beyond that opaque line-level copy.
 
 Which file a key belongs in comes from app/config.py's OPERATIONAL_KEYS:
 listed = operational (.env.config), everything else = secret (.env). That is
@@ -75,6 +79,34 @@ def render_env(values: dict[str, str]) -> str:
     return "".join(f"{name}={value}\n" for name, value in values.items())
 
 
+def merge_env(existing_text: str, updates: dict[str, str]) -> str:
+    """Merge `updates` into `existing_text`, line by line, without ever
+    treating an existing value as anything but opaque text to pass through.
+
+    For each line in `existing_text` that matches _KEY_LINE: if its key is in
+    `updates`, the WHOLE line is replaced with the new `name=value` line and
+    that key is consumed (so it is not appended again below); otherwise the
+    line -- comment, blank, or an untouched key -- is kept verbatim, in place.
+    Any keys still left in `updates` after every existing line is processed
+    (i.e. brand-new keys not previously present) are appended at the end, in
+    the order `updates` was given. This is how a "keep it? [Y]" answer for an
+    already-set secret survives a re-run: this function never inspects that
+    secret's value, only its line's key name.
+    """
+    remaining = dict(updates)
+    lines: list[str] = []
+    for line in existing_text.splitlines():
+        match = _KEY_LINE.match(line)
+        if match and match.group(1) in remaining:
+            name = match.group(1)
+            lines.append(f"{name}={remaining.pop(name)}")
+        else:
+            lines.append(line)
+    for name, value in remaining.items():
+        lines.append(f"{name}={value}")
+    return "".join(f"{line}\n" for line in lines)
+
+
 def write_env(text: str, path: Path, overwrite: bool = False) -> None:
     """`path` is REQUIRED with no default, and an existing file is refused
     unless overwrite=True -- so neither a test nor a mis-run can destroy a
@@ -105,7 +137,6 @@ def _ask(name: str, already_set: bool) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Scaffold .env and .env.config")
-    parser.add_argument("--overwrite", action="store_true", help="replace existing files")
     parser.add_argument("--root", default=".", help="where the example files live")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -126,7 +157,9 @@ def main(argv: list[str] | None = None) -> int:
         chosen = {k: v for k, v in answers.items() if k in keys}
         if not chosen:
             continue
-        write_env(render_env(chosen), path, overwrite=args.overwrite)
+        existing_text = path.read_text(encoding="utf-8") if path.exists() else ""
+        merged = merge_env(existing_text, chosen)
+        write_env(merged, path, overwrite=True)
         print(f"wrote {path} ({len(chosen)} keys)")
 
     print("next: uv run python -m scripts.doctor")

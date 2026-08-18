@@ -75,3 +75,44 @@ def test_write_env_requires_an_explicit_path():
 
     assert inspect.signature(init_env.write_env).parameters["path"].default \
         is inspect.Parameter.empty
+
+
+def test_merge_env_preserves_an_untouched_existing_line(tmp_path):
+    existing = f"GITHUB_APP_PRIVATE_KEY={SENTINEL}\n"
+    merged = init_env.merge_env(existing, {"GROQ_API_KEY": "gsk_new"})
+    assert f"GITHUB_APP_PRIVATE_KEY={SENTINEL}\n" in merged
+
+
+def test_merge_env_replaces_an_existing_key_present_in_updates(tmp_path):
+    existing = f"GROQ_API_KEY={SENTINEL}\n"
+    merged = init_env.merge_env(existing, {"GROQ_API_KEY": "gsk_new"})
+    assert SENTINEL not in merged
+    assert "GROQ_API_KEY=gsk_new\n" in merged
+
+
+def test_merge_env_appends_brand_new_keys_at_the_end(tmp_path):
+    existing = "KEEP=1\n"
+    merged = init_env.merge_env(existing, {"NEW_KEY": "2"})
+    assert merged == "KEEP=1\nNEW_KEY=2\n"
+
+
+def test_merge_env_on_empty_existing_text_just_renders_updates(tmp_path):
+    assert init_env.merge_env("", {"A": "1"}) == "A=1\n"
+
+
+def test_merge_env_reproduces_the_kept_app_credentials_bug_scenario(tmp_path):
+    """This is the exact scenario from the bug report: an operator ran
+    create_github_app.py, then re-ran init_env.py answering "keep it?" for
+    all three App credentials and typing only a new GROQ_API_KEY. The merge
+    must not lose the App credentials -- a full-replace write_env() call
+    with only the newly-answered keys is exactly what did."""
+    existing = (
+        "GITHUB_APP_ID=123\n"
+        f"GITHUB_APP_PRIVATE_KEY={SENTINEL}\n"
+        f"GITHUB_WEBHOOK_SECRET=SENTINEL2-{SENTINEL}\n"
+    )
+    merged = init_env.merge_env(existing, {"GROQ_API_KEY": "gsk_x"})
+    assert "GITHUB_APP_ID=123\n" in merged
+    assert f"GITHUB_APP_PRIVATE_KEY={SENTINEL}\n" in merged
+    assert f"GITHUB_WEBHOOK_SECRET=SENTINEL2-{SENTINEL}\n" in merged
+    assert "GROQ_API_KEY=gsk_x\n" in merged
