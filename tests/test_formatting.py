@@ -169,7 +169,7 @@ def _review_result(est_cost_usd: float | None) -> ReviewResult:
 
 
 def test_comment_omits_the_cost_when_the_model_is_unpriced():
-    result = _review_result(est_cost_usd=None)  # see the module's existing helper
+    result = _review_result(est_cost_usd=None)
     body = format_comment(result)
     assert "$" not in body
     assert "tok in" in body and "tok out" in body
@@ -180,3 +180,13 @@ def test_comment_still_shows_the_cost_when_the_model_is_priced():
     body = format_comment(_review_result(est_cost_usd=0.0004))
     assert "~$0.0004" in body
     assert "est. $0.0004" in body
+
+
+def test_comment_shows_a_zero_cost_rather_than_omitting_it():
+    """0.0 is falsy but PRESENT: a genuinely-priced review that happened to
+    round to zero must still render its cost, unlike an unpriced one. Pins
+    format_comment's `is not None` guard against a regression to a plain
+    truthiness check, which would silently conflate the two."""
+    body = format_comment(_review_result(est_cost_usd=0.0))
+    assert "~$0.0000" in body
+    assert "est. $0.0000" in body
