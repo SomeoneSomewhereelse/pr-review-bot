@@ -477,9 +477,11 @@ landing page. (It was added by
 
 `app/static/dashboard.html` (664 lines) loses ~120:
 
+- `:80` the standalone `#hiwJumpBtn` margin rule
+- `:186-254` the `.how-it-works` / `.hiw-*` CSS block (it is the last run in
+  the stylesheet — `:255` is `</style>`)
 - `:259` the `hiwJumpBtn` button
 - `:290-337` the `<section id="howItWorks">`
-- `:186-~240` the `.how-it-works` / `.hiw-*` CSS block
 - `:369-380` (en) and `:408-419` (he) `hiw_*` string keys
 - `:636-638` the scroll handler
 
