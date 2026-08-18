@@ -35,7 +35,7 @@ def _no_real_provider_credentials(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _shipped_db_synced_defaults(monkeypatch):
-    """Pin the 6 usage-cap/cooldown settings to their Settings class defaults,
+    """Pin the 5 usage-cap/cooldown settings to their Settings class defaults,
     for the same reason _shipped_model_defaults exists: sync_env() now also
     writes these to runtime_config via sync_config_db(), so a locally-edited
     .env.config value could otherwise make a test non-deterministic, or trip
@@ -45,7 +45,6 @@ def _shipped_db_synced_defaults(monkeypatch):
         "dispatcher_rereview_cooldown_max_seconds",
         "dispatcher_rereview_cooldown_factor",
         "key_usage_token_cap",
-        "key_usage_cost_cap_usd",
         "key_usage_reset_time_utc",
     ):
         monkeypatch.setattr(settings, field, Settings.model_fields[field].default)
@@ -1761,14 +1760,13 @@ def test_sync_config_db_writes_settings_values_into_runtime_config(db, db_query,
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 900.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 1.5)
     monkeypatch.setattr(settings, "key_usage_token_cap", 20000)
-    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", 0.5)
     assert deploy.sync_config_db() == 0
     row = db_query(
         "SELECT cooldown_base_seconds, cooldown_max_seconds, cooldown_factor, "
-        "key_usage_token_cap, key_usage_cost_cap_usd, key_usage_reset_time_utc "
+        "key_usage_token_cap, key_usage_reset_time_utc "
         "FROM runtime_config WHERE id = 1"
     )[0]
-    assert row == (45.0, 900.0, 1.5, 20000, 0.5, "04:00:00")
+    assert row == (45.0, 900.0, 1.5, 20000, "04:00:00")
 
 
 def test_sync_config_db_reports_already_in_sync_on_a_second_run(db, capsys):
@@ -1922,7 +1920,7 @@ def test_render_yaml_declares_every_synced_var():
 
 
 def test_render_yaml_never_declares_a_db_synced_key():
-    """The 6 usage-cap/cooldown keys are never a Render env var at all (see
+    """The 5 usage-cap/cooldown keys are never a Render env var at all (see
     _DB_SYNCED_OPERATIONAL_KEYS) -- re-declaring one here would silently
     resurrect the two-sources-of-truth problem this design eliminated."""
     render = yaml.safe_load((_REPO_ROOT / "render.yaml").read_text())

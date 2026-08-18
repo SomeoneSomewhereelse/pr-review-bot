@@ -22,7 +22,6 @@ OPERATIONAL_KEYS = frozenset(
         "GROQ_MODEL",
         "VERTEX_MODEL",
         "KEY_USAGE_TOKEN_CAP",
-        "KEY_USAGE_COST_CAP_USD",
         "KEY_USAGE_RESET_TIME_UTC",
         "GCP_PROJECT",
         "GCP_LOCATION",
@@ -117,22 +116,18 @@ class Settings(BaseSettings):
     # behavior this setting exists to prevent.
     dispatcher_notice_sweep_batch_size: int = Field(default=20, gt=0)
 
-    # --- Proactive per-key daily usage cap. Both caps default to None
-    # (feature off): a deployment that sets neither env var behaves exactly
-    # as before. KEY_USAGE_TOKEN_CAP WINS OUTRIGHT when both are set -- the
-    # cost cap is then not consulted at all, not used as a tiebreak. The
-    # reset time is a plain "HH:MM" (or "HH:MM:SS") UTC wall-clock string;
-    # a `time` field makes pydantic parse it, giving arbitrary granularity
-    # rather than whole-hour-only resets, specifically so a demo can set the
-    # reset a couple of minutes out instead of waiting for the next hour.
-    # gt=0: a 0 or negative cap would make the dispatcher's `tokens >= 0` /
-    # `cost >= 0` comparison unconditionally true, deferring every review
-    # forever -- and that deferral is STICKY, since a ticket's not_before is
-    # already set to a real future timestamp by the time it happens, so
-    # fixing the env var and redeploying does not release already-deferred
-    # tickets.
+    # --- Proactive per-key daily usage cap. Defaults to None (feature off): a
+    # deployment that sets no env var behaves exactly as before. The reset
+    # time is a plain "HH:MM" (or "HH:MM:SS") UTC wall-clock string; a `time`
+    # field makes pydantic parse it, giving arbitrary granularity rather than
+    # whole-hour-only resets, specifically so a demo can set the reset a
+    # couple of minutes out instead of waiting for the next hour.
+    # gt=0: a 0 or negative cap would make the dispatcher's `tokens >= 0`
+    # comparison unconditionally true, deferring every review forever -- and
+    # that deferral is STICKY, since a ticket's not_before is already set to
+    # a real future timestamp by the time it happens, so fixing the env var
+    # and redeploying does not release already-deferred tickets.
     key_usage_token_cap: int | None = Field(default=None, gt=0)
-    key_usage_cost_cap_usd: float | None = Field(default=None, gt=0)
     key_usage_reset_time_utc: time = Field(default=time(4, 0))
 
     # --- Optional operator tooling: read only by scripts/deploy.py on the

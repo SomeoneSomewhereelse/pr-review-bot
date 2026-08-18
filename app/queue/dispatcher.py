@@ -157,8 +157,8 @@ async def _refresh_usage_cap_overrides() -> None:
     fail-safe shape as the refreshes above: degrade to the env defaults rather
     than keep a stale cache."""
     try:
-        tokens, cost, reset = await asyncio.to_thread(store.get_usage_cap_overrides)
-        usage_cap_config.set_override_cache(tokens, cost, reset)
+        tokens, reset = await asyncio.to_thread(store.get_usage_cap_overrides)
+        usage_cap_config.set_override_cache(tokens, reset)
     except Exception:  # noqa: BLE001
         logger.exception("failed to refresh usage-cap overrides; using env defaults")
         usage_cap_config.reset_override_cache()
@@ -237,27 +237,22 @@ async def process_next_due(now: datetime) -> StepResult:
     # shape the reactive-429 gate below already has.
     #
     # FAILS OPEN. Every other per-ticket refresh above degrades to its safe
-    # default on error; the safe default for a cost cap is "not enforced",
+    # default on error; the safe default for a usage cap is "not enforced",
     # because a broken usage query must never be able to block every review.
     # That is why the whole computation — bucket, query, comparison, reset
     # instant — sits inside one try, and why nothing outside it is read.
     cap_reset_at: datetime | None = None
-    token_cap, cost_cap, reset_time = usage_cap_config.effective_caps()
-    if token_cap is not None or cost_cap is not None:
+    token_cap, reset_time = usage_cap_config.effective_caps()
+    if token_cap is not None:
         try:
             bucket_start = store.usage_bucket_start(now, reset_time)
-            tokens, cost = await asyncio.to_thread(
+            tokens, _cost = await asyncio.to_thread(
                 store.get_key_usage,
                 provider,
                 key_index.active_key_index(provider),
                 bucket_start.isoformat(),
             )
-            # The token cap WINS OUTRIGHT when both are set: the cost cap is
-            # not consulted at all, not used as a tiebreak.
-            over_cap = (
-                tokens >= token_cap if token_cap is not None else cost >= cost_cap
-            )
-            if over_cap:
+            if tokens >= token_cap:
                 cap_reset_at = bucket_start + timedelta(hours=24)
         except Exception:  # noqa: BLE001
             logger.exception("failed to check key usage cap; proceeding without it")

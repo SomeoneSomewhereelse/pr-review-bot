@@ -633,17 +633,17 @@ def test_get_all_model_overrides_is_empty_before_any_write():
 
 
 def test_usage_cap_overrides_round_trip():
-    store.set_usage_cap_override(20000, 0.5, "04:30", "2026-08-15T00:00:00+00:00")
-    assert store.get_usage_cap_overrides() == (20000, 0.5, "04:30")
+    store.set_usage_cap_override(20000, "04:30", "2026-08-15T00:00:00+00:00")
+    assert store.get_usage_cap_overrides() == (20000, "04:30")
 
 
 def test_usage_cap_overrides_default_to_all_none():
-    assert store.get_usage_cap_overrides() == (None, None, None)
+    assert store.get_usage_cap_overrides() == (None, None)
 
 
 def test_usage_cap_overrides_write_exactly_what_they_are_given():
-    """Like set_cooldown_override, this writes all three fields every time; a
+    """Like set_cooldown_override, this writes both fields every time; a
     caller wanting to change one is responsible for read-modify-write."""
-    store.set_usage_cap_override(20000, 0.5, "04:30", "2026-08-15T00:00:00+00:00")
-    store.set_usage_cap_override(None, 0.25, None, "2026-08-15T00:01:00+00:00")
-    assert store.get_usage_cap_overrides() == (None, 0.25, None)
+    store.set_usage_cap_override(20000, "04:30", "2026-08-15T00:00:00+00:00")
+    store.set_usage_cap_override(None, "05:00", "2026-08-15T00:01:00+00:00")
+    assert store.get_usage_cap_overrides() == (None, "05:00")

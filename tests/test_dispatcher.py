@@ -52,7 +52,6 @@ def _clean_key_index_cache():
 @pytest.fixture(autouse=True)
 def _caps_off_by_default(monkeypatch):
     monkeypatch.setattr(settings, "key_usage_token_cap", None)
-    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", None)
     yield
 
 
@@ -1017,50 +1016,11 @@ async def test_another_key_slots_usage_does_not_count(monkeypatch, db_exec):
     assert (await dispatcher.process_next_due(NOW)).action == "ran"
 
 
-async def test_cost_cap_applies_when_no_token_cap_is_set(monkeypatch, db_exec):
-    _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "key_usage_token_cap", None)
-    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", 0.05)
-    tid = _enqueue(pr=94)
-    _record_usage(db_exec, tokens=1, cost=0.06)
-
-    called = []
-
-    async def fake_attempt(repo, pr, comment_id=None):
-        called.append(pr)
-        return orchestrator.ReviewCompleted(review=type("R", (), {})())
-
-    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
-
-    assert (await dispatcher.process_next_due(NOW)).action == "deferred"
-    assert called == []
-    assert store.get_ticket(tid).defer_reason == "usage_cap"
-
-
-async def test_token_cap_wins_outright_when_both_caps_are_set(monkeypatch, db_exec):
-    """The cost cap is not consulted AT ALL when a token cap is set -- not
-    merely a tiebreak (design doc §2.1). A blown cost cap must therefore not
-    defer while the token cap still has headroom."""
-    _stub_comments(monkeypatch)
-    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
-    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", 0.0001)
-    _enqueue(pr=95)
-    _record_usage(db_exec, tokens=100, cost=9.99)
-
-    async def fake_attempt(repo, pr, comment_id=None):
-        return orchestrator.ReviewCompleted(review=type("R", (), {})())
-
-    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
-
-    assert (await dispatcher.process_next_due(NOW)).action == "ran"
-
-
 async def test_no_cap_configured_never_queries_usage(monkeypatch, db_exec):
     """Feature off by default: an existing deployment must not even pay for
     the query, let alone change behavior."""
     _stub_comments(monkeypatch)
     monkeypatch.setattr(settings, "key_usage_token_cap", None)
-    monkeypatch.setattr(settings, "key_usage_cost_cap_usd", None)
     _enqueue(pr=96)
     _record_usage(db_exec, tokens=10**9, cost=10**6)
 
@@ -1080,7 +1040,7 @@ async def test_no_cap_configured_never_queries_usage(monkeypatch, db_exec):
 
 
 async def test_usage_check_failure_fails_open_and_runs_the_review(monkeypatch, db_exec):
-    """Cost-cap enforcement degrading to off is the same posture as every
+    """Usage-cap enforcement degrading to off is the same posture as every
     other override here degrading to its safe default -- a broken usage query
     must never be able to block every review."""
     _stub_comments(monkeypatch)
@@ -1143,14 +1103,14 @@ async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypa
     stale token cap in force."""
     from app.queue import dispatcher, store, usage_cap_config
 
-    usage_cap_config.set_override_cache(999, None, None)
+    usage_cap_config.set_override_cache(999, None)
 
     def _boom():
         raise RuntimeError("db down")
 
     monkeypatch.setattr(store, "get_usage_cap_overrides", _boom)
     await dispatcher._refresh_usage_cap_overrides()
-    tokens, _cost, _reset = usage_cap_config.effective_caps()
+    tokens, _reset = usage_cap_config.effective_caps()
     assert tokens != 999
     usage_cap_config.reset_override_cache()
 

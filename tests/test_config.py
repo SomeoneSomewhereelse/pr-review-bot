@@ -72,19 +72,17 @@ def test_vertex_settings_default_to_derive_everything_from_the_key(monkeypatch):
 
 
 def test_key_usage_caps_default_to_off(monkeypatch):
-    """Both caps default to None so an existing deployment that sets neither
-    env var sees no behavior change (design doc §2.1). _env_file=None plus
-    delenv because these defaults must be asserted against the code, not
-    against whatever this working copy's .env happens to say."""
+    """The cap defaults to None so an existing deployment that sets no env var
+    sees no behavior change (design doc §2.1). _env_file=None plus delenv
+    because these defaults must be asserted against the code, not against
+    whatever this working copy's .env happens to say."""
     for name in (
         "KEY_USAGE_TOKEN_CAP",
-        "KEY_USAGE_COST_CAP_USD",
         "KEY_USAGE_RESET_TIME_UTC",
     ):
         monkeypatch.delenv(name, raising=False)
     settings = Settings(_env_file=None)
     assert settings.key_usage_token_cap is None
-    assert settings.key_usage_cost_cap_usd is None
     assert settings.key_usage_reset_time_utc == time(4, 0)
 
 
@@ -103,10 +101,8 @@ def test_key_usage_reset_time_parses_hh_mm_ss(monkeypatch):
 
 def test_key_usage_caps_parse_from_env(monkeypatch):
     monkeypatch.setenv("KEY_USAGE_TOKEN_CAP", "20000")
-    monkeypatch.setenv("KEY_USAGE_COST_CAP_USD", "0.25")
     settings = Settings(_env_file=None)
     assert settings.key_usage_token_cap == 20000
-    assert settings.key_usage_cost_cap_usd == 0.25
 
 
 def test_key_usage_reset_time_rejects_garbage(monkeypatch):
@@ -116,22 +112,18 @@ def test_key_usage_reset_time_rejects_garbage(monkeypatch):
 
 
 def test_key_usage_caps_reject_non_positive_values():
-    """0 (or negative) would make the dispatcher's `tokens >= 0`/`cost >= 0`
-    comparison unconditionally true -- every ticket deferred forever, and the
-    deferral is STICKY (fixing the env var doesn't release already-deferred
-    tickets). Both caps must reject non-positive values at startup."""
+    """0 (or negative) would make the dispatcher's `tokens >= 0` comparison
+    unconditionally true -- every ticket deferred forever, and the deferral is
+    STICKY (fixing the env var doesn't release already-deferred tickets). The
+    cap must reject non-positive values at startup."""
     for bad in (0, -1):
         with pytest.raises(ValidationError):
             Settings(key_usage_token_cap=bad)
-    for bad in (0, -1.0):
-        with pytest.raises(ValidationError):
-            Settings(key_usage_cost_cap_usd=bad)
 
 
 def test_key_usage_caps_accept_positive_values():
-    settings = Settings(key_usage_token_cap=1, key_usage_cost_cap_usd=0.01)
+    settings = Settings(key_usage_token_cap=1)
     assert settings.key_usage_token_cap == 1
-    assert settings.key_usage_cost_cap_usd == 0.01
 
 
 def test_env_config_wins_over_env(tmp_path):
@@ -252,3 +244,10 @@ def test_target_repos_empty_string_means_no_restriction():
 def test_target_repos_single_value_has_no_comma():
     settings = Settings(github_target_repo="org/repo", _env_file=None)
     assert settings.target_repos() == frozenset({"org/repo"})
+
+
+def test_cost_cap_is_gone_entirely():
+    """A dollar cap built on unverified rates is a safety control that can fail
+    open -- worse than no cap (design spec 2026-08-18 section 6c)."""
+    assert "KEY_USAGE_COST_CAP_USD" not in OPERATIONAL_KEYS
+    assert not hasattr(Settings(_env_file=None), "key_usage_cost_cap_usd")

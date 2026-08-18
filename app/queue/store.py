@@ -65,7 +65,6 @@ CREATE TABLE IF NOT EXISTS runtime_config (
     groq_model               TEXT,
     vertex_model             TEXT,
     key_usage_token_cap      INTEGER,
-    key_usage_cost_cap_usd   DOUBLE PRECISION,
     key_usage_reset_time_utc TEXT
 );
 CREATE TABLE IF NOT EXISTS reviews (
@@ -777,8 +776,8 @@ def get_all_model_overrides() -> dict[str, str]:
     return {provider: row[column] for provider, column in columns.items() if row[column]}
 
 
-def get_usage_cap_overrides() -> tuple[int | None, float | None, str | None]:
-    """(token cap, cost cap, reset time) overrides, or Nones when unset.
+def get_usage_cap_overrides() -> tuple[int | None, str | None]:
+    """(token cap, reset time) overrides, or Nones when unset.
 
     The reset time comes back as the raw "HH:MM"/"HH:MM:SS" TEXT it was stored
     as; parsing (and rejecting garbage) belongs to
@@ -786,40 +785,35 @@ def get_usage_cap_overrides() -> tuple[int | None, float | None, str | None]:
     """
     with _require_pool().connection() as conn:
         row = conn.execute(
-            "SELECT key_usage_token_cap, key_usage_cost_cap_usd, key_usage_reset_time_utc "
+            "SELECT key_usage_token_cap, key_usage_reset_time_utc "
             "FROM runtime_config WHERE id = 1"
         ).fetchone()
     if row is None:
-        return (None, None, None)
+        return (None, None)
     return (
         row["key_usage_token_cap"],
-        row["key_usage_cost_cap_usd"],
         row["key_usage_reset_time_utc"],
     )
 
 
-def set_usage_cap_override(
-    tokens: int | None, cost: float | None, reset: str | None, now: str
-) -> None:
-    """Set the (token cap, cost cap, reset time) override trio, or clear a
-    field with None.
+def set_usage_cap_override(tokens: int | None, reset: str | None, now: str) -> None:
+    """Set the (token cap, reset time) override pair, or clear a field with
+    None.
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
-    set_provider_override. Writes exactly the three values it's given; the
+    set_provider_override. Writes exactly the two values it's given; the
     only caller, scripts/deploy.py::sync_config_db(), always writes the full
-    trio straight from .env.config's resolved Settings values -- there is no
+    pair straight from .env.config's resolved Settings values -- there is no
     partial-field write to merge with a current value for.
     """
     with _require_pool().connection() as conn:
         conn.execute(
             "INSERT INTO runtime_config "
-            "(id, key_usage_token_cap, key_usage_cost_cap_usd, "
-            "key_usage_reset_time_utc, updated_at) "
-            "VALUES (1, %s, %s, %s, %s) "
+            "(id, key_usage_token_cap, key_usage_reset_time_utc, updated_at) "
+            "VALUES (1, %s, %s, %s) "
             "ON CONFLICT (id) DO UPDATE SET "
             "key_usage_token_cap = EXCLUDED.key_usage_token_cap, "
-            "key_usage_cost_cap_usd = EXCLUDED.key_usage_cost_cap_usd, "
             "key_usage_reset_time_utc = EXCLUDED.key_usage_reset_time_utc, "
             "updated_at = EXCLUDED.updated_at",
-            (tokens, cost, reset, now),
+            (tokens, reset, now),
         )

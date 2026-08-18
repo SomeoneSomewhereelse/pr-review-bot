@@ -87,7 +87,7 @@ _GENERIC_OPERATIONAL_ENV_ATTRS = {
     "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE": "dispatcher_notice_sweep_batch_size",
 }
 
-# These 6 have their own DB-backed live-override mechanism (runtime_config,
+# These 5 have their own DB-backed live-override mechanism (runtime_config,
 # via cooldown_config.py/usage_cap_config.py) -- unlike every other
 # operational key, they are never a Render env var at all (see render.yaml
 # and the 2026-08-17 "two sources of truth" design note): --sync-config-db
@@ -96,7 +96,6 @@ _GENERIC_OPERATIONAL_ENV_ATTRS = {
 _DB_SYNCED_OPERATIONAL_KEYS = frozenset(
     {
         "KEY_USAGE_TOKEN_CAP",
-        "KEY_USAGE_COST_CAP_USD",
         "KEY_USAGE_RESET_TIME_UTC",
         "DISPATCHER_REREVIEW_COOLDOWN_SECONDS",
         "DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS",
@@ -968,14 +967,13 @@ _DB_SYNCED_COLUMNS = (
     "cooldown_max_seconds",
     "cooldown_factor",
     "key_usage_token_cap",
-    "key_usage_cost_cap_usd",
     "key_usage_reset_time_utc",
 )
 
 
 def sync_config_db() -> int:
     """Push .env.config's usage-cap/cooldown values into runtime_config,
-    unconditionally -- these 6 keys are never a Render env var (see
+    unconditionally -- these 5 keys are never a Render env var (see
     render.yaml and _DB_SYNCED_OPERATIONAL_KEYS above), so this is their only
     sync path. .env.config is the source of truth; the DB is only a mirror of
     it that the dispatcher actually reads (app/queue/cooldown_config.py,
@@ -992,7 +990,7 @@ def sync_config_db() -> int:
     CLI-argument-driven write no longer exists, so there is nothing left to
     merge with the current DB value.
 
-    key_usage_token_cap/cost_cap_usd (gt=0) and dispatcher_rereview_cooldown_
+    key_usage_token_cap (gt=0) and dispatcher_rereview_cooldown_
     factor (ge=1.0) already have pydantic Field constraints -- an invalid
     value there fails at Settings() construction, long before this runs. The
     one invariant pydantic CANNOT express (it spans two fields) is
@@ -1016,9 +1014,8 @@ def sync_config_db() -> int:
         )
         return 2
     tokens = settings.key_usage_token_cap
-    cost = settings.key_usage_cost_cap_usd
     reset = settings.key_usage_reset_time_utc.isoformat()
-    wanted = (base, cap, factor, tokens, cost, reset)
+    wanted = (base, cap, factor, tokens, reset)
 
     print(_verify_database_url_reachable())
     now = datetime.now(timezone.utc).isoformat()

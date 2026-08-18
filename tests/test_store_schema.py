@@ -17,7 +17,7 @@ EXPECTED_COLUMNS = {
         "id", "provider", "updated_at", "cooldown_base_seconds",
         "cooldown_max_seconds", "cooldown_factor", "gemini_key_index",
         "groq_key_index", "vertex_key_index", "gemini_model", "groq_model",
-        "vertex_model", "key_usage_token_cap", "key_usage_cost_cap_usd",
+        "vertex_model", "key_usage_token_cap",
         "key_usage_reset_time_utc",
     },
     "reviews": {
@@ -46,6 +46,10 @@ def test_schema_contains_no_alter_statements():
         "_SCHEMA must declare the final shape via CREATE TABLE only -- an ALTER "
         "is migration code, which a fresh clone must not carry (spec section 6d)"
     )
+
+
+def test_runtime_config_has_no_cost_cap_column(db, db_query):
+    assert "key_usage_cost_cap_usd" not in _columns(db_query, "runtime_config")
 
 
 def test_est_cost_usd_is_nullable(db, db_query):
