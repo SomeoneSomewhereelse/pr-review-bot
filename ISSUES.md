@@ -176,6 +176,26 @@ an error"). Ordered roughly chronologically by when they actually occurred.
 
 ## Parked Issues
 
+**All nine cleared 2026-08-18** in a Stage 1.5 cleanup pass, before Stage 2
+planning began — the operator's call was to clear the whole list at once
+rather than split it by coupling, so that Stage 2 starts from a repo whose
+docstrings, tests, and design-of-record all describe its actual behavior.
+The list is kept below as a record of what was found and why it was parked.
+
+Cleared by: `e4d02b0` (stale `_unpriced_models`/`is_known` docstrings;
+inherited vertex rate now declares itself via a new `Rate.note` field),
+`c7d2685` (zero-cost rendering pinned; leaked plan comment removed),
+`df9f68f` (`pricing_check.py` exits 1 only on real drift; weak drift
+assertion strengthened), `fe7da17` (`get_key_usage()` narrowed to tokens),
+and `SPEC.md` updated in the same pass. Two findings turned out to be worse
+than parked as: `get_key_usage()`'s cost sum was not merely dead but silently
+**wrong** (est_cost_usd became nullable in the same stage, and SQL `SUM`
+skips NULLs, so the total under-reported whenever a review ran unpriced), and
+`SPEC.md` also still declared `est_cost_usd: float` rather than
+`float | None`, which the original parked note had not caught.
+
+Original note follows.
+
 Low-severity findings from Stage 1's final whole-branch review (see the entry
 above), deliberately deferred rather than fixed on that branch — the
 reviewer's own recommendation was to fold only the Critical/Important items

@@ -152,7 +152,7 @@ class ReviewResult(BaseModel):
     total_elapsed_ms: int
     total_tokens_in: int
     total_tokens_out: int
-    est_cost_usd: float
+    est_cost_usd: float | None   # None when the model has no rate entry
 ```
 
 The `SpecialistResult` envelope is the **minimum each specialist must carry** so
@@ -232,7 +232,11 @@ _3 specialists · gemini-flash-latest (vertex) · 11.4s · ~$0.0021_
 
 Footer runtime + cost come straight from the `ReviewResult`: providers return usage
 metadata (Vertex/Gemini/Groq all expose it); `pricing.py` maps tokens × active-provider
-rate → `est_cost_usd`.
+rate → `est_cost_usd`. Pricing is **optional**: a model with no entry in the rate
+table yields `est_cost_usd = None`, and the comment simply omits its cost fragments
+rather than failing — the rate table prices reviews, it does not gate which models
+may run. `scripts/deploy.py`'s `pricing` check reports an unpriced model as a
+non-blocking `WARN`.
 
 ## 7. HMAC webhook validation
 
@@ -421,17 +425,22 @@ read-only counterpart, mirroring `provider-live`: it confirms the actively-
 resolved index's env var is genuinely present on the live Render service.
 
 **Proactive per-key daily usage cap.** The rate-limit handling above is
-*reactive* — it waits for a real 429. `KEY_USAGE_TOKEN_CAP` (or
-`KEY_USAGE_COST_CAP_USD`) adds a *proactive* ceiling: before starting a
-review, the dispatcher sums `total_tokens_in + total_tokens_out` (or
-`est_cost_usd`) over the `reviews` rows belonging to the currently-active
-`(provider, key slot)` since the last `KEY_USAGE_RESET_TIME_UTC` boundary
-(default `04:00` UTC, any `HH:MM`/`HH:MM:SS` granularity). At or over the
-cap, the ticket is deferred to the next reset instead of run — no call is
-made at all. Both caps are unset by default, so a deployment that sets
-neither in `.env.config` is unaffected; `KEY_USAGE_TOKEN_CAP` wins outright
-when both are set (the cost cap is then not consulted at all). Like the
-cooldown settings above, these three live only in the `runtime_config` row
+*reactive* — it waits for a real 429. `KEY_USAGE_TOKEN_CAP` adds a
+*proactive* ceiling: before starting a review, the dispatcher sums
+`total_tokens_in + total_tokens_out` over the `reviews` rows belonging to
+the currently-active `(provider, key slot)` since the last
+`KEY_USAGE_RESET_TIME_UTC` boundary (default `04:00` UTC, any
+`HH:MM`/`HH:MM:SS` granularity). At or over the cap, the ticket is deferred
+to the next reset instead of run — no call is made at all. The cap is unset
+by default, so a deployment that does not set it in `.env.config` is
+unaffected. A dollar-denominated cap (`KEY_USAGE_COST_CAP_USD`) existed
+until 2026-08-18 and was removed: it rested on rate-table values the code
+itself calls representative, so an understated rate made it fail *open* —
+a ceiling an operator believed in but that did not hold. Token counts come
+straight from the provider's usage response and are exact. Express a dollar
+budget by dividing by the rate once, at config time, and setting a token
+cap. Like the cooldown settings above, these two live only in the
+`runtime_config` row
 (`scripts/deploy.py --sync-config-db` pushes `.env.config` into it) — never a
 Render env var. Usage is *derived*
 from the persisted `reviews` history rather than counted in memory, so a
@@ -613,9 +622,8 @@ drains whatever is due.
 `DISPATCHER_BACKOFF_JITTER_SECONDS` (default `0.0`, off),
 `DISPATCHER_REREVIEW_COOLDOWN_SECONDS` (default `300.0`),
 `DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` (default `3600.0`),
-`KEY_USAGE_TOKEN_CAP` (default unset — cap off), `KEY_USAGE_COST_CAP_USD`
-(default unset — cap off; ignored entirely when `KEY_USAGE_TOKEN_CAP` is
-set), `KEY_USAGE_RESET_TIME_UTC` (default `04:00`). The last three are the
+`KEY_USAGE_TOKEN_CAP` (default unset — cap off),
+`KEY_USAGE_RESET_TIME_UTC` (default `04:00`). The last two are the
 one set of *per-key* caps here; every other *numeric* var above is a pacing
 knob (`DATABASE_URL`, first in the list, is a connection string, not one).
 
