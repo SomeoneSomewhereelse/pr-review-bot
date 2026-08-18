@@ -246,7 +246,7 @@ async def process_next_due(now: datetime) -> StepResult:
     if token_cap is not None:
         try:
             bucket_start = store.usage_bucket_start(now, reset_time)
-            tokens, _cost = await asyncio.to_thread(
+            tokens = await asyncio.to_thread(
                 store.get_key_usage,
                 provider,
                 key_index.active_key_index(provider),

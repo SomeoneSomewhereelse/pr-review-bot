@@ -463,9 +463,16 @@ def record_review(
         )
 
 
-def get_key_usage(provider: str, key_index: int, since: str) -> tuple[int, float]:
-    """(tokens_total, cost_total_usd) recorded for this (provider, key_index)
-    since ``since`` (inclusive, an ISO-8601 UTC string).
+def get_key_usage(provider: str, key_index: int, since: str) -> int:
+    """Total tokens recorded for this (provider, key_index) since ``since``
+    (inclusive, an ISO-8601 UTC string).
+
+    Tokens only. This used to also return a summed cost, for the removed
+    KEY_USAGE_COST_CAP_USD (design spec 2026-08-18 section 6c) -- which left
+    it not merely dead but subtly WRONG, since est_cost_usd became nullable
+    in the same stage and SUM silently skips NULLs, so the total quietly
+    under-reported whenever any review ran on an unpriced model. Tokens come
+    straight from the provider's usage response and have no such gap.
 
     Derived with a SUM over `reviews` rather than kept in a dedicated
     running-total table: at free-tier volume (~20 PRs/day) the aggregate
@@ -477,8 +484,7 @@ def get_key_usage(provider: str, key_index: int, since: str) -> tuple[int, float
     with _require_pool().connection() as conn:
         row = conn.execute(
             """
-            SELECT COALESCE(SUM(total_tokens_in + total_tokens_out), 0) AS tokens,
-                   COALESCE(SUM(est_cost_usd), 0) AS cost
+            SELECT COALESCE(SUM(total_tokens_in + total_tokens_out), 0) AS tokens
             FROM reviews
             WHERE provider = %s
               AND COALESCE(key_index, 0) = %s
@@ -486,7 +492,7 @@ def get_key_usage(provider: str, key_index: int, since: str) -> tuple[int, float
             """,
             (provider, key_index, since),
         ).fetchone()
-    return (int(row["tokens"]), float(row["cost"]))
+    return int(row["tokens"])
 
 
 _TICKET_STATUSES = ("pending", "running", "deferred", "retrying", "done", "failed")

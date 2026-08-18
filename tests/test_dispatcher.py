@@ -1027,7 +1027,7 @@ async def test_no_cap_configured_never_queries_usage(monkeypatch, db_exec):
     queried = []
     monkeypatch.setattr(
         dispatcher.store, "get_key_usage",
-        lambda *a, **kw: queried.append(a) or (0, 0.0),
+        lambda *a, **kw: queried.append(a) or 0,
     )
 
     async def fake_attempt(repo, pr, comment_id=None):
