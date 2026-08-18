@@ -16,7 +16,9 @@ attached as a header, never logged.
 """
 from __future__ import annotations
 
+import argparse
 import sys
+from typing import NamedTuple
 
 import httpx
 
@@ -27,24 +29,40 @@ _GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 _HTTP_TIMEOUT = 10.0
 
 
-def compare(catalog: dict[str, tuple[float, float]]) -> list[str]:
-    """Drift lines for groq, comparing `catalog` (model -> USD per 1M tokens)
-    against the rate table. Empty when everything matches."""
-    lines: list[str] = []
+class Comparison(NamedTuple):
+    """Two findings of very different weight, kept apart on purpose.
+
+    ``drift`` is a real problem: a rate this project USES has changed, so
+    every cost estimate it has produced since is wrong. ``missing`` is not a
+    problem at all -- Groq's catalog carries dozens of models this project
+    will never run (whisper, guard, and so on), and an unpriced model is
+    supported anyway (design spec section 6a). Folding the two together made
+    a routine run print a wall of paste-ready lines and exit non-zero every
+    single time, which trains an operator to ignore the tool.
+    """
+
+    drift: list[str]
+    missing: list[str]
+
+
+def compare(catalog: dict[str, tuple[float, float]]) -> Comparison:
+    """Compare `catalog` (model -> USD per 1M tokens) against the rate table."""
+    drift: list[str] = []
+    missing: list[str] = []
     for model, (rate_in, rate_out) in sorted(catalog.items()):
         known = pricing.rate_for("groq", model)
         if known is None:
-            lines.append(
-                f'missing: ("groq", "{model}"): '
+            missing.append(
+                f'("groq", "{model}"): '
                 f'Rate({rate_in}, {rate_out}, _GROQ_PRICING, "<today>"),'
             )
         elif (known.rate_in, known.rate_out) != (rate_in, rate_out):
-            lines.append(
-                f"drifted: groq/{model} table says ({known.rate_in}, {known.rate_out}), "
+            drift.append(
+                f"groq/{model} table says ({known.rate_in}, {known.rate_out}), "
                 f"catalog says ({rate_in}, {rate_out}) "
                 f"[verified {known.verified}, source {known.source_url}]"
             )
-    return lines
+    return Comparison(drift, missing)
 
 
 def _fetch_groq_catalog() -> dict[str, tuple[float, float]]:
@@ -73,13 +91,36 @@ def _fetch_groq_catalog() -> dict[str, tuple[float, float]]:
     return catalog
 
 
-def main() -> int:
-    lines = compare(_fetch_groq_catalog())
-    if not lines:
-        print("pricing: groq rates match the live catalog")
+def main(argv: list[str] | None = None) -> int:
+    """Exit 1 ONLY on drift. A model the table does not carry is normal and
+    exits 0 -- see Comparison's docstring for why the two are not equivalent."""
+    parser = argparse.ArgumentParser(
+        description="Compare app/providers/pricing.py's groq rates against Groq's catalog"
+    )
+    parser.add_argument(
+        "--show-missing",
+        action="store_true",
+        help="list paste-ready _RATES lines for catalog models the table lacks "
+        "(off by default: Groq's catalog carries dozens this project never runs)",
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+
+    result = compare(_fetch_groq_catalog())
+
+    if result.missing:
+        print(f"pricing: {len(result.missing)} catalog model(s) not in the rate table", end="")
+        print(" --" if not args.show_missing else ":")
+        if args.show_missing:
+            for line in result.missing:
+                print(f"  {line}")
+        else:
+            print(" re-run with --show-missing to list them")
+
+    if not result.drift:
+        print("pricing: every groq rate this project uses matches the live catalog")
         return 0
-    print("pricing drift detected:")
-    for line in lines:
+    print("pricing DRIFT detected -- estimates using these rates are wrong:")
+    for line in result.drift:
         print(f"  {line}")
     return 1
 
