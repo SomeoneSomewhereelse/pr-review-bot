@@ -19,6 +19,10 @@ class Rate(NamedTuple):
     rate_out: float  # USD per 1M output tokens
     source_url: str
     verified: str    # ISO date, YYYY-MM-DD
+    # Set when `verified` does NOT record an independent check against
+    # source_url -- e.g. a rate inherited from another provider's entry on a
+    # same-price rationale. An empty note means `verified` means what it says.
+    note: str = ""
 
 
 _GROQ_PRICING = "https://groq.com/pricing"
@@ -33,7 +37,11 @@ _VERTEX_PRICING = "https://cloud.google.com/vertex-ai/generative-ai/pricing"
 # see ISSUES.md).
 _RATES: dict[tuple[str, str], Rate] = {
     ("gemini", "gemini-flash-latest"): Rate(0.30, 2.50, _GEMINI_PRICING, "2026-07-23"),
-    ("vertex", "gemini-flash-latest"): Rate(0.30, 2.50, _VERTEX_PRICING, "2026-07-23"),
+    ("vertex", "gemini-flash-latest"): Rate(
+        0.30, 2.50, _VERTEX_PRICING, "2026-07-23",
+        note="inherited from the gemini (AI-Studio) entry on a same-token-price "
+        "rationale; not independently checked against Vertex's own pricing page",
+    ),
     ("vertex", "gemini-2.5-flash"): Rate(0.30, 2.50, _VERTEX_PRICING, "2026-08-14"),
     ("groq", "llama-3.3-70b-versatile"): Rate(0.59, 0.79, _GROQ_PRICING, "2026-07-23"),
 }
@@ -67,10 +75,12 @@ def is_known(provider: str, model: str) -> bool:
     """Whether (provider, model) has a rate entry -- i.e. whether
     estimate_cost_usd would return a real number instead of None for it.
 
-    scripts/set_override.py's --model validation is the reason this exists:
-    without it, an operator/agent could set a model with no pricing entry,
-    and that would only surface as a silently missing cost in the PR comment
-    -- AFTER all three specialists already made real, paid calls.
+    Backs the advisory pricing warnings -- scripts/set_override.py's
+    --model and scripts/deploy.py's check_pricing()/sync_env(). None of them
+    blocks on the answer: an unpriced model runs fine and simply produces no
+    cost estimate on the PR comment (design spec 2026-08-18 sections 6a/6b).
+    It exists so those warnings can be specific about WHICH model is
+    unpriced, rather than leaving an operator to discover a blank cost field.
     """
     return (provider, model) in _RATES
 

@@ -35,3 +35,15 @@ def test_estimate_cost_usd_returns_none_for_an_unpriced_model():
     orchestrator.run_review AFTER all three specialists had already made real,
     paid calls (design spec 2026-08-18 section 6a)."""
     assert pricing.estimate_cost_usd("groq", "llama-3.1-8b-instant", 100, 100) is None
+
+
+def test_an_inherited_rate_declares_itself_rather_than_implying_a_real_check():
+    """A `verified` date that records no independent check is worse than no
+    date at all -- the field exists so an operator can trust it. The vertex
+    gemini-flash-latest rate was copied from the gemini (AI-Studio) entry on
+    a same-token-price rationale, so it must say so."""
+    inherited = pricing._RATES[("vertex", "gemini-flash-latest")]
+    assert inherited.note, "an inherited rate must declare that it is inherited"
+    assert "not independently checked" in inherited.note
+    # An entry that really was checked carries no caveat.
+    assert pricing._RATES[("groq", "llama-3.3-70b-versatile")].note == ""

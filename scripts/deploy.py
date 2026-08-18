@@ -179,22 +179,24 @@ def _unpriced_models(
 
     `overrides`, when given, is a {provider: DB model override or None} map
     (as returned by _resolved_model_overrides()) -- the EFFECTIVE model (an
-    active override, else the local value) is what gets checked, so a
-    --force'd unpriced override is caught too. check_config() passes this (it
-    must report what will actually run); sync_env() omits it (it is refusing
-    a PUSH of the local value -- its own model-override-disagreement guard
-    already refuses when an active override differs from the local value
-    about to be pushed, and when they're equal, the plain local-value check
-    below catches the unpriced case).
+    active override, else the local value) is what gets checked, so an
+    override set past set_override.py's own warning is reported too.
+    check_pricing() passes this (it must report what will actually run);
+    sync_env() omits it (it is warning about a PUSH of the local value -- its
+    own model-override-disagreement guard already refuses when an active
+    override differs from the local value about to be pushed, and when
+    they're equal, the plain local-value check below catches the unpriced
+    case).
 
     An empty model is skipped deliberately: that is a distinct, pre-existing
     failure mode, and piling a second, confusing message onto it adds noise
     rather than clarity. In practice it never fires -- every Settings model
     field carries a non-empty, priced default.
 
-    Shared by check_config() (which reports all of them) and sync_env()
-    (which refuses on the first), so the two can never disagree about what
-    counts as unpriced.
+    Shared by check_pricing() (which reports all of them as one WARN row)
+    and sync_env() (which prints one warning line each), so the two can never
+    disagree about what counts as unpriced. Neither blocks: an unpriced model
+    runs, it just carries no cost estimate (design spec 2026-08-18 section 6b).
     """
     overrides = overrides or {}
     unpriced: list[tuple[str, str, str, str]] = []
