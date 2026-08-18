@@ -62,8 +62,14 @@ def _fetch_groq_catalog() -> dict[str, tuple[float, float]]:
         prompt, completion = price.get("prompt"), price.get("completion")
         if prompt is None or completion is None:
             continue
-        # the endpoint reports USD per token; the table stores USD per 1M
-        catalog[entry["id"]] = (float(prompt) * 1e6, float(completion) * 1e6)
+        # the endpoint reports USD per token; the table stores USD per 1M.
+        # Round the conversion so exact-float-equality in compare() doesn't
+        # report false drift on values that should match (e.g. 7.9e-7 * 1e6
+        # == 0.7899999999999999 in raw float arithmetic, not 0.79).
+        catalog[entry["id"]] = (
+            round(float(prompt) * 1e6, 6),
+            round(float(completion) * 1e6, 6),
+        )
     return catalog
 
 

@@ -235,6 +235,9 @@ def test_check_pricing_warns_on_an_unpriced_model(complete_config, monkeypatch, 
     assert provider in result.detail
     for known in pricing.models_for(provider):
         assert known in result.detail      # the fix is named, not just the fault
+    # no DB override is active here -- the env var really is the source, so
+    # the message must not claim an override is in play
+    assert "override" not in result.detail.lower()
 
 
 def test_unpriced_model_warns_and_does_not_fail_the_run(monkeypatch):
@@ -291,7 +294,14 @@ def test_check_pricing_uses_the_local_value_without_a_database_url(
 def test_check_pricing_warns_on_an_unpriced_db_model_override(complete_config, monkeypatch):
     """The residual gap this fixes: set_override.py --model can put an
     unpriced model into live rotation, and check_pricing must not report PASS
-    for it just because .env.config's own value is fine."""
+    for it just because .env.config's own value is fine.
+
+    The message must also correctly NAME the override as the source, not the
+    env var -- VERTEX_MODEL may hold something else entirely and isn't even
+    being read while this override is active, so blaming it would send an
+    operator to edit the wrong thing. It must also carry the actual
+    remediation command (set_override.py's real --clear-model --no-activate
+    flags, not guessed syntax)."""
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(
         deploy, "_resolved_model_overrides",
@@ -301,6 +311,9 @@ def test_check_pricing_warns_on_an_unpriced_db_model_override(complete_config, m
     assert result.status == "WARN"
     assert "totally-made-up-model" in result.detail
     assert "vertex" in result.detail
+    assert "override" in result.detail.lower()
+    assert "VERTEX_MODEL is not consulted" in result.detail
+    assert "scripts.set_override vertex --clear-model --no-activate" in result.detail
 
 
 def test_check_pricing_passes_a_priced_db_model_override(complete_config, monkeypatch):

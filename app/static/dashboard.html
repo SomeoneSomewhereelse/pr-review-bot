@@ -410,7 +410,7 @@
               <span class="field"><span class="field-label">${t("col_provider")}: </span><span class="field-value">${esc(review.provider)}/${esc(review.model)}</span></span>
               <span class="field"><span class="field-label">${t("col_time")}: </span><span class="field-value">${(review.elapsed_ms / 1000).toFixed(1)}s</span></span>
               <span class="field"><span class="field-label">${t("col_tokens")}: </span><span class="field-value">${review.tokens_in}/${review.tokens_out}</span></span>
-              <span class="field"><span class="field-label">${t("col_cost")}: </span><span class="field-value">$${review.est_cost_usd.toFixed(4)}</span></span>
+              <span class="field"><span class="field-label">${t("col_cost")}: </span><span class="field-value">${review.est_cost_usd === null ? "—" : `$${review.est_cost_usd.toFixed(4)}`}</span></span>
               <span class="field"><span class="field-label">${t("col_when")}: </span><span class="field-value">${new Date(review.created_at).toLocaleString()}</span></span>
               <span class="field">${statuses}</span>
               ${review.comment_url ? `<a class="comment-link field" href="${review.comment_url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${t("col_comment")}</a>` : ""}

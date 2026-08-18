@@ -255,6 +255,16 @@ def check_pricing() -> CheckResult:
     returns None). This used to be folded into check_config as a FAIL, back
     when an unpriced model crashed the review after three paid calls
     (design spec 2026-08-18 section 6b).
+
+    `model` (from _unpriced_models()) is the EFFECTIVE value -- an active DB
+    override when one is set, else the local env var -- but the env var's
+    NAME (model_var) is always available regardless of which one is in
+    effect. Naming model_var as the source when an override is actually what
+    supplied the unpriced value would misleadingly blame an env var that may
+    hold something else entirely and isn't even being read; branch on
+    whether an override is active so the message always names the real
+    source, matching the override-branching message this file used to build
+    inside check_config() before check_pricing() was extracted out of it.
     """
     overrides: dict[str, str | None] = {}
     if settings.database_url:
@@ -262,11 +272,21 @@ def check_pricing() -> CheckResult:
             overrides = _resolved_model_overrides()
         except Exception:  # noqa: BLE001
             overrides = {}
-    lines = [
-        f"{model_var}={model!r} has no pricing-table entry for {provider} "
-        f"(known: {known}) -- reviews run, with no cost estimate"
-        for provider, model_var, model, known in _unpriced_models(overrides)
-    ]
+    lines = []
+    for provider, model_var, model, known in _unpriced_models(overrides):
+        if overrides.get(provider):
+            lines.append(
+                f"{provider} model override {model!r} has no pricing-table entry "
+                f"(known {provider} models: {known}); {model_var} is not consulted "
+                "while this override is active -- reviews run, with no cost "
+                "estimate. Clear it or add a pricing.py entry: uv run python -m "
+                f"scripts.set_override {provider} --clear-model --no-activate"
+            )
+        else:
+            lines.append(
+                f"{model_var}={model!r} has no pricing-table entry for {provider} "
+                f"(known: {known}) -- reviews run, with no cost estimate"
+            )
     if lines:
         return CheckResult("pricing", "WARN", "\n".join(lines))
     return CheckResult("pricing", "PASS", "")

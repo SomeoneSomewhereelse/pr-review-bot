@@ -61,6 +61,19 @@ async def test_render_stats_guards_on_queue_by_status_error_not_bare_queue_error
     assert "queue.error" not in body
 
 
+async def test_dashboard_page_guards_null_est_cost_usd_before_tofixed():
+    """est_cost_usd is nullable (Task 3 made unpriced reviews serialize as
+    JSON null). Calling .toFixed(4) directly on it throws inside
+    renderReviews, which is called from refreshDashboard's try block -- so
+    one unpriced review among the most-recent 50 blanks the entire reviews
+    table on every poll. The renderer must null-guard before .toFixed,
+    following the same `?? "?"` idiom used for finding.line."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert 'review.est_cost_usd === null ? "—" : `$${review.est_cost_usd.toFixed(4)}`' in body
+
+
 async def test_dashboard_page_escapes_llm_text_before_innerhtml():
     """finding.*/specialist.error are attacker-influenced LLM text; the page
     must run them through esc() before interpolating into innerHTML, not
