@@ -26,6 +26,10 @@ from app.providers import registry
 from app.queue import cooldown_config
 from app.specialists.schemas import ReviewResult
 
+# Declared, not migrated: this is the final shape, provisioned in one pass on
+# first boot. No ALTER statements -- a fresh clone carries no migration code
+# (design spec 2026-08-18 section 6d), and an existing database is recreated
+# out of band rather than migrated in place (section 9).
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -43,27 +47,27 @@ CREATE TABLE IF NOT EXISTS tickets (
     last_reviewed_at   TEXT,
     cooldown_level     INTEGER NOT NULL DEFAULT 0,
     notice_not_before  TEXT,
+    last_error         TEXT,
+    defer_reason       TEXT,
     UNIQUE (repo_full_name, pr_number)
 );
-ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_error TEXT;
-ALTER TABLE tickets ADD COLUMN IF NOT EXISTS defer_reason TEXT;
 CREATE TABLE IF NOT EXISTS runtime_config (
-    id         INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    provider   TEXT,
-    updated_at TEXT NOT NULL
+    id                       INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    provider                 TEXT,
+    updated_at               TEXT NOT NULL,
+    cooldown_base_seconds    DOUBLE PRECISION,
+    cooldown_max_seconds     DOUBLE PRECISION,
+    cooldown_factor          DOUBLE PRECISION,
+    gemini_key_index         INTEGER,
+    groq_key_index           INTEGER,
+    vertex_key_index         INTEGER,
+    gemini_model             TEXT,
+    groq_model               TEXT,
+    vertex_model             TEXT,
+    key_usage_token_cap      INTEGER,
+    key_usage_cost_cap_usd   DOUBLE PRECISION,
+    key_usage_reset_time_utc TEXT
 );
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_base_seconds DOUBLE PRECISION;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_max_seconds  DOUBLE PRECISION;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS cooldown_factor       DOUBLE PRECISION;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_key_index INTEGER;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_key_index   INTEGER;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS vertex_key_index INTEGER;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS gemini_model TEXT;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS groq_model   TEXT;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS vertex_model TEXT;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS key_usage_token_cap INTEGER;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS key_usage_cost_cap_usd DOUBLE PRECISION;
-ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS key_usage_reset_time_utc TEXT;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,
@@ -76,10 +80,10 @@ CREATE TABLE IF NOT EXISTS reviews (
     total_tokens_in    INTEGER NOT NULL,
     total_tokens_out   INTEGER NOT NULL,
     est_cost_usd       DOUBLE PRECISION NOT NULL,
-    results            JSONB   NOT NULL
+    results            JSONB   NOT NULL,
+    key_index          INTEGER
 );
 CREATE INDEX IF NOT EXISTS reviews_created_at_idx ON reviews (created_at DESC);
-ALTER TABLE reviews ADD COLUMN IF NOT EXISTS key_index INTEGER;
 """
 
 _pool: ConnectionPool | None = None
