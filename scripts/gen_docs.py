@@ -159,3 +159,42 @@ def render_sync_env() -> str:
             "Render would create dead env vars.",
         ]
     ) + "\n"
+
+
+def render_checks() -> str:
+    """The deploy checklist, rendered from deploy.CHECKS in run order.
+
+    Order is the registry's order, not sorted: the checks run foundational
+    first so a misconfiguration is reported before the checks that would fail
+    as a consequence of it, and the table is more useful read the same way.
+    """
+    lines = [
+        GENERATED_HEADER,
+        "# Deployment checks\n",
+        "`uv run python -m scripts.deploy` runs all of these and prints one line "
+        "each, so a single run surfaces every problem rather than only the "
+        "first.\n",
+        "| Check | Verifies | Always runs? |",
+        "| --- | --- | --- |",
+    ]
+    for spec in deploy.CHECKS:
+        lines.append(
+            f"| `{spec.name}` | {spec.verifies} | "
+            f"{'yes' if spec.required else 'needs an operator key'} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Unskipping the optional checks\n",
+            "An optional check degrades to `SKIPPED` with a hint, never to a "
+            "failure, when its operator-local key is unset. None of these keys is "
+            "ever set on the Render service itself.\n",
+            "- `RENDER_API_KEY` (Render → Account Settings → API Keys) enables "
+            "`boot-creds-live`, `render-service`, `provider-live`, `api-key-live`, "
+            "and `--sync-env`.",
+            "- `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.",
+            "- `DATABASE_URL` enables `database` and `provider` — the provider "
+            "override lives in the same database.",
+        ]
+    )
+    return "\n".join(lines) + "\n"

@@ -119,3 +119,34 @@ def test_sync_env_table_lists_every_providers_model_var():
 def test_the_new_renderers_are_deterministic():
     assert gen_docs.render_pricing() == gen_docs.render_pricing()
     assert gen_docs.render_sync_env() == gen_docs.render_sync_env()
+
+
+def test_checks_table_renders_every_registered_check_in_order():
+    from scripts import deploy
+
+    table = gen_docs.render_checks()
+    positions = [table.index(f"`{spec.name}`") for spec in deploy.CHECKS]
+    assert positions == sorted(positions), "table order must match run order"
+    for spec in deploy.CHECKS:
+        assert spec.verifies in table, f"{spec.name}'s description was not rendered"
+
+
+def test_checks_table_distinguishes_required_from_optional():
+    from scripts import deploy
+
+    table = gen_docs.render_checks()
+    for line in table.splitlines():
+        for spec in deploy.CHECKS:
+            if line.startswith(f"| `{spec.name}`"):
+                assert ("yes" in line) is spec.required, f"{spec.name} marked wrongly"
+
+
+def test_checks_table_names_the_keys_that_unlock_the_optional_ones():
+    """An operator seeing SKIPPED needs to know which key would unskip it."""
+    table = gen_docs.render_checks()
+    for key in ("RENDER_API_KEY", "UPTIMEROBOT_API_KEY", "DATABASE_URL"):
+        assert key in table
+
+
+def test_render_checks_is_deterministic():
+    assert gen_docs.render_checks() == gen_docs.render_checks()
