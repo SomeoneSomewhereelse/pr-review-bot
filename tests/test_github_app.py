@@ -8,6 +8,7 @@ new dependencies, these tests patch `requests.adapters.HTTPAdapter.send`
 tiny in-memory router keyed on method + URL substring.
 """
 
+import base64
 import json
 
 import pytest
@@ -23,6 +24,8 @@ PR_NUMBER = 1
 REPO_API_URL = f"https://api.github.com/repos/{REPO_FULL_NAME}"
 PR_API_URL = f"{REPO_API_URL}/pulls/{PR_NUMBER}"
 ISSUE_API_URL = f"{REPO_API_URL}/issues/{PR_NUMBER}"
+
+_seen_key_material: list[str] = []
 
 
 def _repo_json():
@@ -48,28 +51,46 @@ def _pull_json():
     }
 
 
-@pytest.fixture(autouse=True)
-def _throwaway_app_credentials(monkeypatch):
-    """Point settings at a freshly generated, throwaway RSA key.
-
-    Keeps these tests independent of the real (gitignored) App credentials —
-    only JWT *signing* happens locally with this key; every HTTP call is
-    mocked below, so nothing is ever sent anywhere with it.
-    """
-    import base64
-
+@pytest.fixture(scope="module")
+def _app_credentials_key_material() -> str:
+    """Generates the throwaway RSA key once per test file, not once per
+    test. No test depends on the key's value differing from another
+    test's -- see _throwaway_app_credentials below."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    return base64.b64encode(pem).decode()
 
+
+@pytest.fixture(autouse=True)
+def _throwaway_app_credentials(_app_credentials_key_material, monkeypatch):
+    """Point settings at the module's shared throwaway RSA key.
+
+    Keeps these tests independent of the real (gitignored) App credentials —
+    only JWT *signing* happens locally with this key; every HTTP call is
+    mocked below, so nothing is ever sent anywhere with it. The key itself
+    can't be generated at module scope directly: `monkeypatch` is only
+    available at function scope, and a module-scoped fixture depending on it
+    raises ScopeMismatch at collection. So the expensive part (keygen) is
+    module-scoped via _app_credentials_key_material above, and this fixture
+    just does the (cheap) monkeypatch.setattr calls every test.
+    """
     monkeypatch.setattr(settings, "github_app_id", 999999)
     monkeypatch.setattr(settings, "github_app_installation_id", 123456)
-    monkeypatch.setattr(
-        settings, "github_app_private_key", base64.b64encode(pem).decode()
-    )
+    monkeypatch.setattr(settings, "github_app_private_key", _app_credentials_key_material)
+
+
+def test_key_material_fixture_produces_a_value(_app_credentials_key_material):
+    _seen_key_material.append(_app_credentials_key_material)
+    assert _app_credentials_key_material  # non-empty base64 string
+
+
+def test_key_material_fixture_is_shared_not_regenerated(_app_credentials_key_material):
+    assert _seen_key_material, "test_key_material_fixture_produces_a_value must run first"
+    assert _app_credentials_key_material == _seen_key_material[0]
 
 
 class FakeGithubTransport:
