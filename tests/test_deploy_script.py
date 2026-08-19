@@ -18,7 +18,7 @@ import yaml
 
 from app.config import OPERATIONAL_KEYS, Settings, settings
 from app.providers import pricing
-from scripts import deploy
+from scripts import _prereqs, deploy
 
 BASE = "https://x.onrender.com"
 HEALTH = f"{BASE}/healthz"
@@ -742,6 +742,13 @@ def test_health_fails_on_a_transport_error():
 
 DEAD_DB_URL = "postgresql://u:pw@127.0.0.1:1/postgres?connect_timeout=1"
 
+# A stand-in for "some database is configured" in sync_env() tests that are
+# about something else entirely (model overrides) and stub every DB accessor,
+# so this URL is never dialed. It must NOT be a localhost/127.0.0.1/.internal
+# host: sync_env()'s local-test-database guard refuses those outright and
+# would short-circuit the guard each such test is actually named for.
+REMOTE_PLACEHOLDER_DB_URL = "postgresql://u:p@db.example.com/x"
+
 
 def test_database_skips_with_a_hint_when_unset(monkeypatch):
     monkeypatch.setattr(settings, "database_url", "")
@@ -1355,6 +1362,74 @@ def _env_var_list(values: dict):
 def test_sync_env_requires_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     assert deploy.sync_env() == 2
+
+
+@pytest.mark.parametrize(
+    "local_url",
+    [
+        # exactly what scripts/test_db.py exports:
+        "postgresql://postgres:x@localhost:5433/postgres",
+        "postgresql://postgres:x@127.0.0.1:5432/postgres",
+        "postgresql://u:p@db.internal:5432/postgres",
+    ],
+)
+def test_sync_env_refuses_a_local_test_database_url(sync_ready, monkeypatch, capsys, local_url):
+    """DATABASE_URL is always-synced and Settings reads os.environ ahead of
+    .env, so a shell that ran `eval "$(uv run python -m scripts.test_db)"`
+    would otherwise repoint the live Render service at a throwaway container
+    on the operator's laptop."""
+    monkeypatch.setattr(settings, "database_url", local_url)
+    assert deploy.sync_env() == 2
+    err = capsys.readouterr().err
+    assert "refusing to sync" in err
+    assert "scripts.test_db" in err
+    assert "unset DATABASE_URL" in err
+
+
+def test_sync_env_local_database_url_guard_refuses_before_any_request(sync_ready, monkeypatch):
+    """Same 'refuse before touching anything' contract the other pre-push
+    guards hold to -- no Render call, and no psycopg connection to the local
+    database either."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://postgres:x@localhost:5433/postgres")
+    connected = []
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: connected.append(1))
+    with respx.mock:
+        services = respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=_service_list())
+        )
+        assert deploy.sync_env() == 2
+    assert services.call_count == 0
+    assert connected == []
+
+
+def test_sync_env_still_accepts_a_real_remote_database_url(sync_ready, capsys):
+    """The guard must not fire on a normal hosted DATABASE_URL -- sync_ready's
+    host is a plain remote hostname, so a full sync still runs to completion."""
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(200, json=_env_var_list({}))
+        )
+        respx.put(url__regex=rf"{RENDER_SERVICES}/srv-1/env-vars/.+").mock(
+            return_value=httpx.Response(200, json={})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}})
+        )
+        respx.get(f"{RENDER_SERVICES}/srv-1/deploys/dep-1").mock(
+            return_value=httpx.Response(200, json={"deploy": {"status": "live"}})
+        )
+        assert deploy.sync_env() == 0
+    assert "refusing to sync" not in capsys.readouterr().err
+
+
+def test_sync_env_local_db_guard_consumes_the_shared_prereqs_predicate():
+    """The guard must never grow its own private notion of 'local' -- it reads
+    scripts/_prereqs.py's predicate, the same one scripts/test_db.py uses."""
+    assert deploy._looks_like_local_test_db is _prereqs._looks_like_local_test_db
 
 
 def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys):
@@ -2423,7 +2498,7 @@ def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
     from scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
-    monkeypatch.setattr(settings, "database_url", "postgresql://localhost/x")
+    monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
     monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
@@ -2444,7 +2519,7 @@ def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
     from scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
-    monkeypatch.setattr(settings, "database_url", "postgresql://localhost/x")
+    monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")
     monkeypatch.setattr(deploy, "_resolved_provider", lambda: ("vertex", None))
@@ -2459,7 +2534,7 @@ def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "_wanted_env", lambda: {"LLM_PROVIDER": "vertex"})
     # sync_config_db() (run as part of sync_env() now) reads/writes
     # runtime_config via a raw psycopg.connect() -- stub it so this test's
-    # fake postgresql://localhost/x is never actually dialed.
+    # fake REMOTE_PLACEHOLDER_DB_URL is never actually dialed.
     monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
     # Mocked so this test makes no live Render call; returning None makes the
     # script stop at "no such service" -- which proves it got PAST the model
@@ -2482,7 +2557,7 @@ def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
     from scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
-    monkeypatch.setattr(settings, "database_url", "postgresql://localhost/x")
+    monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "llm_model", "gemini-flash-latest")
     monkeypatch.setattr(settings, "vertex_model", "gemini-2.5-flash")

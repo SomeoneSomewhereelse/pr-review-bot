@@ -33,6 +33,7 @@ from app import github_app
 from app.config import settings
 from app.providers import pricing, registry
 from scripts import _override, _render
+from scripts._prereqs import _looks_like_local_test_db
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
@@ -1085,6 +1086,31 @@ def sync_env() -> int:
     """
     if not settings.render_api_key:
         print("--sync-env requires RENDER_API_KEY", file=sys.stderr)
+        return 2
+    # DATABASE_URL is in _ALWAYS_SYNCED, and Settings reads the process
+    # environment ahead of any .env file -- so a shell that ran
+    # `eval "$(uv run python -m scripts.test_db)"` (README's fast-iteration
+    # path) has a throwaway localhost:5433 URL sitting in os.environ, and
+    # _wanted_env() would happily push THAT to the live service, repointing
+    # production at a container on the operator's laptop. This project has
+    # already had one incident of exactly this shape (a live Render service
+    # left holding a dummy test value -- see tests/conftest.py's
+    # _quarantine_operator_apis comment), so a local-shaped URL is a refusal,
+    # not a warning. Deliberately the FIRST guard after the API-key check:
+    # everything below it would otherwise open psycopg connections to that
+    # local database first and report confusing downstream failures. Consumes
+    # scripts/_prereqs.py's predicate -- the same one scripts/test_db.py uses
+    # -- so the two can never disagree about what "local" means.
+    if _looks_like_local_test_db(settings.database_url):
+        host = urlsplit(settings.database_url).hostname or "?"
+        print(
+            f"refusing to sync: DATABASE_URL points at {host}, a local/test Postgres -- "
+            "pushing it would repoint the live Render service at a database on this "
+            "machine. This is almost certainly a shell where "
+            '`eval "$(uv run python -m scripts.test_db)"` was run; `unset DATABASE_URL` '
+            "(or use a fresh shell) and re-run.",
+            file=sys.stderr,
+        )
         return 2
     if settings.llm_provider not in _PROVIDERS:
         accepted = ", ".join(sorted(_PROVIDERS))
