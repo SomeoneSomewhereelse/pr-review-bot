@@ -49,3 +49,28 @@ def test_the_docs_job_needs_no_database():
     """gen_docs reads class metadata and module constants only, so wiring a
     Postgres service to this job would be pure noise."""
     assert "services" not in _workflow()["jobs"]["docs"]
+
+
+def test_a_pages_job_builds_and_deploys_the_guide():
+    jobs = _workflow()["jobs"]
+    assert "pages" in jobs
+    commands = " ".join(s.get("run", "") for s in jobs["pages"]["steps"])
+    assert "mkdocs build" in commands
+    assert "--strict" in commands, "a broken internal link must fail the build"
+
+
+def test_the_pages_job_has_the_permissions_deployment_needs():
+    job = _workflow()["jobs"]["pages"]
+    assert job["permissions"]["pages"] == "write"
+    assert job["permissions"]["id-token"] == "write"
+
+
+def test_pages_deploys_only_from_the_default_branch():
+    """A Pages deploy from a feature branch would publish unreviewed docs."""
+    job = _workflow()["jobs"]["pages"]
+    assert "refs/heads/main" in job["if"]
+
+
+def test_the_docs_drift_job_still_exists():
+    """Stage 3a's guarantee must survive this stage."""
+    assert "docs" in _workflow()["jobs"]
