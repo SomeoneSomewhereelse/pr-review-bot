@@ -2582,7 +2582,7 @@ def test_sync_env_allows_a_priced_model(sync_ready, monkeypatch, capsys):
     assert "no Render service named" in capsys.readouterr().err
 
 
-def test_checks_registry_matches_what_run_checks_actually_runs():
+def test_checks_registry_matches_what_run_checks_actually_runs(monkeypatch):
     """The registry is the single source: if run_checks stops consuming it,
     the generated checks.md silently starts describing a different tool."""
     names = [spec.name for spec in deploy.CHECKS]
@@ -2591,6 +2591,7 @@ def test_checks_registry_matches_what_run_checks_actually_runs():
         "database", "provider", "provider-live", "api-key-live",
         "render-service", "uptime-pinger",
     ]
+    _stub_all_checks(monkeypatch, ["PASS"] * 11)
     results = deploy.run_checks(frozenset(), "https://example.invalid")
     assert [r.name for r in results] == names
 

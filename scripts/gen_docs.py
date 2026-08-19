@@ -191,8 +191,10 @@ def render_checks() -> str:
             "",
             "## Unskipping the optional checks\n",
             "An optional check degrades to `SKIPPED` with a hint, never to a "
-            "failure, when its operator-local key is unset. None of these keys is "
-            "ever set on the Render service itself.\n",
+            "failure, when its operator-local key is unset. `RENDER_API_KEY` and "
+            "`UPTIMEROBOT_API_KEY` are operator-local and are never set on the "
+            "Render service; `DATABASE_URL` is both — the service needs it too, "
+            "and `--sync-env` pushes it there.\n",
             "- `RENDER_API_KEY` (Render → Account Settings → API Keys) enables "
             "`boot-creds-live`, `render-service`, `provider-live`, `api-key-live`, "
             "and `--sync-env`.",

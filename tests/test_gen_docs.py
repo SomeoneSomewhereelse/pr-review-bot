@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.config import OPERATIONAL_KEYS, settings
 from scripts import gen_docs
 
@@ -29,6 +31,19 @@ def test_config_table_never_contains_a_configured_value(monkeypatch):
                   "gemini_api_key", "gcp_service_account_key", "github_app_private_key"):
         monkeypatch.setattr(settings, field, SENTINEL, raising=False)
     assert SENTINEL not in gen_docs.render_config()
+
+
+def test_no_generated_file_contains_a_configured_value(tmp_path, monkeypatch):
+    """Same regression guard as test_config_table_never_contains_a_configured_value,
+    extended to every renderer write_all() produces -- not just render_config().
+    A future renderer that reads deploy.settings (the live instance deploy.py
+    imports at module scope) would otherwise evade both the AST guard (which
+    only inspects gen_docs.py's own imports) and a config-only sentinel."""
+    for field in ("database_url", "github_webhook_secret", "groq_api_key",
+                  "gemini_api_key", "gcp_service_account_key", "github_app_private_key"):
+        monkeypatch.setattr(settings, field, SENTINEL, raising=False)
+    for path in gen_docs.write_all(tmp_path):
+        assert SENTINEL not in path.read_text(encoding="utf-8"), path
 
 
 def test_gen_docs_module_does_not_import_the_settings_instance():
@@ -210,3 +225,64 @@ def test_committed_reference_files_are_up_to_date():
 def test_main_writes_and_reports(tmp_path, capsys):
     assert gen_docs.main(["--root", str(tmp_path)]) == 0
     assert "config.md" in capsys.readouterr().out
+
+
+def test_every_file_call_in_gen_docs_declares_encoding_and_newline():
+    """Spec section 8k / 5a: a missing explicit encoding= on a read or write
+    silently falls back to the OS locale encoding (cp1252 on Windows), and a
+    missing newline= on a write falls back to CRLF there -- either fails the
+    byte-for-byte CI drift check on that operator's machine, since
+    .gitattributes pins the working tree to LF. Parsed with ast rather than
+    grepped, so a call spanning multiple lines or using different quoting
+    still gets caught."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(gen_docs))
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name in {"open", "read_text", "write_text"}:
+            calls.append((name, node))
+
+    assert calls, "expected at least one open/read_text/write_text call to check"
+    for name, node in calls:
+        kwargs = {kw.arg for kw in node.keywords if kw.arg}
+        assert "encoding" in kwargs, f"{name}() at gen_docs.py:{node.lineno} has no encoding="
+        if name == "write_text":
+            assert "newline" in kwargs, f"{name}() at gen_docs.py:{node.lineno} has no newline="
+
+
+def test_write_all_output_is_utf8_not_locale_dependent(tmp_path):
+    """Spec section 8k / 5a: proves the explicit encoding="utf-8" in
+    write_all is load-bearing, not coincidental. The generated checks.md
+    contains characters that a missing explicit encoding= would mishandle
+    under cp1252 (the Windows default locale encoding): an arrow that cp1252
+    cannot represent at all, and an em-dash that it represents as a different
+    byte than UTF-8 does. Confirming the file is genuinely UTF-8 on disk --
+    not some other encoding that happens to decode without error -- shows
+    write_all's explicit encoding argument, and not luck, is what protects
+    determinism."""
+    paths = gen_docs.write_all(tmp_path)
+    checks = next(p for p in paths if p.name == "checks.md")
+    text = checks.read_text(encoding="utf-8")
+    assert "→" in text
+    assert "—" in text
+
+    # The arrow has no cp1252 representation whatsoever -- a write under that
+    # encoding would raise outright rather than silently drift.
+    with pytest.raises(UnicodeEncodeError):
+        text.encode("cp1252")
+
+    # The bytes actually on disk are UTF-8's multi-byte encoding of these
+    # characters, not cp1252's single-byte forms (0x97 for the em-dash;
+    # the arrow has no cp1252 form at all).
+    raw = checks.read_bytes()
+    assert "→".encode("utf-8") in raw
+    assert "—".encode("utf-8") in raw
+
+    # Round-tripping the bytes on disk through UTF-8 is lossless.
+    assert raw.decode("utf-8").encode("utf-8") == raw

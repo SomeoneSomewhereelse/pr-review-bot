@@ -97,9 +97,20 @@ def db_query(db_url):
 # point at REAL infrastructure. A test that forgets to monkeypatch them runs
 # against production: during this plan's Task 2 exactly that happened, and a
 # live Render service had GITHUB_TARGET_REPO overwritten with a dummy value.
-# Same reasoning as the DATABASE_URL guard above -- default to inert, and make
-# reaching a live API something a test has to ask for by name.
-_LIVE_OPERATOR_KEYS = ("render_api_key", "uptimerobot_api_key")
+# Later, during Stage 3a's final review, the same gap was found to cover
+# GitHub App credentials too: test_checks_registry_matches_what_run_checks_
+# actually_runs called run_checks() with no mocking and check_installation_
+# and_webhook (github-app) is exactly as capable of reaching live
+# infrastructure as render/uptimerobot -- it actually did repoint the real
+# GitHub App webhook. Same reasoning as the DATABASE_URL guard above --
+# default to inert, and make reaching a live API something a test has to ask
+# for by name.
+_LIVE_OPERATOR_KEYS = (
+    "render_api_key",
+    "uptimerobot_api_key",
+    "github_app_private_key",
+    "github_webhook_secret",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -108,6 +119,11 @@ def _quarantine_operator_apis(request, monkeypatch):
         return
     for name in _LIVE_OPERATOR_KEYS:
         monkeypatch.setattr(settings, name, "")
+    # github_app_id is an int field (default 0), unlike the string keys above
+    # -- blank it with the type-correct falsy value so check_installation_and_
+    # webhook's `if not settings.github_app_id` still degrades to SKIPPED
+    # instead of raising on a str-vs-int mismatch.
+    monkeypatch.setattr(settings, "github_app_id", 0)
     # settings.database_url defaults to whatever this working copy's real
     # .env points at (a Supabase pooler host in this repo). scripts/deploy.py
     # now opens raw psycopg connections against it (check_database,
