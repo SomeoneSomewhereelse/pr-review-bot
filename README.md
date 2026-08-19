@@ -1,4 +1,4 @@
-# Autonomous Code Review Engine (Project ד)
+# Autonomous Code Review Engine
 
 A GitHub PR webhook triggers an **Orchestrator** that fetches the diff and
 fans out to three parallel LLM specialists — **Security**, **Performance**,
