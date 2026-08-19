@@ -79,11 +79,28 @@ same "don't guess at an unconfirmed cause" reason.
 
 ### 3a. Fix `test_github_app.py`'s per-test RSA keygen
 
-Change `_throwaway_app_credentials` (`tests/test_github_app.py:51`) from
-implicit function scope to `scope="module"`. Confirmed safe: the fixture's
-own docstring already states the key's only purpose is local JWT-signing
-round-trips with every HTTP call mocked — no test depends on the key's value
-differing from another test's. Saves ~1.4s in this file.
+`_throwaway_app_credentials` (`tests/test_github_app.py:51`) can't simply
+become `scope="module"` — it depends on the `monkeypatch` fixture, which
+pytest only provides at function scope; a module-scoped fixture requesting
+it raises `ScopeMismatch` at collection, before any test runs. Split it in
+two instead:
+
+- A new `scope="module"` fixture (no `monkeypatch` dependency) that does the
+  actual `rsa.generate_private_key(...)` call once per file and returns the
+  base64-encoded PEM (and the fixed `github_app_id`/`installation_id`
+  values) as plain data.
+- `_throwaway_app_credentials` stays `autouse=True` at function scope (so
+  every test still gets `monkeypatch.setattr` applied and automatically
+  undone, same as today — the safety property nothing changes here), but
+  now just reads that cached data and calls `monkeypatch.setattr` three
+  times — no keygen. `monkeypatch.setattr` itself is cheap; the RSA
+  generation is the ~45ms cost, and it now runs once per file instead of
+  once per test.
+
+Confirmed safe to share the key across tests: the fixture's own docstring
+already states the key's only purpose is local JWT-signing round-trips with
+every HTTP call mocked — no test depends on the key's value differing from
+another test's. Saves ~1.4s in this file.
 
 Also do a repo-wide grep for the same `autouse` + implicit-function-scope +
 expensive-setup pattern (crypto keygen, anything else non-trivial), in case
