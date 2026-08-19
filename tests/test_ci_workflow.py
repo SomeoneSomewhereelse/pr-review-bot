@@ -26,8 +26,23 @@ def test_the_docs_job_regenerates_and_fails_on_drift():
     steps = _workflow()["jobs"]["docs"]["steps"]
     commands = " ".join(step.get("run", "") for step in steps)
     assert "scripts.gen_docs" in commands
-    assert "git diff --exit-code" in commands
+    assert "git add -A" in commands
+    assert "git diff --cached --exit-code" in commands
     assert "guide/reference" in commands
+
+
+def test_the_docs_job_regenerates_before_diffing():
+    """Order matters, not just presence: a diff-then-regenerate reordering
+    would never observe drift, but a substring-only check on the joined
+    commands (as above) can't tell the two orderings apart."""
+    steps = _workflow()["jobs"]["docs"]["steps"]
+    regenerate_index = next(
+        i for i, step in enumerate(steps) if "scripts.gen_docs" in step.get("run", "")
+    )
+    diff_index = next(
+        i for i, step in enumerate(steps) if "git diff --cached --exit-code" in step.get("run", "")
+    )
+    assert regenerate_index < diff_index
 
 
 def test_the_docs_job_needs_no_database():

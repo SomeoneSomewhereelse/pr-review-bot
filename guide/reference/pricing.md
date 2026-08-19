@@ -7,9 +7,9 @@ Rates are USD per 1M tokens. Pricing is **optional**: a model with no entry here
 
 | Provider | Model | In | Out | Verified | Source |
 | --- | --- | --- | --- | --- | --- |
-| `gemini` | `gemini-flash-latest` | 0.3 | 2.5 | 2026-07-23 | [source](https://ai.google.dev/gemini-api/docs/pricing) |
+| `gemini` | `gemini-flash-latest` | 0.30 | 2.50 | 2026-07-23 | [source](https://ai.google.dev/gemini-api/docs/pricing) |
 | `groq` | `llama-3.3-70b-versatile` | 0.59 | 0.79 | 2026-07-23 | [source](https://groq.com/pricing) |
-| `vertex` | `gemini-2.5-flash` | 0.3 | 2.5 | 2026-08-14 | [source](https://cloud.google.com/vertex-ai/generative-ai/pricing) |
-| `vertex` | `gemini-flash-latest` | 0.3 | 2.5 | 2026-07-23 † | [source](https://cloud.google.com/vertex-ai/generative-ai/pricing) |
+| `vertex` | `gemini-2.5-flash` | 0.30 | 2.50 | 2026-08-14 | [source](https://cloud.google.com/vertex-ai/generative-ai/pricing) |
+| `vertex` | `gemini-flash-latest` | 0.30 | 2.50 | 2026-07-23 † | [source](https://cloud.google.com/vertex-ai/generative-ai/pricing) |
 
 † `vertex`/`gemini-flash-latest`: inherited from the gemini (AI-Studio) entry on a same-token-price rationale; not independently checked against Vertex's own pricing page

@@ -89,6 +89,27 @@ def test_render_config_is_deterministic():
     assert gen_docs.render_config() == gen_docs.render_config()
 
 
+def test_default_text_handles_a_field_with_no_declared_default():
+    """Fix D: a required field (or a default_factory-only one) has no plain
+    default at all -- field.default is pydantic's PydanticUndefined sentinel.
+    No Settings field is like this today, so this test builds a throwaway
+    local model rather than relying on one existing in app.config.Settings.
+    Without the defensive branch, this would render the literal string
+    "PydanticUndefined" into a published doc."""
+    from pydantic import BaseModel, Field
+
+    class _Throwaway(BaseModel):
+        required_field: int
+        factory_field: list[str] = Field(default_factory=list)
+
+    text = gen_docs._default_text(_Throwaway.model_fields["required_field"])
+    assert "PydanticUndefined" not in text
+    assert "required" in text.lower()
+
+    text = gen_docs._default_text(_Throwaway.model_fields["factory_field"])
+    assert "PydanticUndefined" not in text
+
+
 def test_pricing_table_carries_every_rate_with_its_provenance():
     from app.providers import pricing
 
@@ -125,6 +146,16 @@ def test_sync_env_table_separates_pushed_from_never_pushed():
     assert "runtime_config" in table, "must say WHERE the DB-only keys actually live"
 
 
+def test_sync_env_table_explains_numbered_key_slots():
+    """Fix B: the page must at least mention the numbered-slot mechanism
+    (GEMINI_API_KEY_2, GROQ_API_KEY_3, ...) that _wanted_env() also pushes --
+    without asserting how many slots exist or what they're set to, since that
+    would require reading local configured values."""
+    table = gen_docs.render_sync_env()
+    assert "slot" in table.lower()
+    assert "_2" in table
+
+
 def test_sync_env_table_lists_every_providers_model_var():
     from app.providers import registry
 
@@ -136,6 +167,31 @@ def test_sync_env_table_lists_every_providers_model_var():
 def test_the_new_renderers_are_deterministic():
     assert gen_docs.render_pricing() == gen_docs.render_pricing()
     assert gen_docs.render_sync_env() == gen_docs.render_sync_env()
+
+
+def test_escape_cell_escapes_a_literal_pipe():
+    """Fix E: an unescaped `|` in a table cell would corrupt the row's column
+    structure."""
+    assert gen_docs._escape_cell("a | b") == "a \\| b"
+    assert gen_docs._escape_cell("no pipes here") == "no pipes here"
+
+
+def test_checks_table_escapes_a_verifies_string_containing_a_pipe(monkeypatch):
+    """A `verifies` string with a literal `|` must not corrupt the table."""
+    from scripts import deploy
+
+    fake_check = deploy.CheckSpec(
+        "fake-check", lambda: None, "verifies a | b", True
+    )
+    monkeypatch.setattr(deploy, "CHECKS", deploy.CHECKS + (fake_check,))
+    table = gen_docs.render_checks()
+    assert "verifies a \\| b" in table
+    lines = [line for line in table.splitlines() if line.startswith("| `fake-check`")]
+    assert len(lines) == 1
+    # Column separators only: strip the escaped pipe first, since "\|" still
+    # contains a literal "|" character that must not be mistaken for a
+    # (fifth) column boundary.
+    assert lines[0].replace("\\|", "").count("|") == 4
 
 
 def test_checks_table_renders_every_registered_check_in_order():
@@ -183,7 +239,7 @@ def test_write_all_touches_nothing_outside_guide_reference(tmp_path):
     misplaced argument away from destroying hand-written content."""
     (tmp_path / "guide").mkdir()
     keeper = tmp_path / "guide" / "index.md"
-    keeper.write_text("hand-written, must survive\n", encoding="utf-8")
+    keeper.write_text("hand-written, must survive\n", encoding="utf-8", newline="\n")
 
     gen_docs.write_all(tmp_path)
 

@@ -29,6 +29,8 @@ All of them, not just the active provider's: a database override can activate an
 
 The selected provider's is always pushed. Another provider's is pushed only if you happen to have it set locally -- an unselected provider's key is never demanded.
 
+Each credential also has numbered key-rotation slots: additional vars named `{credential}_2`, `{credential}_3`, and so on -- the naming scheme is `registry.slot_env_name()`'s (`{base}` for slot 0, `{base}_{n}` for slot n>=1). Any slot that is configured locally is pushed too, for every provider, the same as the base credential above; this reference cannot say how many exist for you, since that would mean reading your local configured values, which this generator never does.
+
 ## Operational settings
 
 - `DEFAULT_RETRY_AFTER_SECONDS`

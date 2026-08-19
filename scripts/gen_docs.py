@@ -15,13 +15,21 @@ both behaviourally and by parsing this module's own import statements.
 Output must be DETERMINISTIC -- no timestamps, no unordered iteration, no
 absolute paths. The CI drift job compares byte-for-byte, so any run-to-run
 variation is a permanently red build rather than a useful signal.
+
+The lists and tables each renderer builds are generated FROM the code above
+and so cannot drift from it. The hand-written PROSE surrounding them (the
+explanatory paragraphs in e.g. render_checks()/render_sync_env()) is not: no
+test enforces that it still accurately describes actual behaviour, so an
+editor changing what a renderer's code does must also re-read and, if needed,
+update its surrounding prose by hand -- not just the generated table/list.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
+
+from pydantic_core import PydanticUndefined
 
 from app.config import OPERATIONAL_KEYS, Settings
 from app.providers import pricing, registry
@@ -41,8 +49,18 @@ def _type_name(annotation: object) -> str:
 
 
 def _default_text(field) -> str:
-    """The DECLARED default -- class-level, never a configured value."""
+    """The DECLARED default -- class-level, never a configured value.
+
+    No Settings field lacks a default today (a default_factory-only field
+    would also have field.default be the sentinel below), so this branch is
+    defensive: it guards against a future field added with no plain default
+    at all. Without it, field.default would be pydantic's own PydanticUndefined
+    sentinel object, and the final `f"`{default}`"` fallback would render the
+    literal string "PydanticUndefined" into a published doc.
+    """
     default = field.default
+    if default is PydanticUndefined:
+        return "*(required — no default)*"
     if default is None:
         return "`None`"
     if default == "":
@@ -62,7 +80,7 @@ def render_config() -> str:
         "# Configuration reference\n",
         "Every setting this service reads. `.env.config` holds operational "
         "settings and is safe to open and edit; `.env` holds credentials and "
-        "nothing else.\n",
+        "identity.\n",
         "| Setting | Type | Default | Lives in |",
         "| --- | --- | --- | --- |",
     ]
@@ -74,6 +92,11 @@ def render_config() -> str:
             f"{_default_text(field)} | `{home}` |"
         )
     return "\n".join(lines) + "\n"
+
+
+def _escape_cell(text: str) -> str:
+    """A literal `|` would corrupt a Markdown table's column structure."""
+    return text.replace("|", "\\|")
 
 
 def render_pricing() -> str:
@@ -97,7 +120,7 @@ def render_pricing() -> str:
     for (provider, model), rate in sorted(pricing._RATES.items()):
         marker = " †" if rate.note else ""
         lines.append(
-            f"| `{provider}` | `{model}` | {rate.rate_in} | {rate.rate_out} | "
+            f"| `{provider}` | `{model}` | {rate.rate_in:.2f} | {rate.rate_out:.2f} | "
             f"{rate.verified}{marker} | [source]({rate.source_url}) |"
         )
         if rate.note:
@@ -146,6 +169,14 @@ def render_sync_env() -> str:
             "The selected provider's is always pushed. Another provider's is pushed "
             "only if you happen to have it set locally -- an unselected provider's "
             "key is never demanded.\n",
+            "Each credential also has numbered key-rotation slots: additional vars "
+            "named `{credential}_2`, `{credential}_3`, and so on -- the naming "
+            "scheme is `registry.slot_env_name()`'s (`{base}` for slot 0, "
+            "`{base}_{n}` for slot n>=1). Any slot that is configured locally is "
+            "pushed too, for every provider, the same as the base credential above; "
+            "this reference cannot say how many exist for you, since that would "
+            "mean reading your local configured values, which this generator never "
+            "does.\n",
             "## Operational settings\n",
             *bullets(generic),
             "",
@@ -183,7 +214,7 @@ def render_checks() -> str:
     ]
     for spec in deploy.CHECKS:
         lines.append(
-            f"| `{spec.name}` | {spec.verifies} | "
+            f"| `{spec.name}` | {_escape_cell(spec.verifies)} | "
             f"{'yes' if spec.required else 'needs an operator key'} |"
         )
     lines.extend(
@@ -226,6 +257,14 @@ def write_all(root: Path) -> list[Path]:
     preserve. What makes that safe is that it is confined to REFERENCE_DIR and
     to GENERATED_FILES' names, every output carries a do-not-edit header, CI
     fails on drift, and no hand-authored page is ever placed in this directory.
+
+    The confinement is relative, not absolute: `root` itself (main()'s --root
+    flag) is caller-supplied and can point anywhere, including outside this
+    repository entirely -- only the `guide/reference` subpath under whatever
+    root is given is fixed. That's deliberate (it's what lets the tmp_path-based
+    tests below point this at a scratch directory) and does not need to be
+    tightened; it just means "confined to REFERENCE_DIR" is a guarantee about
+    the directory name, not a sandboxing guarantee about `root`.
     """
     target = root / REFERENCE_DIR
     target.mkdir(parents=True, exist_ok=True)
@@ -242,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Regenerate guide/reference/ from the code"
     )
     parser.add_argument("--root", default=".", help="repository root to write under")
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(argv)
     for path in write_all(Path(args.root)):
         print(f"wrote {path.as_posix()}")
     return 0

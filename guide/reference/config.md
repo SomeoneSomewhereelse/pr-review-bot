@@ -3,7 +3,7 @@
 
 # Configuration reference
 
-Every setting this service reads. `.env.config` holds operational settings and is safe to open and edit; `.env` holds credentials and nothing else.
+Every setting this service reads. `.env.config` holds operational settings and is safe to open and edit; `.env` holds credentials and identity.
 
 | Setting | Type | Default | Lives in |
 | --- | --- | --- | --- |

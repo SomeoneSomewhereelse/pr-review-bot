@@ -58,4 +58,6 @@ jobs:
         run: uv run python -m scripts.gen_docs
 
       - name: Fail if the generated docs are stale
-        run: git diff --exit-code guide/reference/
+        run: |
+          git add -A guide/reference/
+          git diff --cached --exit-code guide/reference/
