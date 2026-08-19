@@ -49,17 +49,19 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
   OAuth scope on the service-account credential path, and the shared
   `LLM_MODEL` default not existing as a Vertex publisher model for this
   project (Vertex's catalog here only carries the 2.5 generation, e.g.
-  `gemini-2.5-flash`) — see `SETUP.md` §2 for the full history. Confirmed
-  live with `LLM_MODEL=gemini-2.5-flash`: a real structured-output response
-  with non-zero token usage. Billed at the same per-token rate as the Gemini
-  entry below (`app/providers/pricing.py`); the two differ in the auth path,
-  not in price.
+  `gemini-2.5-flash`) — see `guide/background/providers.md` for the full
+  history. Confirmed live with `LLM_MODEL=gemini-2.5-flash`: a real
+  structured-output response with non-zero token usage. Billed at the same
+  per-token rate as the Gemini entry below (`app/providers/pricing.py`); the
+  two differ in the auth path, not in price.
 - **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0
-  fallback in principle (account-blocked in this environment, see `SETUP.md`).
+  fallback in principle (account-blocked in this environment, see
+  `guide/background/providers.md`).
 - **Groq** free tier: ~30 RPM / up to 14.4K req/day — the actual live
   provider, independent $0 path.
 - **GitHub Models** free tier: rides the user's GitHub account, no card —
-  a second genuinely live $0 cross-vendor path (modest RPM/RPD, see `SETUP.md`).
+  a second genuinely live $0 cross-vendor path (modest RPM/RPD, see
+  `guide/background/providers.md`).
 - **Render** free tier: 750 instance-hours/month (15 min idle spin-down).
   Mitigated by keep-warm pinger (free service, cron-job.org / UptimeRobot).
 - **Supabase** free tier: ~500 MB Postgres storage, pauses after ~7 days

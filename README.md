@@ -87,9 +87,9 @@ up a throwaway Postgres 16 via `testcontainers` automatically) or a
 those tests fail with an opaque testcontainers error. CI provides this
 automatically via a `services: postgres` container — no action needed there.
 
-814 deterministic tests, no real network calls — mocks GitHub's REST API (at
+821 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
-clients, and the webhook HTTP layer. CI (`.github/workflows/project-d-ci.yml`
+clients, and the webhook HTTP layer. CI (`.github/workflows/ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
 every push/PR touching this project.
 
