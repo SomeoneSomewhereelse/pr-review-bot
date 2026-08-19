@@ -174,3 +174,25 @@ def local_slot_discovery_allowed():
     that directly test scripts._override.local_slot_values() /
     local_slot_indices() and need the real implementation, not a mock."""
     return True
+
+
+def _touches_shared_postgres(item: pytest.Item) -> bool:
+    """True if item's fixture closure includes db_url -- the root fixture
+    that db, db_exec, and db_query all depend on, and that a few tests
+    (e.g. tests/test_override_helpers.py) request directly. Checking the
+    root rather than the three derived names means a test can't slip
+    through by requesting db_url on its own."""
+    return "db_url" in item.fixturenames
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Auto-tag every Postgres-touching test with `db` (for `pytest -m "not
+    db"` fast iteration) and `xdist_group(name="db")` (so pytest-xdist
+    schedules them all onto the same worker, avoiding cross-worker TRUNCATE
+    races against the one shared Postgres instance). See the 2026-08-19
+    test-suite-performance design doc, section 3c, for why this is keyed off
+    db_url specifically."""
+    for item in items:
+        if _touches_shared_postgres(item):
+            item.add_marker(pytest.mark.db)
+            item.add_marker(pytest.mark.xdist_group(name="db"))

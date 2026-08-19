@@ -97,6 +97,8 @@ clients, and the webhook HTTP layer. CI (`.github/workflows/ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
 every push/PR touching this project.
 
+Run `pytest -m "not db"` to skip Postgres-touching tests for the fastest inner loop; CI still runs the full suite.
+
 ### Live verification scripts
 
 These make real network calls against real accounts/services — not run by

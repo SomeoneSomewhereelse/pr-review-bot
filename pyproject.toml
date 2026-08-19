@@ -24,6 +24,7 @@ dev = [
     "mkdocs-material>=9.5",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.6",
     "respx>=0.21",
     "ruff>=0.7",
     "testcontainers[postgres]>=4.0",
@@ -39,3 +40,7 @@ select = ["E4", "E7", "E9", "F", "E501"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-n auto --dist=loadgroup"
+markers = [
+    "db: transitively touches the shared Postgres via the db_url fixture (auto-applied by tests/conftest.py's pytest_collection_modifyitems hook, not meant to be added by hand)",
+]
