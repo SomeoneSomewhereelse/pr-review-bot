@@ -13,8 +13,9 @@ do not summarize, reformat, or add emoji to it.
 
 If the exit code is non-zero, help the user act on each line marked `FAIL`,
 using the hint that line already printed. Full explanations of each check live
-in `README.md` under "Deploying to production (Render + Supabase)"; read that
-section before speculating about a cause.
+in `guide/operations/deploy.md`; read that page (and
+`guide/reference/checks.md` for the per-check explanations) before
+speculating about a cause.
 
 If the diagnosis is that the Render service's environment variables have
 drifted from the local `.env`, the follow-up is:

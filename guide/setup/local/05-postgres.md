@@ -7,7 +7,7 @@ pick whichever is least friction for you.
 === "Docker (recommended)"
 
     ```bash
-    docker run -p 5432:5432 -e POSTGRES_PASSWORD=x postgres:16
+    docker run -d --name pr-review-pg -p 5432:5432 -e POSTGRES_PASSWORD=x postgres:16
     ```
 
     ```bash

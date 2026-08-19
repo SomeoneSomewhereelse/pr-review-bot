@@ -3,12 +3,29 @@ shape is asserted rather than assumed. Everything here reads files -- no test
 in Stage 3b touches the network (see the plan's Global Constraints)."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import yaml
 
 _ROOT = Path(__file__).resolve().parent.parent
 _MKDOCS = _ROOT / "mkdocs.yml"
+
+
+def _tracked_root_markdown_files() -> list[Path]:
+    """Root-level ``*.md`` files that are actually tracked by git -- excludes
+    local scratch/session files (e.g. a gitignored ``memory.md``) that may
+    exist on a particular machine but are not part of the shipped guide/docs
+    set, so a scan over them would be flaky depending on what happens to sit
+    on disk."""
+    out = subprocess.run(
+        ["git", "ls-files", "*.md"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    return [_ROOT / rel for rel in out if "/" not in rel]
 
 
 def _config() -> dict:
@@ -261,17 +278,26 @@ def test_deploy_points_at_a_guide_page_that_exists():
 
 
 def test_no_script_still_points_at_setup_md():
-    """Scans scripts/ ONLY.
+    """Scans scripts/*.py, root-level tracked *.md files (except ISSUES.md
+    and SPEC.md, which legitimately reference SETUP.md as historical/
+    design-record content), .env*.example files, and .claude/commands/*.md.
 
-    tests/ is deliberately excluded: this very file contains the literal
-    "SETUP.md" in test_setup_md_is_gone_and_the_guide_replaced_it, so a scan
-    including tests/ would fail on itself. That self-reference trap has now
-    bitten this project three times -- see ISSUES.md (Stage 2 Task 4's
+    tests/ is deliberately excluded throughout: this very file contains the
+    literal "SETUP.md" in test_setup_md_is_gone_and_the_guide_replaced_it, so
+    a scan including tests/ would fail on itself. That self-reference trap has
+    now bitten this project three times -- see ISSUES.md (Stage 2 Task 4's
     docstring, and Stage 3a's ast-vs-grep note). Any test that scans source
     for a forbidden string must exclude the file asserting it.
     """
-    for path in _ROOT.glob("scripts/*.py"):
-        assert "SETUP.md" not in path.read_text(encoding="utf-8"), f"{path.name} is stale"
+    scanned: list[Path] = list(_ROOT.glob("scripts/*.py"))
+    scanned += [
+        p for p in _tracked_root_markdown_files() if p.name not in {"ISSUES.md", "SPEC.md"}
+    ]
+    scanned += list(_ROOT.glob(".env*.example"))
+    scanned += list(_ROOT.glob(".claude/commands/*.md"))
+    assert scanned
+    for path in scanned:
+        assert "SETUP.md" not in path.read_text(encoding="utf-8"), f"{path} is stale"
 
 
 def test_claude_md_points_at_the_guide():

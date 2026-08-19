@@ -6,7 +6,7 @@ layered on top.
 
 ```bash
 git clone <your-fork-or-clone-url>
-cd final_project
+cd pr-review-bot   # or whatever your clone created
 uv sync
 uv run pytest
 ```
@@ -18,10 +18,30 @@ already in place.
 
 | Tool | Why | Check |
 |---|---|---|
-| **Python 3.12** | pinned in `.python-version` | `python3 --version` |
+| **Python 3.12** | pinned in `.python-version` | see below |
 | [**uv**](https://docs.astral.sh/uv/) | this project's package/venv manager | `uv --version` |
 | **git** | to clone the repo | `git --version` |
 | **Docker, *or* a reachable `DATABASE_URL`** | the test suite and the app both need a real Postgres | see below |
+
+Checking your Python version:
+
+=== "Linux"
+
+    ```bash
+    python3 --version
+    ```
+
+=== "macOS"
+
+    ```bash
+    python3 --version
+    ```
+
+=== "Windows"
+
+    ```powershell
+    py --version
+    ```
 
 The Docker-or-`DATABASE_URL` line is one conditional, not two separate
 requirements: `tests/conftest.py`'s `db_url` fixture spins up a throwaway

@@ -131,9 +131,8 @@ _DEPLOY_FAILED_STATUSES = {
     "deactivated",
 }
 # ~5 minutes between progress lines at the default 10s poll interval, so a
-# long in-flight wait never goes more than a few minutes without visible
-# output (this project's ISSUES.md documents real operator mistakes made
-# against live infra during apparently-silent stretches).
+# long in-flight wait never looks hung -- there is always visible output
+# within a few minutes, not total silence until the final result.
 _IN_FLIGHT_PROGRESS_EVERY = 30
 
 

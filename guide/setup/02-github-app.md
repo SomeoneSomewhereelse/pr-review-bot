@@ -6,11 +6,18 @@ pull request's diff and post (and later edit) a review comment.
 ## The one-command path
 
 ```bash
-uv run python -m scripts.create_github_app --base-url https://your-host
+uv run python -m scripts.create_github_app --name your-app-name --base-url https://your-real-host
 ```
 
 Run this yourself — it writes real credentials to `.env`, so it must never
 be run by an agent.
+
+Both flags matter: `--base-url` has no real-looking default on purpose —
+omit it and the script falls back to the obviously-fake
+`https://example.invalid` rather than silently creating a webhook pointed
+nowhere useful, so pass your own tunnel or Render URL. `--name` defaults to
+`pr-review-engine`, but GitHub App names are globally unique, so the exact
+default will already be taken if anyone else has run this — pick your own.
 
 This drives GitHub's **App Manifest flow**: it opens a browser form that
 POSTs a manifest to `github.com/settings/apps/new`, you approve it, GitHub
@@ -51,7 +58,10 @@ only two of which this project uses:
   service at startup if that credential is ever missing or wrong. Pinning
   the Installation ID removes that read from the unconditional boot path
   entirely, so a bad private key only breaks webhook handling later instead
-  of the whole service at boot.
+  of the whole service at boot. **Upgrade hazard**: installing a second copy
+  of the same GitHub App makes boot-time auto-discovery ambiguous (which
+  installation is "the" one?), and the service now refuses to start rather
+  than guess — pin the Installation ID if you ever install a second copy.
 - **Client ID** — sits on the same settings page, and is easy to grab by
   mistake, but this project **does not use it at all**.
 

@@ -43,8 +43,8 @@ KEY_USAGE_TOKEN_CAP=20000        # tokens/day for the ACTIVE key slot
 KEY_USAGE_RESET_TIME_UTC=04:00   # when the day rolls over (default 04:00 UTC)
 ```
 
-`KEY_USAGE_TOKEN_CAP` is **unset by default** — set it and nothing changes
-until you do. When it's set, the dispatcher checks the currently-active
+`KEY_USAGE_TOKEN_CAP` is **unset by default** — leave it unset and nothing
+is capped. When it's set, the dispatcher checks the currently-active
 `(provider, key slot)`'s usage so far today *before* starting a review; at
 or over the cap it defers the ticket to the next reset rather than making
 the call, and the PR gets a notice saying so, worded distinctly from a

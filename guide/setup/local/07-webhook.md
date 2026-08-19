@@ -8,10 +8,11 @@ This points the GitHub App's webhook at your current `PUBLIC_BASE_URL` (only
 patching it if it's wrong — see the chicken-and-egg note below) and runs the
 same verification checklist `scripts/doctor.py` composes from.
 
-On this track, expect the **Render** and **pinger** rows to report `SKIP`
-cleanly with no `RENDER_API_KEY` set — that is expected here, not a problem.
-Those checks exist for the hosted track; nothing in `app/` knows Render
-exists at all.
+On this track, expect five rows -- `boot-creds-live`, `provider-live`,
+`api-key-live`, `render-service`, and `uptime-pinger` -- to report `SKIPPED`
+cleanly with no `RENDER_API_KEY` or `UPTIMEROBOT_API_KEY` set — that is
+expected here, not a problem. Those checks exist for the hosted track;
+nothing in `app/` knows Render exists at all.
 
 ## Re-run this each session
 

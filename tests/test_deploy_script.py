@@ -1946,7 +1946,7 @@ def test_render_yaml_never_declares_a_db_synced_key():
 def test_exit_codes_are_documented():
     """Spec section 7.2 lists three causes for exit 2; the docs must carry
     them, or the contract exists only in the code."""
-    text = (_REPO_ROOT / "guide" / "operations" / "deploy.md").read_text()
+    text = (_REPO_ROOT / "guide" / "operations" / "deploy.md").read_text(encoding="utf-8")
     assert "exit 0" in text and "exit 1" in text and "exit 2" in text
 
 
