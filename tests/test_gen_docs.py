@@ -6,6 +6,8 @@ credentials -- and everything generated here is committed and published.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.config import OPERATIONAL_KEYS, settings
 from scripts import gen_docs
 
@@ -150,3 +152,61 @@ def test_checks_table_names_the_keys_that_unlock_the_optional_ones():
 
 def test_render_checks_is_deterministic():
     assert gen_docs.render_checks() == gen_docs.render_checks()
+
+
+def test_write_all_creates_exactly_the_four_generated_files(tmp_path):
+    written = gen_docs.write_all(tmp_path)
+    assert {p.name for p in written} == {
+        "config.md", "pricing.md", "checks.md", "sync-env.md"
+    }
+    for path in written:
+        assert path.read_text(encoding="utf-8").startswith(gen_docs.GENERATED_HEADER)
+
+
+def test_write_all_touches_nothing_outside_guide_reference(tmp_path):
+    """The confinement guarantee. A generator that can write anywhere is one
+    misplaced argument away from destroying hand-written content."""
+    (tmp_path / "guide").mkdir()
+    keeper = tmp_path / "guide" / "index.md"
+    keeper.write_text("hand-written, must survive\n", encoding="utf-8")
+
+    gen_docs.write_all(tmp_path)
+
+    assert keeper.read_text(encoding="utf-8") == "hand-written, must survive\n"
+    produced = {p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()}
+    assert produced == {
+        "guide/index.md",
+        "guide/reference/config.md",
+        "guide/reference/pricing.md",
+        "guide/reference/checks.md",
+        "guide/reference/sync-env.md",
+    }
+
+
+def test_write_all_is_idempotent_byte_for_byte(tmp_path):
+    """Spec section 8h. The CI drift job compares bytes, so a second run that
+    differs at all -- a timestamp, a reordered set -- is a permanent red build."""
+    first = {p: p.read_bytes() for p in gen_docs.write_all(tmp_path)}
+    second = {p: p.read_bytes() for p in gen_docs.write_all(tmp_path)}
+    assert first == second
+
+
+def test_written_files_use_lf_endings(tmp_path):
+    """.gitattributes pins the working tree to LF. A CRLF write on Windows
+    would fail the drift check on that operator's machine and nowhere else."""
+    for path in gen_docs.write_all(tmp_path):
+        assert b"\r\n" not in path.read_bytes()
+
+
+def test_committed_reference_files_are_up_to_date():
+    """The repo's committed output must match what the code generates now --
+    the same invariant CI enforces, checked here so a local run catches it."""
+    root = Path(__file__).resolve().parent.parent
+    for name, render in gen_docs.GENERATED_FILES.items():
+        committed = (root / gen_docs.REFERENCE_DIR / name).read_text(encoding="utf-8")
+        assert committed == render(), f"{name} is stale -- run scripts.gen_docs"
+
+
+def test_main_writes_and_reports(tmp_path, capsys):
+    assert gen_docs.main(["--root", str(tmp_path)]) == 0
+    assert "config.md" in capsys.readouterr().out

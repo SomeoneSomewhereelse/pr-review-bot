@@ -19,6 +19,10 @@ variation is a permanently red build rather than a useful signal.
 
 from __future__ import annotations
 
+import argparse
+import sys
+from pathlib import Path
+
 from app.config import OPERATIONAL_KEYS, Settings
 from app.providers import pricing, registry
 from scripts import deploy
@@ -198,3 +202,49 @@ def render_checks() -> str:
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+# The only directory this script may write to, and the only files it may
+# create. Both are fixed, not configurable: a generator that can be pointed
+# anywhere is one wrong argument away from replacing hand-written content.
+REFERENCE_DIR = "guide/reference"
+
+GENERATED_FILES = {
+    "config.md": render_config,
+    "pricing.md": render_pricing,
+    "checks.md": render_checks,
+    "sync-env.md": render_sync_env,
+}
+
+
+def write_all(root: Path) -> list[Path]:
+    """Write every generated file under `root`/guide/reference; return them.
+
+    A REPLACING writer by design -- these files have no hand-written content to
+    preserve. What makes that safe is that it is confined to REFERENCE_DIR and
+    to GENERATED_FILES' names, every output carries a do-not-edit header, CI
+    fails on drift, and no hand-authored page is ever placed in this directory.
+    """
+    target = root / REFERENCE_DIR
+    target.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for name, render in GENERATED_FILES.items():
+        path = target / name
+        path.write_text(render(), encoding="utf-8", newline="\n")
+        written.append(path)
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Regenerate guide/reference/ from the code"
+    )
+    parser.add_argument("--root", default=".", help="repository root to write under")
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    for path in write_all(Path(args.root)):
+        print(f"wrote {path.as_posix()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
