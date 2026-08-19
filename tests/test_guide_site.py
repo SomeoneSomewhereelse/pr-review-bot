@@ -229,3 +229,22 @@ def test_background_is_not_in_the_setup_reading_path():
         assert "background/" not in page.read_text(encoding="utf-8"), (
             "background is optional context; a setup step must not depend on it"
         )
+
+
+def test_setup_md_is_gone_and_the_guide_replaced_it():
+    assert not (_ROOT / "SETUP.md").exists()
+    assert (_ROOT / "guide" / "setup" / "index.md").is_file()
+
+
+def test_readme_is_a_landing_page_not_a_manual():
+    text = (_ROOT / "README.md").read_text(encoding="utf-8")
+    assert len(text.splitlines()) <= 180, "README should be a landing page, not an ops manual"
+    assert "Deploy your own" in text, "the guide link must be prominent"
+    for heading in ("Architecture", "Tech stack", "Testing", "Known limitations", "Cost"):
+        assert heading in text, f"{heading} belongs in README, not the guide"
+
+
+def test_readme_no_longer_carries_the_operations_manual():
+    text = (_ROOT / "README.md").read_text(encoding="utf-8")
+    for moved in ("--sync-config-db", "set_override", "uptime-pinger"):
+        assert moved not in text, f"{moved} moved to guide/operations/"

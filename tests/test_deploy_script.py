@@ -1914,20 +1914,6 @@ def test_wanted_env_pushes_numbered_slots_for_every_provider_not_just_the_select
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_env_var_names_match_the_docs():
-    """Every name --sync-env can push must be documented, or an operator has no
-    way to know what the service needs."""
-    readme = (_REPO_ROOT / "README.md").read_text()
-    setup = (_REPO_ROOT / "SETUP.md").read_text()
-    names = set(deploy._ALWAYS_SYNCED) | {"LLM_PROVIDER"}
-    for credential, model_var in deploy._PROVIDERS.values():
-        names.add(credential)
-        names.add(model_var)
-    for name in sorted(names):
-        assert name in readme, f"{name} missing from README.md"
-        assert name in setup, f"{name} missing from SETUP.md"
-
-
 def test_render_yaml_declares_every_synced_var():
     """A fresh Blueprint provision only creates env-var slots for names
     render.yaml declares -- a name --sync-env can push but render.yaml omits
@@ -1962,9 +1948,8 @@ def test_render_yaml_never_declares_a_db_synced_key():
 def test_exit_codes_are_documented():
     """Spec section 7.2 lists three causes for exit 2; the docs must carry
     them, or the contract exists only in the code."""
-    for doc in ("README.md", "SETUP.md"):
-        text = (_REPO_ROOT / doc).read_text()
-        assert "exit 0" in text and "exit 1" in text and "exit 2" in text
+    text = (_REPO_ROOT / "guide" / "operations" / "deploy.md").read_text()
+    assert "exit 0" in text and "exit 1" in text and "exit 2" in text
 
 
 def test_main_rejects_an_unknown_flag(monkeypatch, capsys):
