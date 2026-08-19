@@ -37,3 +37,25 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest -v
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      # No Postgres service: gen_docs reads class metadata and module
+      # constants only, never the database and never a configured value.
+      - name: Regenerate reference docs
+        run: uv run python -m scripts.gen_docs
+
+      - name: Fail if the generated docs are stale
+        run: git diff --exit-code guide/reference/
