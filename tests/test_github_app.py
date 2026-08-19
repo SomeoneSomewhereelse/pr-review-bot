@@ -83,11 +83,13 @@ def _throwaway_app_credentials(_app_credentials_key_material, monkeypatch):
     monkeypatch.setattr(settings, "github_app_private_key", _app_credentials_key_material)
 
 
+@pytest.mark.xdist_group(name="github_app_key_material")
 def test_key_material_fixture_produces_a_value(_app_credentials_key_material):
     _seen_key_material.append(_app_credentials_key_material)
     assert _app_credentials_key_material  # non-empty base64 string
 
 
+@pytest.mark.xdist_group(name="github_app_key_material")
 def test_key_material_fixture_is_shared_not_regenerated(_app_credentials_key_material):
     assert _seen_key_material, "test_key_material_fixture_produces_a_value must run first"
     assert _app_credentials_key_material == _seen_key_material[0]
