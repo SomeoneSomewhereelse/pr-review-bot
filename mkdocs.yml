@@ -28,6 +28,11 @@ nav:
       - 2. Create the GitHub App: setup/02-github-app.md
       - 3. Install the App: setup/03-install-app.md
       - 4. Configure an LLM provider: setup/04-llm-provider.md
+      - Local track:
+          - 5. Get a Postgres: setup/local/05-postgres.md
+          - 6. Start a tunnel: setup/local/06-tunnel.md
+          - 7. Register the webhook: setup/local/07-webhook.md
+          - 8. Run the service: setup/local/08-run.md
   - Reference:
       - Configuration: reference/config.md
       - Model pricing: reference/pricing.md

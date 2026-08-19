@@ -31,7 +31,8 @@ service runs:
 | Remaining steps | mostly your own terminal | four browser/dashboard steps |
 
 - **Local** — run the engine on your own machine against a tunnel, for
-  development and debugging. Continue to `local/05-postgres.md`.
+  development and debugging. Continue to
+  [local/05-postgres.md](local/05-postgres.md).
 - **Hosted** — deploy to Render with Supabase for the queue, for a durable,
   always-on reviewer. Continue to `hosted/05-supabase.md`.
 

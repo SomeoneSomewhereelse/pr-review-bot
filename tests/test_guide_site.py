@@ -108,3 +108,27 @@ def test_github_app_page_encodes_the_pem_with_the_project_script():
 def test_setup_index_sends_the_reader_to_a_track():
     text = (_SETUP / "index.md").read_text(encoding="utf-8")
     assert "local/05" in text and "hosted/05" in text
+
+
+def test_local_track_pages_match_doctors_titles():
+    from scripts import doctor
+
+    pages = {5: "05-postgres.md", 6: "06-tunnel.md", 7: "07-webhook.md", 8: "08-run.md"}
+    for step in doctor.steps_for("local"):
+        if step.number < 5:
+            continue
+        text = (_SETUP / "local" / pages[step.number]).read_text(encoding="utf-8")
+        assert step.title in text
+
+
+def test_tunnel_page_explains_the_ephemeral_url():
+    text = (_SETUP / "local" / "06-tunnel.md").read_text(encoding="utf-8")
+    assert "cloudflared" in text
+    assert "changes" in text.lower(), "the URL changing each restart must be stated"
+
+
+def test_local_verify_page_uses_the_project_health_check():
+    """spec section 5: curl on Windows PowerShell aliases Invoke-WebRequest."""
+    text = (_SETUP / "local" / "07-webhook.md").read_text(encoding="utf-8")
+    assert "--health-only" in text
+    assert "curl " not in text
