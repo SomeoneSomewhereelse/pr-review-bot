@@ -85,12 +85,34 @@ that same [reference page](../reference/checks.md#unskipping-the-optional-checks
 
 | Exit | Meaning |
 | --- | --- |
-| exit 0 | every check that ran passed (a skipped check never fails the run) |
-| exit 1 | at least one check failed — read the report to see which |
-| exit 2 | the run never really started: two modes passed together, a public base URL is unset, `--sync-env` without `RENDER_API_KEY`, `--sync-config-db` without `DATABASE_URL`, or a sync refused before any request (an empty required value, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, an invalid cooldown, or an active DB override that would mask the push) |
+| exit 0 | every check that ran passed (a skipped check never fails the run) — or, for `--sync-env`, env vars were already in sync and no deploy was even triggered |
+| exit 1 | at least one check failed, **or** (`--sync-env` only) the sync/deploy itself hit a problem after starting — see the caveat below, these are not the same kind of exit 1 |
+| exit 2 | the run never really started, before any request went out: two modes passed together; a public base URL is unset; `--sync-env` without `RENDER_API_KEY`; `--sync-config-db` (or the `--sync-config-db` step `--sync-env` runs internally) without `DATABASE_URL`, or with a cooldown that would resolve to something invalid (`factor < 1.0`, `base > cap`, or a non-positive base/cap); or `--sync-env` refusing to push because of an unsupported `LLM_PROVIDER`, an empty required value, an active DB provider/model override that disagrees with what's about to be pushed, or a Render API error while resolving the service before any push began |
 
-In short: exit 0 means trust the report as-is, exit 1 means read the report
-for what to fix, exit 2 means the run never really started.
+An unpriced model is explicitly **not** an exit-2 cause: it only ever prints
+a warning to stderr and the push continues normally (see `pricing` in
+[Deployment checks](../reference/checks.md) and
+`tests/test_deploy_script.py::test_unpriced_model_warns_and_does_not_fail_the_run`)
+— a missing cost estimate is a nice-to-have, not a blocker.
+
+!!! warning "Two different exit 1s for `--sync-env`"
+    For the default run and `--health-only`, exit 1 always means "read the
+    printed report — one of its rows says `FAIL`." For `--sync-env`,
+    exit 1 can also come from the sync/deploy step itself, **before any
+    check report is ever printed**: no Render service found under
+    `RENDER_SERVICE_NAME`, a push interrupted partway through by an
+    exception (some vars already changed — re-run to finish, don't assume
+    nothing happened), the wait for an already-in-flight deploy timing out,
+    or the triggered deploy itself timing out, failing, or being
+    canceled/superseded. In every one of these cases there is no report
+    table to go read — the reason is on stderr instead. If `--sync-env`
+    exits 1 and you see a check report with a `FAIL` row, that row is what
+    to fix; if you see no report at all, read the stderr line instead.
+
+In short: exit 0 means trust the report as-is; exit 1 during the default run
+or `--health-only` means read the report for what to fix; exit 1 during
+`--sync-env` means check whether a report even printed — if not, the reason
+is on stderr; exit 2 always means the run never really started.
 
 ## Next
 
