@@ -22,7 +22,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Callable, Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import httpx
@@ -1267,22 +1267,85 @@ def _safe(name: str, fn, *args) -> CheckResult:
         return CheckResult(name, "FAIL", f"unexpected {type(exc).__name__}")
 
 
+class _FunctionProxy:
+    """A callable that looks up a function dynamically at call time, allowing
+    monkeypatching to work correctly with the CHECKS registry."""
+
+    def __init__(self, func_name: str) -> None:
+        self.func_name = func_name
+
+    def __call__(self, *args, **kwargs) -> CheckResult:  # type: ignore
+        func = globals()[self.func_name]
+        return func(*args, **kwargs)
+
+
+class CheckSpec(NamedTuple):
+    """One row of the checklist, and the single source for its documentation.
+
+    `verifies` is written for an operator reading the generated table, not for
+    a maintainer reading this file -- scripts/gen_docs.py renders it verbatim.
+    `required` means "always runs -- needs no operator-local key". It is NOT
+    "can fail the run": `pricing` always runs but only ever WARNs. The others
+    degrade to SKIPPED without RENDER_API_KEY / UPTIMEROBOT_API_KEY /
+    DATABASE_URL rather than failing.
+    """
+
+    name: str
+    func: Callable[..., CheckResult]
+    verifies: str
+    required: bool
+    args: tuple[str, ...] = ()
+
+
+CHECKS: tuple[CheckSpec, ...] = (
+    CheckSpec("config", _FunctionProxy("check_config"),
+              "Every setting the service needs is resolvable locally", True),
+    CheckSpec("pricing", _FunctionProxy("check_pricing"),
+              "Every provider's effective model has a rate-table entry "
+              "(a warning only -- an unpriced model runs, without a cost estimate)",
+              True),
+    CheckSpec("boot-creds-live", _FunctionProxy("check_boot_credentials_live"),
+              "The vars the service reads at every boot are present on the deployed "
+              "Render service under their current names -- not just locally", False),
+    CheckSpec("github-app", _FunctionProxy("check_installation_and_webhook"),
+              "The App has exactly one installation, every repo in GITHUB_TARGET_REPO "
+              "is covered by it, and its webhook points here (set only if wrong)",
+              True, ("repos", "base")),
+    CheckSpec("health", _FunctionProxy("check_health_endpoint"),
+              "/healthz answers BOTH GET and HEAD -- UptimeRobot's free tier sends "
+              "HEAD, so a GET-only endpoint lets the instance sleep", True, ("base",)),
+    CheckSpec("database", _FunctionProxy("check_database"),
+              "Postgres is reachable and the app has provisioned its tickets table",
+              False),
+    CheckSpec("provider", _FunctionProxy("check_provider"),
+              "The provider that will actually run -- LLM_PROVIDER, or an active DB "
+              "override -- has its credential set", False),
+    CheckSpec("provider-live", _FunctionProxy("check_provider_live"),
+              "The actively-resolved provider's credential is present on the deployed "
+              "Render service, not just locally", False),
+    CheckSpec("api-key-live", _FunctionProxy("check_api_key_live"),
+              "The actively-resolved provider's actively-resolved key slot is present "
+              "on the deployed Render service", False),
+    CheckSpec("render-service", _FunctionProxy("check_render_service"),
+              "The latest Render deploy is live, and matches local HEAD when a commit "
+              "is comparable", False),
+    CheckSpec("uptime-pinger", _FunctionProxy("check_uptime_pinger"),
+              "A monitor targets /healthz exactly, is active, and polls at most every "
+              "10 minutes", False, ("base",)),
+)
+
+
 def run_checks(repos: frozenset[str], base: str) -> list[CheckResult]:
     """All eleven, foundational (and cheap, where possible) first, so a
     misconfiguration is reported before the checks that would fail as a
-    consequence of it."""
+    consequence of it. Order and content come from CHECKS, which
+    scripts/gen_docs.py also renders -- so the table an operator reads can
+    never describe a different set than the one that runs.
+    """
+    available = {"repos": repos, "base": base}
     return [
-        _safe("config", check_config),
-        _safe("pricing", check_pricing),
-        _safe("boot-creds-live", check_boot_credentials_live),
-        _safe("github-app", check_installation_and_webhook, repos, base),
-        _safe("health", check_health_endpoint, base),
-        _safe("database", check_database),
-        _safe("provider", check_provider),
-        _safe("provider-live", check_provider_live),
-        _safe("api-key-live", check_api_key_live),
-        _safe("render-service", check_render_service),
-        _safe("uptime-pinger", check_uptime_pinger, base),
+        _safe(spec.name, spec.func, *(available[name] for name in spec.args))
+        for spec in CHECKS
     ]
 
 

@@ -2580,3 +2580,36 @@ def test_sync_env_allows_a_priced_model(sync_ready, monkeypatch, capsys):
     monkeypatch.setattr(deploy._render, "find_service_id", lambda: None)
     assert deploy.sync_env() == 1
     assert "no Render service named" in capsys.readouterr().err
+
+
+def test_checks_registry_matches_what_run_checks_actually_runs():
+    """The registry is the single source: if run_checks stops consuming it,
+    the generated checks.md silently starts describing a different tool."""
+    names = [spec.name for spec in deploy.CHECKS]
+    assert names == [
+        "config", "pricing", "boot-creds-live", "github-app", "health",
+        "database", "provider", "provider-live", "api-key-live",
+        "render-service", "uptime-pinger",
+    ]
+    results = deploy.run_checks(frozenset(), "https://example.invalid")
+    assert [r.name for r in results] == names
+
+
+def test_every_check_spec_is_documented_and_well_formed():
+    for spec in deploy.CHECKS:
+        assert spec.verifies.strip(), f"{spec.name} has no description to generate from"
+        assert callable(spec.func)
+        assert isinstance(spec.required, bool)
+        assert set(spec.args) <= {"repos", "base"}, f"{spec.name} wants an unknown argument"
+
+
+def test_required_checks_are_the_ones_that_need_no_operator_key():
+    """`required` drives the generated table's "Always runs?" column, so it has
+    to mean something precise: a check that needs no operator-local key
+    (RENDER_API_KEY, UPTIMEROBOT_API_KEY, DATABASE_URL).
+
+    Deliberately NOT "can fail the run" -- `pricing` always runs but only ever
+    WARNs, so conflating the two would misdescribe it in the published table.
+    """
+    required = {spec.name for spec in deploy.CHECKS if spec.required}
+    assert required == {"config", "pricing", "github-app", "health"}
