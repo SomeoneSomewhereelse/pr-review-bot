@@ -23,6 +23,7 @@ site/
 # Local session state (machine-specific, not shared)
 memory.md
 auth-link.txt
+tmp.md
 
 # Zoom-demo-only scaffolding (not part of the graded/documented feature set)
 fixtures/demo_bulk_bad_code/

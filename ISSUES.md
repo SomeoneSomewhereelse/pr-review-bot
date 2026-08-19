@@ -187,3 +187,119 @@ an error"). Ordered roughly chronologically by when they actually occurred.
 - **What happened:** Task 1's brief specified, verbatim, `test_checks_registry_matches_what_run_checks_actually_runs()` — a test that calls `deploy.run_checks(frozenset(), "https://example.invalid")` with **no monkeypatching of any check function**. `tests/conftest.py`'s autouse `_quarantine_operator_apis` fixture (added after an earlier, similar incident — see its comment at line 96-99, "a live Render service had GITHUB_TARGET_REPO overwritten with a dummy value") blanks `render_api_key`, `uptimerobot_api_key`, and `database_url`, but was never extended to cover `github_app_id`/`github_app_private_key`. This machine has real GitHub App credentials configured (confirmed structurally — booleans only, per the Secret Handling rules; no value read or displayed). `check_installation_and_webhook` (`scripts/deploy.py:338`) reads the App's current webhook URL and, if it doesn't match `{base}/webhook`, calls `github_app.set_webhook_url()` unconditionally — no dry-run mode, no confirmation. With `base="https://example.invalid"`, a real, valid installation would have its webhook repointed to a nonexistent host, silently breaking all future PR-review delivery. This is the same underlying incident class the `_quarantine_operator_apis` fixture already exists to prevent, just for a credential pair the fixture's author didn't extend to. The test ran for real — not mocked — at least twice during this session's own implementer/reviewer work (Task 1's initial implementation and its fix round), and remained part of every subsequent full-suite run through Task 7. Six task-scoped reviews (including Task 1's own, twice) and this controller's own baseline/final test runs all executed this test without noticing, because a passing pytest result for this test says nothing about what the real check underneath it did — the test only asserts row *names* match, not statuses, so it passes whether the real check PASSed, FAILed, or silently mutated production state. Only the final whole-branch review, explicitly instructed to trace live-call risk across the whole diff, caught it.
 - **Cost:** Confirmed. The operator was alerted immediately, before any further live call was made by the controller. The operator independently corrected the App's webhook back to `PUBLIC_BASE_URL/webhook` by hand. A controller-run, read-then-verify sanity check (`deploy.check_installation_and_webhook` called directly, not the full `run_checks`, so no further write was risked) confirmed the fix: `PASS`, "webhook already correct", `installation=148449134`, tracking both configured repos. Net cost: production PR-review webhook delivery was broken from Task 1 until the operator's manual correction (exact outage window unconfirmed — at minimum the span of this session's Task 1 through the final review). No secret value was exposed at any point.
 - **Suggested CLAUDE.md change:** Extend the existing "a plan's own provided code needs the same scrutiny as any other code" rule with a specific corollary: **a plan-provided test that calls a function known to reach live external state (anything in `scripts/deploy.py`'s `check_*` family, or anything that calls `app/github_app.py`) needs the same monkeypatch/quarantine scrutiny as a plan-provided *production* code snippet, not just a correctness read** — a test's job is normally assumed to be side-effect-free by construction, which is exactly why six separate reviews (including two on this exact commit) read this one for logical correctness (does the registry order match?) without asking whether calling it could touch a real server. Also worth hardening structurally: extend `tests/conftest.py`'s `_LIVE_OPERATOR_KEYS` quarantine to include `github_app_id`/`github_app_private_key`/`github_webhook_secret`, closing this class of gap by default rather than per-incident.
+
+---
+
+## Parked Issues
+
+Deliberately deferred quality nits from task and final-review passes — not
+incidents ("something went wrong"), but known, low-severity gaps a
+controller ruled were not worth a fix loop or fix-wave slot at the time.
+Recorded here so they aren't silently lost. Format:
+
+```
+### <short title>
+- **Found during:** stage/task, which review caught it
+- **What:** the gap, in one or two sentences
+- **Why parked:** why it didn't get fixed in-session
+- **Follow-up:** what closing it would take
+```
+
+### Setup-experience Stage 3b (below): 5 items parked at stage close
+
+Stage 3b (guide-site migration, `docs/superpowers/plans/2026-08-18-setup-experience-stage-3b-guide-site.md`)
+ran 10 tasks + 1 final whole-branch review + 1 consolidated 18-item fix
+wave. Of the final review's 6 Important + 14 Minor findings, all 6
+Important and roughly 12 of the 14 Minor findings were fixed in the one
+fix wave (commit `8b647ff`). The 5 below were explicitly left open —
+mostly because closing them either depends on something outside this
+session's control (Pages not yet enabled) or was explicitly out of the
+fix wave's requested scope, not because they were judged wrong to raise.
+
+### `test_deploy_points_at_a_guide_page_that_exists` only checks the URL path, not the host or repo
+
+- **Found during:** Stage 3b final whole-branch review (opus).
+- **What:** `tests/test_guide_site.py`'s check on `scripts.deploy._GUIDE_URL`
+  does `.split("/pr-review-bot/", 1)[1]` and only asserts the resulting path
+  resolves to a real file under `guide/`. It never asserts the host
+  (`someonesomewhereelse.github.io`) or repo name portion of the URL. A
+  future repo rename or fork would either raise an uncaught `IndexError`
+  (unreadable failure) or, in a narrower edge case, let a wrong owner slip
+  through silently.
+- **Why parked:** the URL is correct today (verified against the live
+  `git remote -v` during the final review); this is a test-robustness gap,
+  not a live defect, and wasn't part of the review's must-fix list.
+- **Follow-up:** assert the host/owner segment against
+  `git config remote.origin.url` (or hardcode the expected host with a
+  comment explaining why), and guard the `.split()` so a mismatch raises a
+  readable assertion instead of `IndexError`.
+
+### `README.md` doesn't yet link the published GitHub Pages guide site
+
+- **Found during:** Stage 3b final whole-branch review (opus).
+- **What:** `README.md` links the guide via its repo-relative path
+  (`guide/setup/index.md`), which resolves correctly on GitHub but isn't
+  the same as linking the live, published Pages site. The Pages URL
+  currently appears in exactly one place in the whole repo:
+  `scripts/deploy.py`'s `_GUIDE_URL` constant.
+- **Why parked:** GitHub Pages is not yet enabled for this repo (the one
+  documented manual step — Settings → Pages → source "GitHub Actions" —
+  is still outstanding), so the URL isn't live yet. Adding a link to a
+  404ing page would be worse than the current state.
+- **Follow-up:** once Pages is enabled and confirmed live, add a "Guide:
+  https://someonesomewhereelse.github.io/pr-review-bot/" line near
+  README's existing "Deploy your own →" link.
+
+### `guide/operations/deploy.md`'s exit-2 row still slightly overstates "before any request went out"
+
+- **Found during:** Stage 3b final whole-branch review (opus), Minor #18.
+- **What:** The fix wave added the missing database-write exit-2 cause to
+  this row (per the same finding), but did not touch the row's framing
+  claim that exit 2 means "the run never really started, before any
+  request went out." That's very slightly wrong for one exit-2 site
+  (`scripts/deploy.py`, the push loop's first `PUT`/`DELETE` raising before
+  any key is recorded as pushed — an HTTP request did go out and fail,
+  even though no var actually changed on Render).
+- **Why parked:** the operator-facing guidance ("nothing changed, safe to
+  retry") still holds regardless of the wording; this is a phrasing
+  precision issue, not a correctness one, and the fix wave's scope was the
+  missing *cause*, not this pre-existing framing sentence.
+- **Follow-up:** soften "before any request went out" to something like
+  "before any change actually landed on Render" — one clause, no table
+  restructuring needed.
+
+### Old README's specific planted-issue examples aren't restated in the guide
+
+- **Found during:** Stage 3b Task 7's review, re-confirmed at the final
+  whole-branch review.
+- **What:** The pre-migration README's live-rehearsal narrative named the
+  specific planted issues used to prove the reviewer works (a hardcoded
+  credential, an N+1 query, a magic number). `guide/setup/local/08-run.md`
+  describes what a good result looks like in general shape (comment within
+  ~15s, issues named across all three sections, footer with runtime/tokens)
+  but doesn't name these three concrete examples, and `guide/background/rehearsals.md`
+  only has the summary table.
+- **Why parked:** not actually orphaned — the three examples still live
+  verbatim in `SPEC.md` (lines ~93, ~269, ~331-332), which stays linked
+  from README as the design doc, so nothing is unrecoverable. The final
+  review's fix wave was explicitly told this was "an optional enhancement,
+  not requested" and out of its scope, per the controller's dispatch.
+- **Follow-up:** add the three concrete examples to `local/08-run.md`'s
+  "what a good result looks like" parenthetical — lets a reader judge
+  whether their own first review actually caught the right things, not
+  just that a comment appeared.
+
+### `.env.example`'s repointed comment is longer than its neighbors
+
+- **Found during:** Stage 3b final-fix-wave re-review.
+- **What:** The new comment at `.env.example` (repointing a former
+  `SETUP.md` reference to `guide/operations/overrides.md`) runs to 93
+  characters, longer than the ~60-75 char wrap the surrounding comment
+  block otherwise uses.
+- **Why parked:** purely cosmetic — doesn't affect parsing, and the
+  content itself is correct (this was independently verified). The
+  re-reviewer that found it explicitly judged it "not worth a follow-up on
+  its own."
+- **Follow-up:** rewrap the comment to match the block's existing line
+  length next time that file is touched for any other reason; not worth a
+  standalone commit.
