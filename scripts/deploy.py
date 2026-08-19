@@ -1267,18 +1267,6 @@ def _safe(name: str, fn, *args) -> CheckResult:
         return CheckResult(name, "FAIL", f"unexpected {type(exc).__name__}")
 
 
-class _FunctionProxy:
-    """A callable that looks up a function dynamically at call time, allowing
-    monkeypatching to work correctly with the CHECKS registry."""
-
-    def __init__(self, func_name: str) -> None:
-        self.func_name = func_name
-
-    def __call__(self, *args, **kwargs) -> CheckResult:  # type: ignore
-        func = globals()[self.func_name]
-        return func(*args, **kwargs)
-
-
 class CheckSpec(NamedTuple):
     """One row of the checklist, and the single source for its documentation.
 
@@ -1298,38 +1286,39 @@ class CheckSpec(NamedTuple):
 
 
 CHECKS: tuple[CheckSpec, ...] = (
-    CheckSpec("config", _FunctionProxy("check_config"),
+    CheckSpec("config", lambda: check_config(),
               "Every setting the service needs is resolvable locally", True),
-    CheckSpec("pricing", _FunctionProxy("check_pricing"),
+    CheckSpec("pricing", lambda: check_pricing(),
               "Every provider's effective model has a rate-table entry "
               "(a warning only -- an unpriced model runs, without a cost estimate)",
               True),
-    CheckSpec("boot-creds-live", _FunctionProxy("check_boot_credentials_live"),
+    CheckSpec("boot-creds-live", lambda: check_boot_credentials_live(),
               "The vars the service reads at every boot are present on the deployed "
               "Render service under their current names -- not just locally", False),
-    CheckSpec("github-app", _FunctionProxy("check_installation_and_webhook"),
+    CheckSpec("github-app",
+              lambda repos, base: check_installation_and_webhook(repos, base),
               "The App has exactly one installation, every repo in GITHUB_TARGET_REPO "
               "is covered by it, and its webhook points here (set only if wrong)",
               True, ("repos", "base")),
-    CheckSpec("health", _FunctionProxy("check_health_endpoint"),
+    CheckSpec("health", lambda base: check_health_endpoint(base),
               "/healthz answers BOTH GET and HEAD -- UptimeRobot's free tier sends "
               "HEAD, so a GET-only endpoint lets the instance sleep", True, ("base",)),
-    CheckSpec("database", _FunctionProxy("check_database"),
+    CheckSpec("database", lambda: check_database(),
               "Postgres is reachable and the app has provisioned its tickets table",
               False),
-    CheckSpec("provider", _FunctionProxy("check_provider"),
+    CheckSpec("provider", lambda: check_provider(),
               "The provider that will actually run -- LLM_PROVIDER, or an active DB "
               "override -- has its credential set", False),
-    CheckSpec("provider-live", _FunctionProxy("check_provider_live"),
+    CheckSpec("provider-live", lambda: check_provider_live(),
               "The actively-resolved provider's credential is present on the deployed "
               "Render service, not just locally", False),
-    CheckSpec("api-key-live", _FunctionProxy("check_api_key_live"),
+    CheckSpec("api-key-live", lambda: check_api_key_live(),
               "The actively-resolved provider's actively-resolved key slot is present "
               "on the deployed Render service", False),
-    CheckSpec("render-service", _FunctionProxy("check_render_service"),
+    CheckSpec("render-service", lambda: check_render_service(),
               "The latest Render deploy is live, and matches local HEAD when a commit "
               "is comparable", False),
-    CheckSpec("uptime-pinger", _FunctionProxy("check_uptime_pinger"),
+    CheckSpec("uptime-pinger", lambda base: check_uptime_pinger(base),
               "A monitor targets /healthz exactly, is active, and polls at most every "
               "10 minutes", False, ("base",)),
 )
