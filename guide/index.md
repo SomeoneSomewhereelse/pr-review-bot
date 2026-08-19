@@ -30,11 +30,9 @@ Budget about **30 minutes** for a first working review.
 ## Two tracks
 
 - **Local** — run the engine on your own machine against a webhook-forwarding
-  tool, for development and debugging. Covered in the setup guide
-  (`setup/index.md`, added in a later stage of this guide).
+  tool, for development and debugging. Covered in the [setup guide](setup/index.md).
 - **Hosted** — deploy to Render with a real GitHub webhook, for a durable,
-  always-on reviewer. Also covered in the setup guide
-  (`setup/index.md`, added in a later stage of this guide).
+  always-on reviewer. Also covered in the [setup guide](setup/index.md).
 
 ## The one command to remember
 

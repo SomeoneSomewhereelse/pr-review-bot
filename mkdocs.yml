@@ -22,6 +22,12 @@ markdown_extensions:
       alternate_style: true
 nav:
   - Home: index.md
+  - Setup:
+      - Overview: setup/index.md
+      - 1. Prerequisites: setup/01-prerequisites.md
+      - 2. Create the GitHub App: setup/02-github-app.md
+      - 3. Install the App: setup/03-install-app.md
+      - 4. Configure an LLM provider: setup/04-llm-provider.md
   - Reference:
       - Configuration: reference/config.md
       - Model pricing: reference/pricing.md

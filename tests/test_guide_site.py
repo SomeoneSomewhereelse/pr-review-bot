@@ -67,3 +67,44 @@ def test_landing_page_states_the_prerequisites_up_front():
     assert "3.12" in text, "the Python floor is in .python-version and nowhere a reader looks"
     assert "uv" in text
     assert "Postgres" in text
+
+
+_SETUP = _ROOT / "guide" / "setup"
+
+
+def test_shared_pages_match_doctors_step_titles():
+    """If the guide and doctor disagree about a step's name, an operator
+    following one while running the other cannot tell where they are."""
+    from scripts import doctor
+
+    shared = [s for s in doctor.steps_for("local") if s.number <= 4]
+    pages = {
+        1: "01-prerequisites.md",
+        2: "02-github-app.md",
+        3: "03-install-app.md",
+        4: "04-llm-provider.md",
+    }
+    for step in shared:
+        text = (_SETUP / pages[step.number]).read_text(encoding="utf-8")
+        assert step.title in text, f"step {step.number} page must carry doctor's title"
+
+
+def test_prerequisites_page_uses_portable_commands_only():
+    """spec section 5: `base64 -w0` is GNU-only and `curl` on Windows
+    PowerShell aliases Invoke-WebRequest, which takes different arguments."""
+    text = (_SETUP / "01-prerequisites.md").read_text(encoding="utf-8")
+    assert "base64 -w0" not in text
+    assert "winget install Docker" not in text or "=== " in text, (
+        "a Windows-only install line must sit inside tabbed content"
+    )
+
+
+def test_github_app_page_encodes_the_pem_with_the_project_script():
+    text = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
+    assert "scripts.encode_credential" in text
+    assert "base64 -w0" not in text
+
+
+def test_setup_index_sends_the_reader_to_a_track():
+    text = (_SETUP / "index.md").read_text(encoding="utf-8")
+    assert "local/05" in text and "hosted/05" in text
