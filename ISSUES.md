@@ -205,4 +205,25 @@ Recorded here so they aren't silently lost. Format:
 - **Follow-up:** what closing it would take
 ```
 
-_No parked issues open. Stage 3b's five were all closed on 2026-08-19; see that commit for what each fix was._
+### CI actions still target the deprecated Node 20 runtime
+
+- **Found during:** the 2026-08-19 push of `6ec3a8f`, in the CI run's own
+  annotations — not a review finding.
+- **What:** `actions/checkout@v4` (three call sites) and
+  `astral-sh/setup-uv@v3` (three call sites) in
+  `.github/workflows/ci.yml` both declare Node 20, which GitHub has
+  deprecated. The runner force-runs them on Node 24 and emits a warning on
+  every run. `actions/configure-pages@v5`, `actions/upload-pages-artifact@v3`
+  and `actions/deploy-pages@v4` are not flagged.
+- **Why parked:** it is a warning, not a failure — all three jobs
+  (`lint-and-test`, `docs`, `pages`) pass, and the forced Node 24 runtime is
+  already the behaviour the bump would produce. Bumping two actions across
+  six call sites is its own change with its own CI verification, not
+  something to fold into a docs commit.
+- **Follow-up:** bump to `actions/checkout@v5` and `astral-sh/setup-uv@v7`
+  (check for the current majors at the time — these move) in one commit, and
+  confirm all three jobs still pass. Worth doing next time the workflow file
+  is touched for any other reason; GitHub will eventually stop force-running
+  Node 20 actions, at which point this becomes a real failure.
+
+_Stage 3b's five parked items were all closed on 2026-08-19 (`7182a14`)._
