@@ -30,8 +30,9 @@ def test_manifest_requests_exactly_the_documented_permissions():
 
 def test_manifest_keeps_the_app_private():
     """A PUBLIC App lets any third party self-install and have their events
-    accepted while GITHUB_TARGET_REPO is unset (track-all mode) -- SETUP.md
-    section 1 records this as the reason the App must stay private."""
+    accepted while GITHUB_TARGET_REPO is unset (track-all mode) --
+    guide/setup/02-github-app.md records this as the reason the App must
+    stay private."""
     assert cga.build_manifest("bot", "https://e.com", "http://localhost:1/c")["public"] is False
 
 

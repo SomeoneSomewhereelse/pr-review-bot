@@ -5,8 +5,9 @@ runtime via monkeypatching app.config.settings (no server restart needed —
 proves the abstraction is a true runtime seam, not just an env-file toggle):
 
   1. LLM_PROVIDER=groq   -> real success (as proven in steps 5-6).
-  2. LLM_PROVIDER=gemini -> real transport failure (403, account-flagged
-     per SETUP.md/CLAUDE.md) -> every specialist's own never-raise contract
+  2. LLM_PROVIDER=gemini -> real transport failure (403, account-flagged --
+     see guide/background/providers.md and CLAUDE.md) -> every specialist's
+     own never-raise contract
      (specialists/base.py) catches it and returns status="failed" -> the
      orchestrator's asyncio.gather merge (step 6) still produces a full
      ReviewResult and posts a coherent comment showing 3 failed rows. No

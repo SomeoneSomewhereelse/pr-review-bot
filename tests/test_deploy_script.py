@@ -95,9 +95,7 @@ def test_render_report_aligns_columns_and_summarizes():
     # Status starts at the same column on every row.
     status_columns = {line.index(s) for line, s in zip(lines[:3], ["PASS", "FAIL", "SKIPPED"])}
     assert len(status_columns) == 1
-    assert lines[-1] == (
-        "1 failed, 1 skipped -- see README.md#deploying-to-production-render--supabase"
-    )
+    assert lines[-1] == f"1 failed, 1 skipped -- see {deploy._GUIDE_URL}"
 
 
 def test_render_report_indents_continuation_lines():

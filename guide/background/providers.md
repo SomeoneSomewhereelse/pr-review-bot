@@ -30,9 +30,8 @@ The block was confirmed exhausted as of 2026-07-23: a second API key under a
 different Google project hit the same `403`; keys under multiple genuinely
 different Google accounts were blocked too. Per the forum, the only
 documented fix is attaching GCP billing — a trade-off this project
-deliberately avoids (see `SETUP.md`'s deviation notes and `CLAUDE.md`'s
-"Substitutions from the brief"). Cross-vendor provider-agnosticism was
-demonstrated via Groq instead.
+deliberately avoids (see `CLAUDE.md`'s "Substitutions from the brief").
+Cross-vendor provider-agnosticism was demonstrated via Groq instead.
 
 **Resolved, 2026-08-10:** the API key was updated (new key, same or a
 different Google account — not investigated further), and

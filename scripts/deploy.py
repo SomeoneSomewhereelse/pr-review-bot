@@ -11,7 +11,7 @@ that holds no logic.
 
 Output is terse by contract (design spec section 7.4): details are fragments
 naming the observed fact and the next action, never the reasoning -- the
-explanations live in README.md.
+explanations live in the published guide (see _GUIDE_URL below).
 """
 
 from __future__ import annotations
@@ -36,7 +36,8 @@ from scripts import _override, _render
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
-_README_ANCHOR = "README.md#deploying-to-production-render--supabase"
+_GUIDE_BASE = "https://someonesomewhereelse.github.io/pr-review-bot"
+_GUIDE_URL = f"{_GUIDE_BASE}/operations/deploy/"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
 _UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
@@ -44,10 +45,10 @@ _UPTIMEROBOT_API = "https://api.uptimerobot.com/v2/getMonitors"
 _MAX_PINGER_INTERVAL_SECONDS = 600
 
 # The service env vars --sync-env always pushes, regardless of provider.
-# Authoritative: tests/test_deploy_script.py's test_env_var_names_match_the_docs
-# asserts README.md and SETUP.md each mention every name here, AND every
-# credential/model var named in _PROVIDERS -- both docs already cover every
-# provider's model var.
+# Authoritative: scripts/gen_docs.py renders this list (plus every
+# credential/model var named in _PROVIDERS) straight into
+# guide/reference/sync-env.md, so the published guide can never drift from
+# what this tuple actually contains.
 _ALWAYS_SYNCED = (
     "DATABASE_URL",
     "GITHUB_APP_ID",
@@ -131,8 +132,8 @@ _DEPLOY_FAILED_STATUSES = {
 }
 # ~5 minutes between progress lines at the default 10s poll interval, so a
 # long in-flight wait never goes more than a few minutes without visible
-# output (SETUP.md's documented history includes a real operator mistake
-# against live infra made during an apparently-silent stretch).
+# output (this project's ISSUES.md documents real operator mistakes made
+# against live infra during apparently-silent stretches).
 _IN_FLIGHT_PROGRESS_EVERY = 30
 
 
@@ -807,7 +808,7 @@ def render_report(results: list[CheckResult]) -> str:
     if skipped:
         parts.append(f"{skipped} skipped")
     if failed:
-        lines.append(", ".join(parts) + f" -- see {_README_ANCHOR}")
+        lines.append(", ".join(parts) + f" -- see {_GUIDE_URL}")
     elif parts:
         lines.append("all checks passed, " + ", ".join(parts))
     else:

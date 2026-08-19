@@ -248,3 +248,32 @@ def test_readme_no_longer_carries_the_operations_manual():
     text = (_ROOT / "README.md").read_text(encoding="utf-8")
     for moved in ("--sync-config-db", "set_override", "uptime-pinger"):
         assert moved not in text, f"{moved} moved to guide/operations/"
+
+
+def test_deploy_points_at_a_guide_page_that_exists():
+    """spec section 3d: the CLI prints this to a terminal user, so it must
+    resolve to a real page."""
+    from scripts import deploy
+
+    assert deploy._GUIDE_URL.startswith("https://")
+    path = deploy._GUIDE_URL.rstrip("/").split("/pr-review-bot/", 1)[1]
+    assert (_ROOT / "guide" / f"{path}.md").is_file(), f"no guide page for {path}"
+
+
+def test_no_script_still_points_at_setup_md():
+    """Scans scripts/ ONLY.
+
+    tests/ is deliberately excluded: this very file contains the literal
+    "SETUP.md" in test_setup_md_is_gone_and_the_guide_replaced_it, so a scan
+    including tests/ would fail on itself. That self-reference trap has now
+    bitten this project three times -- see ISSUES.md (Stage 2 Task 4's
+    docstring, and Stage 3a's ast-vs-grep note). Any test that scans source
+    for a forbidden string must exclude the file asserting it.
+    """
+    for path in _ROOT.glob("scripts/*.py"):
+        assert "SETUP.md" not in path.read_text(encoding="utf-8"), f"{path.name} is stale"
+
+
+def test_claude_md_points_at_the_guide():
+    text = (_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "SETUP.md" not in text

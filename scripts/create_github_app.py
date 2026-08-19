@@ -11,7 +11,8 @@ github.com/settings/apps/new, the operator approves, GitHub redirects back
 with a one-time code, and POST /app-manifests/{code}/conversions returns the
 App ID, PEM, and webhook secret together. That replaces creating the App by
 hand, generating a private key by hand, and base64-encoding it by hand.
-SETUP.md section 1 records that this project's own App was made this way.
+guide/setup/02-github-app.md records that this project's own App was made
+this way.
 
 The webhook URL is a placeholder at creation time -- the tunnel or Render URL
 does not exist yet. scripts/deploy.py's github-app check corrects it later
@@ -69,7 +70,7 @@ def build_manifest(app_name: str, base_url: str, redirect_url: str) -> dict:
     GITHUB_TARGET_REPO unset makes the bot act on every repo its installation
     covers, which is only safe because a private App can only be installed by
     accounts the owner chooses. A public App would let any third party
-    self-install and have their events accepted (SETUP.md section 1).
+    self-install and have their events accepted (guide/setup/02-github-app.md).
     """
     return {
         "name": app_name,

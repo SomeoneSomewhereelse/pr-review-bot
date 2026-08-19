@@ -161,9 +161,10 @@ when working under `app/`.
   reproducibility.
 - **`vertex` adapter reinstated (2026-08-14)** — it was removed when Vertex AI's
   payment-card requirement collided with this project's no-card constraint (see
-  SETUP.md §2), leaving it live-unrunnable and mock-only. GCP billing/ADC access
-  later became available, so `vertex` is back as a real, live-runnable third
-  provider, matching `SPEC.md`'s stated default. Its credential is a GCP
+  `guide/background/providers.md`), leaving it live-unrunnable and mock-only.
+  GCP billing/ADC access later became available, so `vertex` is back as a
+  real, live-runnable third provider, matching `SPEC.md`'s stated default.
+  Its credential is a GCP
   service-account identity rather than an API-key string:
   `GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
   see the 2026-08-16 credential-convention design) → implicit ADC, resolved
@@ -185,11 +186,12 @@ per Google's own AI Developer Forum, this is an automated Trust & Safety flag,
 and one documented trigger is **hitting repeated 429s / testing many models
 back-to-back without backoff**, which is exactly what happened during
 troubleshooting here. The only documented fix is attaching GCP billing, which
-this project's setup deliberately avoids (see SETUP.md) — so once flagged, a
-provider is effectively lost for the rest of the demo. (**Update, 2026-08-10:**
-a later API key update resolved this specific block — see SETUP.md §2 — but
-that doesn't change the rule below; a flag is still a real risk that this
-discipline exists to avoid, not something to rely on being reversible.)
+this project's setup deliberately avoids (see `guide/background/providers.md`)
+— so once flagged, a provider is effectively lost for the rest of the demo.
+(**Update, 2026-08-10:** a later API key update resolved this specific block
+— see `guide/background/providers.md` — but that doesn't change the rule
+below; a flag is still a real risk that this discipline exists to avoid, not
+something to rely on being reversible.)
 **Rules to avoid repeating this:**
 
 - **Never loop/burst live calls across many models or keys** to "see what
