@@ -91,7 +91,7 @@ automatically via a `services: postgres` container — no action needed there.
 
 **Faster local iteration:** `eval "$(uv run python -m scripts.test_db)"` once per shell session starts a persistent local test Postgres and exports `DATABASE_URL`, so `pytest` skips testcontainers' cold boot; `uv run python -m scripts.test_db down` tears it down.
 
-821 deterministic tests, no real network calls — mocks GitHub's REST API (at
+844 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
 clients, and the webhook HTTP layer. CI (`.github/workflows/ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on

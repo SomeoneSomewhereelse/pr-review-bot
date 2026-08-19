@@ -273,3 +273,41 @@ confirming no persistent Postgres was in use. `tmp.md` (gitignored, not
 committed) holds the full per-subagent timing log the stage-level numbers
 in section 1 are drawn from, for anyone who wants the raw per-dispatch
 breakdown.
+
+## 8. Results
+
+Measured after Tasks 1-4 landed, using the exact commands from section 6:
+
+- Full suite (`uv run pytest -q --durations=25`): **844 passed, 1 warning in
+  67.43s (0:01:07)** (baseline was ~54s serial). The slowest items are the two
+  new xdist-grouping regression tests (6.32s call, 4.93s setup — the second
+  being the one-time testcontainers boot inside the `db` group) followed by a
+  long tail of sub-1.1s items; see the durations output for the full top-25.
+- Fast-iteration subset (`uv run pytest -q -m "not db and not xdist_meta"`):
+  **608 passed in 47.07s**, confirmed stable on a second run (**608 passed in
+  47.42s**) — no flakiness between the two runs.
+- Test counts (`--collect-only`): **844** total,
+  **608** with `-m "not db and not xdist_meta"` (236 deselected) — the smaller
+  number confirms the marker selection actually filters something, and this
+  filtered-out 236 is this project's authoritative "how many tests actually
+  touch Postgres" count.
+- Zero-config path (Step 4): confirmed exactly one distinct
+  testcontainers-managed Postgres container name over the whole run, on two
+  independent runs (container names `interesting_goldstine` and
+  `dazzling_curie` respectively, one per run), continuously polled via
+  `docker ps --filter ancestor=postgres:16-alpine` every second for the run's
+  full duration rather than sampled once — max concurrent count was 1 on both
+  runs, and each run's set of distinct container names ever seen had exactly
+  one member. Both background `pytest` runs exited 0 (844 passed each time).
+- CI (Step 5): **pass** — `lint-and-test` completed in 41s on push
+  (run [32282918106](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32282918106)),
+  no `TRUNCATE`/connection-related failures.
+
+Measurement itself surfaced two real cross-task bugs before these numbers
+could be recorded: an order-dependent test pair in `tests/test_github_app.py`
+that broke when split across xdist workers, and a hook-ordering bug where
+`tests/conftest.py`'s db-marker hook ran after xdist's own worker-side
+nodeid-stamping hook, silently defeating the `db` group's grouping guarantee
+(up to 24 concurrent testcontainers Postgres containers instead of 1). Both
+were root-caused and fixed, in commits `d491fa8` and `bec9b86` respectively,
+before the numbers above were captured.
