@@ -70,3 +70,52 @@ def test_generated_output_carries_the_do_not_edit_header():
 def test_render_config_is_deterministic():
     """CI compares byte-for-byte, so any run-to-run variation is a red build."""
     assert gen_docs.render_config() == gen_docs.render_config()
+
+
+def test_pricing_table_carries_every_rate_with_its_provenance():
+    from app.providers import pricing
+
+    table = gen_docs.render_pricing()
+    for (provider, model), rate in pricing._RATES.items():
+        assert model in table
+        assert provider in table
+        assert rate.verified in table
+        assert rate.source_url in table
+
+
+def test_pricing_table_surfaces_an_inherited_rates_caveat():
+    """A `verified` date that records no independent check must not be
+    presented as though it did -- the note exists precisely to say so."""
+    table = gen_docs.render_pricing()
+    assert "not independently checked" in table
+
+
+def test_pricing_table_explains_that_an_unpriced_model_still_runs():
+    table = gen_docs.render_pricing()
+    assert "without a cost estimate" in table
+
+
+def test_sync_env_table_separates_pushed_from_never_pushed():
+    from scripts import deploy
+
+    table = gen_docs.render_sync_env()
+    for name in deploy._ALWAYS_SYNCED:
+        assert name in table
+    for name in deploy._DB_SYNCED_OPERATIONAL_KEYS:
+        assert name in table, "the DB-only keys must be listed as deliberately never pushed"
+    for name in deploy._NEVER_SYNCED_OPERATIONAL_KEYS:
+        assert name in table
+    assert "runtime_config" in table, "must say WHERE the DB-only keys actually live"
+
+
+def test_sync_env_table_lists_every_providers_model_var():
+    from app.providers import registry
+
+    table = gen_docs.render_sync_env()
+    for _credential, model_var in registry.PROVIDERS.values():
+        assert model_var in table
+
+
+def test_the_new_renderers_are_deterministic():
+    assert gen_docs.render_pricing() == gen_docs.render_pricing()
+    assert gen_docs.render_sync_env() == gen_docs.render_sync_env()
