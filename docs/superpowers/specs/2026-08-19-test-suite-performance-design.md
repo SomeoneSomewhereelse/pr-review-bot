@@ -10,7 +10,9 @@ dev dependency group), `README.md`'s Testing section, a new `scripts/test_db.py`
 
 The full suite (821 tests as of this writing) takes **~54 seconds** per
 `uv run pytest -q` invocation, run serially, on a 24-core machine with
-`pytest-xdist` not installed. This project's subagent-driven-development
+`pytest-xdist` not installed. (Re-measured at ~38s on this machine as of the
+final whole-branch review — see section 8b; the ~54s figure above is kept as
+the historical number that motivated this design, not a claim about today.) This project's subagent-driven-development
 pattern re-runs the full suite many times per plan (one fresh implementer +
 one fresh reviewer subagent per task, each running `ruff` + full `pytest` +
 `mkdocs build --strict` before reporting), so structurally-avoidable
@@ -237,7 +239,7 @@ this project's "measure, don't assert" convention:
 
 - Before: `uv run pytest -q --durations=25` (current: ~54s serial, no
   xdist) — already captured in section 1, re-confirm at plan-execution time
-  in case drift occurred.
+  in case drift occurred. (Re-confirmed at ~38s on this machine — see 8b.)
 - After 3a alone: same command, expect ~1.4s improvement.
 - After 3c lands: same command (now parallel by default via `addopts`);
   also run `uv run pytest -q -m "not db"` and record its time separately as
@@ -433,8 +435,14 @@ eval'd shell with every outbound call hard-stubbed to raise: the premise held
 (run [32282918106](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32282918106)),
 no `TRUNCATE`/connection-related failures. Measured while `addopts` still said
 `-n auto`; as noted in 8a, CI runners are small enough that `auto` and a pinned
-`4` resolve to comparable worker counts there, so this result is not
-invalidated by the pin — but it should be re-confirmed on the next push.
+`4` resolve to comparable worker counts there, so this result was not expected
+to be invalidated by the pin.
+
+**Re-confirmed after the pin landed:** `lint-and-test` completed in 44s on the
+push that included the `-n 4` config change and the final-review fix wave
+(run [32296335505](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32296335505)),
+still no `TRUNCATE`/connection-related failures — comparable to the pre-pin
+41s, as predicted.
 
 ### 8h. Bugs surfaced by measurement
 
