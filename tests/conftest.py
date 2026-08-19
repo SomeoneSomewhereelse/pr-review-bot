@@ -185,13 +185,28 @@ def _touches_shared_postgres(item: pytest.Item) -> bool:
     return "db_url" in item.fixturenames
 
 
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     """Auto-tag every Postgres-touching test with `db` (for `pytest -m "not
     db"` fast iteration) and `xdist_group(name="db")` (so pytest-xdist
     schedules them all onto the same worker, avoiding cross-worker TRUNCATE
     races against the one shared Postgres instance). See the 2026-08-19
     test-suite-performance design doc, section 3c, for why this is keyed off
-    db_url specifically."""
+    db_url specifically.
+
+    `tryfirst=True` is load-bearing, not decoration. `--dist=loadgroup` never
+    reads the `xdist_group` marker: pytest-xdist's worker-side
+    `WorkerInteractor.pytest_collection_modifyitems` stamps an `@<group>`
+    suffix onto `item._nodeid`, and that nodeid *string* is the only thing the
+    scheduler groups on. That stamping hookimpl is undecorated, so pluggy
+    orders it by registration LIFO -- and this file is an *initial* conftest
+    (`testpaths = ["tests"]`), registered before `WorkerInteractor`, so
+    without `tryfirst` xdist stamps first, while no item carries the marker
+    yet, and every db test ends up its own singleton group spread across every
+    worker (each spinning its own testcontainers Postgres). The failure is
+    silent -- all tests still pass and `-m db` still selects correctly, since
+    marker selection is evaluated after both hooks have run.
+    `tests/test_xdist_group_ordering.py` is the regression guard."""
     for item in items:
         if _touches_shared_postgres(item):
             item.add_marker(pytest.mark.db)

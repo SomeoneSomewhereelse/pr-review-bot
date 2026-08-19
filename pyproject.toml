@@ -43,4 +43,5 @@ pythonpath = ["."]
 addopts = "-n auto --dist=loadgroup"
 markers = [
     "db: transitively touches the shared Postgres via the db_url fixture (auto-applied by tests/conftest.py's pytest_collection_modifyitems hook, not meant to be added by hand)",
+    "xdist_meta: exercises real xdist worker subprocess scheduling via pytester -- slow, excluded from the fast-iteration `-m` filter",
 ]
