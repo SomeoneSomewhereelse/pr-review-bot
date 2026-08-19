@@ -93,7 +93,16 @@ def up() -> int:
         print(f"error: {_CONTAINER_NAME} did not become ready in time", file=sys.stderr)
         return 1
 
-    assert _looks_like_local_test_db(_DATABASE_URL), "constructed URL must be local"
+    # A real raise, not a bare `assert`: this is the last gate before a
+    # DATABASE_URL reaches an operator's shell (and, via `eval`, every
+    # subsequent command in it), and `python -O` strips asserts entirely --
+    # a safety check that can be optimized away is not a safety check.
+    if not _looks_like_local_test_db(_DATABASE_URL):
+        raise RuntimeError(
+            "refusing to print a DATABASE_URL that is not local -- this script only "
+            "ever constructs its own throwaway localhost URL, so reaching this means "
+            "_DATABASE_URL was edited into something unsafe"
+        )
     print(f"export DATABASE_URL={_DATABASE_URL}")
     return 0
 

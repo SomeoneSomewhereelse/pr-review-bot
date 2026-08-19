@@ -3,6 +3,8 @@ no real Docker required to run this file."""
 
 import subprocess
 
+import pytest
+
 from scripts import test_db
 
 
@@ -99,6 +101,19 @@ def test_down_reports_a_clear_error_when_docker_is_missing(monkeypatch, capsys):
 
 def test_constructed_database_url_is_recognized_as_local():
     assert test_db._looks_like_local_test_db(test_db._DATABASE_URL) is True
+
+
+def test_up_refuses_to_print_a_non_local_database_url(monkeypatch, capsys):
+    """The pre-print gate is a real `raise`, not a bare `assert` -- so it still
+    fires under `python -O`, where asserts are stripped."""
+    fake_run = _fake_run({"inspect": (0, "true"), "pg_isready": (0, "")})
+    monkeypatch.setattr(test_db.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(test_db.subprocess, "run", fake_run)
+    monkeypatch.setattr(test_db, "_DATABASE_URL", "postgresql://u:p@db.example.com/postgres")
+
+    with pytest.raises(RuntimeError, match="refusing to print"):
+        test_db.up()
+    assert "export DATABASE_URL" not in capsys.readouterr().out
 
 
 def test_main_dispatches_to_up_by_default(monkeypatch):
