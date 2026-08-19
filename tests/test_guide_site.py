@@ -202,3 +202,30 @@ def test_no_operations_page_mentions_the_removed_cost_cap():
     invite someone to set a variable nothing reads."""
     for page in _OPS.glob("*.md"):
         assert "KEY_USAGE_COST_CAP_USD" not in page.read_text(encoding="utf-8")
+
+
+_BG = _ROOT / "guide" / "background"
+
+
+def test_provider_history_survives_the_migration():
+    """This is the record of what was actually tried and what it cost --
+    the thing most easily lost when a 750-line journal is restructured."""
+    text = (_BG / "providers.md").read_text(encoding="utf-8")
+    assert "PERMISSION_DENIED" in text, "the Gemini Trust & Safety block"
+    assert "github_models" in text or "GitHub Models" in text
+    assert "gemini-2.5-flash" in text, "the Vertex catalog finding"
+
+
+def test_rehearsal_history_keeps_the_measured_timings():
+    text = (_BG / "rehearsals.md").read_text(encoding="utf-8")
+    assert "PR #3" in text or "#3" in text
+    assert "8s" in text or "8 s" in text
+
+
+def test_background_is_not_in_the_setup_reading_path():
+    setup_pages = list((_ROOT / "guide" / "setup").rglob("*.md"))
+    assert setup_pages
+    for page in setup_pages:
+        assert "background/" not in page.read_text(encoding="utf-8"), (
+            "background is optional context; a setup step must not depend on it"
+        )

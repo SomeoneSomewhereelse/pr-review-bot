@@ -44,6 +44,10 @@ nav:
       - Tuning cooldowns and usage caps: operations/tuning.md
       - Deploying an image: operations/image-deploys.md
       - Config files: operations/config-files.md
+  - Background:
+      - Provider history: background/providers.md
+      - Live rehearsal history: background/rehearsals.md
+      - Repo history: background/history.md
   - Reference:
       - Configuration: reference/config.md
       - Model pricing: reference/pricing.md
