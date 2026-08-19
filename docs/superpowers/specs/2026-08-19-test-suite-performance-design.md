@@ -254,8 +254,8 @@ this project's "measure, don't assert" convention:
 - Confirm CI: push the branch, confirm `lint-and-test` still passes with no
   `TRUNCATE`/connection-related failures.
 - If README's "821 deterministic tests" count changes (section 4 adds at
-  least one test), update `README.md:92` to match — `pytest --collect-only
-  -q | tail -1` gives the authoritative count.
+  least one test), update README's Testing section to match — `pytest
+  --collect-only -q | tail -1` gives the authoritative count.
 - If any candidate lands and the before/after numbers don't move, say so in
   the plan's closing report and consider reverting rather than keeping a
   change that only added configuration surface.
@@ -276,57 +276,175 @@ breakdown.
 
 ## 8. Results
 
-Measured after Tasks 1-4 landed, using the commands from section 6, adapted
-where noted: section 6 says `-m "not db"` for the fast-iteration number, but
-the actual command run below is `-m "not db and not xdist_meta"` —
-`xdist_meta` is a new marker added by the `bec9b86` remediation, after
-section 6 was written, and excluding it from the fast-iteration subset for
-the same reason `db` is excluded (its one test spins up real xdist worker
-subprocesses and is slow, ~6.3s, though it touches no Postgres).
+All numbers below were re-measured on the final branch state (856 collected
+tests) on the same machine section 1 used — WSL2, `nproc` = 24 — after the
+final whole-branch review found that the originally-shipped `-n auto` had made
+this design's own primary target metric *slower*. Each configuration was run at
+least once, the chosen one twice.
 
-- Full suite (`uv run pytest -q --durations=25`): **844 passed, 1 warning in
-  67.43s (0:01:07)** (baseline was ~54s serial). Wall time went *up* despite
-  parallelism — the dominant single cost is the new `xdist_meta` regression
-  test's real xdist-subprocess run (6.32s call), plus per-worker startup
-  overhead (`-n auto` spins up 24 workers) that a 67s run doesn't fully
-  amortize. Full-suite wall time was never this design's primary target,
-  though; see below for the fast-iteration number, which is. The slowest
-  items after that are the one-time testcontainers boot inside the `db`
-  group (4.93s setup) followed by a long tail of sub-1.1s items; see the
-  durations output for the full top-25.
-- Fast-iteration subset (`uv run pytest -q -m "not db and not xdist_meta"`):
-  **608 passed in 47.07s**, confirmed stable on a second run (**608 passed in
-  47.42s**) — no flakiness between the two runs.
-- Test counts (`--collect-only`): **844** total,
-  **608** with `-m "not db and not xdist_meta"` (236 deselected) — the smaller
-  number confirms the marker selection actually filters something. That 236
-  is the union of both exclusion reasons, not purely a Postgres count:
-  `uv run pytest --collect-only -q -m db` collects **234** (this project's
-  authoritative "how many tests actually touch Postgres" count), and
-  `-m xdist_meta` collects **2** (`tests/test_xdist_group_ordering.py`'s two
-  real top-level tests, module-tagged via `pytestmark = pytest.mark.xdist_meta`
-  — the module's other `test_shared_*`/`test_plain_*` names are string
-  literals for a synthetic `pytester` sub-suite, not tests collected from
-  this file itself). The two marker sets are disjoint (`-m "db and
-  xdist_meta"` collects 0) and their union matches: `-m "db or xdist_meta"`
-  collects 236 = 234 + 2.
-- Zero-config path (Step 4): confirmed exactly one distinct
-  testcontainers-managed Postgres container name over the whole run, on two
-  independent runs (container names `interesting_goldstine` and
-  `dazzling_curie` respectively, one per run), continuously polled via
-  `docker ps --filter ancestor=postgres:16-alpine` every second for the run's
-  full duration rather than sampled once — max concurrent count was 1 on both
-  runs, and each run's set of distinct container names ever seen had exactly
-  one member. Both background `pytest` runs exited 0 (844 passed each time).
-- CI (Step 5): **pass** — `lint-and-test` completed in 41s on push
-  (run [32282918106](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32282918106)),
-  no `TRUNCATE`/connection-related failures.
+### 8a. Worker count: `-n auto` was actively harmful; `-n 4` ships
 
-Measurement itself surfaced two real cross-task bugs before these numbers
-could be recorded: an order-dependent test pair in `tests/test_github_app.py`
-that broke when split across xdist workers, and a hook-ordering bug where
-`tests/conftest.py`'s db-marker hook ran after xdist's own worker-side
+`addopts` originally shipped `-n auto`. On a 24-core machine that spins **24
+workers**, and each worker pays a full app-import startup cost (~1.25s
+inferred). On a workload whose *total* serial time is ~31-57s, that fixed cost
+dominates and never amortizes:
+
+Fast-iteration subset, `uv run pytest -q -m "not db and not xdist_meta"`
+(621 tests):
+
+| `-n` | Wall time | vs serial |
+|---|---|---|
+| `0` (serial) | 30.96s | — |
+| `2` | 21.66s | −30% |
+| **`4`** | **19.95s / 20.04s** | **−36%** |
+| `6` | 21.01s | −32% |
+| `8` | 22.26s | −28% |
+| `auto` (= 24) | 45.42s | **+47% (slower than no parallelism at all)** |
+
+Full suite, `uv run pytest -q --durations=25` (856 tests, testcontainers path,
+no `DATABASE_URL` set):
+
+| `-n` | Wall time | vs serial |
+|---|---|---|
+| `0` (serial) | 57.15s | — |
+| **`4`** | **35.21s / 35.58s** | **−38%** |
+| `auto` (= 24) | 65.82s | **+15% (slower than serial)** |
+
+The curve is flat-bottomed between 2 and 8 and falls off a cliff past that, so
+`-n 4` is picked as the measured minimum rather than a knife-edge optimum —
+anything in 2-8 would have been defensible, and the guard test in
+`tests/test_conftest_db_marker_hook.py` asserts that range rather than the
+literal 4. `pyproject.toml` now pins `-n 4 --dist=loadgroup`, with a comment
+recording why it must not be "restored" to `auto`.
+
+**Why CI never caught this.** GitHub's hosted runners have 2-4 cores, so
+`-n auto` *there* already resolved to a small, sane worker count — CI timed at
+41s and 44s and looked fine. The pathology only appears on a high-core
+developer machine, which is exactly where the fast-iteration loop this design
+exists to speed up actually runs. Pinning an integer also makes local and CI
+behaviour identical instead of silently core-count-dependent.
+
+**The design was sound; the configuration was wrong.** Section 6 says to
+consider reverting a change whose numbers don't move. With the worker count
+corrected the numbers move substantially and in the right direction (−36% on
+the primary target, −38% on the full suite), so the mechanism is kept.
+
+### 8b. Backfilling section 6's "after 3a alone" measurement
+
+Section 6 asked for this and Task 5 never performed it (it measured only after
+all four tasks had landed). Backfilled here against the two real commits, in
+throwaway worktrees, both of which predate xdist and therefore ran serially —
+matching section 6's original intent. Two runs each after a discarded warmup,
+`uv run pytest -q --durations=25`:
+
+| Commit | What | Runs | Mean |
+|---|---|---|---|
+| `f3d301b` | pre-plan baseline (821 tests) | 38.57s, 38.12s | 38.35s |
+| `4288152` | Task 1 / section 3a alone (823 tests) | 37.40s, 37.12s | 37.26s |
+
+**~1.1s saved**, against section 3a's ~1.4s estimate — and the after-commit
+runs 2 *more* tests than the baseline, so the per-test saving is slightly
+larger than the raw delta shows. Close enough to call the estimate confirmed;
+reported as measured rather than rounded up to the predicted figure.
+
+This backfill also corrects a stale number in section 1: the baseline full
+suite measures **~38s serially on this machine today**, not the "~54 seconds"
+section 1 records. Section 1's figure was captured in an earlier session and
+has drifted (machine state, warm caches, dependency versions); it is left in
+place as the historical record of what prompted this design, but ~38s is the
+honest present-day serial baseline, and it is the number the −38% full-suite
+improvement above should be read against.
+
+### 8c. Test counts and marker selection
+
+`--collect-only -q`: **856** total, **621** with
+`-m "not db and not xdist_meta"` (235 deselected), **234** with `-m db` (this
+project's authoritative "how many tests touch Postgres" count), **1** with
+`-m xdist_meta`. The two marker sets are disjoint (`-m "db and xdist_meta"`
+collects 0) and their union matches exactly: 235 = 234 + 1.
+
+`xdist_meta` marks exactly **one** test —
+`test_hook_applied_xdist_group_reaches_the_loadgroup_scheduler` (5.34s call; it
+spins real xdist worker subprocesses via `pytester`). It was previously applied
+module-wide via `pytestmark`, which also swept in that file's second test,
+`test_this_projects_conftest_hook_declares_tryfirst` — a sub-5ms assertion, and
+the only direct check that the real `tests/conftest.py` hook still declares
+`tryfirst`. Excluding it bought nothing and removed a real guard from the fast
+loop, so the marker is now applied per-test and the `tryfirst` check runs in
+`-m "not db and not xdist_meta"`.
+
+### 8d. Zero-config path (section 6, step 4)
+
+Confirmed exactly one distinct testcontainers-managed Postgres container over a
+whole run, on two independent runs (container names `interesting_goldstine` and
+`dazzling_curie`), polled continuously via
+`docker ps --filter ancestor=postgres:16-alpine` every second for each run's
+full duration rather than sampled once. Max concurrent count was 1 on both
+runs. Both runs exited 0.
+
+### 8e. `scripts/test_db.py` against real Docker (section 6)
+
+Section 6 required this and it was never done — every test in
+`tests/test_test_db_script.py` mocks `shutil.which` and `subprocess.run`, so a
+script whose entire purpose is real Docker orchestration had never once been
+executed against real Docker. Performed here against Docker 29.7.2:
+
+- **`up` when absent** → printed exactly
+  `export DATABASE_URL=postgresql://postgres:x@localhost:5433/postgres`, exit 0;
+  `docker ps` showed `bcd1d7f05b01 pr-review-test-pg Up 2 seconds
+  0.0.0.0:5433->5432/tcp`.
+- **`up` a second time** → byte-identical output, exit 0, and
+  `docker ps -a --filter name=pr-review-test-pg` still showed **the same single
+  container id** `bcd1d7f05b01` (count 1). Idempotency confirmed against real
+  Docker, not a mock.
+- **`eval "$(...)"`** → `DATABASE_URL` went from unset to the printed value in
+  the calling shell, and a real `psycopg.connect` against it answered
+  `SELECT 1 -> 1`, `server_version -> 16.14`. Structurally valid *and* live.
+- **`down`** → exit 0, and `docker ps -a --filter name=pr-review-test-pg`
+  returned **no rows**. Running `down` again on an already-absent container is
+  also a clean exit 0.
+
+### 8f. Safety gap found and closed during this fix wave
+
+README documents `eval "$(uv run python -m scripts.test_db)"` as the
+fast-iteration path, and `Settings.database_url` reads the process environment
+ahead of any `.env` file. `scripts/deploy.py::_wanted_env()` puts
+`settings.database_url` into what `--sync-env` pushes, and `DATABASE_URL` is in
+`_ALWAYS_SYNCED` — so running `--sync-env` from a shell where `test_db` had
+been eval'd would have silently repointed the **live Render service** at
+`postgresql://...@localhost:5433/postgres`. `sync_env()` already refused for an
+active provider override and for disagreeing model overrides, but had no guard
+for this. This project has had one real incident of exactly this shape (a live
+Render service left holding a dummy test value — see `tests/conftest.py`'s
+`_quarantine_operator_apis` comment).
+
+`sync_env()` now refuses (exit 2, before any HTTP request or database
+connection) when `scripts/_prereqs.py::_looks_like_local_test_db` — the same
+predicate `scripts/test_db.py` itself consumes, unmodified — matches
+`settings.database_url`, naming `scripts/test_db.py` as the likely cause and
+telling the operator to `unset DATABASE_URL`. Verified end-to-end in a real
+eval'd shell with every outbound call hard-stubbed to raise: the premise held
+(`os.environ` did win over `.env`; host resolved to `localhost`) and
+`sync_env()` returned 2 without attempting a single call.
+
+### 8g. CI (section 6, step 5)
+
+**Pass** — `lint-and-test` completed in 41s on push
+(run [32282918106](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32282918106)),
+no `TRUNCATE`/connection-related failures. Measured while `addopts` still said
+`-n auto`; as noted in 8a, CI runners are small enough that `auto` and a pinned
+`4` resolve to comparable worker counts there, so this result is not
+invalidated by the pin — but it should be re-confirmed on the next push.
+
+### 8h. Bugs surfaced by measurement
+
+Measurement itself surfaced three real bugs that would otherwise have shipped:
+an order-dependent test pair in `tests/test_github_app.py` that broke when
+split across xdist workers (`d491fa8`); a hook-ordering bug where
+`tests/conftest.py`'s db-marker hook ran *after* xdist's worker-side
 nodeid-stamping hook, silently defeating the `db` group's grouping guarantee
-(up to 24 concurrent testcontainers Postgres containers instead of 1). Both
-were root-caused and fixed, in commits `d491fa8` and `bec9b86` respectively,
-before the numbers above were captured.
+and allowing up to 24 concurrent testcontainers Postgres containers (`bec9b86`);
+and the `-n auto` regression documented in 8a, caught only by the final
+whole-branch review. The last of these is the reason section 6's
+"if the numbers don't move, say so" instruction exists — and the reason it has
+to be executed as a real measurement, not an assumption.

@@ -89,15 +89,15 @@ up a throwaway Postgres 16 via `testcontainers` automatically) or a
 those tests fail with an opaque testcontainers error. CI provides this
 automatically via a `services: postgres` container — no action needed there.
 
-**Faster local iteration:** `eval "$(uv run python -m scripts.test_db)"` once per shell session starts a persistent local test Postgres and exports `DATABASE_URL`, so `pytest` skips testcontainers' cold boot; `uv run python -m scripts.test_db down` tears it down.
+**Faster local iteration:** `eval "$(uv run python -m scripts.test_db)"` once per shell session starts a persistent local test Postgres and exports `DATABASE_URL`, so `pytest` skips testcontainers' cold boot; `uv run python -m scripts.test_db down` tears it down. That shell now has a throwaway `DATABASE_URL` exported, which takes priority over `.env` — `unset DATABASE_URL` (or use a fresh shell) before any deploy tooling; `scripts/deploy.py --sync-env` refuses outright rather than pushing a localhost database to the live service.
 
-844 deterministic tests, no real network calls — mocks GitHub's REST API (at
+856 deterministic tests, no real network calls — mocks GitHub's REST API (at
 the `requests` transport layer PyGithub uses), all LLM providers' SDK
 clients, and the webhook HTTP layer. CI (`.github/workflows/ci.yml`
 at the repo root, path-filtered to this directory) runs `ruff` + `pytest` on
 every push/PR touching this project.
 
-Run `pytest -m "not db and not xdist_meta"` to skip Postgres-touching tests and this suite's own slow xdist-scheduling meta-test for the fastest inner loop; CI still runs the full suite.
+Run `pytest -m "not db and not xdist_meta"` to skip Postgres-touching tests and this suite's own slow xdist-scheduling meta-test for the fastest inner loop; CI still runs the full suite. Tests run in parallel on a **fixed 4 workers** (`pyproject.toml`'s `addopts`), deliberately not `-n auto` — one worker per core is a net loss on a suite this size, since each pays a full app-import startup cost. Add `-n0` to disable parallelism for interactive debugging (`--pdb`, `-s`), which xdist workers cannot forward.
 
 ### Live verification scripts
 
