@@ -276,21 +276,40 @@ breakdown.
 
 ## 8. Results
 
-Measured after Tasks 1-4 landed, using the exact commands from section 6:
+Measured after Tasks 1-4 landed, using the commands from section 6, adapted
+where noted: section 6 says `-m "not db"` for the fast-iteration number, but
+the actual command run below is `-m "not db and not xdist_meta"` —
+`xdist_meta` is a new marker added by the `bec9b86` remediation, after
+section 6 was written, and excluding it from the fast-iteration subset for
+the same reason `db` is excluded (its one test spins up real xdist worker
+subprocesses and is slow, ~6.3s, though it touches no Postgres).
 
 - Full suite (`uv run pytest -q --durations=25`): **844 passed, 1 warning in
-  67.43s (0:01:07)** (baseline was ~54s serial). The slowest items are the two
-  new xdist-grouping regression tests (6.32s call, 4.93s setup — the second
-  being the one-time testcontainers boot inside the `db` group) followed by a
-  long tail of sub-1.1s items; see the durations output for the full top-25.
+  67.43s (0:01:07)** (baseline was ~54s serial). Wall time went *up* despite
+  parallelism — the dominant single cost is the new `xdist_meta` regression
+  test's real xdist-subprocess run (6.32s call), plus per-worker startup
+  overhead (`-n auto` spins up 24 workers) that a 67s run doesn't fully
+  amortize. Full-suite wall time was never this design's primary target,
+  though; see below for the fast-iteration number, which is. The slowest
+  items after that are the one-time testcontainers boot inside the `db`
+  group (4.93s setup) followed by a long tail of sub-1.1s items; see the
+  durations output for the full top-25.
 - Fast-iteration subset (`uv run pytest -q -m "not db and not xdist_meta"`):
   **608 passed in 47.07s**, confirmed stable on a second run (**608 passed in
   47.42s**) — no flakiness between the two runs.
 - Test counts (`--collect-only`): **844** total,
   **608** with `-m "not db and not xdist_meta"` (236 deselected) — the smaller
-  number confirms the marker selection actually filters something, and this
-  filtered-out 236 is this project's authoritative "how many tests actually
-  touch Postgres" count.
+  number confirms the marker selection actually filters something. That 236
+  is the union of both exclusion reasons, not purely a Postgres count:
+  `uv run pytest --collect-only -q -m db` collects **234** (this project's
+  authoritative "how many tests actually touch Postgres" count), and
+  `-m xdist_meta` collects **2** (`tests/test_xdist_group_ordering.py`'s two
+  real top-level tests, module-tagged via `pytestmark = pytest.mark.xdist_meta`
+  — the module's other `test_shared_*`/`test_plain_*` names are string
+  literals for a synthetic `pytester` sub-suite, not tests collected from
+  this file itself). The two marker sets are disjoint (`-m "db and
+  xdist_meta"` collects 0) and their union matches: `-m "db or xdist_meta"`
+  collects 236 = 234 + 2.
 - Zero-config path (Step 4): confirmed exactly one distinct
   testcontainers-managed Postgres container name over the whole run, on two
   independent runs (container names `interesting_goldstine` and
