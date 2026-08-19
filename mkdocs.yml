@@ -33,6 +33,11 @@ nav:
           - 6. Start a tunnel: setup/local/06-tunnel.md
           - 7. Register the webhook: setup/local/07-webhook.md
           - 8. Run the service: setup/local/08-run.md
+      - Hosted track:
+          - 5. Create the Supabase project: setup/hosted/05-supabase.md
+          - 6. Create the Render service: setup/hosted/06-render.md
+          - 7. Sync config and verify: setup/hosted/07-sync.md
+          - 8. Add the keep-warm pinger: setup/hosted/08-pinger.md
   - Reference:
       - Configuration: reference/config.md
       - Model pricing: reference/pricing.md

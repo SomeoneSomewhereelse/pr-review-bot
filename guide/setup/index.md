@@ -34,7 +34,8 @@ service runs:
   development and debugging. Continue to
   [local/05-postgres.md](local/05-postgres.md).
 - **Hosted** — deploy to Render with Supabase for the queue, for a durable,
-  always-on reviewer. Continue to `hosted/05-supabase.md`.
+  always-on reviewer. Continue to
+  [hosted/05-supabase.md](hosted/05-supabase.md).
 
 Both tracks share steps 1–4 above, so a wrong guess this early costs
 nothing — `scripts/doctor.py` re-detects which track you're on from your

@@ -132,3 +132,36 @@ def test_local_verify_page_uses_the_project_health_check():
     text = (_SETUP / "local" / "07-webhook.md").read_text(encoding="utf-8")
     assert "--health-only" in text
     assert "curl " not in text
+
+
+def test_hosted_track_pages_match_doctors_titles():
+    from scripts import doctor
+
+    pages = {5: "05-supabase.md", 6: "06-render.md", 7: "07-sync.md", 8: "08-pinger.md"}
+    for step in doctor.steps_for("hosted"):
+        if step.number < 5:
+            continue
+        text = (_SETUP / "hosted" / pages[step.number]).read_text(encoding="utf-8")
+        assert step.title in text
+
+
+def test_supabase_page_pins_the_session_pooler_port():
+    text = (_SETUP / "hosted" / "05-supabase.md").read_text(encoding="utf-8")
+    assert "5432" in text and "6543" in text, "both ports named, so the wrong one is unmistakable"
+
+
+def test_render_page_lists_exactly_the_four_boot_vars():
+    """spec section 4b: SETUP.md walked through nine; only four are needed to
+    boot, and deploy.py's own check already names which."""
+    from scripts import deploy
+
+    text = (_SETUP / "hosted" / "06-render.md").read_text(encoding="utf-8")
+    for name in deploy._BOOT_CREDENTIAL_NAMES:
+        assert name in text
+    assert "RENDER_API_KEY" in text, "must say it is NOT a service env var"
+
+
+def test_pinger_page_warns_about_the_exact_url():
+    text = (_SETUP / "hosted" / "08-pinger.md").read_text(encoding="utf-8")
+    assert "healthz" in text
+    assert "HEAD" in text, "UptimeRobot's free tier sends HEAD, not GET"
