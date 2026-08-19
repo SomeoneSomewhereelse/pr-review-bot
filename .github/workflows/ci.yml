@@ -63,6 +63,7 @@ jobs:
           git diff --cached --exit-code guide/reference/
 
   pages:
+    needs: [lint-and-test, docs]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
