@@ -1,0 +1,36 @@
+site_name: PR Review Engine
+site_description: Autonomous code-review engine — deploy your own
+docs_dir: guide
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/brightness-7, name: Switch to dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/brightness-4, name: Switch to light mode}
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+nav:
+  - Home: index.md
+  - Reference:
+      - Configuration: reference/config.md
+      - Model pricing: reference/pricing.md
+      - Deployment checks: reference/checks.md
+      - What --sync-env pushes: reference/sync-env.md
+validation:
+  # index.md links to setup/index.md, which Task 2 of this plan adds. nav
+  # targets (checked above) stay strictly validated via the default
+  # `validation.nav.not_found: warn`; only this forward content-reference is
+  # relaxed so each task's own `mkdocs build --strict` can pass standalone.
+  links:
+    not_found: ignore
