@@ -36,5 +36,18 @@ the active model has a priced entry in this project's pricing table — an
 unpriced model still runs and reviews normally, just without the `est.`
 fragment.
 
+`fixtures/bad_code/` plants three specific problems, so you can check that
+the review caught the right things rather than only that a comment appeared:
+
+| Planted issue | Where | Which specialist should catch it |
+| --- | --- | --- |
+| a hardcoded credential | a module-level API key constant | security |
+| an N+1 query | one HTTP call per account, inside the loop over accounts | performance |
+| a magic number | a bare threshold in the high-usage filter | code quality |
+
+A review that names all three is working as designed. One that names two is
+still a real review — the specialists are LLM calls, not a fixed rule set —
+but three is what the fixture is built to produce.
+
 That comment is the whole point of this project: a fresh PR from a fresh
 clone, reviewed automatically, no manual step in between.

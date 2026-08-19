@@ -5,9 +5,11 @@ fans out to three parallel LLM specialists — **Security**, **Performance**,
 **Code Quality** — each backed by a structured-output LLM call. Findings are
 merged into a single Markdown PR comment, edited in place on later pushes.
 
-**[Deploy your own →](guide/setup/index.md)** — the full setup guide, from a
-fresh clone to a first posted review comment, covering both a local run and
-a hosted Render + Supabase deployment.
+**[Deploy your own →](https://someonesomewhereelse.github.io/pr-review-bot/setup/)**
+— the full setup guide, from a fresh clone to a first posted review comment,
+covering both a local run and a hosted Render + Supabase deployment. The same
+pages live in [`guide/`](guide/setup/index.md) if you would rather read them
+in the repo.
 
 Full design: [`SPEC.md`](SPEC.md). Stack/conventions: [`CLAUDE.md`](CLAUDE.md).
 Cost model: [`cost.md`](cost.md). This project's actual live configuration

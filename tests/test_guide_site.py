@@ -267,13 +267,25 @@ def test_readme_no_longer_carries_the_operations_manual():
         assert moved not in text, f"{moved} moved to guide/operations/"
 
 
+# Hardcoded rather than derived from `git config remote.origin.url`, so the
+# assertion still means something in a checkout with no remote (a worktree, a
+# tarball, CI on a fork). A rename of the repo or its owner is expected to
+# fail this test -- that is the point: _GUIDE_URL is printed to operators, and
+# a stale host sends them to someone else's site or a 404.
+_EXPECTED_GUIDE_BASE = "https://someonesomewhereelse.github.io/pr-review-bot/"
+
+
 def test_deploy_points_at_a_guide_page_that_exists():
     """spec section 3d: the CLI prints this to a terminal user, so it must
-    resolve to a real page."""
+    resolve to a real page -- on the right host, under the right repo."""
     from scripts import deploy
 
-    assert deploy._GUIDE_URL.startswith("https://")
-    path = deploy._GUIDE_URL.rstrip("/").split("/pr-review-bot/", 1)[1]
+    assert deploy._GUIDE_URL.startswith(_EXPECTED_GUIDE_BASE), (
+        f"_GUIDE_URL must point at this repo's Pages site "
+        f"({_EXPECTED_GUIDE_BASE}), got {deploy._GUIDE_URL}"
+    )
+    path = deploy._GUIDE_URL[len(_EXPECTED_GUIDE_BASE) :].rstrip("/")
+    assert path, "_GUIDE_URL must name a page, not just the site root"
     assert (_ROOT / "guide" / f"{path}.md").is_file(), f"no guide page for {path}"
 
 
