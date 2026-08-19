@@ -165,3 +165,40 @@ def test_pinger_page_warns_about_the_exact_url():
     text = (_SETUP / "hosted" / "08-pinger.md").read_text(encoding="utf-8")
     assert "healthz" in text
     assert "HEAD" in text, "UptimeRobot's free tier sends HEAD, not GET"
+
+
+_OPS = _ROOT / "guide" / "operations"
+
+
+def test_operations_pages_link_generated_tables_instead_of_restating_them():
+    """A hand-copied check table is precisely the drift Stage 3a's generation
+    and CI job exist to make impossible."""
+    deploy_page = (_OPS / "deploy.md").read_text(encoding="utf-8")
+    assert "reference/checks" in deploy_page
+    assert "reference/sync-env" in deploy_page
+    assert "| Check | Verifies |" not in deploy_page, "do not restate the generated table"
+
+
+def test_deploy_page_documents_the_exit_codes():
+    text = (_OPS / "deploy.md").read_text(encoding="utf-8")
+    for code in ("exit 0", "exit 1", "exit 2"):
+        assert code in text
+
+
+def test_config_files_page_states_the_two_file_split():
+    text = (_OPS / "config-files.md").read_text(encoding="utf-8")
+    assert ".env.config" in text and ".env" in text
+    assert "OPERATIONAL_KEYS" in text
+
+
+def test_tuning_page_says_the_db_only_settings_need_no_redeploy():
+    text = (_OPS / "tuning.md").read_text(encoding="utf-8")
+    assert "--sync-config-db" in text
+    assert "runtime_config" in text
+
+
+def test_no_operations_page_mentions_the_removed_cost_cap():
+    """KEY_USAGE_COST_CAP_USD was removed in Stage 1; documenting it would
+    invite someone to set a variable nothing reads."""
+    for page in _OPS.glob("*.md"):
+        assert "KEY_USAGE_COST_CAP_USD" not in page.read_text(encoding="utf-8")

@@ -1,0 +1,99 @@
+# Deploying and verifying
+
+`scripts/deploy.py` is the one tool for both verifying and performing a
+deploy. It is a plain CLI — no editor, assistant, or Claude Code required —
+and it always runs from **your own machine**, never inside the Render
+container: `scripts/` is not copied into the Docker image, and
+`RENDER_EXTERNAL_URL` only exists inside Render's own container, which is
+why every invocation below passes `PUBLIC_BASE_URL` explicitly.
+
+## Three modes, mutually exclusive
+
+Passing more than one of these together is refused (`exit 2`) — they are
+separate modes, not composable.
+
+- **No flag** — run the full check suite and report. This is the default,
+  credential-light way to answer "is everything OK?"
+- **`--sync-env`** — push `.env.config` and the active provider's credential
+  to the Render service, trigger a redeploy, wait for it to settle, then run
+  the full check suite against the result. See
+  [What `--sync-env` pushes](../reference/sync-env.md) for the exact,
+  provider-derived push set — it is generated from the code, so it is linked
+  here rather than restated.
+- **`--sync-config-db`** — push only the cooldown and usage-cap settings
+  straight into the database, skipping the Render/redeploy machinery
+  entirely. Covered in full on [Tuning cooldowns and usage
+  caps](tuning.md).
+- **`--health-only`** — run only the `health` check: a narrower,
+  credential-free "is the service up?" with nothing else. Needs just
+  `PUBLIC_BASE_URL`/`RENDER_EXTERNAL_URL`.
+
+=== "bash"
+
+    ```bash
+    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --health-only
+    ```
+
+=== "PowerShell"
+
+    ```powershell
+    $env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
+    uv run python -m scripts.deploy --health-only
+    ```
+
+For a full deploy, swap `--health-only` for `--sync-env` (needs
+`RENDER_API_KEY` too):
+
+=== "bash"
+
+    ```bash
+    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
+    ```
+
+=== "PowerShell"
+
+    ```powershell
+    $env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
+    uv run python -m scripts.deploy --sync-env
+    ```
+
+Claude Code users can run `/deploy` instead, which wraps the same CLI.
+
+!!! note "Budget your time"
+    Before triggering anything, `--sync-env` waits for any deploy already in
+    progress to settle (it never stacks a second deploy on top of one still
+    building) — worst case that's up to 900s waiting for the in-flight one,
+    plus up to 900s for the one it triggers itself, so budget up to ~30
+    minutes in the rare worst case. A warm redeploy with nothing already in
+    flight has taken well under a minute in practice.
+
+## What gets checked
+
+The full check suite always runs every check and prints one line each, so a
+single run surfaces every problem rather than only the first. The check list,
+what each one verifies, and which ones are skipped without an operator-local
+key are generated from the check registry itself — see [Deployment
+checks](../reference/checks.md) rather than a copy here that could drift
+from it.
+
+Three operator-local keys unskip the optional checks, and none of them is
+ever set on the Render service itself: `RENDER_API_KEY`, `UPTIMEROBOT_API_KEY`,
+and `DATABASE_URL`. Which specific checks each one unlocks is documented on
+that same [reference page](../reference/checks.md#unskipping-the-optional-checks).
+
+## Exit codes
+
+| Exit | Meaning |
+| --- | --- |
+| exit 0 | every check that ran passed (a skipped check never fails the run) |
+| exit 1 | at least one check failed — read the report to see which |
+| exit 2 | the run never really started: two modes passed together, a public base URL is unset, `--sync-env` without `RENDER_API_KEY`, `--sync-config-db` without `DATABASE_URL`, or a sync refused before any request (an empty required value, an unsupported `LLM_PROVIDER`, a model with no pricing-table entry, an invalid cooldown, or an active DB override that would mask the push) |
+
+In short: exit 0 means trust the report as-is, exit 1 means read the report
+for what to fix, exit 2 means the run never really started.
+
+## Next
+
+- [Switching providers and API keys](overrides.md)
+- [Tuning cooldowns and usage caps](tuning.md)
+- [Deploying an image](image-deploys.md)
