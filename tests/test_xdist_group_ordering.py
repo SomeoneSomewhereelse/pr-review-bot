@@ -37,9 +37,12 @@ import pytest
 
 pytest_plugins = ["pytester"]
 
-# Slow (spins real xdist worker subprocesses) and touches no Postgres, so it
-# gets its own marker rather than reusing `db`.
-pytestmark = pytest.mark.xdist_meta
+# `xdist_meta` is applied per-test below, NOT module-wide: only the pytester
+# test is slow (it spins real xdist worker subprocesses, ~5s). A module-level
+# `pytestmark` also excluded `test_this_projects_conftest_hook_declares_
+# tryfirst` -- a sub-5ms assertion, and the only direct check on the real
+# conftest -- from the `-m "not db and not xdist_meta"` fast loop, for no
+# saving at all.
 
 _GROUP = "sharedgroup"
 
@@ -120,6 +123,9 @@ def _run_grouped_suite(pytester: pytest.Pytester) -> dict[str, str]:
     return ran
 
 
+# Slow (spins real xdist worker subprocesses) and touches no Postgres, so it
+# gets its own marker rather than reusing `db`.
+@pytest.mark.xdist_meta
 def test_hook_applied_xdist_group_reaches_the_loadgroup_scheduler(pytester):
     """A conftest hook that adds xdist_group must run before xdist's worker-side
     nodeid stamping, or --dist=loadgroup silently ignores the grouping."""
