@@ -1,217 +1,258 @@
-# Design — Test suite execution time: root causes and candidate fixes
+# Design — Test suite execution time: root causes and approved fixes
 
 **Date:** 2026-08-19
-**Status:** Draft — for brainstorming, not yet approved for planning
+**Status:** Approved for planning
 **Relates to:** `tests/conftest.py` (`db_url`, `db` fixtures), `tests/test_github_app.py`
 (`_throwaway_app_credentials`), `pyproject.toml` (`[tool.pytest.ini_options]`,
-dev dependency group), the subagent-driven-development execution pattern used
-for this project's staged plans (many separate `uv run pytest` process
-invocations per plan, one per dispatched subagent).
+dev dependency group), `README.md`'s Testing section, a new `scripts/test_db.py`.
 
 ## 1. Problem
 
 The full suite (821 tests as of this writing) takes **~54 seconds** per
 `uv run pytest -q` invocation, run serially, on a 24-core machine with
-`pytest-xdist` not installed. That is not slow in isolation — but this
-project's own development pattern (subagent-driven-development: one fresh
-implementer + one fresh reviewer subagent per plan task, each independently
-running `ruff check` + a full `pytest` pass + `mkdocs build --strict` before
-reporting) means the full suite gets re-run **many times per plan**, each in
-its own OS process, with no state shared between runs.
+`pytest-xdist` not installed. This project's subagent-driven-development
+pattern re-runs the full suite many times per plan (one fresh implementer +
+one fresh reviewer subagent per task, each running `ruff` + full `pytest` +
+`mkdocs build --strict` before reporting), so structurally-avoidable
+per-invocation fixed costs get paid over and over. From Stage 3b's own
+execution log (`tmp.md`, gitignored, not committed — 29 subagent dispatches
+across 10 tasks): ~144 minutes of cumulative subagent wall-clock time for
+that stage alone.
 
-Concretely, from Stage 3b's own execution log (`tmp.md`, this session,
-29 subagent dispatches across 10 tasks + review/fix rounds): the sum of
-subagent-reported wall-clock time was **~8.6M ms (≈144 minutes)** across the
-stage. A meaningful and fully avoidable fraction of that is redundant,
-per-process fixed costs that have nothing to do with the actual work being
-verified — found by directly profiling this session's own test runs, not
-estimated:
+Five root causes, all measured directly this session (see section 8):
 
 1. **No persistent test Postgres.** `tests/conftest.py:27`'s `db_url`
-   fixture is `scope="session"`, but "session" means *per pytest process*.
-   `DATABASE_URL` is unset in this environment and no Postgres container is
-   left running between invocations, so **every separate `pytest`
-   invocation pays testcontainers' ~3.85s container-boot cost from cold**
-   (measured directly this session — see the `setup` phase duration on
-   whichever test happens to first request the `db` fixture). Across
-   ~20-30 separate subagent-run `pytest` invocations in a single stage, that
-   is **roughly 1.5-2 minutes of pure, structurally-avoidable container-boot
-   overhead** — the same fixed cost paid over and over for no reason, since
-   nothing about the container's state needs to differ between invocations.
-
-2. **No `pytest-xdist` despite 24 idle CPU cores.** The suite runs fully
-   serial. The large majority of the 821 tests are independent, mocked-
-   boundary unit tests (per this project's own stated testing philosophy —
-   see `CLAUDE.md`'s "LLM API testing hygiene" section and the general
-   mock-the-SDK-boundary pattern used throughout `tests/`), which should
-   parallelize cleanly. The one real hazard: ~13 test files touch the `db`
-   fixture (`tests/conftest.py:58`), which does `store.close_pool()` /
-   `store.init_pool()` and a `TRUNCATE tickets, runtime_config, reviews` per
-   test against **one shared Postgres instance** — running those across
-   multiple `xdist` workers concurrently would race (one worker's `TRUNCATE`
-   wiping another's fixture setup mid-test).
-
-3. **A confirmed, isolated, zero-ambiguity inefficiency**:
-   `tests/test_github_app.py:51`'s `_throwaway_app_credentials` fixture is
-   `@pytest.fixture(autouse=True)` at **function scope**, and generates a
-   fresh 2048-bit RSA key (`rsa.generate_private_key(...)`, directly
-   measured at ~45ms on this machine) for **every one of that file's 33
-   tests**, even though nothing about test correctness depends on the key's
-   specific value — it is a throwaway signing key used only for local JWT
-   round-trips, per the fixture's own docstring ("every HTTP call is mocked
-   below, so nothing is ever sent anywhere with it"). Regenerating it 33
-   times instead of once costs ~1.4s for zero benefit.
-
-4. **No test markers separating "fast/unit" from "needs Postgres."**
-   There is currently no way to run "everything except the DB-touching
-   tests" without hand-picking files by name. This matters specifically for
-   the subagent-driven-development iteration loop: a task that never touches
-   `app/queue/store.py`-adjacent code still has no cheap way to skip the
-   DB-fixture-touching subset during its own inner edit-test-edit loop, and
-   ends up paying the DB-container-boot-plus-DB-test cost even when
-   iterating on something unrelated (e.g. a pure documentation task, which
-   is most of what this project's `guide/` stages actually do).
-
-5. **Process-level, not a test-suite defect per se, but compounds all of the
-   above**: task dispatch briefs in this project's SDD executions
-   consistently ask each implementer/reviewer to run the full suite **twice**
-   — once to "confirm baseline" at the start of a task, once as the final
-   pre-commit check — even for narrow, single-file tasks where the
-   immediately-prior task's own close-out had *just* confirmed a green
-   baseline seconds earlier. This is not wrong (a defensive habit), but on a
-   24-second-vs-2-minute test suite the calculus for "is re-confirming worth
-   it" changes: right now it's cheap insurance; if the fixes below succeed
-   in cutting single-run time to a few seconds, this doubling becomes
-   genuinely free and not worth engineering around; if they don't, it stays
-   worth revisiting.
+   fixture is `scope="session"`, but "session" means *per pytest process*
+   (and, after this design lands, per xdist *worker* process — see section
+   3c). With `DATABASE_URL` unset, every separate `pytest` invocation pays
+   testcontainers' ~3.85s container-boot cost from cold. Across ~20-30
+   separate subagent-run invocations in a stage, that's roughly 1.5-2
+   minutes of pure, avoidable overhead.
+2. **No `pytest-xdist` despite 24 idle CPU cores.** The large majority of
+   the 821 tests are independent, mocked-boundary unit tests that
+   parallelize cleanly. The hazard: tests that touch Postgres via the `db`
+   fixture (`tests/conftest.py:58`) run `TRUNCATE tickets, runtime_config,
+   reviews` against **one shared instance** — concurrent xdist workers would
+   race.
+3. **Confirmed, isolated inefficiency:** `tests/test_github_app.py:51`'s
+   `_throwaway_app_credentials` fixture is `autouse=True` at function scope,
+   generating a fresh 2048-bit RSA key (~45ms, measured) for every one of
+   that file's 33 tests, though nothing depends on the key's value
+   differing between tests (its own docstring: every HTTP call is mocked,
+   nothing is ever sent with it). Costs ~1.4s for zero benefit.
+4. **No test markers separating "fast/unit" from "needs Postgres."** No way
+   to run "everything except DB-touching tests" without hand-picking files.
+5. **Process habit, not a test-suite defect:** SDD dispatch briefs
+   consistently run the full suite twice per task (baseline + pre-commit
+   check) even when the immediately-prior task just confirmed green seconds
+   earlier. Deliberately out of scope for this design — see section 6.
 
 ### Not investigated further (flagged, not root-caused)
 
-`tests/test_github_app.py`'s slowest individual tests (several around
-0.78s-1.03s in the `call` phase specifically, i.e. not fixture setup) were
-profiled far enough to rule out the RSA-keygen fixture as the primary cause
-(setup phase for these tests measured only 0.03-0.07s) and to rule out a
-real network stall (the file monkeypatches
-`requests.adapters.HTTPAdapter.send` globally via its `fake_transport`
-fixture, so no unmocked call can reach the network). The remaining
-hypothesis — PyGithub's `Github(auth=Auth.AppAuth(...))` client being
-reconstructed fresh per top-level call within `app/github_app.py`
-(`_app_jwt_client()`, `get_installation_client()`), each doing its own
-JWT-encode/PEM-parse — was not confirmed with a clean profile (a `cProfile`
-run was dominated by cold-import/collection overhead specific to running one
-test file in isolation, which is not representative of its cost inside a
-warm full-suite run). Worth a proper `py-spy`/`pytest --durations` pass
-scoped correctly if `test_github_app.py` specifically becomes a target.
+`tests/test_github_app.py`'s slowest individual tests (0.78-1.03s in the
+`call` phase, not fixture setup) were profiled enough to rule out RSA-keygen
+and a real network stall as causes, but not enough to confirm the remaining
+hypothesis (PyGithub client reconstruction per call in `app/github_app.py`).
+**Out of scope** until someone profiles it correctly with `py-spy` or a
+properly-scoped `--durations` pass outside single-file isolation.
 
-## 2. Candidate fixes
+## 2. Scope and build order
 
-Ranked by confidence and effort, not necessarily the order to build them —
-that's for the planning session.
+In scope, in this order:
 
-### 2a. Persistent local test Postgres (highest confidence, lowest effort)
+1. **Fix RSA fixture scope** (section 3a) — isolated, zero-risk, do first.
+2. **`scripts/test_db.py`** (section 3b) — no test-code changes, no
+   dependency on anything else landing first.
+3. **Unified `db` marker + xdist grouping** (section 3c) — the two require
+   each other (the marker is what makes the grouping safe), so they land as
+   one change.
 
-Document (and/or script) starting one long-lived Postgres container once —
-`docker run -d --name pr-review-test-pg -p 5432:5432 -e POSTGRES_PASSWORD=x postgres:16-alpine`
-— and exporting `DATABASE_URL` to point at it for the duration of a
-development/SDD session. `tests/conftest.py:29`'s existing `if env_url:`
-branch already handles this path (with its existing
-`_looks_like_local_test_db` safety guard, unchanged) — **no test code
-changes needed**, only a documented/scripted operator step. Every
-subsequent `pytest` invocation in that shell skips testcontainers' cold
-boot entirely.
+**Out of scope:** the SDD double-run habit (was "2e" in the draft) — not a
+test-suite change, and revisiting it only makes sense once the above are
+measured and the per-invocation cost has actually dropped. Not tracked as a
+follow-up item; if it's still worth revisiting later, that's a fresh,
+separate conversation informed by the after-numbers this design produces.
+The unconfirmed `test_github_app.py` per-call cost (above) stays out for the
+same "don't guess at an unconfirmed cause" reason.
 
-Open question for the planning session: where does this belong —
-`guide/setup/01-prerequisites.md` (operator-facing, since it's not just an
-SDD-session optimization but a general "fast local iteration" tip), a
-`scripts/` helper that starts/verifies the container idempotently, or both?
+## 3. The fixes
 
-### 2b. `pytest-xdist` with DB tests grouped to one worker
-
-Add `pytest-xdist` to `pyproject.toml`'s dev dependency group. Mark every
-test that (transitively) requests the `db` fixture with
-`@pytest.mark.xdist_group(name="db")` so `xdist` schedules all of them onto
-the same worker (avoiding cross-worker `TRUNCATE` races against the one
-shared Postgres) while every other test fans out freely across the
-remaining workers. Run with `-n auto` (or a fixed count — 24 logical cores
-may not all be usable/desirable; the planning session should pick a
-sensible default, e.g. `-n 8`).
-
-Open questions: does `xdist_group` need to be applied per-test or can it be
-applied at the module level for the ~13 affected files in one line each
-(likely the latter, via `pytestmark`)? Does CI's own `services: postgres`
-container (referenced in `tests/conftest.py`'s module docstring) tolerate
-concurrent connections from a single `xdist`-grouped worker the same way
-local testcontainers does — should be yes since it's the same fixture path,
-but worth confirming against the CI job definition
-(`.github/workflows/ci.yml`'s `lint-and-test` job) rather than assuming.
-
-### 2c. Fix `test_github_app.py`'s per-test RSA keygen
+### 3a. Fix `test_github_app.py`'s per-test RSA keygen
 
 Change `_throwaway_app_credentials` (`tests/test_github_app.py:51`) from
-its current implicit function scope to `scope="module"`. Confirmed safe:
-the fixture's own docstring already states the key's only purpose is local
-JWT-signing round-trips with every HTTP call mocked — no test depends on
-the key's value differing from another test's. Saves ~1.4s in this file
-alone; worth a repo-wide grep for the same
-`autouse` + function-scope + expensive-crypto-or-IO-setup pattern in case
-it recurs elsewhere (not confirmed to recur — this was the only instance
-found this session, but the grep wasn't exhaustive across every test file).
+implicit function scope to `scope="module"`. Confirmed safe: the fixture's
+own docstring already states the key's only purpose is local JWT-signing
+round-trips with every HTTP call mocked — no test depends on the key's value
+differing from another test's. Saves ~1.4s in this file.
 
-### 2d. Test markers for fast iteration
+Also do a repo-wide grep for the same `autouse` + implicit-function-scope +
+expensive-setup pattern (crypto keygen, anything else non-trivial), in case
+it recurs elsewhere. Not confirmed to recur — this was the only instance
+found so far, and the grep wasn't exhaustive — but cheap to check while
+already in this area.
 
-Introduce a `db` marker (or similar name — bikeshed in planning) applied to
-every test that requests the `db` fixture (possibly the same marker used
-for 2b's `xdist_group`, or a separate one if the two need to vary
-independently). Document `pytest -m "not db"` as the fast-iteration command
-in whatever this project's equivalent of a "how to run tests" doc is
-(currently `README.md`'s trimmed Testing section, post-Stage-3b — see
-`docs/superpowers/plans/2026-08-18-setup-experience-stage-3b-guide-site.md`'s
-outcome). This is the most direct answer to "invoke the full suite only
-when required": reserve the full run (ideally the now-parallelized, 2b
-version) for pre-commit/final-review gates, and let iteration loops run a
-markedly faster subset.
+### 3b. `scripts/test_db.py` — persistent local test Postgres
 
-### 2e. SDD process guidance (not a test-suite change)
+A new script, not a guide change (existing local-track docs at
+`guide/setup/local/05-postgres.md` cover the *app's* runtime Postgres for
+the local-hosting track; this is a separate, test-iteration-only concern
+that a hosted-track contributor — app running on Render+Supabase, no local
+Postgres otherwise — would not get from that page).
 
-If 2a-2d land and meaningfully shrink single-run time, revisit whether
-per-task implementer/reviewer dispatch briefs still need to instruct a
-"confirm baseline, then confirm again at the end" double full-suite run for
-narrow single-file tasks, versus trusting the SDD ledger's last-recorded
-green state and running the full suite only once, at the end. Deliberately
-sequenced last: this only becomes worth engineering around once the
-underlying run is fast enough that a habit built around a slow suite stops
-making sense on its own.
+- `uv run python -m scripts.test_db` (default `up` behavior): idempotent —
+  checks for a running, healthy container named `pr-review-test-pg`; starts
+  one via `docker run` if absent or unhealthy. Uses **port 5433**, not 5432,
+  specifically so it never collides with the local track's `pr-review-pg`
+  container (which uses 5432) if a contributor has both running. Prints
+  `export DATABASE_URL=postgresql://postgres:x@localhost:5433/postgres` to
+  stdout and nothing else, for `eval "$(uv run python -m scripts.test_db)"`.
+- `uv run python -m scripts.test_db down`: stops and removes the container.
+- The printed connection string's password is a fixed, throwaway,
+  script-generated local value that authenticates nothing real — this is
+  not the kind of secret CLAUDE.md's "Secret handling" section is about
+  (that section concerns credentials that authenticate against real
+  infrastructure: Supabase, Render, GitHub, GCP). Printing it to stdout for
+  the `eval` pattern is not a violation of that section. The script must
+  still never accept, read, or echo a **real** `DATABASE_URL` — it only ever
+  constructs its own throwaway local one.
+- Reuses `scripts/_prereqs.py::_looks_like_local_test_db` (already
+  documented there as mirroring `tests/conftest.py`) as a sanity check that
+  the URL it's about to print is in fact local before printing it — belt
+  and suspenders, since the URL is script-constructed and inherently local
+  already.
+- `tests/conftest.py:29`'s existing `if env_url:` branch (and its
+  `_looks_like_local_test_db` guard, unchanged) already handles consuming
+  this exported `DATABASE_URL` — **no test code changes needed** for this
+  part.
+- README's existing Testing section (`README.md:78-96`, within its 180-line
+  budget and required-headings list, verified by
+  `test_readme_is_a_landing_page_not_a_manual`) gets one line pointing to
+  the script as the fast-iteration path; the zero-config testcontainers
+  path stays documented as the default for a fresh clone.
 
-## 3. Non-goals (proposed — confirm in planning)
+### 3c. Unified `db` marker + xdist grouping
 
-- No change to the mocked-SDK-boundary testing philosophy itself
-  (`CLAUDE.md`'s "LLM API testing hygiene" section) — this is about
-  execution speed of the existing test architecture, not what gets tested
-  or how.
+Add `pytest-xdist` to `pyproject.toml`'s dev dependency group. Add
+`addopts = "-n auto --dist=loadgroup"` to `[tool.pytest.ini_options]` —
+applies to every invocation, local and CI, with nothing to remember. `-n
+auto` detects CPU count fresh per invocation (cheap syscall); no caching
+mechanism or CLAUDE.md rule is needed, and none is added.
+
+A `pytest_collection_modifyitems` hook in `tests/conftest.py` auto-applies
+both `pytest.mark.db` and `pytest.mark.xdist_group(name="db")` to any
+collected test item where **`"db_url" in item.fixturenames`**. This is
+deliberately checked against `db_url` — the root fixture — rather than
+against `db`/`db_exec`/`db_query` individually: `fixturenames` is pytest's
+fully-resolved transitive closure, so any test using `db`, `db_exec`, or
+`db_query` (all three depend on `db_url`) is already covered by this one
+check, as is a test that requests `db_url` directly (several do — e.g.
+`tests/test_override_helpers.py`, `tests/test_set_override_script.py`).
+Checking the three derived names instead of the root would have missed the
+direct-`db_url` tests, leaving them free to land on a different xdist
+worker than the grouped ones — which would both double-pay the
+testcontainers boot cost (session-scoped `db_url` re-triggering on a second
+worker) and reopen exactly the cross-worker race the grouping exists to
+prevent. One marker registered in `pyproject.toml`'s pytest config drives
+both `-m "not db"` (fast-iteration selection) and the `xdist_group` (safe
+parallelization) — nothing to hand-annotate per file, and a newly added
+DB-touching test is covered automatically because it's detected by fixture
+usage, not by a maintained list.
+
+**Zero-config fresh-clone path is unaffected by any of this.** With no
+`DATABASE_URL` set, exactly one xdist worker ends up owning the entire `db`
+group (by construction — the hook guarantees every `db_url`-touching test
+lands in that one group), so exactly one worker ever requests the
+session-scoped `db_url` fixture and testcontainers boots exactly once for
+the whole run — the same cost paid today, not multiplied by worker count.
+The DB-touching subset does not itself parallelize (it's serialized onto
+one worker by design, to protect the one shared Postgres instance,
+regardless of whether that instance is testcontainers-managed or a real
+`DATABASE_URL`) — the win is that the non-DB majority of the suite fans out
+across the remaining workers *concurrently* with that one worker's DB work,
+instead of paying both costs serially back to back.
+
+**CI:** `.github/workflows/ci.yml`'s `lint-and-test` job already sets
+`DATABASE_URL` via its `services: postgres` container before running `uv
+run pytest -v` — same fixture code path as local, so the same one-worker
+grouping guarantee applies there too. Confirm this behaves as expected
+against the actual job definition as a plan verification task (run CI on
+the branch and check for `TRUNCATE`-related failures or connection errors)
+rather than assuming it from code-reading alone.
+
+## 4. Safety net: guard test coverage
+
+There is currently no test exercising
+`tests/conftest.py::_looks_like_local_test_db` or the `db_url` fixture's
+`AssertionError`-raising refusal path at all — the guard that stands between
+an accidentally-exported production `DATABASE_URL` and a `TRUNCATE` is
+itself untested. This design does not change that guard's logic, but it
+does make setting `DATABASE_URL` locally more common (that's 3b's whole
+point), which raises the cost of the guard silently regressing. Add a test
+proving a production-shaped URL (e.g. a Supabase pooler hostname) still
+raises `AssertionError` and is not bypassed absent `ALLOW_REMOTE_TEST_DB`.
+This is new test coverage for existing, unchanged behavior — not a change to
+the guard itself.
+
+## 5. Non-goals
+
+- No change to the mocked-SDK-boundary testing philosophy (`CLAUDE.md`'s
+  "LLM API testing hygiene" section) — this is about execution speed of the
+  existing test architecture, not what gets tested or how.
 - No migration away from `testcontainers` as the zero-config default path
-  for a fresh clone with no `DATABASE_URL` set — 2a adds a faster **opt-in**
-  path for active development/SDD sessions, it doesn't remove the
-  zero-config fallback a first-time contributor relies on (this directly
-  serves Stage 3b's own goal of a stranger going from `git clone` to a
-  first review with no extra setup).
+  for a fresh clone with no `DATABASE_URL` set. Section 3b adds a faster
+  **opt-in** path; it does not remove or alter the zero-config fallback
+  Stage 3b's guide promises a first-time contributor.
 - No attempt to eliminate the RSA-keygen or JWT-signing cost from
-  `app/github_app.py`'s actual runtime behavior — 2c only touches how often
-  the *test* fixture regenerates a throwaway key, not how the app itself
-  authenticates.
-- The unconfirmed `test_github_app.py` per-call overhead (see "Not
-  investigated further" above) is explicitly out of this spec's scope until
-  someone actually profiles it correctly — don't guess at a fix for a cause
-  that wasn't confirmed.
+  `app/github_app.py`'s actual runtime behavior — section 3a only touches
+  how often the *test* fixture regenerates a throwaway key.
+- The unconfirmed `test_github_app.py` per-call overhead stays out of scope
+  until someone profiles it correctly (see section 1).
+- The SDD double-run process habit is out of scope entirely (see section 2)
+  — not tracked as a follow-up in this document.
+- No change to `_looks_like_local_test_db`'s logic or the
+  `ALLOW_REMOTE_TEST_DB` escape hatch — section 4 adds test coverage for the
+  existing behavior, not a behavior change.
 
-## 4. Evidence trail
+## 6. Verification plan (for the implementation plan to execute)
 
-All numbers above were measured directly in this session, not estimated:
-`uv run pytest -q --durations=25` for the full-suite breakdown;
-`uv run pytest tests/test_github_app.py -q --durations=0` for the isolated
-file; a 20-iteration microbenchmark of `rsa.generate_private_key` for the
-keygen cost; `nproc` and `python -c "import xdist"` (`ModuleNotFoundError`)
-for the parallelization headroom; `docker ps` and `echo $DATABASE_URL` for
-confirming no persistent Postgres was in use. This spec's session also
-produced `tmp.md` (gitignored, not committed) with the full per-subagent
-timing log this problem statement's stage-level numbers are drawn from, if
-whoever picks this up wants the raw per-dispatch breakdown.
+Record a before number, an after number, and the exact command for each, per
+this project's "measure, don't assert" convention:
+
+- Before: `uv run pytest -q --durations=25` (current: ~54s serial, no
+  xdist) — already captured in section 1, re-confirm at plan-execution time
+  in case drift occurred.
+- After 3a alone: same command, expect ~1.4s improvement.
+- After 3c lands: same command (now parallel by default via `addopts`);
+  also run `uv run pytest -q -m "not db"` and record its time separately as
+  the fast-iteration number.
+- Confirm the zero-config path explicitly: run the full suite with
+  `DATABASE_URL` unset and Docker available, confirm exactly one
+  testcontainers container is created (not one per worker) — e.g. via
+  `docker ps` during the run, or a log line — and the suite still passes.
+- Confirm 3b's script: `up` twice in a row is a no-op the second time
+  (idempotency), `down` actually removes the container, and the printed
+  `DATABASE_URL` is structurally valid (never assert on the value itself,
+  per CLAUDE.md's secret-handling conventions, even though this one isn't a
+  real secret — match the existing convention anyway for consistency).
+- Confirm CI: push the branch, confirm `lint-and-test` still passes with no
+  `TRUNCATE`/connection-related failures.
+- If README's "821 deterministic tests" count changes (section 4 adds at
+  least one test), update `README.md:92` to match — `pytest --collect-only
+  -q | tail -1` gives the authoritative count.
+- If any candidate lands and the before/after numbers don't move, say so in
+  the plan's closing report and consider reverting rather than keeping a
+  change that only added configuration surface.
+
+## 7. Evidence trail
+
+All numbers in section 1 were measured directly in the session that
+produced the original draft of this document, not estimated: `uv run
+pytest -q --durations=25` for the full-suite breakdown; `uv run pytest
+tests/test_github_app.py -q --durations=0` for the isolated file; a
+20-iteration microbenchmark of `rsa.generate_private_key` for the keygen
+cost; `nproc` and `python -c "import xdist"` (`ModuleNotFoundError`) for the
+parallelization headroom; `docker ps` and `echo $DATABASE_URL` for
+confirming no persistent Postgres was in use. `tmp.md` (gitignored, not
+committed) holds the full per-subagent timing log the stage-level numbers
+in section 1 are drawn from, for anyone who wants the raw per-dispatch
+breakdown.
