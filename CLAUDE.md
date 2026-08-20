@@ -261,3 +261,23 @@ generalize from):
   there, not just on the branch being merged in) — a conflicting local edit
   or untracked file on the target can fail the merge in a way that's
   confusing to debug from the merge failure alone.
+- **Don't ask an implementer subagent to reconfirm a full-suite baseline at
+  the start of every task.** Trust the SDD ledger's last-recorded green
+  state from the prior task's own final run instead. The shared
+  `subagent-driven-development` skill's implementer template already asks
+  for exactly one full-suite run, right before committing — a controller
+  adding its own extra "first, confirm baseline" instruction on top of that
+  is a habit this project fell into in earlier stages, not something the
+  template requires. For a plan's first task, the worktree-setup step that
+  precedes dispatch is normally what already confirms things are green, so
+  there's usually no real gap to fill even there. Reason: measured directly
+  during the 2026-08-19/20 test-suite-performance work — the doubling was
+  never principled, and the case for it is weaker still now that the suite
+  itself is faster (full suite 57s serial → 35s at `-n 4`; the `-m "not db"`
+  fast-iteration subset 31s → 20s — see
+  `docs/superpowers/specs/2026-08-19-test-suite-performance-design.md`
+  section 8). Only add an explicit baseline-reconfirm instruction when
+  there's a concrete reason to distrust the ledger for *this* task
+  specifically — manual edits since the last confirmed-green run, a resumed
+  session after a long gap, or a worktree/branch switch — not as a default
+  precaution on every task.
