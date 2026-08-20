@@ -40,6 +40,9 @@ budget about 30 minutes for a first working review.
   gap: 0.75em;
 }
 .flow-diagram .fd-branches {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  justify-items: center;
   gap: 1em;
 }
 .flow-diagram .fd-node {
@@ -50,19 +53,11 @@ budget about 30 minutes for a first working review.
   background: var(--fd-stage-bg);
   color: var(--fd-stage-fg);
   padding: 0.9em 1.1em;
-  cursor: default;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  outline: none;
 }
 .flow-diagram .fd-node.fd-specialist {
   border-color: var(--fd-specialist-border);
   background: var(--fd-specialist-bg);
   color: var(--fd-specialist-fg);
-}
-.flow-diagram .fd-node:hover,
-.flow-diagram .fd-node:focus-visible {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
 }
 .flow-diagram .fd-title {
   font-weight: 600;
@@ -72,15 +67,6 @@ budget about 30 minutes for a first working review.
   color: var(--fd-detail-fg);
   font-size: 0.85em;
   line-height: 1.35;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-height 0.2s ease, opacity 0.2s ease, margin-top 0.2s ease;
-}
-.flow-diagram .fd-node:hover .fd-detail,
-.flow-diagram .fd-node:focus-visible .fd-detail {
-  max-height: 6em;
-  opacity: 1;
   margin-top: 0.5em;
 }
 .flow-diagram .fd-arrow {
@@ -95,71 +81,116 @@ budget about 30 minutes for a first working review.
   width: 100%;
   padding: 0.1em 0;
 }
-.flow-diagram .fd-split-label {
-  text-align: center;
-  font-size: 0.85em;
-  color: var(--fd-detail-fg);
-  margin-bottom: 0.6em;
+.flow-diagram .fd-junction {
+  display: flex;
+  justify-content: center;
+}
+.flow-diagram .fd-junction .fd-arrow-down {
+  display: none;
+}
+.flow-diagram .fd-connector {
+  display: block;
+  width: 100%;
+  height: 56px;
+}
+.flow-diagram .fd-connector path {
+  fill: none;
+  stroke: var(--fd-arrow);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.flow-diagram .fd-connector marker path {
+  fill: var(--fd-arrow);
+  stroke: none;
 }
 @media (max-width: 600px) {
   .flow-diagram .fd-row { flex-direction: column; align-items: stretch; }
   .flow-diagram .fd-arrow:not(.fd-arrow-down) { transform: rotate(90deg); }
   .flow-diagram .fd-node { max-width: none; }
+  .flow-diagram .fd-branches { grid-template-columns: 1fr; }
+  .flow-diagram .fd-connector { display: none; }
+  .flow-diagram .fd-junction .fd-arrow-down { display: flex; }
 }
 </style>
 
 <div class="flow-diagram">
   <div class="fd-row">
-    <div class="fd-node" tabindex="0">
+    <div class="fd-node">
       <div class="fd-title">Pull request opened or updated</div>
       <div class="fd-detail">You push code or open a PR — that's the only step you take.</div>
     </div>
     <div class="fd-arrow">&rarr;</div>
-    <div class="fd-node" tabindex="0">
+    <div class="fd-node">
       <div class="fd-title">Webhook received</div>
       <div class="fd-detail">GitHub calls the bot automatically the moment your PR changes.</div>
-    </div>
-    <div class="fd-arrow">&rarr;</div>
-    <div class="fd-node" tabindex="0">
-      <div class="fd-title">Queued for review</div>
-      <div class="fd-detail">The request is saved in line so nothing gets missed, even under heavy traffic.</div>
-    </div>
-  </div>
-
-  <div class="fd-arrow fd-arrow-down">&darr;</div>
-
-  <div class="fd-split-label">Three specialists check the code at once</div>
-  <div class="fd-row fd-branches">
-    <div class="fd-node fd-specialist" tabindex="0">
-      <div class="fd-title">Security</div>
-      <div class="fd-detail">Looks for risky code, like exposed secrets or unsafe input handling.</div>
-    </div>
-    <div class="fd-node fd-specialist" tabindex="0">
-      <div class="fd-title">Performance</div>
-      <div class="fd-detail">Flags code that could run slowly or waste resources.</div>
-    </div>
-    <div class="fd-node fd-specialist" tabindex="0">
-      <div class="fd-title">Code Quality</div>
-      <div class="fd-detail">Suggests cleaner, easier-to-maintain code.</div>
     </div>
   </div>
 
   <div class="fd-arrow fd-arrow-down">&darr;</div>
 
   <div class="fd-row">
-    <div class="fd-node" tabindex="0">
+    <div class="fd-node">
+      <div class="fd-title">Queued for review</div>
+      <div class="fd-detail">The request is saved in line so nothing gets missed, even under heavy traffic.</div>
+    </div>
+  </div>
+
+  <div class="fd-junction">
+    <svg class="fd-connector" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <marker id="fd-arrowhead" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" />
+        </marker>
+      </defs>
+      <path d="M150,0 L150,24" />
+      <path d="M150,24 C150,40 50,40 50,68" marker-end="url(#fd-arrowhead)" />
+      <path d="M150,24 L150,68" marker-end="url(#fd-arrowhead)" />
+      <path d="M150,24 C150,40 250,40 250,68" marker-end="url(#fd-arrowhead)" />
+    </svg>
+    <div class="fd-arrow fd-arrow-down">&darr;</div>
+  </div>
+
+  <div class="fd-row fd-branches">
+    <div class="fd-node fd-specialist">
+      <div class="fd-title">Security</div>
+      <div class="fd-detail">Looks for risky code, like exposed secrets or unsafe input handling.</div>
+    </div>
+    <div class="fd-node fd-specialist">
+      <div class="fd-title">Performance</div>
+      <div class="fd-detail">Flags code that could run slowly or waste resources.</div>
+    </div>
+    <div class="fd-node fd-specialist">
+      <div class="fd-title">Code Quality</div>
+      <div class="fd-detail">Suggests cleaner, easier-to-maintain code.</div>
+    </div>
+  </div>
+
+  <div class="fd-junction">
+    <svg class="fd-connector" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M50,2 C50,30 150,30 150,46" />
+      <path d="M150,2 L150,46" />
+      <path d="M250,2 C250,30 150,30 150,46" />
+      <path d="M150,46 L150,70" marker-end="url(#fd-arrowhead)" />
+    </svg>
+    <div class="fd-arrow fd-arrow-down">&darr;</div>
+  </div>
+
+  <div class="fd-row">
+    <div class="fd-node">
       <div class="fd-title">Findings combined</div>
       <div class="fd-detail">All three reports are merged into one clear summary.</div>
     </div>
-    <div class="fd-arrow">&rarr;</div>
-    <div class="fd-node" tabindex="0">
+  </div>
+
+  <div class="fd-arrow fd-arrow-down">&darr;</div>
+
+  <div class="fd-row">
+    <div class="fd-node">
       <div class="fd-title">Posted as a PR comment</div>
       <div class="fd-detail">The summary appears directly on your pull request — no dashboard required.</div>
     </div>
   </div>
 </div>
-
-*(Hover or tab to a step for a plain-language explanation.)*
 
 ## What a review looks like
 
