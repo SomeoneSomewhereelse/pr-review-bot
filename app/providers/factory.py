@@ -25,8 +25,6 @@ from app.providers import credentials, key_index, registry, vertex_credentials
 from app.providers.active import active_provider
 from app.providers.active_model import active_model
 from app.providers.base import LLMProvider
-from app.providers.google_genai import GeminiProvider, VertexProvider
-from app.providers.groq import GroqProvider
 
 _instances: dict[tuple[str, int, str], LLMProvider] = {}
 
@@ -59,6 +57,13 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
                 "no credential configured for provider='vertex': GCP_PROJECT not set "
                 "and no service-account key found to derive it from"
             )
+        # Deferred: google.genai is a large SDK (~4.2s import cost, measured
+        # via -X importtime) that every test/request path through
+        # app/specialists/base.py's factory import used to pay eagerly, even
+        # when never touching Gemini/Vertex. Only import it once a vertex
+        # provider is actually being constructed.
+        from app.providers.google_genai import VertexProvider
+
         return VertexProvider(
             project=project,
             location=settings.gcp_location,
@@ -79,8 +84,16 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
             f"({env_name} not set)"
         )
     if provider == "gemini":
+        # Deferred for the same reason as VertexProvider above -- gemini and
+        # vertex share google_genai.py, so this import is usually already
+        # cached by the time either branch runs, but each stays independently
+        # correct if that ever changes.
+        from app.providers.google_genai import GeminiProvider
+
         return GeminiProvider(api_key=api_key, model=model)
     if provider == "groq":
+        from app.providers.groq import GroqProvider
+
         return GroqProvider(api_key=api_key, model=model)
     raise ValueError(f"registry lists {provider!r} but _build cannot construct it")
 

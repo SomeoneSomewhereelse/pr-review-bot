@@ -8,6 +8,9 @@ real Gemini API happens separately in scripts/manual_verify_step4.py.
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,6 +22,8 @@ from app.providers import pricing
 from app.providers.factory import get_provider
 from app.providers.google_genai import GeminiProvider, VertexProvider
 from app.providers.validate import validate_and_repair
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +52,42 @@ def _reset_active_overrides():
     active.reset_override_cache()
     active_model.reset_override_cache()
     factory.reset_provider_cache()
+
+
+def test_importing_the_factory_alone_does_not_pull_in_provider_sdks():
+    """app/providers/factory.py used to import GeminiProvider/VertexProvider
+    and GroqProvider unconditionally at module level, so every test or
+    request path that transitively imports the factory (app/specialists/base.py
+    is the sole importer) paid the full google.genai SDK import cost --
+    measured via `-X importtime` at 4.2s across 323 modules, the single
+    largest import in a full collection pass, bigger than pytest itself --
+    even when it never touches Gemini/Vertex/Groq. _build() already branches
+    on `provider` before constructing, so the fix moves both imports inside
+    the branch that actually needs them.
+
+    Checked in a fresh subprocess: this test process has already imported
+    both SDKs via other test files (e.g. this file's own module-level
+    `from app.providers.google_genai import ...` above), so sys.modules
+    here would give a false pass.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "import app.providers.factory\n"
+            "print('google.genai' in sys.modules)\n"
+            "print('groq' in sys.modules)\n",
+        ],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    genai_imported, groq_imported = result.stdout.strip().splitlines()
+    assert genai_imported == "False", "importing factory alone must not import google.genai"
+    assert groq_imported == "False", "importing factory alone must not import groq"
 
 
 class Greeting(BaseModel):
