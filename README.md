@@ -22,12 +22,12 @@ Cost model: [`cost.md`](cost.md).
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TD
     PR(["Pull request opened<br/>or updated"]) --> Hook(["Webhook received<br/>&amp; verified"])
     Hook --> Queue(["Queued for review"])
-    Queue --> Sec(["Security Review"])
-    Queue --> Perf(["Performance Review"])
-    Queue --> Qual(["Code Quality Review"])
+    Queue --> Sec(["Security"])
+    Queue --> Perf(["Performance"])
+    Queue --> Qual(["Code Quality"])
     Sec --> Merge(["Findings combined"])
     Perf --> Merge
     Qual --> Merge

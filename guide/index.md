@@ -131,15 +131,15 @@ budget about 30 minutes for a first working review.
   <div class="fd-split-label">Three specialists check the code at once</div>
   <div class="fd-row fd-branches">
     <div class="fd-node fd-specialist" tabindex="0">
-      <div class="fd-title">Security Review</div>
+      <div class="fd-title">Security</div>
       <div class="fd-detail">Looks for risky code, like exposed secrets or unsafe input handling.</div>
     </div>
     <div class="fd-node fd-specialist" tabindex="0">
-      <div class="fd-title">Performance Review</div>
+      <div class="fd-title">Performance</div>
       <div class="fd-detail">Flags code that could run slowly or waste resources.</div>
     </div>
     <div class="fd-node fd-specialist" tabindex="0">
-      <div class="fd-title">Code Quality Review</div>
+      <div class="fd-title">Code Quality</div>
       <div class="fd-detail">Suggests cleaner, easier-to-maintain code.</div>
     </div>
   </div>
