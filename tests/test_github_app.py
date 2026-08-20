@@ -10,6 +10,7 @@ tiny in-memory router keyed on method + URL substring.
 
 import base64
 import json
+import time
 
 import pytest
 import requests
@@ -83,6 +84,22 @@ def _throwaway_app_credentials(_app_credentials_key_material, monkeypatch):
     monkeypatch.setattr(settings, "github_app_private_key", _app_credentials_key_material)
 
 
+@pytest.fixture(autouse=True)
+def _no_pygithub_rate_limit_sleep(monkeypatch):
+    """PyGithub's Requester.__deferRequest() calls a real time.sleep() to
+    keep requests at least Consts.DEFAULT_SECONDS_BETWEEN_REQUESTS (0.25s)
+    apart, and writes at least ...WRITES (1.0s) apart -- a real safety
+    throttle against GitHub's secondary rate limits in production. Every
+    call in this file goes through the fully-mocked fake_transport, so the
+    throttle protects nothing here and only wastes wall-clock: profiled at
+    46 real time.sleep calls totaling 11.5s across this file's 33 tests.
+    Patching stdlib time.sleep (not app/github_app.py, which this leaves
+    untouched) is the narrowest fix -- PyGithub's own pacing math still
+    runs, it just no longer blocks.
+    """
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+
 @pytest.mark.xdist_group(name="github_app_key_material")
 def test_key_material_fixture_produces_a_value(_app_credentials_key_material):
     _seen_key_material.append(_app_credentials_key_material)
@@ -140,6 +157,35 @@ def fake_transport(monkeypatch):
     )
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", transport.send)
     return transport
+
+
+def test_upsert_comment_does_not_pay_pygithubs_real_rate_limit_sleep(fake_transport):
+    """PyGithub's Requester enforces real time.sleep() calls between requests
+    (Consts.DEFAULT_SECONDS_BETWEEN_REQUESTS=0.25s) and before writes
+    (...WRITES=1.0s) to avoid tripping GitHub's real secondary rate limits.
+    That pacing is pointless against this file's fully-mocked transport --
+    profiled via cProfile at 46 real time.sleep calls totaling 11.5s across
+    this file's 33 tests. upsert_comment makes 4 calls on one client
+    (token exchange, GET repo, GET pull, GET comments, POST comment) --
+    enough to trigger multiple real waits if left unpatched."""
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments", [])
+    fake_transport.route(
+        "POST",
+        f"/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments",
+        {"id": 1, "body": "x", "user": {"login": "bot"}},
+        201,
+    )
+
+    start = time.monotonic()
+    github_app.upsert_comment(REPO_FULL_NAME, PR_NUMBER, "hello")
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 0.3, (
+        f"took {elapsed:.2f}s -- PyGithub's real inter-request rate-limit sleep "
+        "is not being neutralized in this test file"
+    )
 
 
 def test_fetch_pr_diff_concatenates_file_patches(fake_transport):
