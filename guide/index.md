@@ -6,6 +6,10 @@ the results as a single comment on the PR itself. Three specialists run in
 parallel, and later pushes edit that same comment in place rather than
 piling up new ones.
 
+**Needs:** Python 3.12, [uv](https://docs.astral.sh/uv/), and a Postgres you
+can reach (local or a free [Supabase](https://supabase.com) project) —
+budget about 30 minutes for a first working review.
+
 <style>
 .flow-diagram {
   --fd-stage-bg: #e8eefc;
