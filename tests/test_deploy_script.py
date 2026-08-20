@@ -9,6 +9,7 @@ tests/test_github_app.py for why respx cannot see PyGithub traffic.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -125,6 +126,34 @@ def test_a_warn_row_does_not_count_as_a_failure():
     ])
     assert "1 warning" in report
     assert "failed" not in report
+
+
+def test_report_as_json_carries_every_check_and_a_summary():
+    results = [
+        deploy.CheckResult("config", "PASS", ""),
+        deploy.CheckResult("health", "FAIL", "HEAD /healthz -> 405 (GET ok)"),
+        deploy.CheckResult("database", "SKIPPED", "set DATABASE_URL"),
+    ]
+    payload = deploy.report_as_json(results)
+    assert payload["checks"] == [
+        {"name": "config", "status": "PASS", "detail": ""},
+        {"name": "health", "status": "FAIL", "detail": "HEAD /healthz -> 405 (GET ok)"},
+        {"name": "database", "status": "SKIPPED", "detail": "set DATABASE_URL"},
+    ]
+    assert payload["summary"] == {"passed": 1, "warned": 0, "failed": 1, "skipped": 1}
+    assert payload["guide_url"] == deploy._GUIDE_URL
+
+
+def test_report_as_json_table_matches_render_report():
+    results = [deploy.CheckResult("config", "PASS", "")]
+    assert deploy.report_as_json(results)["table"] == deploy.render_report(results)
+
+
+def test_report_as_json_is_actually_json_serializable():
+    results = [deploy.CheckResult("uptime-pinger", "FAIL", "no monitor matches\nfound: none")]
+    # round-trips without raising, and continuation lines survive as one string
+    parsed = json.loads(json.dumps(deploy.report_as_json(results)))
+    assert parsed["checks"][0]["detail"] == "no monitor matches\nfound: none"
 
 
 @pytest.fixture
@@ -1136,6 +1165,28 @@ def test_main_health_only_fails_when_unhealthy(monkeypatch, capsys):
         respx.head(HEALTH).mock(return_value=httpx.Response(500))
         assert deploy.main(["--health-only"]) == 1
     assert "1 failed" in capsys.readouterr().out
+
+
+def test_main_health_only_json_emits_a_parseable_check(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "public_base_url", BASE)
+    with respx.mock:
+        respx.get(HEALTH).mock(return_value=httpx.Response(500))
+        respx.head(HEALTH).mock(return_value=httpx.Response(500))
+        assert deploy.main(["--health-only", "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["checks"] == [
+        {"name": "health", "status": "FAIL", "detail": "GET -> 500, HEAD -> 500"}
+    ]
+    assert payload["summary"]["failed"] == 1
+
+
+def test_main_json_emits_the_full_checklist_as_one_object(runnable, monkeypatch, capsys):
+    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
+    assert deploy.main(["--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [c["name"] for c in payload["checks"]] == [spec.name for spec in deploy.CHECKS]
+    assert payload["summary"] == {"passed": 7, "warned": 0, "failed": 0, "skipped": 4}
+    assert "all checks passed" in payload["table"]
 
 
 def test_main_health_only_works_without_a_target_repo(monkeypatch):

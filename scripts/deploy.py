@@ -17,6 +17,7 @@ explanations live in the published guide (see _GUIDE_URL below).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -816,6 +817,32 @@ def render_report(results: list[CheckResult]) -> str:
     return "\n".join(lines)
 
 
+def report_as_json(results: list[CheckResult]) -> dict:
+    """The same content as render_report(), structured for a machine reader
+    instead of an aligned-columns table -- built for --json, so a caller
+    (e.g. Claude driving a guided deployment) can branch on an individual
+    check's status/detail without re-parsing indentation-based continuation
+    lines. `table` carries the exact render_report() text, so a caller that
+    also owes a human the verbatim table (see .claude/commands/deploy.md)
+    never has to re-run the checklist -- and its live checks (Render/GitHub/DB
+    calls, one of which writes a webhook) -- a second time just to get both
+    forms.
+    """
+    return {
+        "checks": [
+            {"name": r.name, "status": r.status, "detail": r.detail} for r in results
+        ],
+        "summary": {
+            "passed": sum(1 for r in results if r.status == "PASS"),
+            "warned": sum(1 for r in results if r.status == "WARN"),
+            "failed": sum(1 for r in results if r.status == "FAIL"),
+            "skipped": sum(1 for r in results if r.status == "SKIPPED"),
+        },
+        "guide_url": _GUIDE_URL,
+        "table": render_report(results),
+    }
+
+
 def _wanted_env() -> dict[str, str]:
     """Local values for every var --sync-env will push.
 
@@ -1406,6 +1433,19 @@ def build_parser() -> argparse.ArgumentParser:
             "effect on the next claimed ticket. Needs only DATABASE_URL"
         ),
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "emit the checklist (from a plain run or --health-only) as one JSON "
+            "object -- {checks: [{name, status, detail}], summary, guide_url, "
+            "table} -- instead of the plain-text table; `table` carries the same "
+            "text the non-JSON mode prints, for a caller that owes a human the "
+            "verbatim table too. Has no effect on --sync-config-db's output, and "
+            "not on --sync-env's own progress lines -- only on the checklist a "
+            "plain run (with or without --sync-env first) or --health-only prints"
+        ),
+    )
     return parser
 
 
@@ -1428,7 +1468,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         result = check_health_endpoint(base)
-        print(render_report([result]))
+        print(json.dumps(report_as_json([result])) if args.json else render_report([result]))
         return 1 if result.status == "FAIL" else 0
     if not base:
         print(
@@ -1441,7 +1481,7 @@ def main(argv: list[str] | None = None) -> int:
         if exit_code != 0:
             return exit_code
     results = run_checks(settings.target_repos(), base)
-    print(render_report(results))
+    print(json.dumps(report_as_json(results)) if args.json else render_report(results))
     return 1 if any(r.status == "FAIL" for r in results) else 0
 
 
