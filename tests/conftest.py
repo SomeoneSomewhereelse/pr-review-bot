@@ -40,6 +40,10 @@ def db_url() -> str:
                 "hostname, set ALLOW_REMOTE_TEST_DB=1 to bypass."
             )
         yield env_url
+        # Matches the testcontainers branch below: whichever pool the `db`
+        # fixture built against this session's db_url gets closed exactly
+        # once, here, rather than per-test -- see `db`'s docstring.
+        store.close_pool()
         return
     from testcontainers.postgres import PostgresContainer
 
@@ -53,19 +57,37 @@ def db_url() -> str:
         # Docker/WSL integration was enabled failed earlier on
         # docker.errors.DockerException, before this code path ever ran.
         yield pg.get_connection_url(driver=None)
+        store.close_pool()
 
 
 @pytest.fixture
 def db(db_url, monkeypatch):
-    """Point the store at the test Postgres, ensure schema, and truncate between
-    tests. Opt-in (DB-touching test modules request it via an autouse wrapper)."""
+    """Point the store at the test Postgres, ensure schema, and truncate
+    between tests. Opt-in (DB-touching test modules request it via an
+    autouse wrapper).
+
+    The pool itself is deliberately NOT closed/reopened per test -- only
+    initialized once per worker process and reused across every test that
+    requests this fixture. store.init_pool() is already idempotent (it only
+    builds a fresh ConnectionPool when none exists; otherwise it just
+    re-verifies the schema, cheap), so there is never a correctness reason
+    to force a rebuild between tests -- db_url never changes within a
+    session/worker. Measured via cProfile: the previous close-then-reopen
+    cost ~17s cumulative (mostly psycopg_pool's worker-thread shutdown wait)
+    across this suite's 234 db-marked tests, over half that group's serial
+    runtime, for zero benefit. db_url's fixture (above) closes the pool
+    exactly once, at session/worker end.
+
+    Safe even if something else closes the pool mid-session (e.g.
+    tests/test_main_lifespan.py's unreachable-Postgres test calls
+    store.close_pool() itself, deliberately): init_pool() recreates it on
+    the next call regardless of who closed it or why.
+    """
     monkeypatch.setattr(settings, "database_url", db_url)
-    store.close_pool()
     store.init_pool()
     with store._require_pool().connection() as conn:
         conn.execute("TRUNCATE tickets, runtime_config, reviews RESTART IDENTITY")
     yield
-    store.close_pool()
 
 
 @pytest.fixture

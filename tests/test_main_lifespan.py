@@ -180,7 +180,7 @@ async def test_lifespan_fails_loudly_when_webhook_secret_is_empty(monkeypatch):
             pass
 
 
-async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch):
+async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch, db_url):
     """Design spec section 11: "If Postgres is unreachable at boot, startup fails
     loudly (correct)". Guards that init_pool()'s diagnostic rewrite did not soften
     that into a warning, and that no dispatcher task is left running."""
@@ -210,3 +210,19 @@ async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch):
 
     # init_pool() raised before create_task was reached: no leaked dispatcher.
     assert created_tasks == []
+
+    # This test deliberately leaves store._pool pointed at a dead host --
+    # now that the db fixture reuses one pool per worker instead of closing
+    # it every test, that leftover pool would otherwise poison every
+    # db-marked test that runs afterward in this worker (each blocking for
+    # the real 30s _POOL_TIMEOUT_SECONDS -- still 1 here, since this test's
+    # own monkeypatch hasn't been torn down yet -- before erroring). First
+    # found by running the full `-m db` suite: 87 tests passed, then a
+    # cascade of errors starting with the very next one.
+    store.close_pool()
+    monkeypatch.setattr(settings, "database_url", db_url)
+    store.init_pool()
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=999, head_sha="sha-recovery-check",
+        provider="groq", now="2026-01-01T12:00:00+00:00",
+    )
