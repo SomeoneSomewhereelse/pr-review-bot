@@ -332,6 +332,55 @@ async def test_attempt_review_survives_migrate_repo_rename_raising(monkeypatch):
     assert outcome.review.pr_number == 1
 
 
+async def test_attempt_review_skips_entirely_on_an_empty_diff(monkeypatch):
+    """An empty diff (e.g. an empty merge commit) must short-circuit before
+    any specialist call, comment post, or dashboard record -- ISSUES.md's
+    'Empty diffs still fan out all 3 specialists' gap."""
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="", repo_full_name=repo),
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("must not be called for an empty diff")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", boom)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", boom)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", boom)
+    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", boom)
+    monkeypatch.setattr(orchestrator.store, "record_review", boom)
+
+    outcome = await orchestrator.attempt_review("owner/repo", 1)
+
+    assert isinstance(outcome, orchestrator.ReviewSkipped)
+
+
+async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypatch):
+    """The rename check is cheap and orthogonal to diff content -- it must
+    still run even when the diff itself turns out to be empty."""
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="", repo_full_name="owner/renamed"),
+    )
+
+    migrated = {}
+
+    def fake_migrate(old, new, now):
+        migrated["old"] = old
+        migrated["new"] = new
+
+    monkeypatch.setattr(orchestrator.store, "migrate_repo_rename", fake_migrate)
+
+    outcome = await orchestrator.attempt_review("owner/old-name", 1)
+
+    assert isinstance(outcome, orchestrator.ReviewSkipped)
+    assert migrated == {"old": "owner/old-name", "new": "owner/renamed"}
+
+
 def test_active_model_resolves_per_provider_through_the_registry(monkeypatch):
     from app import orchestrator
     from app.config import settings

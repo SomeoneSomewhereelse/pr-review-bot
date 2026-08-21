@@ -158,6 +158,31 @@ def test_push_to_cancelled_ticket_respects_cooldown_when_previously_reviewed(mon
     assert store.get_ticket(tid).status == "deferred"        # still cooling down
 
 
+def test_discard_empty_diff_ticket_deletes_a_clean_ticket():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)          # -> running
+    store.discard_empty_diff_ticket(tid, now=T1)
+    assert store.get_ticket(tid) is None
+
+
+def test_discard_empty_diff_ticket_rearms_pending_when_a_push_landed_mid_flight():
+    tid = _enqueue(sha="sha1")
+    store.claim_next_due(now=T0)          # -> running
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )  # sets rereview_requested=1 without touching status
+    store.discard_empty_diff_ticket(tid, now=T1)
+    t = store.get_ticket(tid)
+    assert t is not None
+    assert t.status == "pending"
+    assert t.rereview_requested == 0
+    assert t.head_sha == "sha2"           # the newer push's sha is preserved
+
+
+def test_discard_empty_diff_ticket_is_a_noop_when_no_ticket_exists():
+    store.discard_empty_diff_ticket(999999, now=T1)  # must not raise
+
+
 def test_migrate_repo_rename_moves_a_ticket_to_the_new_name():
     tid = _enqueue(repo="owner/old-name", pr=1)
     store.migrate_repo_rename("owner/old-name", "owner/new-name", now=T1)

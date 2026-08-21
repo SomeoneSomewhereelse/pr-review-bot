@@ -60,9 +60,19 @@ class ReviewRateLimited:
     retry_after: float
 
 
+@dataclass
+class ReviewSkipped:
+    """Nothing to review: the diff has no substantive content (e.g. an empty
+    merge commit) -- no specialist ran, no comment was posted, no dashboard
+    row was recorded. Deliberately narrower than the oversized/binary-diff
+    handling already in diff_utils.py/github_app.py, which produce real
+    content worth a specialist's opinion; this is only the "there is
+    genuinely nothing here" case."""
+
+
 async def attempt_review(
     repo_full_name: str, pr_number: int, comment_id: int | None = None
-) -> ReviewCompleted | ReviewRateLimited:
+) -> ReviewCompleted | ReviewRateLimited | ReviewSkipped:
     """Run the full review pipeline once for one PR.
 
     On completion, posts the Markdown comment via ``github_app.upsert_comment``
@@ -92,6 +102,9 @@ async def attempt_review(
                 "failed to migrate renamed repo %s -> %s", repo_full_name, diff.repo_full_name
             )
     annotated = annotate_and_cap(diff.text)
+
+    if not annotated.text.strip():
+        return ReviewSkipped()
 
     # Referencing these as bare module-level names (not a precomputed tuple
     # of function objects) means they resolve at call time, so tests can
@@ -165,4 +178,6 @@ async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
     outcome = await attempt_review(repo_full_name, pr_number)
     if isinstance(outcome, ReviewRateLimited):
         raise RateLimited(outcome.retry_after)
+    if isinstance(outcome, ReviewSkipped):
+        raise RuntimeError("review skipped: PR diff has no substantive content")
     return outcome.review

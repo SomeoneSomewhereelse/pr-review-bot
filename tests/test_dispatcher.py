@@ -127,6 +127,48 @@ async def test_completed_ticket_runs_and_marks_done(monkeypatch):
     assert store.get_ticket(tid).status == "done"
 
 
+async def test_skipped_ticket_is_discarded_on_an_empty_diff(monkeypatch):
+    """ReviewSkipped (an empty diff) must leave no comment and no ticket
+    trace behind -- ISSUES.md's 'Empty diffs still fan out all 3
+    specialists' gap."""
+    posted = _stub_comments(monkeypatch)
+    tid = _enqueue(pr=1)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewSkipped()
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "skipped"
+    assert store.get_ticket(tid) is None
+    assert posted == []
+
+
+async def test_skipped_ticket_rearms_pending_when_a_push_landed_mid_flight(monkeypatch):
+    """A push that arrives while an empty-diff ticket is still being
+    processed might carry real content -- it must not be lost when the
+    ticket is discarded."""
+    _stub_comments(monkeypatch)
+    tid = _enqueue(pr=1)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        store.enqueue_or_update(
+            repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq",
+            now=NOW.isoformat(),
+        )
+        return orchestrator.ReviewSkipped()
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "skipped"
+    t = store.get_ticket(tid)
+    assert t is not None
+    assert t.status == "pending"
+    assert t.head_sha == "sha2"
+
+
 async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     tid = _enqueue(pr=2)

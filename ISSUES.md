@@ -620,9 +620,34 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
 - **Why it matters:** wasted LLM spend, no correctness break. Not
   event-related — a content-level check, independent of which webhook
   action triggered it.
-- **Status:** open.
+- **Status:** closed (2026-08-21).
 - **Follow-up:** short-circuit review when the annotated diff has no
   substantive content.
+- **Resolution:** `attempt_review` (`app/orchestrator.py`) now checks
+  `annotated.text.strip()` immediately after `annotate_and_cap` and returns
+  a new `ReviewSkipped` outcome when it's empty — before any specialist
+  call, comment post, or `record_review`, so an empty diff costs nothing and
+  leaves no dashboard row. Deliberately scoped to true emptiness only
+  (e.g. a zero-file merge commit); oversized/binary diffs still carry real
+  content and are unaffected.
+
+  Per a follow-up ask ("no bot comment / ticket at all"), the fix goes one
+  step further than posting a "nothing to review" comment: it leaves no
+  trace at all. The ticket row can't be skipped at webhook-enqueue time
+  (diff content is only known at dispatch time, and fetching it
+  synchronously in the webhook handler would break the fast-ack contract —
+  verify HMAC → 202 immediately → review in the background), so instead the
+  dispatcher discards it after the fact. `queue/dispatcher.py`'s
+  `process_next_due` handles `ReviewSkipped` via a new
+  `store.discard_empty_diff_ticket(ticket_id, now)`, which deletes the
+  ticket row outright — unless a push landed on the same PR while this
+  ticket was being processed (`rereview_requested`, set by a concurrent
+  `enqueue_or_update`), in which case that (possibly non-empty) push must
+  not be lost, so the ticket is reset to `'pending'` instead of deleted.
+  Deliberately doesn't reuse `finalize_review`: that always stamps
+  `last_reviewed_at`/`comment_id`, which would falsely mark a nonexistent
+  review as "visible" to later footnote/preservation logic. A new
+  `StepResult.action == "skipped"` makes the outcome observable in tests.
 
 ### Fork PRs and force-pushes — unverified
 

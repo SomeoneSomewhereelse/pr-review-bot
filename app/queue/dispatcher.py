@@ -34,7 +34,7 @@ from app.formatting import (
     format_placeholder,
     format_schedule_notice,
 )
-from app.orchestrator import ReviewRateLimited, attempt_review
+from app.orchestrator import ReviewRateLimited, ReviewSkipped, attempt_review
 from app.providers import active, active_model, key_index
 from app.providers.active import active_provider
 from app.queue import cooldown_config, store, usage_cap_config
@@ -231,7 +231,9 @@ async def process_next_due(now: datetime) -> StepResult:
     """Claim and process one due ticket. Returns what happened.
 
     action semantics: "deferred" = RateLimited OR a retryable hard failure;
-    "failed" = terminal hard-stop; "ran" = completed; "idle" = nothing due.
+    "failed" = terminal hard-stop; "ran" = completed; "skipped" = an empty
+    diff with nothing to review (ticket discarded, no comment posted);
+    "idle" = nothing due.
     """
     ticket = await asyncio.to_thread(store.claim_next_due, now.isoformat())
     if ticket is None:
@@ -448,6 +450,10 @@ async def process_next_due(now: datetime) -> StepResult:
             now=now.isoformat(),
         )
         return StepResult(action="deferred", ticket_id=ticket.id)
+
+    if isinstance(outcome, ReviewSkipped):
+        await asyncio.to_thread(store.discard_empty_diff_ticket, ticket.id, now.isoformat())
+        return StepResult(action="skipped", ticket_id=ticket.id)
 
     if isinstance(outcome, ReviewRateLimited):
         wait = max(outcome.retry_after, settings.dispatcher_min_retry_after_seconds)

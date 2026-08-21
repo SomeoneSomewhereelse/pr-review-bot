@@ -453,6 +453,33 @@ def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> None:
         )
 
 
+def discard_empty_diff_ticket(ticket_id: int, now: str) -> None:
+    """Roll back a ticket claimed for a review that turned out to have an
+    empty diff (orchestrator.ReviewSkipped): no comment was ever posted and
+    nothing was reviewed, so the ticket must leave no trace of this run --
+    unlike a normal completion, calling finalize_review here would wrongly
+    stamp last_reviewed_at/comment_id and make a nonexistent review look
+    "visible" to later preservation logic (dispatcher's _has_visible_review).
+
+    Deletes the row outright, UNLESS a push landed on the same PR while this
+    ticket was being processed (rereview_requested, set by a concurrent
+    enqueue_or_update) -- that push may carry real content, so it must not
+    be lost: the ticket is reset to 'pending' (immediately due) instead of
+    deleted. No-op if the ticket no longer exists."""
+    with _require_pool().connection() as conn:
+        cur = conn.execute(
+            "DELETE FROM tickets WHERE id = %s AND rereview_requested = 0",
+            (ticket_id,),
+        )
+        if cur.rowcount == 0:
+            conn.execute(
+                "UPDATE tickets SET status = 'pending', not_before = NULL, attempts = 0, "
+                "rereview_requested = 0, defer_reason = NULL, updated_at = %s "
+                "WHERE id = %s AND rereview_requested = 1",
+                (now, ticket_id),
+            )
+
+
 def migrate_repo_rename(old_full_name: str, new_full_name: str, now: str) -> None:
     """Rewrite every tickets/reviews row's repo_full_name from old to new.
 
