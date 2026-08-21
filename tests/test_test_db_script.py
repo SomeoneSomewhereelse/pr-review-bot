@@ -10,15 +10,22 @@ from scripts import test_db
 
 def _fake_run(responses):
     """responses: dict mapping a keyword to look for in the command list to
-    (returncode, stdout). First matching keyword wins. Raises if a command
-    doesn't match anything, so an unexpected call fails loudly."""
+    (returncode, stdout) or (returncode, stdout, stderr). First matching
+    keyword wins. Raises if a command doesn't match anything, so an
+    unexpected call fails loudly."""
     calls = []
 
     def _run(cmd, **kwargs):
         calls.append(cmd)
-        for keyword, (returncode, stdout) in responses.items():
+        for keyword, response in responses.items():
             if keyword in cmd:
-                return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+                returncode, stdout, *rest = response
+                stderr = rest[0] if rest else ""
+                if kwargs.get("check") and returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        returncode, cmd, output=stdout, stderr=stderr
+                    )
+                return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
         raise AssertionError(f"unexpected command: {cmd}")
 
     _run.calls = calls
@@ -71,6 +78,74 @@ def test_up_fails_when_the_container_never_becomes_ready(monkeypatch, capsys):
     assert test_db.up() == 1
     out, err = capsys.readouterr()
     assert "did not become ready" in err
+    assert "export DATABASE_URL" not in out
+
+
+def test_container_status_returns_daemon_unreachable_when_docker_daemon_is_down(monkeypatch):
+    fake_run = _fake_run(
+        {
+            "inspect": (
+                1, "",
+                "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. "
+                "Is the docker daemon running?",
+            ),
+        }
+    )
+    monkeypatch.setattr(test_db.subprocess, "run", fake_run)
+
+    assert test_db._container_status() == "daemon_unreachable"
+
+
+def test_up_reports_a_clear_error_when_the_docker_daemon_is_unreachable(monkeypatch, capsys):
+    fake_run = _fake_run(
+        {
+            "inspect": (
+                1, "",
+                "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. "
+                "Is the docker daemon running?",
+            ),
+        }
+    )
+    monkeypatch.setattr(test_db.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(test_db.subprocess, "run", fake_run)
+
+    assert test_db.up() == 1
+    out, err = capsys.readouterr()
+    assert "daemon" in err.lower()
+    assert "export DATABASE_URL" not in out
+    assert not any("run" in cmd for cmd in fake_run.calls)  # never attempted to start one
+
+
+def test_up_reports_a_clear_error_when_docker_run_fails(monkeypatch, capsys):
+    """e.g. the target port is already bound by something else."""
+    fake_run = _fake_run(
+        {
+            "inspect": (1, "", "Error: No such object: pr-review-test-pg"),
+            "run": (1, "", "Bind for 0.0.0.0:5433 failed: port is already allocated"),
+        }
+    )
+    monkeypatch.setattr(test_db.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(test_db.subprocess, "run", fake_run)
+
+    assert test_db.up() == 1
+    out, err = capsys.readouterr()
+    assert "already allocated" in err
+    assert "export DATABASE_URL" not in out
+
+
+def test_up_reports_a_clear_error_when_docker_start_fails(monkeypatch, capsys):
+    fake_run = _fake_run(
+        {
+            "inspect": (0, "false", ""),
+            "start": (1, "", "Error response from daemon: some failure"),
+        }
+    )
+    monkeypatch.setattr(test_db.shutil, "which", lambda name: "/usr/bin/docker")
+    monkeypatch.setattr(test_db.subprocess, "run", fake_run)
+
+    assert test_db.up() == 1
+    out, err = capsys.readouterr()
+    assert "some failure" in err
     assert "export DATABASE_URL" not in out
 
 

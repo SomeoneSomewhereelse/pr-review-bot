@@ -45,7 +45,7 @@ def db_url() -> str:
         # once, here, rather than per-test -- see `db`'s docstring.
         store.close_pool()
         return
-    from testcontainers.postgres import PostgresContainer
+    from testcontainers.community.postgres import PostgresContainer
 
     with PostgresContainer("postgres:16-alpine") as pg:
         # driver=None gives a bare "postgresql://" scheme for raw psycopg3.

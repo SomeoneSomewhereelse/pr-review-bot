@@ -41,15 +41,34 @@ _DOCKER_MISSING_MESSAGE = (
     "this script entirely."
 )
 
+_DOCKER_DAEMON_UNREACHABLE_MESSAGE = (
+    "error: Docker is installed but its daemon is not reachable -- start Docker "
+    "Desktop (or the docker service) and try again."
+)
+
+# The exact wording `docker inspect` prints varies by version, but every
+# variant names the daemon connection itself as the problem -- distinct from
+# "No such object"/"No such container", which is what a merely-absent
+# container's `docker inspect` failure looks like.
+_DAEMON_UNREACHABLE_MARKER = "Cannot connect to the Docker daemon"
+
 
 def _container_status() -> str:
-    """Returns 'running', 'stopped', or 'absent'."""
+    """Returns 'running', 'stopped', 'absent', or 'daemon_unreachable'.
+
+    Both failure statuses come from the SAME nonzero `docker inspect` exit --
+    without checking stderr, an unreachable daemon looked identical to a
+    merely-absent container, so `up()` would try (and fail) to `docker run`
+    against a daemon that was never there to begin with.
+    """
     result = subprocess.run(
         ["docker", "inspect", "-f", "{{.State.Running}}", _CONTAINER_NAME],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
+        if _DAEMON_UNREACHABLE_MARKER in result.stderr:
+            return "daemon_unreachable"
         return "absent"
     return "running" if result.stdout.strip() == "true" else "stopped"
 
@@ -74,19 +93,42 @@ def up() -> int:
         return 1
 
     status = _container_status()
+    if status == "daemon_unreachable":
+        print(_DOCKER_DAEMON_UNREACHABLE_MESSAGE, file=sys.stderr)
+        return 1
     if status == "absent":
-        subprocess.run(
-            [
-                "docker", "run", "-d", "--name", _CONTAINER_NAME,
-                "-p", f"{_PORT}:5432",
-                "-e", f"POSTGRES_PASSWORD={_PASSWORD}",
-                "postgres:16-alpine",
-            ],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            subprocess.run(
+                [
+                    "docker", "run", "-d", "--name", _CONTAINER_NAME,
+                    "-p", f"{_PORT}:5432",
+                    "-e", f"POSTGRES_PASSWORD={_PASSWORD}",
+                    "postgres:16-alpine",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"error: failed to start {_CONTAINER_NAME}: {exc.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return 1
     elif status == "stopped":
-        subprocess.run(["docker", "start", _CONTAINER_NAME], check=True, capture_output=True)
+        try:
+            subprocess.run(
+                ["docker", "start", _CONTAINER_NAME],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"error: failed to start {_CONTAINER_NAME}: {exc.stderr.strip()}",
+                file=sys.stderr,
+            )
+            return 1
     # status == "running": idempotent no-op, already up.
 
     if not _wait_until_ready():

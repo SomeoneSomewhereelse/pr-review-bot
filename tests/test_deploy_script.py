@@ -1929,6 +1929,47 @@ def test_sync_config_db_requires_a_database_url(monkeypatch, capsys):
     assert "DATABASE_URL" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "local_url",
+    [
+        "postgresql://postgres:x@localhost:5433/postgres",
+        "postgresql://postgres:x@127.0.0.1:5432/postgres",
+        "postgresql://u:p@db.internal:5432/postgres",
+    ],
+)
+def test_sync_config_db_refuses_a_local_test_database_url(monkeypatch, capsys, local_url):
+    """Same shape as sync_env()'s guard (ISSUES.md Parked Issues) -- run from
+    a shell where `eval "$(uv run python -m scripts.test_db)"` is still
+    exported, this would otherwise silently write config into the throwaway
+    local container while an operator believes it reached production."""
+    monkeypatch.setattr(settings, "database_url", local_url)
+    connected = []
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: connected.append(1))
+    assert deploy.sync_config_db() == 2
+    err = capsys.readouterr().err
+    assert "refusing to sync" in err
+    assert connected == []
+
+
+def test_sync_config_db_still_accepts_a_real_remote_database_url(monkeypatch, capsys):
+    """The guard must not fire on a normal hosted DATABASE_URL."""
+    monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
+    monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
+    assert deploy.sync_config_db() == 0
+    assert "refusing to sync" not in capsys.readouterr().err
+
+
+@pytest.fixture
+def _real_db_target(db, monkeypatch):
+    """The `db` fixture's URL is local-shaped by construction (a real
+    Postgres for tests to verify actual SQL against) -- exactly what the
+    local-DB guard above exists to refuse. Bypass it for tests that
+    deliberately need real Postgres, without weakening the guard itself for
+    the operator-mistake scenario it protects against in production."""
+    monkeypatch.setattr(deploy, "_looks_like_local_test_db", lambda url: False)
+    yield
+
+
 def test_sync_config_db_refuses_a_base_above_the_cap(monkeypatch, capsys):
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h/db")
     monkeypatch.setattr(deploy.psycopg, "connect", lambda *a, **k: _FakeConn(None))
@@ -1965,7 +2006,9 @@ def test_sync_config_db_never_reaches_the_database_when_invalid(monkeypatch, cap
     assert called == []
 
 
-def test_sync_config_db_writes_settings_values_into_runtime_config(db, db_query, monkeypatch):
+def test_sync_config_db_writes_settings_values_into_runtime_config(
+    _real_db_target, db_query, monkeypatch
+):
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 45.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_max_seconds", 900.0)
     monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_factor", 1.5)
@@ -1979,21 +2022,23 @@ def test_sync_config_db_writes_settings_values_into_runtime_config(db, db_query,
     assert row == (45.0, 900.0, 1.5, 20000, "04:00:00")
 
 
-def test_sync_config_db_writes_review_draft_prs_into_runtime_config(db, db_query, monkeypatch):
+def test_sync_config_db_writes_review_draft_prs_into_runtime_config(
+    _real_db_target, db_query, monkeypatch
+):
     monkeypatch.setattr(settings, "review_draft_prs", True)
     assert deploy.sync_config_db() == 0
     row = db_query("SELECT review_draft_prs FROM runtime_config WHERE id = 1")[0]
     assert row == (True,)
 
 
-def test_sync_config_db_reports_already_in_sync_on_a_second_run(db, capsys):
+def test_sync_config_db_reports_already_in_sync_on_a_second_run(_real_db_target, capsys):
     assert deploy.sync_config_db() == 0
     capsys.readouterr()
     assert deploy.sync_config_db() == 0
     assert "already in sync" in capsys.readouterr().out
 
 
-def test_sync_config_db_reports_only_the_fields_that_changed(db, monkeypatch, capsys):
+def test_sync_config_db_reports_only_the_fields_that_changed(_real_db_target, monkeypatch, capsys):
     assert deploy.sync_config_db() == 0
     capsys.readouterr()
     monkeypatch.setattr(settings, "key_usage_token_cap", 50000)
@@ -2003,7 +2048,9 @@ def test_sync_config_db_reports_only_the_fields_that_changed(db, monkeypatch, ca
     assert "cooldown_base_seconds" not in out  # unchanged, not reported
 
 
-def test_sync_config_db_an_existing_db_override_is_overwritten(db, db_exec, db_query, monkeypatch):
+def test_sync_config_db_an_existing_db_override_is_overwritten(
+    _real_db_target, db_exec, db_query, monkeypatch
+):
     """.env.config is the source of truth (2026-08-17 design note): a
     previously-set live override (however it got there) is unconditionally
     replaced by whatever settings currently resolves to."""

@@ -205,105 +205,20 @@ Recorded here so they aren't silently lost. Format:
 - **Follow-up:** what closing it would take
 ```
 
-### CI actions still target the deprecated Node 20 runtime
-
-- **Found during:** the 2026-08-19 push of `6ec3a8f`, in the CI run's own
-  annotations — not a review finding.
-- **What:** `actions/checkout@v4` (three call sites) and
-  `astral-sh/setup-uv@v3` (three call sites) in
-  `.github/workflows/ci.yml` both declare Node 20, which GitHub has
-  deprecated. The runner force-runs them on Node 24 and emits a warning on
-  every run. `actions/configure-pages@v5`, `actions/upload-pages-artifact@v3`
-  and `actions/deploy-pages@v4` are not flagged.
-- **Why parked:** it is a warning, not a failure — all three jobs
-  (`lint-and-test`, `docs`, `pages`) pass, and the forced Node 24 runtime is
-  already the behaviour the bump would produce. Bumping two actions across
-  six call sites is its own change with its own CI verification, not
-  something to fold into a docs commit.
-- **Follow-up:** bump to `actions/checkout@v5` and `astral-sh/setup-uv@v7`
-  (check for the current majors at the time — these move) in one commit, and
-  confirm all three jobs still pass. Worth doing next time the workflow file
-  is touched for any other reason; GitHub will eventually stop force-running
-  Node 20 actions, at which point this becomes a real failure.
-
 _Stage 3b's five parked items were all closed on 2026-08-19 (`7182a14`)._
 
-### `scripts/test_db.py`'s Docker subprocess calls lack error handling for two real failure modes
-
-- **Found during:** the 2026-08-19 test-suite-performance plan — first
-  flagged as a minor in Task 2's task review (`29741fc`), re-affirmed
-  non-blocking through the final whole-branch review and its fix wave
-  (merged `8576fbc`).
-- **What:** `up()`'s `docker run`/`docker start` calls use `check=True` with
-  no `try`/`except`, so a real failure propagates as a raw
-  `CalledProcessError` traceback instead of the friendly,
-  `_DOCKER_MISSING_MESSAGE`-style output the rest of the script uses. Two
-  distinct triggers hit this same gap: (1) the target port (5433) already
-  bound by something else, and (2) `_container_status()` maps *any*
-  non-zero `docker inspect` exit — including "cannot connect to the Docker
-  daemon" — to `"absent"`, so an installed-but-not-running daemon reaches
-  the same uncaught `docker run` path as a genuinely absent container.
-- **Why parked:** both are plan-mandated code (Task 2's snippet was
-  transcribed verbatim from the approved plan) or a narrow edge case
-  behind an existing `shutil.which("docker")` gate. A correct fix for the
-  daemon-down case alone was scoped during the final review's fix wave at
-  ~30 lines across two files (a new status value, a new message constant,
-  handling in both `up()` and `down()`, plus reworking
-  `tests/test_test_db_script.py`'s `_fake_run` harness, which hardcodes
-  `stderr=""`, and updating three existing tests) — past what either pass
-  budgeted for a minor.
-- **Follow-up:** distinguish "container absent" from "Docker daemon
-  unreachable" in `_container_status()`'s return contract, wrap `up()`'s
-  `docker run`/`start` in a `try`/`except CalledProcessError` that emits a
-  friendly message for both triggers, and extend the mock harness to carry
-  `stderr` so the new branch is actually testable.
-
-### `scripts/deploy.py`'s standalone `--sync-config-db` flag has the same unguarded-local-`DATABASE_URL` shape as the now-fixed `sync_env()` gap
-
-- **Found during:** the final whole-branch review's fix wave for the
-  2026-08-19 test-suite-performance plan (re-review of `c0e2d63`, merged
-  `8576fbc`) — an out-of-scope observation, not one of the review's
-  required findings.
-- **What:** `sync_env()` now refuses to push a local-test-shaped
-  `DATABASE_URL` to the live Render service (guarded via
-  `_looks_like_local_test_db`, added this session after README started
-  teaching `eval "$(uv run python -m scripts.test_db)"`). The standalone
-  `--sync-config-db` flag dispatches straight to `sync_config_db()`, which
-  writes cooldown/cap config into whatever `DATABASE_URL` points at, with
-  no equivalent guard — so run from a `test_db`-eval'd shell, it would
-  write into the throwaway local container and report success while
-  production config drifts unnoticed.
-- **Why parked:** lower severity than the `sync_env()` case it mirrors —
-  nothing reaches Render, and the combined `sync_env()` → `sync_config_db()`
-  call path (the common case) is already safe, since the new guard runs
-  first in that chain. Surfaced during the fix wave's re-review, after the
-  wave's scope had already been fixed and re-verified; adding a second,
-  unplanned guard at that point would have meant another fix/re-review
-  cycle for a lower-severity sibling of a problem already closed.
-- **Follow-up:** add the same `_looks_like_local_test_db(settings.database_url)`
-  refusal at the top of `sync_config_db()` (or wherever the standalone
-  `--sync-config-db` entry point dispatches), mirroring `sync_env()`'s
-  guard shape and message.
-
-### Every full test-suite run prints a `testcontainers.postgres` deprecation warning
-
-- **Found during:** the 2026-08-21 comment-integrity fix (Design Gaps entry
-  above) — noticed in the full-suite output while verifying the fix, not a
-  review finding.
-- **What:** `tests/conftest.py:48` does `from testcontainers.postgres import
-  PostgresContainer`. Installed `testcontainers==4.15.0` emits
-  `DeprecationWarning: testcontainers.postgres is deprecated, use
-  testcontainers.community.postgres instead` the first time that import
-  runs, once per `pytest` invocation (module-level import, not per-test) —
-  visible in every full-suite run's warnings summary.
-- **Why parked:** cosmetic — every test still passes, this session's actual
-  task was the comment-integrity gap, and swapping the import is an
-  unrelated one-line change that doesn't belong bundled into that fix's
-  commit.
-- **Follow-up:** confirmed `testcontainers.community.postgres.PostgresContainer`
-  already exists and is importable in the installed 4.15.0 — change the
-  one import in `tests/conftest.py:48` and re-run the suite to confirm the
-  warning is gone and nothing else in the class's API shifted.
+_The four items below them (CI actions on Node 20; `scripts/test_db.py`'s
+Docker error handling; `--sync-config-db`'s missing local-DATABASE_URL
+guard; the `testcontainers.postgres` deprecation warning) were all closed on
+2026-08-21. One implementation note worth keeping, since it's not obvious
+from the original write-up: adding `_looks_like_local_test_db`'s guard to
+`sync_config_db()` also fires against `tests/conftest.py`'s own `db` fixture
+(a real Postgres for tests, always `localhost`-shaped) — the fix isn't to
+weaken the guard, but to give the handful of tests that deliberately need
+real Postgres (`test_sync_config_db_writes_settings_values_into_runtime_config`
+and its siblings) an explicit bypass fixture
+(`tests/test_deploy_script.py::_real_db_target`) rather than have them
+accidentally start exercising the refusal path instead of the real one._
 
 ---
 

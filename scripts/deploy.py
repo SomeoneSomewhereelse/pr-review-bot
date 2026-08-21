@@ -1079,6 +1079,23 @@ def sync_config_db() -> int:
     if not settings.database_url:
         print("--sync-config-db requires DATABASE_URL", file=sys.stderr)
         return 2
+    # Same risk sync_env() already guards against (ISSUES.md Parked Issues):
+    # a shell that ran `eval "$(uv run python -m scripts.test_db)"` earlier
+    # has a throwaway localhost:5433 URL sitting in os.environ, which Settings
+    # reads ahead of any .env file -- this would silently write config into
+    # that local container while an operator believes production was
+    # updated. Deliberately the first guard, before any connection attempt.
+    if _looks_like_local_test_db(settings.database_url):
+        host = urlsplit(settings.database_url).hostname or "?"
+        print(
+            f"refusing to sync: DATABASE_URL points at {host}, a local/test Postgres -- "
+            "this would write config into a database on this machine, not production. "
+            "This is almost certainly a shell where "
+            '`eval "$(uv run python -m scripts.test_db)"` was run; `unset DATABASE_URL` '
+            "(or use a fresh shell) and re-run.",
+            file=sys.stderr,
+        )
+        return 2
     base = settings.dispatcher_rereview_cooldown_seconds
     cap = settings.dispatcher_rereview_cooldown_max_seconds
     factor = settings.dispatcher_rereview_cooldown_factor
