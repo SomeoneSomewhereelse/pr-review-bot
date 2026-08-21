@@ -453,6 +453,45 @@ def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> None:
         )
 
 
+def migrate_repo_rename(old_full_name: str, new_full_name: str, now: str) -> None:
+    """Rewrite every tickets/reviews row's repo_full_name from old to new.
+
+    Detected when a GitHub call resolves a stored name to a different
+    canonical one -- the repo was renamed, and GitHub transparently redirects
+    old-name requests rather than erroring, so there's no exception to react
+    to (see orchestrator.attempt_review, the sole caller).
+
+    Guarded against tickets' UNIQUE (repo_full_name, pr_number): a fresh
+    webhook under the new name may have already created a ticket for the
+    same PR before this migration runs. Any such colliding old-named row is
+    cancelled instead of migrated -- it's superseded by the row already
+    tracking that PR under the new name, and cancel_ticket's own semantics
+    (a no-op against 'running'/terminal rows) apply here too. reviews has no
+    such constraint -- it's insert-only history -- so its rows always move.
+    """
+    with _require_pool().connection() as conn:
+        conn.execute(
+            """
+            UPDATE tickets SET repo_full_name = %(new)s, updated_at = %(now)s
+            WHERE repo_full_name = %(old)s
+              AND NOT EXISTS (
+                SELECT 1 FROM tickets t2
+                WHERE t2.repo_full_name = %(new)s AND t2.pr_number = tickets.pr_number
+              )
+            """,
+            {"old": old_full_name, "new": new_full_name, "now": now},
+        )
+        conn.execute(
+            "UPDATE tickets SET status = 'cancelled', updated_at = %s "
+            "WHERE repo_full_name = %s AND status IN ('pending', 'deferred', 'retrying')",
+            (now, old_full_name),
+        )
+        conn.execute(
+            "UPDATE reviews SET repo_full_name = %s WHERE repo_full_name = %s",
+            (new_full_name, old_full_name),
+        )
+
+
 def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
     """Mark a ticket as failed after a non-rate-limit exception from attempt_review.
 

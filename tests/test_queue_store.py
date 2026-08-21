@@ -158,6 +158,48 @@ def test_push_to_cancelled_ticket_respects_cooldown_when_previously_reviewed(mon
     assert store.get_ticket(tid).status == "deferred"        # still cooling down
 
 
+def test_migrate_repo_rename_moves_a_ticket_to_the_new_name():
+    tid = _enqueue(repo="owner/old-name", pr=1)
+    store.migrate_repo_rename("owner/old-name", "owner/new-name", now=T1)
+    t = store.get_ticket(tid)
+    assert t.repo_full_name == "owner/new-name"
+    assert t.updated_at == T1
+
+
+def test_migrate_repo_rename_moves_reviews_history_too(db_exec, db_query):
+    db_exec(
+        "INSERT INTO reviews (repo_full_name, pr_number, provider, model, comment_id, "
+        "created_at, total_elapsed_ms, total_tokens_in, total_tokens_out, est_cost_usd, "
+        "results, key_index) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'[]'::jsonb,%s)",
+        ("owner/old-name", 1, "groq", "m", None, T0, 1, 0, 0, 0.0, 0),
+    )
+    store.migrate_repo_rename("owner/old-name", "owner/new-name", now=T1)
+    assert db_query("SELECT repo_full_name FROM reviews WHERE pr_number = 1") == [
+        ("owner/new-name",)
+    ]
+
+
+def test_migrate_repo_rename_cancels_a_colliding_ticket_instead_of_erroring():
+    """A fresh webhook under the new name may already have created a ticket
+    for the same PR before the rename is detected -- the stale old-named row
+    must be cancelled, not migrated into a unique-constraint violation."""
+    stale_tid = _enqueue(repo="owner/old-name", pr=5)
+    fresh_tid = _enqueue(repo="owner/new-name", pr=5)
+
+    store.migrate_repo_rename("owner/old-name", "owner/new-name", now=T1)
+
+    stale = store.get_ticket(stale_tid)
+    assert stale.status == "cancelled"
+    assert stale.repo_full_name == "owner/old-name"   # left in place, not moved
+    fresh = store.get_ticket(fresh_tid)
+    assert fresh.repo_full_name == "owner/new-name"
+    assert fresh.status == "pending"                  # untouched
+
+
+def test_migrate_repo_rename_is_a_noop_when_nothing_matches():
+    store.migrate_repo_rename("owner/nonexistent", "owner/new-name", now=T1)  # must not raise
+
+
 def test_defer_rate_limited_does_not_increment_attempts():
     tid = _enqueue()
     store.claim_next_due(now=T0)

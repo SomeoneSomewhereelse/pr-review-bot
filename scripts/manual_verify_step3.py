@@ -57,9 +57,9 @@ def main() -> None:
 
     print("\nFetching PR diff ...")
     diff = github_app.fetch_pr_diff(repo_full_name, pr_number)
-    print(f"Diff length: {len(diff)} chars")
+    print(f"Diff length: {len(diff.text)} chars")
     print("First 5 lines of diff:")
-    for line in diff.splitlines()[:5]:
+    for line in diff.text.splitlines()[:5]:
         print(f"  {line}")
 
     print("\nPosting first comment (create) ...")

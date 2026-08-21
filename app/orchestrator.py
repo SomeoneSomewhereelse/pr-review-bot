@@ -73,8 +73,25 @@ async def attempt_review(
     """
     started = time.monotonic()
 
-    raw_diff = await asyncio.to_thread(github_app.fetch_pr_diff, repo_full_name, pr_number)
-    annotated = annotate_and_cap(raw_diff)
+    diff = await asyncio.to_thread(github_app.fetch_pr_diff, repo_full_name, pr_number)
+    if diff.repo_full_name != repo_full_name:
+        # GitHub transparently redirects a renamed repo's old-name requests
+        # (no error raised) -- fetch_pr_diff's canonical name is the only
+        # signal a rename happened. Best-effort: a migration hiccup must
+        # never fail an otherwise-successful review, same guarantee as the
+        # record_review call below.
+        try:
+            await asyncio.to_thread(
+                store.migrate_repo_rename,
+                repo_full_name,
+                diff.repo_full_name,
+                datetime.now(timezone.utc).isoformat(),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "failed to migrate renamed repo %s -> %s", repo_full_name, diff.repo_full_name
+            )
+    annotated = annotate_and_cap(diff.text)
 
     # Referencing these as bare module-level names (not a precomputed tuple
     # of function objects) means they resolve at call time, so tests can

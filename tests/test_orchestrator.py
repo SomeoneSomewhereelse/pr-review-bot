@@ -24,7 +24,10 @@ def _ok_result(name: str, tokens_in: int = 10, tokens_out: int = 5) -> Specialis
 async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypatch):
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+    )
 
     posted = {}
 
@@ -73,7 +76,10 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     """
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+    )
 
     posted = {}
 
@@ -116,7 +122,10 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
 async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+    )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment", lambda *a, **k: SimpleNamespace(id=1)
     )
@@ -145,7 +154,10 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
 async def test_run_review_records_the_completed_review(monkeypatch):
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+    )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=111),
@@ -192,7 +204,10 @@ async def test_run_review_survives_record_review_raising(monkeypatch):
     review — the PR comment is already posted by this point."""
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "raw diff text")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+    )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
         lambda repo, pr, body, comment_id=None: SimpleNamespace(id=111),
@@ -219,6 +234,102 @@ async def test_run_review_survives_record_review_raising(monkeypatch):
 
     result = await orchestrator.run_review("owner/repo", 99)  # must not raise
     assert result.pr_number == 99
+
+
+async def test_attempt_review_migrates_a_renamed_repo(monkeypatch):
+    """fetch_pr_diff surfaces GitHub's canonical repo name for free (already
+    resolved internally) -- when it differs from what was requested, the
+    repo was renamed, and attempt_review must migrate the DB rows rather
+    than silently keep using the stale name."""
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name="owner/renamed"),
+    )
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment",
+        lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
+    )
+
+    async def ok(_):
+        return _ok_result("Security")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    migrated = {}
+
+    def fake_migrate(old, new, now):
+        migrated["old"] = old
+        migrated["new"] = new
+
+    monkeypatch.setattr(orchestrator.store, "migrate_repo_rename", fake_migrate)
+
+    await orchestrator.attempt_review("owner/old-name", 1)
+
+    assert migrated == {"old": "owner/old-name", "new": "owner/renamed"}
+
+
+async def test_attempt_review_does_not_migrate_when_name_is_unchanged(monkeypatch):
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+    )
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment",
+        lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
+    )
+
+    async def ok(_):
+        return _ok_result("Security")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    def boom(*a, **k):
+        raise AssertionError("must not migrate when the name didn't change")
+
+    monkeypatch.setattr(orchestrator.store, "migrate_repo_rename", boom)
+
+    await orchestrator.attempt_review("owner/repo", 1)  # must not raise
+
+
+async def test_attempt_review_survives_migrate_repo_rename_raising(monkeypatch):
+    """A migration hiccup must never fail an otherwise-successful review --
+    same guarantee as the existing record_review failure isolation."""
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name="owner/renamed"),
+    )
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment",
+        lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
+    )
+
+    async def ok(_):
+        return _ok_result("Security")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    def boom(*a, **k):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(orchestrator.store, "migrate_repo_rename", boom)
+
+    outcome = await orchestrator.attempt_review("owner/old-name", 1)  # must not raise
+    assert outcome.review.pr_number == 1
 
 
 def test_active_model_resolves_per_provider_through_the_registry(monkeypatch):

@@ -27,7 +27,10 @@ def _provider(monkeypatch):
 async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch):
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+    )
     posted = []
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: posted.append(a))
 
@@ -54,7 +57,10 @@ async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch
 async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+    )
     posted = {}
 
     def fake_upsert(repo, pr, body, comment_id=None):
@@ -85,7 +91,10 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
 async def test_run_review_raises_on_rate_limited(monkeypatch):
     import app.orchestrator as orchestrator
 
-    monkeypatch.setattr(orchestrator.github_app, "fetch_pr_diff", lambda repo, pr: "diff")
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+    )
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: None)
 
     async def rl(_):

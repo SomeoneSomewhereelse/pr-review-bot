@@ -209,9 +209,24 @@ def test_fetch_pr_diff_concatenates_file_patches(fake_transport):
 
     diff = github_app.fetch_pr_diff(REPO_FULL_NAME, PR_NUMBER)
 
-    assert "diff --git a/app.py b/app.py" in diff
-    assert "-old" in diff
-    assert "+new" in diff
+    assert "diff --git a/app.py b/app.py" in diff.text
+    assert "-old" in diff.text
+    assert "+new" in diff.text
+    assert diff.repo_full_name == REPO_FULL_NAME
+
+
+def test_fetch_pr_diff_returns_the_canonical_repo_name_after_a_rename(fake_transport):
+    """GitHub transparently redirects a renamed repo's old-name requests
+    (no error) -- the only way to notice is that the repo object it returns
+    carries the CURRENT full_name, not the one we requested."""
+    renamed = {**_repo_json(), "full_name": "test-owner/renamed-repo"}
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", renamed)
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", _pull_json())
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}/files", [])
+
+    diff = github_app.fetch_pr_diff(REPO_FULL_NAME, PR_NUMBER)
+
+    assert diff.repo_full_name == "test-owner/renamed-repo"
 
 
 def test_upsert_comment_creates_when_no_marker_comment_exists(fake_transport, monkeypatch):

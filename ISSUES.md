@@ -483,9 +483,15 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
   for the process lifetime and refresh it reactively on an auth/404-shaped
   GitHub error. (b) is simpler and covers both revocation and
   reinstall-with-new-id without new webhook subscriptions; (a) detects
-  faster but adds surface area. Worth grouping with the repo
-  rename/transfer gap below — likely the same underlying fix surface
-  (`app/github_app.py`'s installation-client resolution/caching).
+  faster but adds surface area. **Correction (2026-08-21):** the repo
+  rename/transfer gap below turned out NOT to share this fix surface after
+  all — see its resolution. Its "transfer to an org we're not installed
+  on" half is a genuine 404/403 already bounded by existing failure-backoff
+  (a real instance of *this* gap's silent-failure risk, still open), but
+  its "same-org rename" half never errors at all (GitHub redirects
+  transparently) and was fixed separately, at the `github_app.fetch_pr_diff`
+  / `orchestrator.attempt_review` layer, with no relation to installation-id
+  caching.
 
 ### Repo rename/transfer — unverified
 
@@ -499,10 +505,48 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
 - **Why it matters:** unknown — could range from transparent (GitHub
   redirects) to silently orphaning existing ticket/review rows under a now-
   wrong `repo_full_name`.
-- **Status:** needs-verification.
+- **Status:** closed (2026-08-21).
 - **Follow-up:** verify GitHub API behavior for a renamed/transferred repo
   against a cached installation client; likely shares a fix surface with
   the installation-revocation gap above.
+- **Resolution:** turned out to be two different mechanisms with two
+  different answers, found via a spike (GitHub's own docs, no live calls):
+  - **Transfer to an org the App isn't installed on:** confirmed noop, no
+    code needed. It surfaces as a genuine 404/403 (unlike rename, this one
+    really does error), which the existing hard-failure backoff already
+    bounds — a doomed ticket reaches `mark_failed` and stays there; GitHub
+    also stops delivering webhooks for a repo outside the installation's
+    coverage, so no further waste accrues. `scripts/deploy.py`'s existing
+    `check_installation_and_webhook` (an already-resolved prior issue, see
+    the entry above it in this log) already flags a moved-away repo on the
+    next deploy check — but only when `GITHUB_TARGET_REPO` is an explicit
+    allowlist; track-all mode has nothing to compare against. Considered
+    and rejected: a persistent "unreachable repo" flag — nothing ever tells
+    us access was restored, so a sticky flag risks permanently blackholing
+    a repo that becomes reachable again later. Reacting fresh each time,
+    with no lasting state, is simpler and self-healing.
+  - **Rename within the same org:** GitHub redirects old-name API requests
+    transparently (301 for GET/HEAD, 307 for writes) — "a safety net, not a
+    long-term contract" per GitHub's docs — so it never errors, but every
+    webhook fired after the rename reports the *new* name, silently
+    orphaning any ticket still keyed on the old one. Fixed with a live
+    migration, not a persistent flag: `github_app.fetch_pr_diff` already
+    resolves the repo internally, so it now returns a `PrDiff` (text +
+    GitHub's canonical `repo_full_name`) instead of a bare string — no new
+    API call, just surfacing something already fetched. `orchestrator.
+    attempt_review` compares it against the requested name and, on a
+    mismatch, calls the new `store.migrate_repo_rename(old, new, now)`
+    (best-effort, same failure-isolation shape as the existing
+    `record_review` call) — one `UPDATE tickets ... WHERE repo_full_name =
+    old`, guarded with `NOT EXISTS` against the `(repo_full_name,
+    pr_number)` unique constraint in case a fresh webhook under the new
+    name already created a ticket for the same PR (that colliding leftover
+    is cancelled instead, via the same semantics as `cancel_ticket`), plus
+    the equivalent `UPDATE reviews` (no such constraint there — insert-only
+    history). If `GITHUB_TARGET_REPO` is an explicit allowlist, the stale
+    entry also gets caught by the same deploy-time check as the transfer
+    case above, prompting a manual config update for future webhooks to
+    resume flowing under the new name.
 
 ### `pull_request.edited` (e.g. base-branch retarget) never triggers a re-review
 

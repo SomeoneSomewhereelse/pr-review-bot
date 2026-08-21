@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from dataclasses import dataclass
 
 from github import Auth, Github, GithubException
 from github.IssueComment import IssueComment
@@ -280,7 +281,17 @@ def get_webhook_url() -> str:
     return url if url.startswith(("http://", "https://")) else ""
 
 
-def fetch_pr_diff(repo_full_name: str, pr_number: int) -> str:
+@dataclass
+class PrDiff:
+    text: str
+    # GitHub's canonical name for the repo, which may differ from the
+    # `repo_full_name` requested if the repo was renamed since that value
+    # was stored -- GitHub transparently redirects old-name requests rather
+    # than erroring, so this is the only way a caller can notice.
+    repo_full_name: str
+
+
+def fetch_pr_diff(repo_full_name: str, pr_number: int) -> PrDiff:
     """Fetch a PR's raw unified diff text.
 
     Built by concatenating each changed file's patch (as returned by the
@@ -297,7 +308,7 @@ def fetch_pr_diff(repo_full_name: str, pr_number: int) -> str:
         header = f"diff --git a/{f.filename} b/{f.filename}"
         patch = f.patch if f.patch else "(binary file or no textual diff available)"
         chunks.append(f"{header}\n{patch}")
-    return "\n".join(chunks)
+    return PrDiff(text="\n".join(chunks), repo_full_name=repo.full_name)
 
 
 def upsert_comment(
