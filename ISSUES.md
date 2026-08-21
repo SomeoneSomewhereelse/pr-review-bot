@@ -476,7 +476,7 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
 - **Why it matters:** the sharpest violation of "partial failure always
   visible" found in the audit — the failure-reporting channel itself is
   what's broken, so nothing reaches GitHub at all, silently.
-- **Status:** open.
+- **Status:** closed (2026-08-21).
 - **Follow-up:** needs a design decision before speccing: either (a)
   subscribe to and handle `installation`/`installation_repositories`
   events for proactive detection, or (b) stop caching the installation id
@@ -487,11 +487,56 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
   rename/transfer gap below turned out NOT to share this fix surface after
   all — see its resolution. Its "transfer to an org we're not installed
   on" half is a genuine 404/403 already bounded by existing failure-backoff
-  (a real instance of *this* gap's silent-failure risk, still open), but
+  (a real instance of *this* gap's silent-failure risk, closed below), but
   its "same-org rename" half never errors at all (GitHub redirects
   transparently) and was fixed separately, at the `github_app.fetch_pr_diff`
   / `orchestrator.attempt_review` layer, with no relation to installation-id
   caching.
+- **Resolution:** landed on a third option, simpler than either (a) or (b):
+  promote `GITHUB_APP_INSTALLATION_ID` to **always required, never
+  auto-discovered/guessed on the operator's behalf** — eliminating the
+  "was it explicitly set or not" branch entirely rather than adding a
+  live-refresh mechanism. Auditing this surfaced a second, independent hole
+  along the way: the *old* optional-with-auto-discovery design only ever
+  validated the id when it was unset, so an explicitly pinned id that later
+  went stale (revoked/reinstalled) was trusted blindly forever, at every
+  checkpoint — deploy-time (`check_installation_and_webhook` discovered
+  fresh and checked repo coverage, but never compared against the pinned
+  value at all), startup (`lifespan` skipped discovery whenever a value was
+  present, full stop), and obviously at runtime. Closed at all three:
+  - New `github_app.discover_and_verify_installation_id(expected)`, the one
+    shared primitive — raises on a mismatch, propagates
+    `AppNotInstalledError`/ambiguous-multiple-installations unchanged.
+  - `app/main.py`'s `lifespan`: unset is now a hard `RuntimeError` (same
+    shape as the existing `GITHUB_WEBHOOK_SECRET` check), and the verify
+    call runs unconditionally afterward — not just when unset.
+  - `scripts/deploy.py`: `check_config()` gained the same unset check
+    (fast, no API call) for early local feedback; `check_installation_and_webhook`
+    gained the same mismatch check inline (reusing the id it already
+    discovers for the repo-coverage check, rather than calling discovery
+    twice); `_wanted_env()`/`_ALWAYS_SYNCED` moved the var from
+    conditionally-included to always-included, so `sync_env()`'s existing
+    generic "refuse to push empty values" guard catches a missing value
+    with no new refusal logic.
+  - `app/queue/dispatcher.py`: a reactive runtime check, on the *first*
+    hard failure (not buried behind several backoff cycles) — disambiguates
+    "the whole installation is gone" from an ordinary per-resource error by
+    calling the same shared primitive, distinguishing a definitive
+    determination from the check itself failing transiently (mirrors
+    `check_installation_and_webhook`'s own `__cause__`-chaining technique,
+    so a GitHub-wide outage during the check is never mistaken for a dead
+    installation). Confirmed bad → `os._exit(1)`, not a raised exception (an
+    unhandled exception in a background asyncio task is silently dropped,
+    not fatal) — deliberately a hard process kill, not a live self-patch,
+    matching the explicit call that a running process auto-correcting its
+    own installation identity would be worse than crashing and letting the
+    host platform restart into the same loud startup check.
+  - Docs (`.env.example`, `guide/setup/02-github-app.md`,
+    `guide/setup/03-install-app.md`) rewritten from "optional, recommended"
+    to "required," with `guide/setup/03-install-app.md` gaining the actual
+    capture instructions (run the now-always-run `github-app` check with
+    the var still blank; its FAIL detail names the real discovered id even
+    unset, so there's no separate discovery tool needed).
 
 ### Repo rename/transfer — unverified
 

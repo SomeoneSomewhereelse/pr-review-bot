@@ -901,6 +901,31 @@ def test_discover_installation_id_for_app_raises_when_ambiguous(fake_transport):
     assert "GITHUB_APP_INSTALLATION_ID" in message
 
 
+def test_discover_and_verify_installation_id_returns_when_matching(fake_transport):
+    fake_transport.route(
+        "GET", "/app/installations", [{"id": 555, "account": {"login": "someone"}}]
+    )
+    assert github_app.discover_and_verify_installation_id(555) == 555
+
+
+def test_discover_and_verify_installation_id_raises_on_mismatch(fake_transport):
+    fake_transport.route(
+        "GET", "/app/installations", [{"id": 555, "account": {"login": "someone"}}]
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        github_app.discover_and_verify_installation_id(111)
+    message = str(exc_info.value)
+    assert "111" in message
+    assert "555" in message
+    assert "GITHUB_APP_INSTALLATION_ID" in message
+
+
+def test_discover_and_verify_installation_id_propagates_app_not_installed(fake_transport):
+    fake_transport.route("GET", "/app/installations", [])
+    with pytest.raises(github_app.AppNotInstalledError):
+        github_app.discover_and_verify_installation_id(555)
+
+
 def test_discover_installation_id_for_app_wraps_a_non_404_github_error(fake_transport):
     """Mirrors discover_installation_id's own non-404 handling: a 401/5xx must
     become an actionable RuntimeError, not propagate as a raw PyGithub

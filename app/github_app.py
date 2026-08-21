@@ -228,6 +228,31 @@ def discover_installation_id_for_app() -> int:
     return int(data[0]["id"])
 
 
+def discover_and_verify_installation_id(expected: int) -> int:
+    """Resolve the App's actual installation id and confirm it matches `expected`.
+
+    This project requires GITHUB_APP_INSTALLATION_ID to be configured
+    explicitly, never guessed on the operator's behalf -- so a pinned value
+    that no longer matches the account's actual installation (most likely
+    because the App was uninstalled and reinstalled, which GitHub assigns a
+    new id for) is exactly as broken as no installation at all, and must
+    fail the same way: loudly, not silently patched over.
+
+    Propagates `AppNotInstalledError`/`RuntimeError` from
+    discover_installation_id_for_app() unchanged (no installation, or more
+    than one). Raises a distinct `RuntimeError` on a mismatch. Returns the
+    freshly-discovered id (== `expected`) otherwise.
+    """
+    discovered = discover_installation_id_for_app()
+    if discovered != expected:
+        raise RuntimeError(
+            f"GITHUB_APP_INSTALLATION_ID={expected} does not match the App's actual "
+            f"installation id={discovered} -- the App was likely uninstalled and "
+            "reinstalled. Update GITHUB_APP_INSTALLATION_ID to the new value."
+        )
+    return discovered
+
+
 def list_installation_repos(installation_id: int) -> list[str]:
     """Full names of repos `installation_id`'s token can access (GET
     /installation/repositories, up to 100 per page -- still first page only,

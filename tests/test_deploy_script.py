@@ -161,6 +161,7 @@ def complete_config(monkeypatch):
     """Every value check_config requires, present and valid."""
     monkeypatch.setattr(settings, "github_app_id", 999999)
     monkeypatch.setattr(settings, "github_app_private_key", "aGVsbG8=")
+    monkeypatch.setattr(settings, "github_app_installation_id", 148449134)
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     monkeypatch.setattr(settings, "public_base_url", "https://x.onrender.com")
@@ -180,6 +181,16 @@ def test_check_config_names_every_missing_key_at_once(complete_config, monkeypat
     assert result.status == "FAIL"
     assert "GITHUB_WEBHOOK_SECRET" in result.detail
     assert "GITHUB_APP_PRIVATE_KEY" in result.detail
+
+
+def test_check_config_requires_the_installation_id(complete_config, monkeypatch):
+    """GITHUB_APP_INSTALLATION_ID must always be configured explicitly, never
+    guessed on the operator's behalf (ISSUES.md 2026-08-21) -- an unset (0)
+    value is a missing required key, caught here before any API call."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 0)
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "GITHUB_APP_INSTALLATION_ID" in result.detail
 
 
 def test_check_config_passes_with_an_empty_target_repo(complete_config, monkeypatch):
@@ -532,6 +543,11 @@ def github_seam(monkeypatch):
     monkeypatch.setattr(github_app, "list_installation_repos", _list_installation_repos)
     monkeypatch.setattr(github_app, "get_webhook_url", lambda: state["current_url"])
     monkeypatch.setattr(github_app, "set_webhook_url", lambda url: state["written"].append(url))
+    # GITHUB_APP_INSTALLATION_ID is required and verified against discovery
+    # (ISSUES.md 2026-08-21) -- pinned to match state["installation_id"] by
+    # default so every test not specifically exercising that verification
+    # isn't tripped by an unrelated mismatch/unset FAIL.
+    monkeypatch.setattr(settings, "github_app_installation_id", state["installation_id"])
     return state
 
 
@@ -708,15 +724,37 @@ def test_installation_and_webhook_matches_allowlist_case_insensitively(github_se
 
 
 def test_installation_and_webhook_passes_the_discovered_id_to_list_installation_repos(
-    github_seam,
+    github_seam, monkeypatch,
 ):
     """Regression guard: list_installation_repos must be called with the id
     discover_installation_id_for_app() just returned, not read internally
     from settings (that was the bug -- see app/github_app.py's
     list_installation_repos docstring)."""
     github_seam["installation_id"] = 777777
+    monkeypatch.setattr(settings, "github_app_installation_id", 777777)
     deploy.check_installation_and_webhook(frozenset(), "https://x.onrender.com")
     assert github_seam["list_repos_called_with"] == 777777
+
+
+def test_installation_and_webhook_fails_when_installation_id_is_unset(github_seam, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_installation_id", 0)
+    result = deploy.check_installation_and_webhook(frozenset(), "https://x.onrender.com")
+    assert result.status == "FAIL"
+    assert "GITHUB_APP_INSTALLATION_ID" in result.detail
+
+
+def test_installation_and_webhook_fails_when_pinned_id_does_not_match_discovery(
+    github_seam, monkeypatch
+):
+    """A pinned GITHUB_APP_INSTALLATION_ID that no longer matches the App's
+    actual installation (e.g. uninstalled and reinstalled) must fail this
+    check, not silently use the discovered id instead."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 111111)
+    result = deploy.check_installation_and_webhook(frozenset(), "https://x.onrender.com")
+    assert result.status == "FAIL"
+    assert "111111" in result.detail
+    assert str(github_seam["installation_id"]) in result.detail
+    assert github_seam["written"] == []
 
 
 def test_installation_and_webhook_repo_list_failure_reports_status(github_seam, monkeypatch):
@@ -1280,16 +1318,21 @@ def test_wanted_env_includes_other_credentials_that_are_set(
 def test_wanted_env_includes_installation_id_when_set_locally(
     gemini_only_config, monkeypatch
 ):
-    """Optional -- pushed only once an operator has captured and pinned it."""
+    """Required -- always synced once configured."""
     monkeypatch.setattr(settings, "github_app_installation_id", 148449134)
     assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == "148449134"
 
 
-def test_wanted_env_omits_installation_id_when_unset(gemini_only_config, monkeypatch):
-    """The default (0, meaning auto-discover at boot) must never be pushed
-    as a literal value -- that would defeat auto-discovery entirely."""
+def test_wanted_env_includes_installation_id_as_empty_when_unset(
+    gemini_only_config, monkeypatch
+):
+    """Required, never guessed on the operator's behalf (ISSUES.md 2026-08-21)
+    -- an unset (0) value must still appear in _wanted_env()'s output (as an
+    empty string) so sync_env()'s generic "refuse to push empty values"
+    guard catches it, rather than being silently omitted the way a
+    genuinely optional setting (e.g. GITHUB_TARGET_REPO) is."""
     monkeypatch.setattr(settings, "github_app_installation_id", 0)
-    assert "GITHUB_APP_INSTALLATION_ID" not in deploy._wanted_env()
+    assert deploy._wanted_env()["GITHUB_APP_INSTALLATION_ID"] == ""
 
 
 def test_wanted_env_pushes_every_generic_operational_setting(gemini_only_config, monkeypatch):
@@ -1395,6 +1438,7 @@ def sync_ready(monkeypatch):
     monkeypatch.setattr(settings, "database_url", "postgresql://u:p@h:5432/postgres")
     monkeypatch.setattr(settings, "github_app_id", 999999)
     monkeypatch.setattr(settings, "github_app_private_key", "aGVsbG8=")
+    monkeypatch.setattr(settings, "github_app_installation_id", 148449134)
     monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "llm_provider", "groq")
@@ -1494,6 +1538,20 @@ def test_sync_env_refuses_to_push_an_empty_value(sync_ready, monkeypatch, capsys
         assert deploy.sync_env() == 2
         assert not route.called
     assert "GROQ_API_KEY" in capsys.readouterr().err
+
+
+def test_sync_env_refuses_to_push_without_an_installation_id(sync_ready, monkeypatch, capsys):
+    """GITHUB_APP_INSTALLATION_ID is required, never guessed on the
+    operator's behalf (ISSUES.md 2026-08-21) -- an unset value must refuse
+    to push, same shape as any other missing required credential."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 0)
+    with respx.mock:
+        route = respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=_service_list())
+        )
+        assert deploy.sync_env() == 2
+        assert not route.called
+    assert "GITHUB_APP_INSTALLATION_ID" in capsys.readouterr().err
 
 
 def test_sync_env_pushes_an_empty_target_repo_without_tripping_the_empty_guard(

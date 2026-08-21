@@ -8,6 +8,24 @@ install itself, so there's no CLI or script for it.
 3. Choose **All repositories**, or select specific repos (e.g. a throwaway
    test repo while you're getting set up).
 
+## Set `GITHUB_APP_INSTALLATION_ID`
+
+**Required** — never auto-discovered or guessed on your behalf; the service
+refuses to start without it, and re-verifies it against the App's actual
+installation on every boot, so a value that's gone stale (e.g. the App was
+uninstalled and reinstalled) fails loudly rather than silently drifting.
+
+You don't have to hunt it down by hand: with `GITHUB_APP_INSTALLATION_ID`
+still blank, run
+
+```bash
+uv run python -m scripts.deploy
+```
+
+Its `github-app` check discovers the real installation and names it in the
+failure detail even while the var is unset. Copy that value into `.env` as
+`GITHUB_APP_INSTALLATION_ID`, then re-run to confirm the check now passes.
+
 ## `GITHUB_TARGET_REPO` is a separate, optional narrowing
 
 Choosing "All repositories" above decides which repos the *installation*

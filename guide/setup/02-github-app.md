@@ -52,16 +52,10 @@ only two of which this project uses:
 
 - **App ID** → `GITHUB_APP_ID`. A short integer, near the top of the App's
   **General** settings page.
-- **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Optional but
-  recommended** — the app auto-discovers it at boot when unset, but that
-  auto-discovery reads `GITHUB_APP_PRIVATE_KEY` and crashes the whole
-  service at startup if that credential is ever missing or wrong. Pinning
-  the Installation ID removes that read from the unconditional boot path
-  entirely, so a bad private key only breaks webhook handling later instead
-  of the whole service at boot. **Upgrade hazard**: installing a second copy
-  of the same GitHub App makes boot-time auto-discovery ambiguous (which
-  installation is "the" one?), and the service now refuses to start rather
-  than guess — pin the Installation ID if you ever install a second copy.
+- **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Required** for
+  either path (one-command or manual) — never auto-discovered or guessed on
+  your behalf. It only exists once the App is installed on an account, so
+  the next step covers how to capture it.
 - **Client ID** — sits on the same settings page, and is easy to grab by
   mistake, but this project **does not use it at all**.
 

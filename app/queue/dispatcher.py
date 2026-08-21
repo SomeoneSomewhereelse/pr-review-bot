@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -119,6 +120,48 @@ def _comment_was_recreated(ticket: store.Ticket, comment: IssueComment | None) -
         and comment is not None
         and comment.id != ticket.comment_id
     )
+
+
+def _installation_confirmed_invalid(exc: Exception) -> bool:
+    """True only when discover_and_verify_installation_id's failure is a
+    definitive determination (no installation at all, ambiguous multiple
+    installations, or a confirmed id mismatch) rather than the check itself
+    failing to complete (a transient GitHub-side error -- plausibly the same
+    outage that caused the review attempt this is diagnosing to fail in the
+    first place, which must never be mistaken for a dead installation).
+    Mirrors scripts/deploy.py's check_installation_and_webhook, which
+    distinguishes the same two cases the same way: a RuntimeError chained
+    from a GithubException (via `raise ... from exc`) is the ambiguous case;
+    one raised directly is a real, checked determination."""
+    if isinstance(exc, github_app.AppNotInstalledError):
+        return True
+    return isinstance(exc, RuntimeError) and exc.__cause__ is None
+
+
+def _check_installation_still_valid_or_die() -> None:
+    """Disambiguate a hard review failure: is the whole GitHub App
+    installation gone (revoked, or reinstalled under a new id), or just this
+    one resource? GITHUB_APP_INSTALLATION_ID is required and never guessed
+    on the operator's behalf (ISSUES.md 2026-08-21) -- a long-running process
+    must never silently patch its own installation id and keep going under a
+    different identity, the same reason app/main.py's lifespan treats a bad
+    installation as a hard startup failure rather than something to work
+    around. Confirmed bad -> log loudly and terminate the process (os._exit,
+    not a raised exception -- an unhandled exception in a background asyncio
+    task is silently dropped, not fatal) so the host platform restarts it and
+    re-runs that same loud startup check. An ambiguous/transient failure of
+    this check itself must never crash the process -- it just means this was
+    an ordinary per-resource error, left to the existing backoff below."""
+    try:
+        github_app.discover_and_verify_installation_id(settings.github_app_installation_id)
+    except Exception as verify_exc:  # noqa: BLE001
+        if _installation_confirmed_invalid(verify_exc):
+            logger.critical(
+                "GitHub App installation is no longer valid (%s) -- terminating so the "
+                "host platform restarts and re-verifies at boot", verify_exc,
+            )
+            os._exit(1)
+        logger.exception("installation verification itself failed; treating as transient")
 
 
 async def post_pending_notices(now: datetime) -> int:
@@ -327,6 +370,7 @@ async def process_next_due(now: datetime) -> StepResult:
     # hard failure: back off per-ticket, hard-stop at the cap
     except Exception as exc:  # noqa: BLE001
         logger.exception("review attempt failed for ticket %s", ticket.id)
+        await asyncio.to_thread(_check_installation_still_valid_or_die)
         next_attempt = ticket.attempts + 1
         if next_attempt >= settings.dispatcher_max_failure_attempts:
             comment_lost = False

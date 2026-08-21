@@ -27,6 +27,14 @@ CAP_RESET_AT = datetime(2026, 1, 2, 4, 0, 0, tzinfo=timezone.utc)
 @pytest.fixture(autouse=True)
 def _env(db, monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "groq")
+    # A hard-failure path now reactively re-verifies the installation id
+    # (ISSUES.md 2026-08-21) -- default to "still matches" so tests not
+    # specifically exercising that check aren't tripped by a real GitHub
+    # App JWT call. Dedicated tests below override this.
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(
+        dispatcher.github_app, "discover_and_verify_installation_id", lambda expected: expected
+    )
     dispatcher.reset_blocked_until()
     active.reset_override_cache()
     yield
@@ -243,6 +251,99 @@ async def test_hard_stop_marks_failed_and_posts_failure_comment(monkeypatch):
     assert store.get_ticket(tid).status == "failed"
     assert posted and posted[0][0] == 8
     assert "could not be completed" in posted[0][1].lower()
+
+
+async def test_hard_failure_checks_installation_validity_before_backing_off(monkeypatch):
+    """Every hard failure reactively re-verifies the installation id, not
+    just the terminal one -- fast detection matters more than checking
+    once at the end of a slow backoff cycle."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
+    tid = _enqueue(pr=95)
+
+    calls = []
+    monkeypatch.setattr(
+        dispatcher.github_app, "discover_and_verify_installation_id",
+        lambda expected: calls.append(expected) or expected,
+    )
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "deferred"           # ordinary backoff still applies
+    assert calls == [12345]                       # installation id from the autouse _env fixture
+    assert store.get_ticket(tid).status == "retrying"
+
+
+async def test_hard_failure_terminates_the_process_when_installation_confirmed_invalid(
+    monkeypatch,
+):
+    """A confirmed-dead installation (uninstalled, or reinstalled under a new
+    id) must terminate the process rather than silently keep going under a
+    stale identity -- an unhandled exception in a background task would
+    otherwise just be logged and dropped, not actually fatal."""
+    from app import github_app
+
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
+    _enqueue(pr=96)
+
+    def _confirmed_gone(expected):
+        raise github_app.AppNotInstalledError("no installations")
+
+    monkeypatch.setattr(
+        dispatcher.github_app, "discover_and_verify_installation_id", _confirmed_gone
+    )
+
+    exits = []
+    monkeypatch.setattr(dispatcher.os, "_exit", lambda code: exits.append(code))
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    await dispatcher.process_next_due(NOW)
+    assert exits == [1]
+
+
+async def test_hard_failure_does_not_terminate_on_an_ambiguous_installation_check_failure(
+    monkeypatch,
+):
+    """A transient failure of the verification call itself (e.g. the same
+    GitHub-wide outage that likely caused the original review to fail) must
+    never be mistaken for a confirmed-dead installation."""
+    from github import GithubException
+
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
+    tid = _enqueue(pr=97)
+
+    def _transient(expected):
+        try:
+            raise GithubException(502, {"message": "boom"}, None)
+        except GithubException as e:
+            raise RuntimeError("installation lookup failed") from e
+
+    monkeypatch.setattr(
+        dispatcher.github_app, "discover_and_verify_installation_id", _transient
+    )
+
+    exits = []
+    monkeypatch.setattr(dispatcher.os, "_exit", lambda code: exits.append(code))
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert exits == []
+    assert result.action == "deferred"            # ordinary backoff, not treated as fatal
+    assert store.get_ticket(tid).status == "retrying"
 
 
 async def test_rate_limited_zero_retry_after_is_floored(monkeypatch):

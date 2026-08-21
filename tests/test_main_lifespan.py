@@ -61,10 +61,11 @@ def test_importing_app_main_configures_the_root_logger_for_info_output():
 async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(monkeypatch):
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
     # Ambient GitHub App config (e.g. local dev's .env) is not real in CI, so
-    # pin installation_id here to skip the discovery branch (see
-    # test_lifespan_skips_discovery_when_installation_id_already_set below) —
-    # this test isn't exercising discovery, just db init/recovery/dispatcher.
+    # pin installation_id and stub discovery to match it (see
+    # test_lifespan_verifies_installation_id_when_already_set below) — this
+    # test isn't exercising that verification, just db init/recovery/dispatcher.
     monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
 
     # Seed a ticket stuck 'running' (as if the process crashed mid-review),
     # via the real test DB, mirroring what recover_on_startup will see when
@@ -105,41 +106,18 @@ async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(m
     assert created_tasks[0].cancelled()
 
 
-async def test_lifespan_skips_discovery_when_installation_id_already_set(monkeypatch):
-    """When GITHUB_APP_INSTALLATION_ID is already configured (e.g. local dev's
-    .env), lifespan must not spend a GitHub App JWT call rediscovering it."""
+async def test_lifespan_verifies_installation_id_when_already_set(monkeypatch):
+    """GITHUB_APP_INSTALLATION_ID is required, never guessed on the operator's
+    behalf -- but a pinned value is still verified against the App's actual
+    installation on every boot, not trusted blindly."""
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
     monkeypatch.setattr(settings, "github_app_installation_id", 123456)
-
-    def _boom() -> int:
-        raise AssertionError(
-            "discover_installation_id_for_app must not be called when already set"
-        )
-
-    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", _boom)
-
-    async with main.lifespan(main.app):
-        pass
-
-    assert settings.github_app_installation_id == 123456
-
-
-async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
-    """When GITHUB_APP_INSTALLATION_ID is unset (0, e.g. on Render — see design
-    spec §6, "becomes optional (auto-discovered)"), lifespan must resolve it
-    via github_app.discover_installation_id_for_app before the dispatcher
-    starts, and assign the resolved id onto settings -- app-level discovery,
-    so this works regardless of whether GITHUB_TARGET_REPO is set (multi-repo
-    support design doc §3d)."""
-    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
-    monkeypatch.setattr(settings, "github_app_installation_id", 0)
-    monkeypatch.setattr(settings, "github_target_repo", "")
 
     calls = []
 
     def _fake_discover() -> int:
         calls.append(1)
-        return 999999
+        return 123456
 
     monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", _fake_discover)
 
@@ -147,7 +125,39 @@ async def test_lifespan_discovers_installation_id_when_unset(monkeypatch):
         pass
 
     assert calls == [1]
-    assert settings.github_app_installation_id == 999999
+    assert settings.github_app_installation_id == 123456
+
+
+async def test_lifespan_refuses_to_start_without_installation_id(monkeypatch):
+    """GITHUB_APP_INSTALLATION_ID must always be configured explicitly -- an
+    unset value (0) is a hard startup failure, not a cue to auto-discover
+    one on the operator's behalf."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 0)
+
+    def _boom() -> int:
+        raise AssertionError("must not attempt discovery when unset -- it's a hard failure")
+
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", _boom)
+
+    with pytest.raises(RuntimeError, match="GITHUB_APP_INSTALLATION_ID"):
+        async with main.lifespan(main.app):
+            pass
+
+
+async def test_lifespan_fails_loudly_when_installation_id_does_not_match_discovery(monkeypatch):
+    """A pinned id that no longer matches the App's actual installation (e.g.
+    it was uninstalled and reinstalled) must fail startup loudly, the same
+    as a missing one -- never silently patched to the freshly-discovered
+    value."""
+    monkeypatch.setattr(settings, "github_app_installation_id", 111)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 222)
+
+    with pytest.raises(RuntimeError) as exc:
+        async with main.lifespan(main.app):
+            pass
+    message = str(exc.value)
+    assert "111" in message
+    assert "222" in message
 
 
 async def test_lifespan_refuses_to_start_without_llm_provider(monkeypatch):
@@ -186,6 +196,7 @@ async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch, d
     that into a warning, and that no dispatcher task is left running."""
     monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
     monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(main.github_app, "discover_installation_id_for_app", lambda: 12345)
 
     # The autouse _env(db) fixture already opened a pool on the test Postgres.
     store.close_pool()

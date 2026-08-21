@@ -54,6 +54,7 @@ _MAX_PINGER_INTERVAL_SECONDS = 600
 _ALWAYS_SYNCED = (
     "DATABASE_URL",
     "GITHUB_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID",
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_TARGET_REPO",
     "GITHUB_WEBHOOK_SECRET",
@@ -222,6 +223,8 @@ def check_config() -> CheckResult:
         missing.append("GITHUB_APP_ID")
     if not settings.github_app_private_key:
         missing.append("GITHUB_APP_PRIVATE_KEY")
+    if not settings.github_app_installation_id:
+        missing.append("GITHUB_APP_INSTALLATION_ID")
     if not settings.github_webhook_secret:
         missing.append("GITHUB_WEBHOOK_SECRET")
     if not resolve_base_url():
@@ -338,13 +341,17 @@ def check_boot_credentials_live() -> CheckResult:
 
 
 def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckResult:
-    """Installation discovery, allowlist verification, plus an idempotent
-    webhook registration.
+    """Installation discovery, GITHUB_APP_INSTALLATION_ID verification,
+    allowlist verification, plus an idempotent webhook registration.
 
     Resolves the installation id at the App level (github_app.
     discover_installation_id_for_app) -- this project's scope is one App
     installation per account/org, so no specific repo is needed to seed the
     lookup (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md).
+    GITHUB_APP_INSTALLATION_ID is required and never guessed on the
+    operator's behalf (ISSUES.md 2026-08-21): a FAIL here if it's unset, or
+    if it disagrees with the id just discovered (most likely because the
+    App was uninstalled and reinstalled, which GitHub assigns a new id for).
 
     If `repos` (the GITHUB_TARGET_REPO allowlist) is non-empty, every entry is
     verified against the installation's actual repo list
@@ -387,6 +394,25 @@ def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckRes
         else:
             detail = str(exc)
         return CheckResult(name, "FAIL", detail)
+
+    # GITHUB_APP_INSTALLATION_ID is required and never guessed on the
+    # operator's behalf (ISSUES.md 2026-08-21) -- verified here against the
+    # id just discovered, independent of check_config()'s own unset check,
+    # since this function is also callable on its own.
+    if not settings.github_app_installation_id:
+        return CheckResult(
+            name, "FAIL",
+            f"GITHUB_APP_INSTALLATION_ID is unset (discovered installation="
+            f"{installation_id}) -- this project requires it to be configured "
+            "explicitly; set it to the value above.",
+        )
+    if settings.github_app_installation_id != installation_id:
+        return CheckResult(
+            name, "FAIL",
+            f"GITHUB_APP_INSTALLATION_ID={settings.github_app_installation_id} does not "
+            f"match the App's actual installation id={installation_id} -- the App was "
+            "likely uninstalled and reinstalled; update GITHUB_APP_INSTALLATION_ID.",
+        )
 
     try:
         covered = github_app.list_installation_repos(installation_id)
@@ -855,6 +881,7 @@ def _wanted_env() -> dict[str, str]:
     wanted = {
         "DATABASE_URL": settings.database_url,
         "GITHUB_APP_ID": str(settings.github_app_id or ""),
+        "GITHUB_APP_INSTALLATION_ID": str(settings.github_app_installation_id or ""),
         "GITHUB_APP_PRIVATE_KEY": settings.github_app_private_key,
         "GITHUB_TARGET_REPO": settings.github_target_repo,
         "GITHUB_WEBHOOK_SECRET": settings.github_webhook_secret,
@@ -876,13 +903,6 @@ def _wanted_env() -> dict[str, str]:
         wanted[model_var] = getattr(settings, model_var.lower(), "")
     for credential, _ in _PROVIDERS.values():
         wanted.update(_override.local_slot_values(credential))
-    # Optional and pushed only once an operator has captured it locally (0 is
-    # the auto-discover-at-boot sentinel, never a real installation id) --
-    # pinning it removes discover_installation_id()'s private-key read from
-    # the unconditional boot path, so a future credential rename degrades to
-    # "webhook handling fails on the next PR" instead of crashing the app.
-    if settings.github_app_installation_id:
-        wanted["GITHUB_APP_INSTALLATION_ID"] = str(settings.github_app_installation_id)
     for env_name, attr in _GENERIC_OPERATIONAL_ENV_ATTRS.items():
         wanted[env_name] = str(getattr(settings, attr))
     return wanted

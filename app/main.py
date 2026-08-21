@@ -43,18 +43,28 @@ async def lifespan(app: FastAPI):
             "(an empty secret would accept any webhook signature)."
         )
     if not settings.github_app_installation_id:
-        # Not set (e.g. on Render, per docs/superpowers/specs/.../design.md
-        # §6: the installation id "becomes optional (auto-discovered)").
-        # Resolve it once via the App JWT before anything tries to use it --
-        # app-level (not repo-scoped), so this works whether or not
-        # GITHUB_TARGET_REPO is configured (see docs/superpowers/specs/
-        # 2026-08-17-multi-repo-support-design.md). A genuine RuntimeError
-        # here (App not installed, or installed on more than one account) is
-        # allowed to propagate and fail startup loudly -- same pattern as
-        # init_pool() failing loudly on an unreachable Postgres.
-        settings.github_app_installation_id = await asyncio.to_thread(
-            github_app.discover_installation_id_for_app
+        # GITHUB_APP_INSTALLATION_ID must always be configured explicitly,
+        # never guessed on the operator's behalf -- refuse to start rather
+        # than auto-discover one, so a stale/missing value is never silently
+        # papered over (ISSUES.md 2026-08-21).
+        raise RuntimeError(
+            "GITHUB_APP_INSTALLATION_ID is unset -- refusing to start. This project "
+            "requires it to be configured explicitly; run scripts/deploy.py's "
+            "github-app check (or check the GitHub UI) to find the App's current "
+            "installation id."
         )
+    # Verified on every boot, not just when unset: a pinned value is exactly
+    # as broken as a missing one if the App was uninstalled and reinstalled
+    # since it was last set (GitHub assigns a new id), and app-level (not
+    # repo-scoped) verification works whether or not GITHUB_TARGET_REPO is
+    # configured (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md).
+    # A genuine RuntimeError here (not installed, installed on more than one
+    # account, or a pinned/actual mismatch) is allowed to propagate and fail
+    # startup loudly -- same pattern as init_pool() failing loudly on an
+    # unreachable Postgres.
+    settings.github_app_installation_id = await asyncio.to_thread(
+        github_app.discover_and_verify_installation_id, settings.github_app_installation_id
+    )
     store.init_pool()
     store.recover_on_startup(datetime.now(timezone.utc).isoformat())
     task = asyncio.create_task(dispatcher.run_forever())
