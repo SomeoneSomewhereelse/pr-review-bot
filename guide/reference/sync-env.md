@@ -54,6 +54,7 @@ Each credential also has numbered key-rotation slots: additional vars named `{cr
 - `DISPATCHER_REREVIEW_COOLDOWN_SECONDS`
 - `KEY_USAGE_RESET_TIME_UTC`
 - `KEY_USAGE_TOKEN_CAP`
+- `REVIEW_DRAFT_PRS`
 
 These live only in the `runtime_config` table, never as a Render env var, because the dispatcher must be able to change them with no redeploy. `uv run python -m scripts.deploy --sync-config-db` pushes them there. Editing one and redeploying does nothing on its own.
 

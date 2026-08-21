@@ -1979,6 +1979,13 @@ def test_sync_config_db_writes_settings_values_into_runtime_config(db, db_query,
     assert row == (45.0, 900.0, 1.5, 20000, "04:00:00")
 
 
+def test_sync_config_db_writes_review_draft_prs_into_runtime_config(db, db_query, monkeypatch):
+    monkeypatch.setattr(settings, "review_draft_prs", True)
+    assert deploy.sync_config_db() == 0
+    row = db_query("SELECT review_draft_prs FROM runtime_config WHERE id = 1")[0]
+    assert row == (True,)
+
+
 def test_sync_config_db_reports_already_in_sync_on_a_second_run(db, capsys):
     assert deploy.sync_config_db() == 0
     capsys.readouterr()

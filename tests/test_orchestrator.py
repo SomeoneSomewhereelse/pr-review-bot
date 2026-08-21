@@ -26,7 +26,7 @@ async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypat
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo, draft=False),
     )
 
     posted = {}
@@ -78,7 +78,7 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo, draft=False),
     )
 
     posted = {}
@@ -124,7 +124,7 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo, draft=False),
     )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment", lambda *a, **k: SimpleNamespace(id=1)
@@ -156,7 +156,7 @@ async def test_run_review_records_the_completed_review(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo, draft=False),
     )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
@@ -206,7 +206,7 @@ async def test_run_review_survives_record_review_raising(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo, draft=False),
     )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
@@ -245,7 +245,7 @@ async def test_attempt_review_migrates_a_renamed_repo(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name="owner/renamed"),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name="owner/renamed", draft=False),
     )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
@@ -278,7 +278,7 @@ async def test_attempt_review_does_not_migrate_when_name_is_unchanged(monkeypatc
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo, draft=False),
     )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
@@ -308,7 +308,7 @@ async def test_attempt_review_survives_migrate_repo_rename_raising(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name="owner/renamed"),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name="owner/renamed", draft=False),
     )
     monkeypatch.setattr(
         orchestrator.github_app, "upsert_comment",
@@ -340,7 +340,7 @@ async def test_attempt_review_skips_entirely_on_an_empty_diff(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="", repo_full_name=repo, draft=False),
     )
 
     def boom(*a, **k):
@@ -357,6 +357,59 @@ async def test_attempt_review_skips_entirely_on_an_empty_diff(monkeypatch):
     assert isinstance(outcome, orchestrator.ReviewSkipped)
 
 
+async def test_attempt_review_skips_a_draft_pr_by_default(monkeypatch):
+    """ISSUES.md's 'Draft PRs are reviewed identically to ready-for-review
+    PRs' gap: a draft PR must short-circuit before any specialist call,
+    comment post, or dashboard record, same as an empty diff."""
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="real diff content", repo_full_name=repo, draft=True),
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("must not be called for a draft PR")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", boom)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", boom)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", boom)
+    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", boom)
+    monkeypatch.setattr(orchestrator.store, "record_review", boom)
+
+    outcome = await orchestrator.attempt_review("owner/repo", 1)
+
+    assert isinstance(outcome, orchestrator.ReviewSkipped)
+
+
+async def test_attempt_review_reviews_a_draft_pr_when_the_override_allows_it(monkeypatch):
+    import app.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="real diff content", repo_full_name=repo, draft=True),
+    )
+    monkeypatch.setattr(
+        orchestrator.github_app, "upsert_comment",
+        lambda repo, pr, body, comment_id=None: SimpleNamespace(id=1),
+    )
+    monkeypatch.setattr(
+        orchestrator.review_draft_config, "effective_review_draft_prs", lambda: True
+    )
+
+    async def ok(_):
+        return _ok_result("Security")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", ok)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", ok)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    outcome = await orchestrator.attempt_review("owner/repo", 1)
+
+    assert isinstance(outcome, orchestrator.ReviewCompleted)
+
+
 async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypatch):
     """The rename check is cheap and orthogonal to diff content -- it must
     still run even when the diff itself turns out to be empty."""
@@ -364,7 +417,7 @@ async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypat
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="", repo_full_name="owner/renamed"),
+        lambda repo, pr: SimpleNamespace(text="", repo_full_name="owner/renamed", draft=False),
     )
 
     migrated = {}

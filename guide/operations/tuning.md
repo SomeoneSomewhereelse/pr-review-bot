@@ -72,6 +72,28 @@ The cap is a ceiling on when the *next* review may start, not on the exact
 daily total: a review's real token usage is only known once it finishes, so
 the run that crosses the line is allowed to complete.
 
+## Reviewing draft PRs
+
+```bash
+# .env.config
+REVIEW_DRAFT_PRS=false   # default: skip drafts entirely
+```
+
+**Off by default.** While a PR is a draft, `opened`/`reopened`/`synchronize`
+are all no-ops — no specialist call, no comment, no ticket left behind.
+`ready_for_review` still triggers a review even with zero new commits, since
+that's GitHub's dedicated signal for "this is now actionable" independent of
+any push. Converting a ready PR back to a draft needs no separate handling:
+the dispatcher checks the PR's *current* draft state at review time (piggy-
+backed on the diff fetch, no extra API call), so any ticket that gets
+re-armed by a later push while the PR is a draft is skipped there too,
+regardless of which webhook event produced it.
+
+Set `REVIEW_DRAFT_PRS=true` to review drafts identically to ready-for-review
+PRs. Like the cooldown/cap settings above, this is database-only —
+`--sync-config-db` pushes it, and the change takes effect on the next ticket
+the dispatcher claims, no redeploy.
+
 ## Next
 
 - [Switching providers and API keys](overrides.md)

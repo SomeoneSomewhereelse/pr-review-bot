@@ -36,6 +36,7 @@ Every setting this service reads. `.env.config` holds operational settings and i
 | `DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` | `float` | `3600.0` | `.env.config` |
 | `DISPATCHER_REREVIEW_COOLDOWN_FACTOR` | `float` | `2.0` | `.env.config` |
 | `DISPATCHER_NOTICE_SWEEP_BATCH_SIZE` | `int` | `20` | `.env.config` |
+| `REVIEW_DRAFT_PRS` | `bool` | `False` | `.env.config` |
 | `KEY_USAGE_TOKEN_CAP` | `int | None` | `None` | `.env.config` |
 | `KEY_USAGE_RESET_TIME_UTC` | `time` | `04:00:00` | `.env.config` |
 | `UPTIMEROBOT_API_KEY` | `str` | *(empty)* | `.env` |

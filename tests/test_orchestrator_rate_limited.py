@@ -29,7 +29,7 @@ async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo, draft=False),
     )
     posted = []
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: posted.append(a))
@@ -59,7 +59,7 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo, draft=False),
     )
     posted = {}
 
@@ -93,7 +93,7 @@ async def test_run_review_raises_on_rate_limited(monkeypatch):
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
-        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo),
+        lambda repo, pr: SimpleNamespace(text="diff", repo_full_name=repo, draft=False),
     )
     monkeypatch.setattr(orchestrator.github_app, "upsert_comment", lambda *a, **k: None)
 

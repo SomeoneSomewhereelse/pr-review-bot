@@ -1431,6 +1431,44 @@ async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypa
     usage_cap_config.reset_override_cache()
 
 
+async def test_review_draft_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
+    """Same fail-safe shape as the other refreshes: a failing DB read must
+    degrade the cache to "no override" rather than keep a stale value."""
+    from app.queue import dispatcher, review_draft_config, store
+
+    review_draft_config.set_override_cache(True)
+
+    def _boom():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(store, "get_review_draft_override", _boom)
+    await dispatcher._refresh_review_draft_override()
+    monkeypatch.setattr(settings, "review_draft_prs", False)
+    assert review_draft_config.effective_review_draft_prs() is False
+    review_draft_config.reset_override_cache()
+
+
+async def test_process_next_due_refreshes_the_review_draft_override(monkeypatch):
+    """The refresh must run once per claimed ticket, same cadence as the
+    other overrides, so a DB-flipped value takes effect on the next ticket
+    with no redeploy."""
+    from app.queue import review_draft_config
+
+    _stub_comments(monkeypatch)
+    _enqueue(pr=1)
+    monkeypatch.setattr(store, "get_review_draft_override", lambda: True)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    await dispatcher.process_next_due(NOW)
+
+    assert review_draft_config.effective_review_draft_prs() is True
+    review_draft_config.reset_override_cache()
+
+
 async def test_under_cap_still_respects_the_blocked_provider_gate(monkeypatch, db_exec):
     """The cap check and the reactive blocked-provider gate are two
     independent gates in sequence: when the cap is configured but current

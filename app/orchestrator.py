@@ -28,7 +28,7 @@ from app.providers.active_model import active_model
 from app.providers.base import RateLimited
 from app.providers.key_index import active_key_index
 from app.providers.pricing import estimate_cost_usd
-from app.queue import store
+from app.queue import review_draft_config, store
 from app.specialists.performance import run_performance_specialist
 from app.specialists.quality import run_quality_specialist
 from app.specialists.schemas import ReviewResult, SpecialistResult
@@ -62,12 +62,14 @@ class ReviewRateLimited:
 
 @dataclass
 class ReviewSkipped:
-    """Nothing to review: the diff has no substantive content (e.g. an empty
-    merge commit) -- no specialist ran, no comment was posted, no dashboard
-    row was recorded. Deliberately narrower than the oversized/binary-diff
-    handling already in diff_utils.py/github_app.py, which produce real
-    content worth a specialist's opinion; this is only the "there is
-    genuinely nothing here" case."""
+    """Nothing to review: either the diff has no substantive content (e.g.
+    an empty merge commit) or the PR is a draft and review_draft_config says
+    drafts aren't reviewed -- no specialist ran, no comment was posted, no
+    dashboard row was recorded. The empty-diff case is deliberately narrower
+    than the oversized/binary-diff handling already in
+    diff_utils.py/github_app.py, which produce real content worth a
+    specialist's opinion; this is only the "there is genuinely nothing here"
+    case."""
 
 
 async def attempt_review(
@@ -101,6 +103,10 @@ async def attempt_review(
             logger.exception(
                 "failed to migrate renamed repo %s -> %s", repo_full_name, diff.repo_full_name
             )
+
+    if diff.draft and not review_draft_config.effective_review_draft_prs():
+        return ReviewSkipped()
+
     annotated = annotate_and_cap(diff.text)
 
     if not annotated.text.strip():

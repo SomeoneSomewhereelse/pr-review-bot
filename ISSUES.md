@@ -455,10 +455,37 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
 - **Why it matters:** likely unwanted noise/cost on work-in-progress PRs,
   but this is a product-scope decision, not a clear bug — needs a call on
   intended behavior before speccing a fix.
-- **Status:** open (needs a product decision first).
+- **Status:** closed (2026-08-21).
 - **Follow-up:** decide whether drafts should be skipped until
   `ready_for_review`, and if so, add a `pull_request.draft` check plus a
   handler for the `ready_for_review` action.
+- **Resolution:** Product decision: skip drafts by default, but make it a
+  live-tunable knob rather than hardcoded — a new `REVIEW_DRAFT_PRS` setting
+  (default `False`), database-only like the re-review cooldown/usage-cap
+  settings (`app/queue/review_draft_config.py`, `runtime_config.review_draft_prs`,
+  refreshed once per claimed ticket in the dispatcher, pushed via
+  `scripts/deploy.py --sync-config-db` — never a Render env var, no redeploy
+  needed to flip it).
+
+  The check itself lives in `orchestrator.attempt_review`, not the webhook:
+  `PrDiff` (`app/github_app.py`) now carries the PR's CURRENT `draft` status,
+  fetched for free off the same `PullRequest` object the diff fetch already
+  needs. `attempt_review` returns `ReviewSkipped` (the same outcome/ticket-
+  discard mechanism built for the empty-diff gap, renamed
+  `store.discard_empty_diff_ticket` → `discard_skipped_ticket` since it now
+  serves both causes) when `diff.draft and not
+  review_draft_config.effective_review_draft_prs()` — before any specialist
+  call, comment post, or dashboard record.
+
+  Checking live status at dispatch time (rather than a snapshot from
+  whichever webhook action produced the ticket) means `converted_to_draft`
+  needs no separate webhook handling: any ticket re-armed by a later push
+  while the PR is/becomes a draft is caught uniformly regardless of which
+  event triggered it. The one webhook change needed is adding
+  `"ready_for_review"` to `app/webhook.py`'s `_REVIEW_TRIGGER_ACTIONS` —
+  GitHub fires it independent of any push, which is the only way "marked
+  ready with zero new commits" can trigger a review at all when drafts are
+  otherwise skipped.
 
 ### GitHub App installation revoked, or app reinstalled, mid-process
 
@@ -639,7 +666,9 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
   verify HMAC → 202 immediately → review in the background), so instead the
   dispatcher discards it after the fact. `queue/dispatcher.py`'s
   `process_next_due` handles `ReviewSkipped` via a new
-  `store.discard_empty_diff_ticket(ticket_id, now)`, which deletes the
+  `store.discard_skipped_ticket(ticket_id, now)` (renamed from
+  `discard_empty_diff_ticket` on 2026-08-21 once the draft-PR gap gave it a
+  second caller), which deletes the
   ticket row outright — unless a push landed on the same PR while this
   ticket was being processed (`rereview_requested`, set by a concurrent
   `enqueue_or_update`), in which case that (possibly non-empty) push must

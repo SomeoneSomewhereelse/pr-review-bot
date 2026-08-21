@@ -314,6 +314,10 @@ class PrDiff:
     # was stored -- GitHub transparently redirects old-name requests rather
     # than erroring, so this is the only way a caller can notice.
     repo_full_name: str
+    # The PR's CURRENT draft status (not a snapshot from whenever a webhook
+    # last fired) -- fetched for free off the same PullRequest object
+    # already needed for the diff, so a live draft check costs no extra call.
+    draft: bool
 
 
 def fetch_pr_diff(repo_full_name: str, pr_number: int) -> PrDiff:
@@ -333,7 +337,7 @@ def fetch_pr_diff(repo_full_name: str, pr_number: int) -> PrDiff:
         header = f"diff --git a/{f.filename} b/{f.filename}"
         patch = f.patch if f.patch else "(binary file or no textual diff available)"
         chunks.append(f"{header}\n{patch}")
-    return PrDiff(text="\n".join(chunks), repo_full_name=repo.full_name)
+    return PrDiff(text="\n".join(chunks), repo_full_name=repo.full_name, draft=pr.draft)
 
 
 def upsert_comment(

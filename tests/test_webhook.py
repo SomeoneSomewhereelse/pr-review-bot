@@ -99,6 +99,30 @@ async def test_opened_action_enqueues_ticket():
     assert ticket.head_sha == "abc123"
 
 
+async def test_ready_for_review_action_enqueues_ticket():
+    """GitHub fires this independent of any push -- the only way a draft PR
+    marked ready with zero new commits still gets reviewed (ISSUES.md's
+    'Draft PRs are reviewed identically to ready-for-review PRs' gap)."""
+    payload = {
+        "action": "ready_for_review",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 8, "head": {"sha": "abc123"}, "draft": False},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "77777777-7777-7777-7777-777777777777",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    ticket = store.claim_next_due(now="2026-01-01T12:00:00+00:00")
+    assert ticket is not None
+    assert ticket.repo_full_name == "owner/repo"
+    assert ticket.pr_number == 8
+
+
 async def test_ignored_action_does_not_enqueue():
     payload = {
         "action": "labeled",

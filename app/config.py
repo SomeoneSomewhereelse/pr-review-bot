@@ -41,6 +41,7 @@ OPERATIONAL_KEYS = frozenset(
         "RENDER_SERVICE_NAME",
         "GITHUB_TARGET_REPO",
         "PUBLIC_BASE_URL",
+        "REVIEW_DRAFT_PRS",
     }
 )
 
@@ -121,6 +122,13 @@ class Settings(BaseSettings):
     # "no limit" in SQLite, silently reverting to the unbounded pre-fix
     # behavior this setting exists to prevent.
     dispatcher_notice_sweep_batch_size: int = Field(default=20, gt=0)
+
+    # --- Draft PRs. Database-only, like the cooldown/usage-cap settings
+    # above -- never a Render env var, so an operator can flip it with no
+    # redeploy (uv run python -m scripts.deploy --sync-config-db). False
+    # (the default) skips a review while a PR is a draft; ready_for_review
+    # still triggers one even with zero new commits (see app/webhook.py).
+    review_draft_prs: bool = False
 
     # --- Proactive per-key daily usage cap. Defaults to None (feature off): a
     # deployment that sets no env var behaves exactly as before. The reset

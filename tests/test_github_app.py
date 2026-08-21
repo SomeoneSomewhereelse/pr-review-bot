@@ -47,6 +47,7 @@ def _pull_json():
         "id": 1,
         "title": "test PR",
         "state": "open",
+        "draft": False,
         "url": PR_API_URL,
         "issue_url": ISSUE_API_URL,
     }
@@ -213,6 +214,19 @@ def test_fetch_pr_diff_concatenates_file_patches(fake_transport):
     assert "-old" in diff.text
     assert "+new" in diff.text
     assert diff.repo_full_name == REPO_FULL_NAME
+    assert diff.draft is False
+
+
+def test_fetch_pr_diff_reports_a_draft_pr(fake_transport):
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}", _repo_json())
+    fake_transport.route(
+        "GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}", {**_pull_json(), "draft": True}
+    )
+    fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}/files", [])
+
+    diff = github_app.fetch_pr_diff(REPO_FULL_NAME, PR_NUMBER)
+
+    assert diff.draft is True
 
 
 def test_fetch_pr_diff_returns_the_canonical_repo_name_after_a_rename(fake_transport):

@@ -17,9 +17,13 @@ logger = logging.getLogger(__name__)
 
 # PR actions we react to. GitHub sends the `pull_request` event for many
 # actions (closed, labeled, assigned, ...) — per SPEC.md's confirmed
-# decision, only these three trigger a review; everything else is a no-op
-# except _CANCEL_ACTIONS below.
-_REVIEW_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
+# decision, only these four trigger a review; everything else is a no-op
+# except _CANCEL_ACTIONS below. `ready_for_review` fires independent of any
+# push -- it's the only way a draft PR marked ready with zero new commits
+# still gets a review when review_draft_config skips drafts (whether a PR is
+# CURRENTLY a draft is checked live at dispatch time, not from this payload
+# -- see orchestrator.attempt_review).
+_REVIEW_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize", "ready_for_review"}
 
 # "closed" covers both a merge and a plain close (distinguished only by
 # pull_request.merged, which doesn't matter here) -- either way the PR is no

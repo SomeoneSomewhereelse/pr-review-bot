@@ -91,12 +91,13 @@ _GENERIC_OPERATIONAL_ENV_ATTRS = {
     "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE": "dispatcher_notice_sweep_batch_size",
 }
 
-# These 5 have their own DB-backed live-override mechanism (runtime_config,
-# via cooldown_config.py/usage_cap_config.py) -- unlike every other
-# operational key, they are never a Render env var at all (see render.yaml
-# and the 2026-08-17 "two sources of truth" design note): --sync-config-db
-# (and --sync-env, which calls the same push) mirrors .env.config straight
-# into runtime_config instead, which is what the app actually reads.
+# These 6 have their own DB-backed live-override mechanism (runtime_config,
+# via cooldown_config.py/usage_cap_config.py/review_draft_config.py) --
+# unlike every other operational key, they are never a Render env var at all
+# (see render.yaml and the 2026-08-17 "two sources of truth" design note):
+# --sync-config-db (and --sync-env, which calls the same push) mirrors
+# .env.config straight into runtime_config instead, which is what the app
+# actually reads.
 _DB_SYNCED_OPERATIONAL_KEYS = frozenset(
     {
         "KEY_USAGE_TOKEN_CAP",
@@ -104,6 +105,7 @@ _DB_SYNCED_OPERATIONAL_KEYS = frozenset(
         "DISPATCHER_REREVIEW_COOLDOWN_SECONDS",
         "DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS",
         "DISPATCHER_REREVIEW_COOLDOWN_FACTOR",
+        "REVIEW_DRAFT_PRS",
     }
 )
 
@@ -1042,12 +1044,13 @@ _DB_SYNCED_COLUMNS = (
     "cooldown_factor",
     "key_usage_token_cap",
     "key_usage_reset_time_utc",
+    "review_draft_prs",
 )
 
 
 def sync_config_db() -> int:
-    """Push .env.config's usage-cap/cooldown values into runtime_config,
-    unconditionally -- these 5 keys are never a Render env var (see
+    """Push .env.config's usage-cap/cooldown/review-draft values into
+    runtime_config, unconditionally -- these 6 keys are never a Render env var (see
     render.yaml and _DB_SYNCED_OPERATIONAL_KEYS above), so this is their only
     sync path. .env.config is the source of truth; the DB is only a mirror of
     it that the dispatcher actually reads (app/queue/cooldown_config.py,
@@ -1089,7 +1092,7 @@ def sync_config_db() -> int:
         return 2
     tokens = settings.key_usage_token_cap
     reset = settings.key_usage_reset_time_utc.isoformat()
-    wanted = (base, cap, factor, tokens, reset)
+    wanted = (base, cap, factor, tokens, reset, settings.review_draft_prs)
 
     print(_verify_database_url_reachable())
     now = datetime.now(timezone.utc).isoformat()

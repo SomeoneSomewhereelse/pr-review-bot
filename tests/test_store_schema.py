@@ -18,7 +18,7 @@ EXPECTED_COLUMNS = {
         "cooldown_max_seconds", "cooldown_factor", "gemini_key_index",
         "groq_key_index", "vertex_key_index", "gemini_model", "groq_model",
         "vertex_model", "key_usage_token_cap",
-        "key_usage_reset_time_utc",
+        "key_usage_reset_time_utc", "review_draft_prs",
     },
     "reviews": {
         "id", "repo_full_name", "pr_number", "provider", "model", "comment_id",

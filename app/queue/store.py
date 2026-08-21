@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS runtime_config (
     groq_model               TEXT,
     vertex_model             TEXT,
     key_usage_token_cap      INTEGER,
-    key_usage_reset_time_utc TEXT
+    key_usage_reset_time_utc TEXT,
+    review_draft_prs         BOOLEAN
 );
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -453,11 +454,12 @@ def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> None:
         )
 
 
-def discard_empty_diff_ticket(ticket_id: int, now: str) -> None:
-    """Roll back a ticket claimed for a review that turned out to have an
-    empty diff (orchestrator.ReviewSkipped): no comment was ever posted and
-    nothing was reviewed, so the ticket must leave no trace of this run --
-    unlike a normal completion, calling finalize_review here would wrongly
+def discard_skipped_ticket(ticket_id: int, now: str) -> None:
+    """Roll back a ticket claimed for a review that turned out to need no
+    review at all (orchestrator.ReviewSkipped: an empty diff, or a draft PR
+    that review_draft_config says not to review): no comment was ever posted
+    and nothing was reviewed, so the ticket must leave no trace of this run
+    -- unlike a normal completion, calling finalize_review here would wrongly
     stamp last_reviewed_at/comment_id and make a nonexistent review look
     "visible" to later preservation logic (dispatcher's _has_visible_review).
 
@@ -935,4 +937,33 @@ def set_usage_cap_override(tokens: int | None, reset: str | None, now: str) -> N
             "key_usage_reset_time_utc = EXCLUDED.key_usage_reset_time_utc, "
             "updated_at = EXCLUDED.updated_at",
             (tokens, reset, now),
+        )
+
+
+def get_review_draft_override() -> bool | None:
+    """The draft-PR review override in force, or None when unset (falls back
+    to Settings.review_draft_prs).
+
+    Synchronous like every other store function -- async callers use
+    asyncio.to_thread.
+    """
+    with _require_pool().connection() as conn:
+        row = conn.execute(
+            "SELECT review_draft_prs FROM runtime_config WHERE id = 1"
+        ).fetchone()
+    return (row or {}).get("review_draft_prs")
+
+
+def set_review_draft_override(value: bool | None, now: str) -> None:
+    """Set the override, or clear it with value=None.
+
+    Upserts the singleton row -- same CHECK (id = 1) guarantee as
+    set_provider_override.
+    """
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "INSERT INTO runtime_config (id, review_draft_prs, updated_at) VALUES (1, %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET review_draft_prs = EXCLUDED.review_draft_prs, "
+            "updated_at = EXCLUDED.updated_at",
+            (value, now),
         )

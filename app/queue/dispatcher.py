@@ -37,7 +37,7 @@ from app.formatting import (
 from app.orchestrator import ReviewRateLimited, ReviewSkipped, attempt_review
 from app.providers import active, active_model, key_index
 from app.providers.active import active_provider
-from app.queue import cooldown_config, store, usage_cap_config
+from app.queue import cooldown_config, review_draft_config, store, usage_cap_config
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +227,18 @@ async def _refresh_usage_cap_overrides() -> None:
         usage_cap_config.reset_override_cache()
 
 
+async def _refresh_review_draft_override() -> None:
+    """Refresh the draft-PR review override once per claimed ticket, same
+    cadence and fail-safe shape as the refreshes above: degrade to the env
+    default rather than keep a stale cache."""
+    try:
+        value = await asyncio.to_thread(store.get_review_draft_override)
+        review_draft_config.set_override_cache(value)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to refresh review-draft override; using env default")
+        review_draft_config.reset_override_cache()
+
+
 async def process_next_due(now: datetime) -> StepResult:
     """Claim and process one due ticket. Returns what happened.
 
@@ -276,6 +288,8 @@ async def process_next_due(now: datetime) -> StepResult:
     await _refresh_model_overrides()
 
     await _refresh_usage_cap_overrides()
+
+    await _refresh_review_draft_override()
 
     if ticket.notice_not_before is not None:
         try:
@@ -452,7 +466,7 @@ async def process_next_due(now: datetime) -> StepResult:
         return StepResult(action="deferred", ticket_id=ticket.id)
 
     if isinstance(outcome, ReviewSkipped):
-        await asyncio.to_thread(store.discard_empty_diff_ticket, ticket.id, now.isoformat())
+        await asyncio.to_thread(store.discard_skipped_ticket, ticket.id, now.isoformat())
         return StepResult(action="skipped", ticket_id=ticket.id)
 
     if isinstance(outcome, ReviewRateLimited):

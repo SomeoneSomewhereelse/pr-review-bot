@@ -158,20 +158,20 @@ def test_push_to_cancelled_ticket_respects_cooldown_when_previously_reviewed(mon
     assert store.get_ticket(tid).status == "deferred"        # still cooling down
 
 
-def test_discard_empty_diff_ticket_deletes_a_clean_ticket():
+def test_discard_skipped_ticket_deletes_a_clean_ticket():
     tid = _enqueue()
     store.claim_next_due(now=T0)          # -> running
-    store.discard_empty_diff_ticket(tid, now=T1)
+    store.discard_skipped_ticket(tid, now=T1)
     assert store.get_ticket(tid) is None
 
 
-def test_discard_empty_diff_ticket_rearms_pending_when_a_push_landed_mid_flight():
+def test_discard_skipped_ticket_rearms_pending_when_a_push_landed_mid_flight():
     tid = _enqueue(sha="sha1")
     store.claim_next_due(now=T0)          # -> running
     store.enqueue_or_update(
         repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
     )  # sets rereview_requested=1 without touching status
-    store.discard_empty_diff_ticket(tid, now=T1)
+    store.discard_skipped_ticket(tid, now=T1)
     t = store.get_ticket(tid)
     assert t is not None
     assert t.status == "pending"
@@ -179,8 +179,8 @@ def test_discard_empty_diff_ticket_rearms_pending_when_a_push_landed_mid_flight(
     assert t.head_sha == "sha2"           # the newer push's sha is preserved
 
 
-def test_discard_empty_diff_ticket_is_a_noop_when_no_ticket_exists():
-    store.discard_empty_diff_ticket(999999, now=T1)  # must not raise
+def test_discard_skipped_ticket_is_a_noop_when_no_ticket_exists():
+    store.discard_skipped_ticket(999999, now=T1)  # must not raise
 
 
 def test_migrate_repo_rename_moves_a_ticket_to_the_new_name():
@@ -597,6 +597,35 @@ def test_cooldown_override_and_provider_override_coexist():
     store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T1)
     assert store.get_provider_override() == "groq"
     assert store.get_cooldown_overrides() == (30.0, 600.0, 1.5)
+
+
+def test_review_draft_override_defaults_to_none():
+    assert store.get_review_draft_override() is None
+
+
+def test_set_then_get_review_draft_override():
+    store.set_review_draft_override(True, now=T0)
+    assert store.get_review_draft_override() is True
+
+
+def test_setting_review_draft_override_twice_replaces_rather_than_inserting(db_query):
+    store.set_review_draft_override(True, now=T0)
+    store.set_review_draft_override(False, now=T1)
+    assert store.get_review_draft_override() is False
+    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 1
+
+
+def test_clearing_review_draft_override_restores_none():
+    store.set_review_draft_override(True, now=T0)
+    store.set_review_draft_override(None, now=T1)
+    assert store.get_review_draft_override() is None
+
+
+def test_review_draft_override_and_provider_override_coexist():
+    store.set_provider_override("groq", T0)
+    store.set_review_draft_override(True, now=T1)
+    assert store.get_provider_override() == "groq"
+    assert store.get_review_draft_override() is True
 
 
 def test_new_ticket_has_cooldown_level_zero():
