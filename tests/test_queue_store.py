@@ -183,6 +183,50 @@ def test_discard_skipped_ticket_is_a_noop_when_no_ticket_exists():
     store.discard_skipped_ticket(999999, now=T1)  # must not raise
 
 
+def test_discard_skipped_ticket_preserves_a_previously_reviewed_tickets_state(db_exec):
+    """A ticket that was already reviewed once must not lose its cooldown
+    escalation / comment tracking just because a LATER push happens to be a
+    draft or an empty diff -- otherwise a dummy empty-diff/draft push could
+    be used to reset the anti-churn cooldown deliberately."""
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL, rereview_cooldown_level=0)
+    store.set_comment_id(tid, 4242)
+    db_exec("UPDATE tickets SET cooldown_level = 3, status = 'running' WHERE id = %s", (tid,))
+
+    store.discard_skipped_ticket(tid, now=T1)
+
+    t = store.get_ticket(tid)
+    assert t is not None
+    assert t.status == "done"
+    assert t.last_reviewed_at == T0
+    assert t.comment_id == 4242
+    assert t.cooldown_level == 3
+    assert t.not_before is None
+    assert t.rereview_requested == 0
+
+
+def test_discard_skipped_ticket_still_rearms_pending_over_preserving_done_state(db_exec):
+    """A concurrent push mid-flight must win over preserving the prior
+    review's 'done' state -- that push might carry real content and must
+    never be lost."""
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.finalize_review(tid, now=T0, rereview_not_before=T_COOL, rereview_cooldown_level=0)
+    db_exec(
+        "UPDATE tickets SET status = 'running', rereview_requested = 1, head_sha = 'sha3' "
+        "WHERE id = %s",
+        (tid,),
+    )
+
+    store.discard_skipped_ticket(tid, now=T1)
+
+    t = store.get_ticket(tid)
+    assert t.status == "pending"
+    assert t.rereview_requested == 0
+    assert t.head_sha == "sha3"
+
+
 def test_migrate_repo_rename_moves_a_ticket_to_the_new_name():
     tid = _enqueue(repo="owner/old-name", pr=1)
     store.migrate_repo_rename("owner/old-name", "owner/new-name", now=T1)

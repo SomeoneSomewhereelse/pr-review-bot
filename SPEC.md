@@ -641,7 +641,14 @@ to recreate it, the id GitHub returns differs from the one on file
 (`dispatcher._comment_was_recreated`); that mismatch nulls `last_reviewed_at`
 (`store.clear_visible_review`) rather than let unrecoverable content keep
 being treated as a "visible" review by the cooldown/placeholder-vs-footnote
-logic above. The column is also available for the design doc's §13 "ping
+logic above. The claim-time schedule-notice clear (`clear_schedule_notice`)
+detects loss differently rather than via that same mismatch check: unlike
+`append_schedule_notice`/`append_review_footnote`, it never creates a
+fallback comment when none is found — it returns `None` outright — so a
+confirmed-gone comment there is `comment is None` (with a `comment_id` still
+on file), not an id mismatch; found missing in an independent review
+(2026-08-21) as the one comment-touching path that hadn't been wired up
+this way. The column is also available for the design doc's §13 "ping
 comment" future feature, which remains out of scope.
 
 **Out of scope** (mostly unchanged from the design doc, all deliberate — see
@@ -730,14 +737,20 @@ prompted a re-check after a retarget with no new commits of its own.
 a zero-file merge commit) short-circuits to `ReviewSkipped` before any
 specialist call, comment post, or `reviews` row — the same mechanism as the
 draft-PR skip above. The dispatcher's `process_next_due` handles
-`ReviewSkipped` via `store.discard_skipped_ticket`, which deletes the
-ticket row outright — leaving no comment and no ticket trace at all —
-unless a push landed on the same PR while the ticket was being processed
-(`rereview_requested`), in which case that possibly-non-empty push must not
-be lost, so the ticket is reset to `'pending'` instead of deleted. This is
-deliberately not `finalize_review`: that always stamps
-`last_reviewed_at`/`comment_id`, which would falsely mark a nonexistent
-review as "visible" to the preservation logic above.
+`ReviewSkipped` via `store.discard_skipped_ticket`, in priority order: (1) a
+push that landed on the same PR while the ticket was being processed
+(`rereview_requested`) always wins — that possibly-non-empty push must not
+be lost, so the ticket is reset to `'pending'`; (2) a ticket never reviewed
+before (`last_reviewed_at IS NULL`) is deleted outright, leaving no comment
+and no ticket trace at all; (3) a ticket that WAS reviewed before instead
+reverts to `'done'`, preserving `last_reviewed_at`/`comment_id`/
+`cooldown_level` untouched (2026-08-21, found by an independent review of
+this same work) — deleting it in this case would silently reset the
+re-review cooldown escalation for a PR already flagged as churny, which a
+dummy empty-diff/draft push could otherwise be used to exploit deliberately.
+This is deliberately not `finalize_review`: that always stamps
+`last_reviewed_at`/`comment_id` to *now*, which would falsely mark a
+nonexistent review as fresh/"visible" to the preservation logic above.
 
 **Fork PRs and force-pushes: confirmed non-issues, no code changed.** A PR
 is always addressed through the *base* repo's API

@@ -463,23 +463,44 @@ def discard_skipped_ticket(ticket_id: int, now: str) -> None:
     stamp last_reviewed_at/comment_id and make a nonexistent review look
     "visible" to later preservation logic (dispatcher's _has_visible_review).
 
-    Deletes the row outright, UNLESS a push landed on the same PR while this
-    ticket was being processed (rereview_requested, set by a concurrent
-    enqueue_or_update) -- that push may carry real content, so it must not
-    be lost: the ticket is reset to 'pending' (immediately due) instead of
-    deleted. No-op if the ticket no longer exists."""
+    Three outcomes, in priority order:
+    1. A push landed on the same PR while this ticket was being processed
+       (rereview_requested, set by a concurrent enqueue_or_update) -- that
+       push may carry real content, so it must not be lost: reset to
+       'pending' (immediately due) regardless of anything below.
+    2. The ticket was never reviewed before (last_reviewed_at is NULL) --
+       nothing to preserve, so the row is deleted outright, leaving no
+       trace.
+    3. The ticket WAS reviewed before -- revert to 'done', preserving
+       last_reviewed_at/comment_id/cooldown_level untouched, rather than
+       deleting. Deleting here would reset the re-review cooldown escalation
+       for a PR that's already been flagged as churny, which a dummy
+       empty-diff/draft push could otherwise be used to exploit on purpose.
+
+    No-op if the ticket no longer exists.
+    """
     with _require_pool().connection() as conn:
         cur = conn.execute(
-            "DELETE FROM tickets WHERE id = %s AND rereview_requested = 0",
+            "DELETE FROM tickets WHERE id = %s AND rereview_requested = 0 "
+            "AND last_reviewed_at IS NULL",
             (ticket_id,),
         )
-        if cur.rowcount == 0:
-            conn.execute(
-                "UPDATE tickets SET status = 'pending', not_before = NULL, attempts = 0, "
-                "rereview_requested = 0, defer_reason = NULL, updated_at = %s "
-                "WHERE id = %s AND rereview_requested = 1",
-                (now, ticket_id),
-            )
+        if cur.rowcount > 0:
+            return
+        cur = conn.execute(
+            "UPDATE tickets SET status = 'pending', not_before = NULL, attempts = 0, "
+            "rereview_requested = 0, defer_reason = NULL, updated_at = %s "
+            "WHERE id = %s AND rereview_requested = 1",
+            (now, ticket_id),
+        )
+        if cur.rowcount > 0:
+            return
+        conn.execute(
+            "UPDATE tickets SET status = 'done', not_before = NULL, "
+            "rereview_requested = 0, defer_reason = NULL, updated_at = %s "
+            "WHERE id = %s AND last_reviewed_at IS NOT NULL",
+            (now, ticket_id),
+        )
 
 
 def migrate_repo_rename(old_full_name: str, new_full_name: str, now: str) -> None:
