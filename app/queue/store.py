@@ -408,6 +408,51 @@ def finalize_review(
         )
 
 
+def set_comment_id(ticket_id: int, comment_id: int | None) -> None:
+    """Persist a comment id discovered on any route that touches the bot's
+    comment (placeholder, schedule notice, footnote, clear), independent of
+    whatever status transition that route also makes. No-op when comment_id
+    is None -- callers pass whatever a github_app call returned, and a
+    caller with nothing new to report (e.g. no comment existed to touch)
+    must never erase an already-persisted id."""
+    if comment_id is None:
+        return
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "UPDATE tickets SET comment_id = %s WHERE id = %s", (comment_id, ticket_id)
+        )
+
+
+def clear_visible_review(ticket_id: int) -> None:
+    """Mark a ticket's review as no longer visible on GitHub: its comment was
+    confirmed gone (github_app had to create a fresh one for a footnote/notice
+    rather than edit the one on file) so the content that lived in it is
+    unrecoverable. Nulls last_reviewed_at so _has_visible_review-driven
+    decisions -- cooldown re-arm timing, placeholder-vs-footnote choice --
+    reflect reality instead of a stale success record."""
+    with _require_pool().connection() as conn:
+        conn.execute("UPDATE tickets SET last_reviewed_at = NULL WHERE id = %s", (ticket_id,))
+
+
+def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> None:
+    """Cancel a queued-but-not-yet-claimed ticket when its PR closes or
+    merges, so it's never picked up and never wastes an LLM call / posts a
+    stale comment. No-op if no ticket exists, or if it's already 'running'
+    (an in-flight attempt has already committed its spend and posted its
+    comment -- see dispatcher.py's module docstring on why there's no cheap
+    way to abort it mid-flight) or already terminal ('done'/'failed'/
+    'cancelled'). A later `reopened` push revives it via enqueue_or_update's
+    existing terminal-state re-arm branch -- 'cancelled' falls into the same
+    catch-all as 'done'/'failed'."""
+    with _require_pool().connection() as conn:
+        conn.execute(
+            "UPDATE tickets SET status = 'cancelled', updated_at = %s "
+            "WHERE repo_full_name = %s AND pr_number = %s "
+            "AND status IN ('pending', 'deferred', 'retrying')",
+            (now, repo_full_name, pr_number),
+        )
+
+
 def mark_failed(ticket_id: int, now: str, error: str | None = None) -> None:
     """Mark a ticket as failed after a non-rate-limit exception from attempt_review.
 
@@ -495,7 +540,9 @@ def get_key_usage(provider: str, key_index: int, since: str) -> int:
     return int(row["tokens"])
 
 
-_TICKET_STATUSES = ("pending", "running", "deferred", "retrying", "done", "failed")
+_TICKET_STATUSES = (
+    "pending", "running", "deferred", "retrying", "done", "failed", "cancelled"
+)
 
 
 def dashboard_stats() -> dict:

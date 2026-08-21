@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from github.IssueComment import IssueComment
+
 from app import github_app
 from app.config import settings
 from app.formatting import (
@@ -96,13 +98,26 @@ async def _post_placeholder(
     now: datetime,
     comment_id: int | None = None,
     reason: Literal["provider", "usage_cap"] = "provider",
-) -> None:
-    await asyncio.to_thread(
+) -> IssueComment:
+    return await asyncio.to_thread(
         github_app.upsert_comment,
         repo,
         pr,
         format_placeholder(pr, retry_after, now, reason=reason),
         comment_id,
+    )
+
+
+def _comment_was_recreated(ticket: store.Ticket, comment: IssueComment | None) -> bool:
+    """True when the comment a footnote/notice was just written to is NOT the
+    one this ticket had on file -- i.e. the stored comment was confirmed gone
+    and github_app had to create a fresh one rather than edit it in place.
+    Signals content loss: whatever review body lived in the old comment is
+    unrecoverable."""
+    return (
+        ticket.comment_id is not None
+        and comment is not None
+        and comment.id != ticket.comment_id
     )
 
 
@@ -115,7 +130,7 @@ async def post_pending_notices(now: datetime) -> int:
     tickets = await asyncio.to_thread(store.tickets_needing_notice, now.isoformat())
     for ticket in tickets:
         try:
-            await asyncio.to_thread(
+            comment = await asyncio.to_thread(
                 github_app.append_schedule_notice,
                 ticket.repo_full_name,
                 ticket.pr_number,
@@ -129,6 +144,11 @@ async def post_pending_notices(now: datetime) -> int:
                 ),
                 ticket.comment_id,
             )
+            await asyncio.to_thread(
+                store.set_comment_id, ticket.id, comment.id if comment is not None else None
+            )
+            if _comment_was_recreated(ticket, comment):
+                await asyncio.to_thread(store.clear_visible_review, ticket.id)
             await asyncio.to_thread(
                 store.mark_notice_posted, ticket.id, ticket.not_before
             )
@@ -214,9 +234,12 @@ async def process_next_due(now: datetime) -> StepResult:
 
     if ticket.notice_not_before is not None:
         try:
-            await asyncio.to_thread(
+            comment = await asyncio.to_thread(
                 github_app.clear_schedule_notice,
                 ticket.repo_full_name, ticket.pr_number, ticket.comment_id,
+            )
+            await asyncio.to_thread(
+                store.set_comment_id, ticket.id, comment.id if comment is not None else None
             )
             await asyncio.to_thread(store.clear_notice, ticket.id)
         # a stale note is cosmetic; must not block the review
@@ -266,13 +289,16 @@ async def process_next_due(now: datetime) -> StepResult:
             now=now.isoformat(),
         )
         if not _has_visible_review(ticket):
-            await _post_placeholder(
+            comment = await _post_placeholder(
                 ticket.repo_full_name,
                 ticket.pr_number,
                 (cap_reset_at - now).total_seconds(),
                 now,
                 ticket.comment_id,
                 reason="usage_cap",
+            )
+            await asyncio.to_thread(
+                store.set_comment_id, ticket.id, comment.id if comment is not None else None
             )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
@@ -285,9 +311,12 @@ async def process_next_due(now: datetime) -> StepResult:
             now=now.isoformat(),
         )
         if not _has_visible_review(ticket):
-            await _post_placeholder(
+            comment = await _post_placeholder(
                 ticket.repo_full_name, ticket.pr_number, (blocked - now).total_seconds(), now,
                 ticket.comment_id,
+            )
+            await asyncio.to_thread(
+                store.set_comment_id, ticket.id, comment.id if comment is not None else None
             )
         return StepResult(action="deferred", ticket_id=ticket.id)
 
@@ -300,25 +329,38 @@ async def process_next_due(now: datetime) -> StepResult:
         logger.exception("review attempt failed for ticket %s", ticket.id)
         next_attempt = ticket.attempts + 1
         if next_attempt >= settings.dispatcher_max_failure_attempts:
+            comment_lost = False
             try:
                 if _has_visible_review(ticket):
                     # Preserve the good review; append a self-cleaning footnote.
-                    await asyncio.to_thread(
+                    comment = await asyncio.to_thread(
                         github_app.append_review_footnote,
                         ticket.repo_full_name,
                         ticket.pr_number,
                         format_failure_footnote(next_attempt),
                         ticket.comment_id,
                     )
+                    comment_lost = _comment_was_recreated(ticket, comment)
                 else:
                     # No good review to preserve — the notice takes the marker comment.
-                    await asyncio.to_thread(
+                    comment = await asyncio.to_thread(
                         github_app.upsert_comment,
                         ticket.repo_full_name,
                         ticket.pr_number,
                         format_failure(ticket.pr_number, next_attempt),
                         ticket.comment_id,
                     )
+                await asyncio.to_thread(
+                    store.set_comment_id,
+                    ticket.id,
+                    comment.id if comment is not None else None,
+                )
+                if comment_lost:
+                    # The bot's comment was confirmed deleted -- the review
+                    # body that lived in it is unrecoverable. Stop claiming a
+                    # review is still visible so scheduling/placeholder
+                    # decisions reflect reality.
+                    await asyncio.to_thread(store.clear_visible_review, ticket.id)
             # couldn't post the notice; don't strand as terminal
             except Exception:  # noqa: BLE001
                 logger.exception("failed to post terminal failure notice for ticket %s", ticket.id)
@@ -374,8 +416,11 @@ async def process_next_due(now: datetime) -> StepResult:
             now=now.isoformat(),
         )
         if not _has_visible_review(ticket):
-            await _post_placeholder(
+            comment = await _post_placeholder(
                 ticket.repo_full_name, ticket.pr_number, wait, now, ticket.comment_id
+            )
+            await asyncio.to_thread(
+                store.set_comment_id, ticket.id, comment.id if comment is not None else None
             )
         return StepResult(action="deferred", ticket_id=ticket.id)
 

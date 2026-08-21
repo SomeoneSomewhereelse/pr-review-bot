@@ -17,8 +17,15 @@ logger = logging.getLogger(__name__)
 
 # PR actions we react to. GitHub sends the `pull_request` event for many
 # actions (closed, labeled, assigned, ...) — per SPEC.md's confirmed
-# decision, only these three trigger a review; everything else is a no-op.
+# decision, only these three trigger a review; everything else is a no-op
+# except _CANCEL_ACTIONS below.
 _REVIEW_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize"}
+
+# "closed" covers both a merge and a plain close (distinguished only by
+# pull_request.merged, which doesn't matter here) -- either way the PR is no
+# longer actionable, so any ticket that hasn't started running yet is
+# cancelled rather than left to waste a review on it.
+_CANCEL_ACTIONS = {"closed"}
 
 router = APIRouter()
 
@@ -43,21 +50,34 @@ def _is_duplicate_delivery(delivery_id: str) -> bool:
     return False
 
 
-async def _enqueue_from_payload(payload: dict) -> None:
-    """Enqueue a durable review ticket for a triggering PR action (no-op otherwise)."""
-    if payload.get("action") not in _REVIEW_TRIGGER_ACTIONS:
+async def _handle_pull_request_payload(payload: dict) -> None:
+    """React to a `pull_request` webhook payload: enqueue a durable review
+    ticket for a triggering action, cancel a queued-but-not-yet-running
+    ticket when the PR closes or merges, or no-op for everything else."""
+    action = payload.get("action")
+    if action not in _REVIEW_TRIGGER_ACTIONS and action not in _CANCEL_ACTIONS:
         return
     pull_request = payload.get("pull_request") or {}
     repository = payload.get("repository") or {}
     repo_full_name = repository.get("full_name")
     pr_number = pull_request.get("number")
     if not repo_full_name or pr_number is None:
-        logger.warning("pull_request webhook missing repo/pr number; skipping enqueue")
+        logger.warning("pull_request webhook missing repo/pr number; skipping")
         return
     target_repos = settings.target_repos()
     if target_repos and repo_full_name.casefold() not in {r.casefold() for r in target_repos}:
         logger.info("Ignoring webhook for non-target repo %s", repo_full_name)
         return
+
+    if action in _CANCEL_ACTIONS:
+        await asyncio.to_thread(
+            store.cancel_ticket,
+            repo_full_name=repo_full_name,
+            pr_number=pr_number,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+        return
+
     head_sha = (pull_request.get("head") or {}).get("sha")
     await asyncio.to_thread(
         store.enqueue_or_update,
@@ -83,5 +103,5 @@ async def webhook(request: Request) -> Response:
         return Response(status_code=200, content="already processed")
 
     payload = json.loads(raw_body)
-    await _enqueue_from_payload(payload)
+    await _handle_pull_request_payload(payload)
     return Response(status_code=202)

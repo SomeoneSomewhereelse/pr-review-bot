@@ -85,6 +85,79 @@ def test_recover_on_startup_resets_running_to_pending():
     assert store.get_ticket(tid).status == "pending"
 
 
+def test_cancel_ticket_cancels_a_pending_ticket():
+    tid = _enqueue()
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    t = store.get_ticket(tid)
+    assert t.status == "cancelled"
+    assert t.updated_at == T1
+
+
+def test_cancel_ticket_cancels_a_deferred_ticket():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.defer_rate_limited(tid, not_before=FUTURE, now=T0)
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    assert store.get_ticket(tid).status == "cancelled"
+
+
+def test_cancel_ticket_cancels_a_retrying_ticket():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.defer_failed(tid, not_before=FUTURE, now=T0)
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    assert store.get_ticket(tid).status == "cancelled"
+
+
+def test_cancel_ticket_does_not_touch_a_running_ticket():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)          # -> running
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    assert store.get_ticket(tid).status == "running"
+
+
+def test_cancel_ticket_is_a_noop_when_no_ticket_exists():
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=999, now=T1)  # must not raise
+
+
+def test_cancel_ticket_does_not_touch_an_already_terminal_ticket():
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.mark_failed(tid, now=T0, error="boom")
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    assert store.get_ticket(tid).status == "failed"          # untouched, not re-labeled
+
+
+def test_cancelled_ticket_is_not_claimable():
+    tid = _enqueue()
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    assert store.claim_next_due(now=T1) is None
+    assert store.get_ticket(tid).status == "cancelled"
+
+
+def test_push_to_cancelled_ticket_revives_to_pending_when_never_reviewed():
+    tid = _enqueue()
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )
+    t = store.get_ticket(tid)
+    assert t.status == "pending"
+    assert t.head_sha == "sha2"
+
+
+def test_push_to_cancelled_ticket_respects_cooldown_when_previously_reviewed(monkeypatch):
+    monkeypatch.setattr(settings, "dispatcher_rereview_cooldown_seconds", 3600.0)
+    tid = _enqueue()
+    store.claim_next_due(now=T0)
+    store.finalize_review(tid, now=T0, rereview_not_before=T0, rereview_cooldown_level=0)
+    store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=1, head_sha="sha2", provider="groq", now=T1
+    )
+    assert store.get_ticket(tid).status == "deferred"        # still cooling down
+
+
 def test_defer_rate_limited_does_not_increment_attempts():
     tid = _enqueue()
     store.claim_next_due(now=T0)
@@ -243,6 +316,34 @@ def test_finalize_review_none_comment_id_does_not_erase_persisted_id():
         tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=0, comment_id=None
     )
     assert store.get_ticket(tid).comment_id == 555   # NOT overwritten to None
+
+
+def test_set_comment_id_persists_the_id():
+    tid = _enqueue()
+    store.set_comment_id(tid, 777)
+    assert store.get_ticket(tid).comment_id == 777
+
+
+def test_set_comment_id_none_is_a_noop():
+    tid = _enqueue()
+    store.finalize_review(
+        tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=0, comment_id=555
+    )
+    store.set_comment_id(tid, None)
+    assert store.get_ticket(tid).comment_id == 555
+
+
+def test_clear_visible_review_nulls_last_reviewed_at():
+    tid = _enqueue()
+    store.finalize_review(
+        tid, now=T1, rereview_not_before=T_COOL, rereview_cooldown_level=0, comment_id=555
+    )
+    assert store.get_ticket(tid).last_reviewed_at is not None
+
+    store.clear_visible_review(tid)
+    t = store.get_ticket(tid)
+    assert t.last_reviewed_at is None
+    assert t.comment_id == 555  # unrelated column untouched
 
 
 def test_finalize_review_with_flag_re_arms_deferred_at_cooldown_and_resets_attempts(db_exec):

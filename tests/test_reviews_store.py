@@ -119,6 +119,7 @@ def test_dashboard_queue_counts_includes_all_statuses_defaulted_to_zero():
     counts = store.dashboard_queue_counts()
     assert counts == {
         "pending": 1, "running": 0, "deferred": 0, "retrying": 0, "done": 0, "failed": 0,
+        "cancelled": 0,
     }
 
 

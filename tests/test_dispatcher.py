@@ -7,6 +7,7 @@ unit-tested. Uses the shared Postgres test harness and a cleared blocked_until m
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,10 +72,12 @@ def _enqueue(pr, now=NOW):
 
 def _stub_comments(monkeypatch):
     posted = []
-    monkeypatch.setattr(dispatcher.github_app, "upsert_comment",
-                        lambda repo, pr, body, comment_id=None: posted.append(
-                            (pr, body, comment_id)
-                        ))
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted.append((pr, body, comment_id))
+        return SimpleNamespace(id=comment_id)
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", fake_upsert)
     return posted
 
 
@@ -136,6 +139,32 @@ async def test_rate_limited_ticket_defers_posts_placeholder_and_blocks(monkeypat
     assert dispatcher._blocked_until["groq"] == NOW + timedelta(seconds=30)
 
 
+async def test_rate_limited_outcome_placeholder_persists_a_recreated_comment_id(
+    monkeypatch, db_exec
+):
+    """The bot's comment was deleted: upsert_comment creates a fresh one with
+    a different id than what was threaded into the call -- that new id must
+    be persisted, not silently dropped."""
+    posted = []
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted.append((pr, body, comment_id))
+        return SimpleNamespace(id=999)
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", fake_upsert)
+    tid = _enqueue(pr=2)
+    _set_comment_id(db_exec, tid, 202)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewRateLimited(retry_after=30.0)
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    await dispatcher.process_next_due(NOW)
+    assert posted[0][2] == 202                       # old id threaded into the call
+    assert store.get_ticket(tid).comment_id == 999   # new id from GitHub persisted
+
+
 async def test_blocked_provider_defers_without_calling_attempt(monkeypatch, db_exec):
     posted = _stub_comments(monkeypatch)
     tid = _enqueue(pr=3)
@@ -155,6 +184,28 @@ async def test_blocked_provider_defers_without_calling_attempt(monkeypatch, db_e
     assert called == []                            # never fired a doomed call
     assert posted and "rate limit" in posted[0][1].lower()
     assert posted[0][2] == 303                     # threaded comment_id preserved
+
+
+async def test_blocked_provider_placeholder_persists_a_recreated_comment_id(monkeypatch, db_exec):
+    posted = []
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted.append((pr, body, comment_id))
+        return SimpleNamespace(id=888)
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", fake_upsert)
+    tid = _enqueue(pr=3)
+    _set_comment_id(db_exec, tid, 303)
+    dispatcher._blocked_until["groq"] = NOW + timedelta(seconds=120)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        raise AssertionError("must not be called while blocked")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    await dispatcher.process_next_due(NOW)
+    assert posted[0][2] == 303
+    assert store.get_ticket(tid).comment_id == 888
 
 
 async def test_first_hard_failure_defers_with_backoff_not_terminal(monkeypatch):
@@ -412,17 +463,23 @@ async def test_rate_limited_outcome_then_sweep_posts_schedule_notice(monkeypatch
 
 def _stub_footnotes(monkeypatch):
     appended = []
-    monkeypatch.setattr(dispatcher.github_app, "append_review_footnote",
-                        lambda repo, pr, footnote, comment_id=None: appended.append(
-                            (pr, footnote, comment_id)
-                        ))
+
+    def fake_append(repo, pr, footnote, comment_id=None):
+        appended.append((pr, footnote, comment_id))
+        return SimpleNamespace(id=comment_id)
+
+    monkeypatch.setattr(dispatcher.github_app, "append_review_footnote", fake_append)
     return appended
 
 
 def _stub_clear_schedule(monkeypatch):
     cleared = []
-    monkeypatch.setattr(dispatcher.github_app, "clear_schedule_notice",
-                        lambda repo, pr, comment_id=None: cleared.append((pr, comment_id)))
+
+    def fake_clear(repo, pr, comment_id=None):
+        cleared.append((pr, comment_id))
+        return SimpleNamespace(id=comment_id)
+
+    monkeypatch.setattr(dispatcher.github_app, "clear_schedule_notice", fake_clear)
     return cleared
 
 
@@ -444,6 +501,41 @@ async def test_terminal_failure_appends_footnote_when_good_review_exists(monkeyp
     assert appended and appended[0][0] == 22   # footnote appended
     assert appended[0][2] == 2222               # threaded comment_id preserved
     assert posted == []                         # good review NOT overwritten
+    t = store.get_ticket(tid)
+    assert t.comment_id == 2222                 # unchanged id re-persisted, not dropped
+    assert t.last_reviewed_at is not None       # still visible -- nothing was lost
+
+
+async def test_terminal_failure_footnote_confirmed_loss_clears_visible_review(
+    monkeypatch, db_exec
+):
+    """The bot's comment was deleted: append_review_footnote has to create a
+    fresh one with a different id than what was on file. That's confirmed
+    content loss -- the new id must be persisted AND last_reviewed_at cleared
+    so later scheduling/placeholder decisions stop believing a review is
+    still visible."""
+    appended = []
+
+    def fake_append(repo, pr, footnote, comment_id=None):
+        appended.append((pr, footnote, comment_id))
+        return SimpleNamespace(id=6666)
+
+    monkeypatch.setattr(dispatcher.github_app, "append_review_footnote", fake_append)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
+    tid = _reviewed_then_pushed(27, monkeypatch)
+    _set_comment_id(db_exec, tid, 2727)
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    result = await dispatcher.process_next_due(NOW)
+    assert result.action == "failed"
+    assert appended[0][2] == 2727                # old id threaded into the call
+    t = store.get_ticket(tid)
+    assert t.comment_id == 6666                  # new id from GitHub persisted
+    assert t.last_reviewed_at is None            # visible-review flag honestly cleared
 
 
 async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch, db_exec):
@@ -465,6 +557,7 @@ async def test_terminal_failure_overwrites_when_no_good_review(monkeypatch, db_e
     assert "could not be completed" in posted[0][1].lower()
     assert posted[0][2] == 2424                  # threaded comment_id preserved
     assert appended == []                        # no footnote when nothing to preserve
+    assert store.get_ticket(tid).comment_id == 2424  # persisted, not just threaded
 
 
 async def test_terminal_notice_post_failure_defers_instead_of_stranding(monkeypatch):
@@ -635,6 +728,37 @@ async def test_claim_clears_schedule_notice_when_one_was_pending(monkeypatch, db
     assert store.get_ticket(tid).notice_not_before is None
 
 
+async def test_claim_time_clear_schedule_notice_persists_a_recreated_comment_id(
+    monkeypatch, db_exec
+):
+    """clear_schedule_notice's own id must be persisted even when the ticket's
+    review attempt fails right after -- this call site has no other route to
+    ever record a recreated id."""
+    cleared = []
+
+    def fake_clear(repo, pr, comment_id=None):
+        cleared.append((pr, comment_id))
+        return SimpleNamespace(id=6060)
+
+    monkeypatch.setattr(dispatcher.github_app, "clear_schedule_notice", fake_clear)
+    tid = _enqueue(pr=73)
+    _set_comment_id(db_exec, tid, 7373)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s, "
+        "notice_not_before=%s WHERE id=%s",
+        (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
+    )
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    await dispatcher.process_next_due(NOW)
+    assert cleared == [(73, 7373)]
+    assert store.get_ticket(tid).comment_id == 6060
+
+
 async def test_claim_does_not_call_clear_when_no_notice_pending(monkeypatch):
     _stub_comments(monkeypatch)
     cleared = _stub_clear_schedule(monkeypatch)
@@ -677,10 +801,12 @@ async def test_claim_clear_failure_does_not_block_review_attempt(monkeypatch, db
 
 def _stub_append_schedule(monkeypatch):
     posted = []
-    monkeypatch.setattr(dispatcher.github_app, "append_schedule_notice",
-                        lambda repo, pr, footnote, comment_id=None: posted.append(
-                            (pr, footnote, comment_id)
-                        ))
+
+    def fake_append(repo, pr, footnote, comment_id=None):
+        posted.append((pr, footnote, comment_id))
+        return SimpleNamespace(id=comment_id)
+
+    monkeypatch.setattr(dispatcher.github_app, "append_schedule_notice", fake_append)
     return posted
 
 
@@ -701,6 +827,35 @@ async def test_post_pending_notices_posts_for_matching_ticket(monkeypatch, db_ex
     assert posted[0][2] == 8080
     assert "13:00 UTC" in posted[0][1]
     assert store.get_ticket(tid).notice_not_before == future.isoformat()
+    assert store.get_ticket(tid).comment_id == 8080  # unchanged id re-persisted
+
+
+async def test_post_pending_notices_confirmed_loss_clears_visible_review(monkeypatch, db_exec):
+    """The bot's comment was deleted: append_schedule_notice has to create a
+    fresh one with a different id. That's confirmed content loss -- persist
+    the new id AND clear last_reviewed_at."""
+    posted = []
+
+    def fake_append(repo, pr, footnote, comment_id=None):
+        posted.append((pr, footnote, comment_id))
+        return SimpleNamespace(id=9999)
+
+    monkeypatch.setattr(dispatcher.github_app, "append_schedule_notice", fake_append)
+    tid = _enqueue(pr=84)
+    _set_comment_id(db_exec, tid, 8484)
+    future = NOW + timedelta(hours=1)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s WHERE id=%s",
+        (future.isoformat(), NOW.isoformat(), tid),
+    )
+
+    count = await dispatcher.post_pending_notices(NOW)
+
+    assert count == 1
+    assert posted[0][2] == 8484                  # old id threaded into the call
+    t = store.get_ticket(tid)
+    assert t.comment_id == 9999                  # new id from GitHub persisted
+    assert t.last_reviewed_at is None            # visible-review flag honestly cleared
 
 
 async def test_post_pending_notices_does_not_repost_when_marker_matches(monkeypatch, db_exec):
@@ -968,6 +1123,24 @@ async def test_over_token_cap_defers_without_calling_attempt_review(monkeypatch,
     assert posted and posted[0][0] == 90
     assert "usage limit" in posted[0][1].lower()
     assert posted[0][2] == 9090                  # threaded comment_id preserved
+
+
+async def test_usage_cap_placeholder_persists_a_recreated_comment_id(monkeypatch, db_exec):
+    posted = []
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted.append((pr, body, comment_id))
+        return SimpleNamespace(id=777)
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", fake_upsert)
+    monkeypatch.setattr(settings, "key_usage_token_cap", 500)
+    tid = _enqueue(pr=90)
+    _set_comment_id(db_exec, tid, 9090)
+    _record_usage(db_exec, tokens=500)
+
+    await dispatcher.process_next_due(NOW)
+    assert posted[0][2] == 9090
+    assert store.get_ticket(tid).comment_id == 777
 
 
 async def test_under_token_cap_runs_normally(monkeypatch, db_exec):

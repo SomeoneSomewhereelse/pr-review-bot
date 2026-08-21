@@ -101,7 +101,7 @@ async def test_opened_action_enqueues_ticket():
 
 async def test_ignored_action_does_not_enqueue():
     payload = {
-        "action": "closed",
+        "action": "labeled",
         "repository": {"full_name": "owner/repo"},
         "pull_request": {"number": 7, "head": {"sha": "abc123"}},
     }
@@ -109,6 +109,53 @@ async def test_ignored_action_does_not_enqueue():
     headers = {
         "X-Hub-Signature-256": _sign(body),
         "X-GitHub-Delivery": "66666666-6666-6666-6666-666666666666",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    assert store.claim_next_due(now="2026-01-01T12:00:00+00:00") is None
+
+
+async def test_closed_action_cancels_a_pending_ticket(db_query):
+    opened = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 9, "head": {"sha": "abc123"}},
+    }
+    closed = {**opened, "action": "closed"}
+    async with await _client() as c:
+        await c.post(
+            "/webhook", content=json.dumps(opened).encode(),
+            headers={
+                "X-Hub-Signature-256": _sign(json.dumps(opened).encode()),
+                "X-GitHub-Delivery": "77777777-7777-7777-7777-777777777777",
+            },
+        )
+        response = await c.post(
+            "/webhook", content=json.dumps(closed).encode(),
+            headers={
+                "X-Hub-Signature-256": _sign(json.dumps(closed).encode()),
+                "X-GitHub-Delivery": "88888888-8888-8888-8888-888888888888",
+            },
+        )
+
+    assert response.status_code == 202
+    assert db_query(
+        "SELECT status FROM tickets WHERE repo_full_name = 'owner/repo' AND pr_number = 9"
+    ) == [("cancelled",)]
+
+
+async def test_closed_action_on_untracked_pr_is_a_noop():
+    payload = {
+        "action": "closed",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 10, "head": {"sha": "abc123"}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "99999999-9999-9999-9999-999999999999",
     }
     async with await _client() as c:
         response = await c.post("/webhook", content=body, headers=headers)

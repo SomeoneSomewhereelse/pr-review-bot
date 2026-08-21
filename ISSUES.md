@@ -284,3 +284,268 @@ _Stage 3b's five parked items were all closed on 2026-08-19 (`7182a14`)._
   refusal at the top of `sync_config_db()` (or wherever the standalone
   `--sync-config-db` entry point dispatches), mirroring `sync_env()`'s
   guard shape and message.
+
+### Every full test-suite run prints a `testcontainers.postgres` deprecation warning
+
+- **Found during:** the 2026-08-21 comment-integrity fix (Design Gaps entry
+  above) — noticed in the full-suite output while verifying the fix, not a
+  review finding.
+- **What:** `tests/conftest.py:48` does `from testcontainers.postgres import
+  PostgresContainer`. Installed `testcontainers==4.15.0` emits
+  `DeprecationWarning: testcontainers.postgres is deprecated, use
+  testcontainers.community.postgres instead` the first time that import
+  runs, once per `pytest` invocation (module-level import, not per-test) —
+  visible in every full-suite run's warnings summary.
+- **Why parked:** cosmetic — every test still passes, this session's actual
+  task was the comment-integrity gap, and swapping the import is an
+  unrelated one-line change that doesn't belong bundled into that fix's
+  commit.
+- **Follow-up:** confirmed `testcontainers.community.postgres.PostgresContainer`
+  already exists and is importable in the installed 4.15.0 — change the
+  one import in `tests/conftest.py:48` and re-run the suite to confirm the
+  warning is gone and nothing else in the class's API shifted.
+
+---
+
+## Design Gaps
+
+Proactive findings, not incidents — nothing here actually happened. Produced
+by a pre-flight audit (2026-08-21) that traced hypothetical real-world
+scenarios (pre-existing PRs, deleted comments, revoked permissions, etc.)
+against the bot's actual current code, ahead of the first real-production run
+against live GitHub repos/orgs. Recorded here as reference input for
+speccing and planning that work, not as a top-to-bottom todo list. Format:
+
+```
+### <short title>
+- **Found during:** audit context
+- **What:** the gap, with file:line evidence
+- **Why it matters:** production impact if left as-is
+- **Status:** open | decided-non-issue | needs-verification
+- **Follow-up:** what closing it (or verifying it) would take
+```
+
+### Pre-existing open PRs with no further activity never get a ticket
+
+- **Found during:** 2026-08-21 pre-flight audit, scenario "a PR already open
+  when the bot is instantiated gets a new push."
+- **What:** `enqueue_or_update` (`app/queue/store.py:247-303`) is idempotent
+  and handles a `synchronize`-first arrival for an untracked PR correctly —
+  the actual scenario asked about works fine. But nothing backfills tickets
+  for PRs that never receive *any* subsequent webhook event.
+  `recover_on_startup` (`store.py:604-612`) only resets crashed `running`
+  rows back to `pending`; no code lists open PRs from GitHub and seeds
+  missing rows (confirmed absent: no `get_pulls`/`list_pulls`/
+  `reconcile`/`backfill`/`seed` call anywhere under `app/` or `scripts/`
+  besides the demo-PR creation scripts).
+- **Why it matters:** decided non-issue — see Status. Documented here so the
+  decision itself, and the reasoning, isn't lost.
+- **Status:** decided-non-issue. Once live, every PR opened after go-live
+  gets a normal `opened` event; this only exists as a one-time cutover
+  condition at first launch, not a standing gap. Accepted assumption:
+  GitHub does not retroactively fire webhooks for pre-existing PRs on
+  install, and a pre-existing PR that never gets pushed to again is out of
+  scope for the bot.
+- **Follow-up:** none planned. Optional (comms only, not code): note in
+  rollout messaging that "no bot comment" on an old PR means "never seen,"
+  not "reviewed, no findings" — so it isn't misread by a human reviewer.
+
+### Bot's own comment can be permanently lost, or silently orphaned as a footnote-only comment
+
+- **Found during:** 2026-08-21 pre-flight audit, scenario "an admin deletes
+  the bot's comment."
+- **What:** Single upserted issue comment per PR, tagged with
+  `COMMENT_MARKER` (`app/github_app.py:23`). `_find_bot_comment`
+  (`github_app.py:48-63`) tolerates a 404 on the stored id, falls back to a
+  marker scan, and `upsert_comment` (`github_app.py:303-317`) creates a new
+  comment if none is found — the common "comment deleted, next push
+  arrives" case self-heals correctly. Two real sub-gaps remain:
+  1. **Staleness:** `tickets.comment_id` is only written back on a fully
+     successful review (`dispatcher.py:386-393` → `store.py:390`, via
+     `COALESCE`). None of the other routes that touch a comment — the
+     footnote-append fallback, notice-posting, the terminal-failure comment
+     — persist the id they end up with. `mark_failed` doesn't even take a
+     `comment_id` param (`store.py:411-425`).
+  2. **Content loss:** if the comment is deleted and the *next* event is a
+     failure/notice rather than a full review, `append_review_footnote`'s
+     fallback (`github_app.py:335`) creates a brand-new comment containing
+     only the footnote text. The original review body lived solely inside
+     the deleted comment and is not recoverable — persisting the comment id
+     correctly (fix 1) does not by itself restore this content.
+- **Why it matters:** breaks CLAUDE.md's "partial failure is always
+  visible" guarantee — a viewer can end up looking at an orphaned footnote
+  with no review content and no indication a review ever existed, and the
+  DB can point at a dead comment id indefinitely.
+- **Status:** closed (2026-08-21).
+- **Follow-up:** (a) persist the comment id from every route that
+  finds/creates/edits a comment, not just full success; (b) separately
+  decide how to handle confirmed content loss — either persist enough of
+  the last-rendered review body to repost in full on recreate, or treat a
+  confirmed-missing target comment as "needs a fresh full re-review"
+  instead of a bare footnote post.
+- **Resolution:** (a) `store.set_comment_id` — a small, independent,
+  no-op-on-None write — is now called from every dispatcher call site that
+  touches a comment (`_post_placeholder`'s three callers, the claim-time
+  `clear_schedule_notice`, `post_pending_notices`, and the terminal-failure
+  footnote/overwrite branch), so whatever id github_app actually returns is
+  always persisted, not just on full success. (b) went with the
+  fresh-full-re-review option rather than persisting review bodies:
+  `dispatcher._comment_was_recreated` compares the id a footnote/notice call
+  returns against the ticket's stored id; on a mismatch (comment confirmed
+  deleted and recreated), `store.clear_visible_review` nulls
+  `last_reviewed_at`, so `_has_visible_review` — and everything gated on it
+  (cooldown re-arm timing, placeholder-vs-footnote choice) — honestly
+  reflects that no review is visible, rather than reconstructing
+  possibly-stale content. `finalize_review`'s own path is unaffected: a full
+  review is always complete content regardless of whether its target
+  comment was found or newly created, so it was never at risk. No
+  github_app.py changes were needed — the id-comparison lives entirely in
+  the dispatcher.
+
+### No ticket cancellation when a PR is closed or merged mid-review
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** `closed` is an intentionally-ignored `pull_request` action
+  (`app/webhook.py:19`, `_REVIEW_TRIGGER_ACTIONS` at line 21 excludes it),
+  but nothing cancels a `pending`/`running` ticket that already exists for
+  that PR when it closes or merges. `orchestrator.attempt_review` runs to
+  completion regardless and still calls `upsert_comment`
+  (`orchestrator.py:121-124`).
+- **Why it matters:** wasted LLM spend and a stale/pointless review comment
+  posted to a PR that's no longer actionable. Not a crash — GitHub allows
+  commenting on closed PRs — just cost and noise.
+- **Status:** closed (2026-08-21).
+- **Follow-up:** handle the `closed` action to cancel/skip any
+  pending-or-running ticket for that `(repo_full_name, pr_number)`.
+- **Resolution:** scoped down from "pending-or-running" to
+  pending/deferred/retrying only — a `'running'` ticket is a single
+  in-flight `await attempt_review(...)` in the dispatcher's one serial
+  consumer loop with no cancellation token threaded through
+  orchestrator/specialists, and `orchestrator.attempt_review` posts its
+  comment *before* returning (`orchestrator.py:122-124`), so by the time a
+  closure could even be checked, the comment's already live — aborting it
+  would mean threading ticket/queue awareness into `orchestrator.py`, which
+  the module boundary (`app/CLAUDE.md`) deliberately keeps ignorant of
+  queue state. Accepted as a residual: the race window (closed landing in
+  the few-second gap between claim and completion) is narrow, and the fix
+  below already captures the overwhelming majority of the waste. Added a
+  new terminal ticket status, `'cancelled'`, and
+  `store.cancel_ticket(repo_full_name, pr_number, now)` — a single
+  `UPDATE ... WHERE status IN ('pending','deferred','retrying')`, so it's a
+  no-op against a running or already-terminal ticket by construction, no
+  branching needed. `app/webhook.py`'s `_enqueue_from_payload` became
+  `_handle_pull_request_payload`, branching on a new `_CANCEL_ACTIONS =
+  {"closed"}` (covers both merge and plain-close — GitHub sends the same
+  action string for both) alongside the existing trigger actions. Revival
+  on a later `reopened` needed zero new code: `enqueue_or_update`'s
+  existing terminal-state re-arm branch (`store.py`, previously handling
+  only `'done'`/`'failed'`) already catches any non-active status, so
+  `'cancelled'` re-arms through the same `_due_after_cooldown` path.
+  `_TICKET_STATUSES` and the dashboard's EN/HE string tables got the new
+  status added for display completeness.
+
+### Draft PRs are reviewed identically to ready-for-review PRs
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** No `draft` check anywhere in `app/webhook.py` (`grep -rn draft
+  app/` returns nothing). A PR opened as a draft triggers the same
+  `opened` path as any other, burning all 3 specialist calls and posting a
+  public comment immediately. `converted_to_draft`/`ready_for_review`
+  actions aren't handled either way.
+- **Why it matters:** likely unwanted noise/cost on work-in-progress PRs,
+  but this is a product-scope decision, not a clear bug — needs a call on
+  intended behavior before speccing a fix.
+- **Status:** open (needs a product decision first).
+- **Follow-up:** decide whether drafts should be skipped until
+  `ready_for_review`, and if so, add a `pull_request.draft` check plus a
+  handler for the `ready_for_review` action.
+
+### GitHub App installation revoked, or app reinstalled, mid-process
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** `settings.github_app_installation_id` is resolved once at
+  process startup (`app/main.py:45-56`) and cached for the process
+  lifetime (`app/github_app.py:108-124`). If permissions are revoked or the
+  app is uninstalled/reinstalled (new installation id) while the process is
+  running, every subsequent GitHub call fails — including the terminal-
+  failure comment the dispatcher tries to post to report the failure
+  (`dispatcher.py:294-299` catches it generically, retries via
+  `compute_backoff`/`defer_failed` up to `DISPATCHER_MAX_FAILURE_ATTEMPTS`,
+  then hits `notice_post_ceiling`, `dispatcher.py:322-343`, and gives up
+  with only a log line).
+- **Why it matters:** the sharpest violation of "partial failure always
+  visible" found in the audit — the failure-reporting channel itself is
+  what's broken, so nothing reaches GitHub at all, silently.
+- **Status:** open.
+- **Follow-up:** needs a design decision before speccing: either (a)
+  subscribe to and handle `installation`/`installation_repositories`
+  events for proactive detection, or (b) stop caching the installation id
+  for the process lifetime and refresh it reactively on an auth/404-shaped
+  GitHub error. (b) is simpler and covers both revocation and
+  reinstall-with-new-id without new webhook subscriptions; (a) detects
+  faster but adds surface area. Worth grouping with the repo
+  rename/transfer gap below — likely the same underlying fix surface
+  (`app/github_app.py`'s installation-client resolution/caching).
+
+### Repo rename/transfer — unverified
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** Tickets and reviews are keyed on `(repo_full_name, pr_number)`
+  (`app/queue/store.py:52`). Whether a repo rename or transfer (same
+  installation, new `full_name`) is tolerated — via GitHub's redirect
+  behavior, or by resolving stale rows under the old name — was not
+  confirmed either way; no rename/transfer/private-repo fixtures exist in
+  `tests/`.
+- **Why it matters:** unknown — could range from transparent (GitHub
+  redirects) to silently orphaning existing ticket/review rows under a now-
+  wrong `repo_full_name`.
+- **Status:** needs-verification.
+- **Follow-up:** verify GitHub API behavior for a renamed/transferred repo
+  against a cached installation client; likely shares a fix surface with
+  the installation-revocation gap above.
+
+### `pull_request.edited` (e.g. base-branch retarget) never triggers a re-review
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** `_REVIEW_TRIGGER_ACTIONS` (`app/webhook.py:21`) is `{"opened",
+  "reopened", "synchronize"}` — `edited` isn't included. GitHub sends
+  `edited` for, among other things, retargeting a PR to a different base
+  branch, which can change the effective diff entirely. Not explicitly
+  confirmed as in- or out-of-scope by the audit.
+- **Why it matters:** unknown/unverified — a retargeted PR may go
+  unreviewed against its new effective diff.
+- **Status:** needs-verification.
+- **Follow-up:** confirm whether GitHub's `edited` payload distinguishes a
+  base-branch change from a title/body edit, and if so, whether it should
+  join the trigger set.
+
+### Empty diffs still fan out all 3 specialists
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** No short-circuit for a zero-change diff (e.g. an empty merge
+  commit) found in `orchestrator.attempt_review` or `specialists/base.py`;
+  the pipeline still runs all 3 LLM calls against an effectively empty
+  annotated diff. (Oversized and binary diffs *are* already handled —
+  `diff_utils.annotate_and_cap`, `app/diff_utils.py:88-101`, and
+  `github_app.fetch_pr_diff`'s binary placeholder, `github_app.py:283-300`.)
+- **Why it matters:** wasted LLM spend, no correctness break. Not
+  event-related — a content-level check, independent of which webhook
+  action triggered it.
+- **Status:** open.
+- **Follow-up:** short-circuit review when the annotated diff has no
+  substantive content.
+
+### Fork PRs and force-pushes — unverified
+
+- **Found during:** 2026-08-21 pre-flight audit, broader sweep.
+- **What:** Neither "PR from a fork vs. same-repo branch" (possible
+  permission/token differences) nor "force-push vs. normal push" (diff
+  always fetched fresh by current head, so likely fine) was explicitly
+  confirmed handled or broken by the audit.
+- **Why it matters:** unknown — likely fine for force-push (diffs are
+  fetched fresh, not incrementally), plausible risk for forks depending on
+  what token/permission scope the installation client uses for fork
+  branches.
+- **Status:** needs-verification.
+- **Follow-up:** a quick confirm pass on both before ruling them out;
+  lowest priority of this list, most likely to close as non-issues.
