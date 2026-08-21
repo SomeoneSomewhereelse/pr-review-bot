@@ -630,10 +630,29 @@ speccing and planning that work, not as a top-to-bottom todo list. Format:
   confirmed as in- or out-of-scope by the audit.
 - **Why it matters:** unknown/unverified — a retargeted PR may go
   unreviewed against its new effective diff.
-- **Status:** needs-verification.
+- **Status:** closed (2026-08-21).
 - **Follow-up:** confirm whether GitHub's `edited` payload distinguishes a
   base-branch change from a title/body edit, and if so, whether it should
   join the trigger set.
+- **Resolution:** Confirmed: every `edited` delivery carries a `changes`
+  object naming exactly what changed, keyed by field
+  (`{"title": {"from": "..."}}`, `{"body": {"from": "..."}}`, or
+  `{"base": {"ref": {...}, "sha": {...}}}` for a retarget) — a base change is
+  unambiguous. Decision: a retarget re-reviews; a title/body-only edit stays
+  a no-op.
+
+  `app/webhook.py` gets a new `_is_base_retarget(payload)` helper
+  (`"base" in payload.get("changes", {})`), not a fourth entry in
+  `_REVIEW_TRIGGER_ACTIONS` — `edited` must not trigger unconditionally, only
+  when it's specifically a base change. `_handle_pull_request_payload`
+  treats `action == "edited" and _is_base_retarget(payload)` as a trigger,
+  falling through to the existing `enqueue_or_update` call unchanged — no new
+  store logic needed, since that function already handles every ticket state
+  correctly regardless of what triggered it. `fetch_pr_diff` was already
+  computing the diff against the CURRENT base live on every call (never a
+  stored/stale one), so the only real gap was that nothing prompted a
+  re-check after a retarget with no new commits; a later unrelated push
+  would have picked up the new base's diff anyway, just with no urgency.
 
 ### Empty diffs still fan out all 3 specialists
 

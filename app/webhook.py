@@ -31,6 +31,18 @@ _REVIEW_TRIGGER_ACTIONS = {"opened", "reopened", "synchronize", "ready_for_revie
 # cancelled rather than left to waste a review on it.
 _CANCEL_ACTIONS = {"closed"}
 
+
+def _is_base_retarget(payload: dict) -> bool:
+    """True only for an `edited` delivery that changed the PR's base branch.
+
+    GitHub fires `edited` for title/body edits too, which must NOT trigger a
+    review -- only a base change can change the effective diff. The payload
+    names exactly what changed in `changes`, keyed by field name (e.g.
+    `{"title": {"from": "..."}}` vs `{"base": {"ref": {...}, "sha": {...}}}`),
+    so checking for a `base` key unambiguously identifies a retarget.
+    """
+    return "base" in (payload.get("changes") or {})
+
 router = APIRouter()
 
 _DEDUP_CAPACITY = 1000
@@ -56,10 +68,16 @@ def _is_duplicate_delivery(delivery_id: str) -> bool:
 
 async def _handle_pull_request_payload(payload: dict) -> None:
     """React to a `pull_request` webhook payload: enqueue a durable review
-    ticket for a triggering action, cancel a queued-but-not-yet-running
-    ticket when the PR closes or merges, or no-op for everything else."""
+    ticket for a triggering action (or an `edited` that retargeted the base
+    branch), cancel a queued-but-not-yet-running ticket when the PR closes
+    or merges, or no-op for everything else."""
     action = payload.get("action")
-    if action not in _REVIEW_TRIGGER_ACTIONS and action not in _CANCEL_ACTIONS:
+    is_base_retarget = action == "edited" and _is_base_retarget(payload)
+    if (
+        action not in _REVIEW_TRIGGER_ACTIONS
+        and action not in _CANCEL_ACTIONS
+        and not is_base_retarget
+    ):
         return
     pull_request = payload.get("pull_request") or {}
     repository = payload.get("repository") or {}

@@ -123,6 +123,71 @@ async def test_ready_for_review_action_enqueues_ticket():
     assert ticket.pr_number == 8
 
 
+async def test_edited_action_with_base_change_enqueues_ticket():
+    """A base-branch retarget can change the effective diff entirely --
+    ISSUES.md's 'pull_request.edited never triggers a re-review' gap."""
+    payload = {
+        "action": "edited",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 9, "head": {"sha": "abc123"}},
+        "changes": {"base": {"ref": {"from": "old-branch"}, "sha": {"from": "oldsha"}}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "88888888-8888-8888-8888-888888888888",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    ticket = store.claim_next_due(now="2026-01-01T12:00:00+00:00")
+    assert ticket is not None
+    assert ticket.repo_full_name == "owner/repo"
+    assert ticket.pr_number == 9
+
+
+async def test_edited_action_without_base_change_does_not_enqueue():
+    """A title/body-only edit must stay a no-op -- only a base retarget
+    changes the effective diff."""
+    payload = {
+        "action": "edited",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 9, "head": {"sha": "abc123"}},
+        "changes": {"title": {"from": "old title"}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "99999999-9999-9999-9999-999999999999",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    assert store.claim_next_due(now="2026-01-01T12:00:00+00:00") is None
+
+
+async def test_edited_action_with_no_changes_key_does_not_enqueue():
+    """Defensive: a malformed/incomplete edited payload with no `changes` at
+    all must never be mistaken for a base retarget."""
+    payload = {
+        "action": "edited",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 9, "head": {"sha": "abc123"}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    }
+    async with await _client() as c:
+        response = await c.post("/webhook", content=body, headers=headers)
+
+    assert response.status_code == 202
+    assert store.claim_next_due(now="2026-01-01T12:00:00+00:00") is None
+
+
 async def test_ignored_action_does_not_enqueue():
     payload = {
         "action": "labeled",
