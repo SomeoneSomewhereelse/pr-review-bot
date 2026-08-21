@@ -15,7 +15,7 @@ Runs in production on **Render** with **Supabase Postgres** for the durable queu
 | LLM providers | **Vertex (default) + free-Gemini + Groq** via `google-genai` |
 | Model | **`gemini-flash-latest`** (brief's `gemini-2.5-flash` is deprecated; pinnable via env) |
 | Structured output | Per-provider native schema + **shared Pydantic validate-repair** |
-| PR triggers | **`opened` + `reopened` + `synchronize`** (edit comment in place) |
+| PR triggers | **`opened` + `reopened` + `synchronize` + `ready_for_review`**, plus a base-branch-retargeting `edited` (edit comment in place); `closed` cancels a not-yet-run ticket instead — see section 13 |
 | GitHub auth | **GitHub App** (JWT → short-lived installation token) |
 | Build order | **Security specialist end-to-end first**, then Performance + Quality |
 | Webhook processing | Verify HMAC → **202 immediately** → background task runs review |
@@ -630,11 +630,19 @@ knob (`DATABASE_URL`, first in the list, is a connection string, not one).
 **Robust comment identity.** The bot identifies its own comment by the
 persisted `comment_id` first, falling back to an author-filtered marker scan
 (`user.type == "Bot"` + marker), so a human/other comment containing the
-marker is never edited by mistake. `finalize_review` now persists the posted
-comment's id (`comment_id` column) on successful review completion,
-guaranteeing that future edits (placeholder→result, or a re-review) locate
-the correct comment without ambiguity. The column is also available for the
-design doc's §13 "ping comment" future feature, which remains out of scope.
+marker is never edited by mistake. `store.set_comment_id` persists whatever
+id `github_app` actually returns from **every** route that finds/creates/edits
+a comment, not only a fully successful review's `finalize_review` — the
+placeholder, schedule-notice, and terminal-failure paths all persist it too
+(2026-08-21 pre-flight audit; previously only a full success did, so a
+comment touched by any other route could silently drift from the id on
+file). If the bot's comment is deleted and a later footnote/notice call has
+to recreate it, the id GitHub returns differs from the one on file
+(`dispatcher._comment_was_recreated`); that mismatch nulls `last_reviewed_at`
+(`store.clear_visible_review`) rather than let unrecoverable content keep
+being treated as a "visible" review by the cooldown/placeholder-vs-footnote
+logic above. The column is also available for the design doc's §13 "ping
+comment" future feature, which remains out of scope.
 
 **Out of scope** (mostly unchanged from the design doc, all deliberate — see
 below for the one exception): provider failover on a daily wall, a priority
@@ -661,3 +669,98 @@ per `CLAUDE.md`'s hygiene rules: confirming GitHub Models actually sends a
 usable `Retry-After` header on a `429` (one deliberate call) — not yet
 performed; until it is, the `DEFAULT_RETRY_AFTER_SECONDS` fallback is what
 governs that provider's backoff.
+
+## 13. PR lifecycle edge cases (2026-08-21 pre-flight audit)
+
+A pre-flight audit ahead of the first real-production run against live
+GitHub repos traced several PR lifecycle scenarios the original design
+didn't cover. Full reasoning and alternatives considered for each:
+`ISSUES.md`'s "Design Gaps" section, which recorded them as they were found
+and closed — folded into this doc as they're settled, since these are now
+just how the system behaves, not open questions.
+
+**Cancellation on close/merge.** `closed` (GitHub sends the same action for
+both a merge and a plain close) cancels any `pending`/`deferred`/`retrying`
+ticket for that PR (`store.cancel_ticket`) rather than letting it run to
+completion and post a comment on a PR that's no longer actionable. A
+`'running'` ticket is left alone — by the time a closure could be observed,
+`attempt_review` has already committed its spend and posted its comment,
+and there is no cancellation token threaded through
+orchestrator/specialists to abort it mid-flight. A later `reopened` revives
+a `'cancelled'` ticket through the same terminal-state re-arm path
+`enqueue_or_update` already uses for `'done'`/`'failed'`.
+
+**Draft PRs skipped by default.** `REVIEW_DRAFT_PRS` (default `false`,
+database-only override — same `runtime_config` mechanism as the re-review
+cooldown/usage-cap settings, no redeploy to flip) controls whether a draft
+PR gets reviewed. `orchestrator.attempt_review` checks the PR's *live*
+`draft` status — fetched for free off the same `PullRequest` object the
+diff fetch already needs — and short-circuits to `ReviewSkipped` (no
+specialist call, no comment, no ticket left behind) when the flag says
+drafts are skipped. `ready_for_review` joins the PR-triggers set
+specifically because it's the only action that fires independent of a
+push, which is what lets a draft marked ready with zero new commits still
+get reviewed. Checking live status at dispatch time, rather than a
+snapshot from whichever webhook action produced the ticket, means
+`converted_to_draft` needs no separate webhook handling of its own.
+
+**Repo rename tolerated; cross-org transfer already bounded.** A same-org
+rename never errors (GitHub redirects old-name API requests transparently)
+but silently changes which name every future webhook reports —
+`fetch_pr_diff` surfaces GitHub's own canonical name for free (already
+resolved internally to serve the diff request), and a mismatch against the
+name a ticket is keyed on triggers `store.migrate_repo_rename` to move that
+PR's `tickets`/`reviews` rows to the new name. A transfer to an org the App
+isn't installed on genuinely 404s/403s (unlike a rename, this one really
+does error) — already covered by the existing hard-failure backoff, no new
+code needed; GitHub also stops delivering webhooks for a repo outside the
+installation's coverage, so no further waste accrues either way.
+
+**Base-branch retarget triggers a re-review.** `pull_request.edited` fires
+for title/body edits too, which must not trigger anything — only a base
+change can change the effective diff. GitHub's `changes` object on every
+`edited` delivery names exactly what changed, keyed by field name, so a
+`changes.base` key unambiguously identifies a retarget
+(`webhook._is_base_retarget`). The diff itself was already computed against
+the live base on every `fetch_pr_diff` call (never a stored/stale one), so
+this doesn't fix a wrong-diff bug — it closes the gap where nothing
+prompted a re-check after a retarget with no new commits of its own.
+
+**Empty diffs skipped entirely.** A diff with no substantive content (e.g.
+a zero-file merge commit) short-circuits to `ReviewSkipped` before any
+specialist call, comment post, or `reviews` row — the same mechanism as the
+draft-PR skip above. The dispatcher's `process_next_due` handles
+`ReviewSkipped` via `store.discard_skipped_ticket`, which deletes the
+ticket row outright — leaving no comment and no ticket trace at all —
+unless a push landed on the same PR while the ticket was being processed
+(`rereview_requested`), in which case that possibly-non-empty push must not
+be lost, so the ticket is reset to `'pending'` instead of deleted. This is
+deliberately not `finalize_review`: that always stamps
+`last_reviewed_at`/`comment_id`, which would falsely mark a nonexistent
+review as "visible" to the preservation logic above.
+
+**Fork PRs and force-pushes: confirmed non-issues, no code changed.** A PR
+is always addressed through the *base* repo's API
+(`/repos/{base-owner}/{base-repo}/pulls/{n}/...`) regardless of whether its
+head lives in a fork — `fetch_pr_diff`/`upsert_comment` never touch the fork
+directly, and GitHub computes the cross-repo diff server-side, so the
+installation token's base-repo scope (`contents: read` /
+`pull_requests: write` / `issues: write`) is sufficient for both reading the
+diff and posting the comment with no special handling. A force-push is
+indistinguishable from any other push: `synchronize` fires identically for
+both, `head_sha` is stored purely for record-keeping and is never compared
+against anything, and `fetch_pr_diff` always fetches the diff fresh against
+whatever the current head is — there is no incremental/cached diff logic
+anywhere for a rewritten history to invalidate.
+
+**GitHub App installation id: always required, never guessed.** Also
+confirmed load-bearing during this audit (a real gap, not a
+non-issue): `GITHUB_APP_INSTALLATION_ID` must be set explicitly and is
+verified against the App's actual installation at every checkpoint —
+deploy-time check, process startup, and reactively on the first hard
+review failure — rather than optionally auto-discovered once at boot. A
+confirmed-invalid installation now terminates the process (`os._exit(1)`)
+so the host platform restarts into the same loud startup check, rather than
+silently continuing under a dead credential or self-patching to a new one
+mid-run. Full setup/capture instructions:
+`guide/setup/03-install-app.md`.
