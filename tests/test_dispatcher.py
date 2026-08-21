@@ -352,6 +352,36 @@ async def test_hard_failure_terminates_the_process_when_installation_confirmed_i
     assert exits == [1]
 
 
+async def test_hard_failure_terminates_on_an_installation_id_mismatch(monkeypatch):
+    """_installation_confirmed_invalid's third path: a plain RuntimeError
+    raised directly (no `from exc`) by discover_and_verify_installation_id on
+    an id mismatch, or by discover_installation_id_for_app on an ambiguous
+    multiple-installations result. Only AppNotInstalledError and a
+    GithubException-chained RuntimeError were exercised through
+    process_next_due before this test -- a regression that accidentally
+    chained the mismatch raise (`raise ... from exc`) would silently stop
+    terminating the process here and nothing would catch it."""
+    _stub_comments(monkeypatch)
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
+    _enqueue(pr=98)
+
+    def _mismatch(expected):
+        raise RuntimeError(f"installation id mismatch: expected {expected}")
+
+    monkeypatch.setattr(dispatcher.github_app, "discover_and_verify_installation_id", _mismatch)
+
+    exits = []
+    monkeypatch.setattr(dispatcher.os, "_exit", lambda code: exits.append(code))
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    await dispatcher.process_next_due(NOW)
+    assert exits == [1]
+
+
 async def test_hard_failure_does_not_terminate_on_an_ambiguous_installation_check_failure(
     monkeypatch,
 ):
@@ -900,6 +930,39 @@ async def test_claim_time_clear_schedule_notice_persists_a_recreated_comment_id(
     await dispatcher.process_next_due(NOW)
     assert cleared == [(73, 7373)]
     assert store.get_ticket(tid).comment_id == 6060
+
+
+async def test_claim_time_clear_schedule_notice_confirmed_loss_clears_visible_review(
+    monkeypatch, db_exec
+):
+    """clear_schedule_notice returns None -- not a recreated comment -- when
+    the bot's comment is confirmed gone (unlike append_schedule_notice/
+    append_review_footnote, it never creates a fallback). That must be
+    treated as the same content-loss signal handled at every other
+    comment-touching call site (post_pending_notices, the terminal-failure
+    branch), not silently ignored -- otherwise a later gate in the same or a
+    future process_next_due call still trusts the stale last_reviewed_at and
+    can suppress a placeholder, leaving the PR with zero bot comments."""
+    monkeypatch.setattr(
+        dispatcher.github_app, "clear_schedule_notice",
+        lambda repo, pr, comment_id=None: None,
+    )
+    tid = _enqueue(pr=75)
+    _set_comment_id(db_exec, tid, 7575)
+    db_exec(
+        "UPDATE tickets SET status='deferred', not_before=%s, last_reviewed_at=%s, "
+        "notice_not_before=%s WHERE id=%s",
+        (NOW.isoformat(), NOW.isoformat(), "2026-01-01T11:00:00+00:00", tid),
+    )
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    await dispatcher.process_next_due(NOW)
+
+    assert store.get_ticket(tid).last_reviewed_at is None
 
 
 async def test_claim_does_not_call_clear_when_no_notice_pending(monkeypatch):

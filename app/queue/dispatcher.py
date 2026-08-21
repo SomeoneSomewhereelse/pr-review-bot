@@ -300,6 +300,17 @@ async def process_next_due(now: datetime) -> StepResult:
             await asyncio.to_thread(
                 store.set_comment_id, ticket.id, comment.id if comment is not None else None
             )
+            # Unlike append_schedule_notice/append_review_footnote,
+            # clear_schedule_notice never creates a fallback comment -- it
+            # returns None outright when the bot's comment is confirmed
+            # gone, which is why that case can't be detected via
+            # _comment_was_recreated (which requires a non-None comment).
+            # Both signal the same unrecoverable content loss and must be
+            # treated identically to the other comment-touching call sites.
+            if comment is None and ticket.comment_id is not None:
+                await asyncio.to_thread(store.clear_visible_review, ticket.id)
+            elif _comment_was_recreated(ticket, comment):
+                await asyncio.to_thread(store.clear_visible_review, ticket.id)
             await asyncio.to_thread(store.clear_notice, ticket.id)
         # a stale note is cosmetic; must not block the review
         except Exception:  # noqa: BLE001
