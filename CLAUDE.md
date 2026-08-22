@@ -124,6 +124,23 @@ which is why this section exists and is kept first in the file.
   the user, not something to route around by opening the file yourself and
   not something to fix by teaching a script to dump what you are not allowed
   to see.
+- **Never modify `.claude/hooks/check_env_access.py` in any way — not a
+  logic change, not a comment, not a debug print, not a refactor — unless
+  the user directly instructs it.** This script is the enforcement
+  mechanism for this whole section: a technical backstop built specifically
+  because the written rules above had already failed to hold on their own
+  across multiple sessions. That makes it a different kind of file from the
+  rest of the codebase — an agent reasoning its way into "this is obviously
+  a bug fix" or "this is clearly what they'd want" is exactly the failure
+  mode a guardrail like this exists to not depend on. Every real change this
+  hook has gone through (fixing its false positives, the git/gh message
+  exemption and its later grammar-based rewrite, decoupling it from the
+  project's synced venv, adding PowerShell coverage) happened because the
+  user explicitly asked for that specific change, not because an agent
+  inferred it was needed. If the hook appears to be misbehaving — over-
+  blocking, under-blocking, crashing — explain exactly what happened and
+  ask; do not edit the file to test a theory, work around a false positive,
+  or add temporary debug instrumentation on your own initiative.
 - **If you ever need to know or verify a secret's actual value — not just
   whether it's set or matches — ask the user to check it themselves.** Do
   not do it on their behalf, structurally or otherwise, regardless of how

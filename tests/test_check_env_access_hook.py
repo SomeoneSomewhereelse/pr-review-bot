@@ -206,6 +206,81 @@ def test_message_exemption_does_not_apply_to_non_git_commands():
     assert blocked
 
 
+# --- PowerShell coverage ---
+#
+# Regression: an earlier version only checked tool_name == "Bash", so the
+# `command` field was never inspected at all for the "PowerShell" tool --
+# confirmed live on a native-Windows session, where `Get-Content .env`
+# executed with no warning while Read on the same path was denied.
+
+def test_blocks_powershell_get_content_on_env():
+    blocked, out = _run("PowerShell", {"command": "Get-Content .env"})
+    assert blocked and _is_denied(out)
+
+
+def test_blocks_powershell_mid_pipeline():
+    blocked, _ = _run("PowerShell", {"command": "Get-Content .env | Out-Null"})
+    assert blocked
+
+
+def test_allows_powershell_env_example():
+    blocked, _ = _run("PowerShell", {"command": "Get-Content .env.example"})
+    assert not blocked
+
+
+def test_allows_powershell_unrelated_command():
+    blocked, _ = _run("PowerShell", {"command": "git status"})
+    assert not blocked
+
+
+def test_still_blocks_powershell_git_add_env():
+    blocked, _ = _run("PowerShell", {"command": "git add .env"})
+    assert blocked
+
+
+def test_allows_powershell_single_quoted_git_commit_message():
+    blocked, _ = _run("PowerShell", {"command": "git commit -m 'explains .env usage'"})
+    assert not blocked
+
+
+def test_allows_powershell_single_quoted_herestring_commit_message():
+    """The real multi-line commit convention for the PowerShell tool, per
+    its own instructions -- a single-quoted here-string, always inert."""
+    command = (
+        "git commit -m @'\n"
+        "docs: explains .env in the body\n\n"
+        "Also mentions cp .env.example .env for context.\n"
+        "'@"
+    )
+    blocked, _ = _run("PowerShell", {"command": command})
+    assert not blocked
+
+
+def test_still_blocks_smuggled_command_substitution_in_powershell_double_quotes():
+    blocked, _ = _run("PowerShell", {"command": 'git commit -m "$(Get-Content .env)"'})
+    assert blocked
+
+
+def test_still_blocks_smuggled_command_substitution_in_powershell_herestring():
+    command = (
+        "git commit -m @\"\n"
+        "$(Get-Content .env)\n"
+        "\"@"
+    )
+    blocked, _ = _run("PowerShell", {"command": command})
+    assert blocked
+
+
+def test_allows_powershell_double_quoted_herestring_mentioning_env_in_prose():
+    command = (
+        "git commit -m @\"\n"
+        "docs: explains .env in the body\n"
+        "\"@"
+    )
+    blocked, _ = _run("PowerShell", {"command": command})
+    assert not blocked
+
+
 # --- Malformed input ---
 
 def test_malformed_json_fails_toward_checking_the_raw_payload():
