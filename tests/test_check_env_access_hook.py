@@ -154,6 +154,32 @@ def test_allows_the_real_heredoc_commit_message_shape():
     assert not blocked
 
 
+def test_allows_a_heredoc_body_that_literally_describes_command_substitution():
+    """The exact failure this fix addresses: a commit message describing
+    THIS mechanism used backticks for markdown code formatting and literally
+    showed "$(cat <<'EOF2' ...)" as an example -- text ABOUT the syntax, not
+    an active instance of it. A single-quoted heredoc delimiter makes the
+    body provably inert regardless of what characters it contains, so this
+    must be exempted even though it "looks" like it contains a command."""
+    command = (
+        "git commit -m \"$(cat <<'EOF'\n"
+        "fix: mentions .env and uses backticks like `this` in prose\n\n"
+        "Also literally shows an example: -m \\\"$(cat <<'EOF2' ... EOF2)\\\"\n"
+        "EOF\n"
+        ")\""
+    )
+    blocked, _ = _run("Bash", {"command": command})
+    assert not blocked
+
+
+def test_allows_a_single_quoted_value_even_if_its_content_looks_dangerous():
+    """Single quotes are unconditionally inert in bash -- no expansion of
+    any kind happens inside them, so even a value that LOOKS like a command
+    substitution must still be exempted; it can never actually execute."""
+    blocked, _ = _run("Bash", {"command": "git commit -m '$(cat .env) mentioned only as text'"})
+    assert not blocked
+
+
 def test_still_blocks_git_add_env():
     """The exemption must never cover an actual pathspec, only message-flag
     values."""
