@@ -50,7 +50,9 @@ _SHARED: tuple[Step, ...] = (
     Step(1, "Install prerequisites", "prereqs",
          "uv sync, then install anything the prereqs rows above name"),
     Step(2, "Create the GitHub App", "app_credentials",
-         "uv run python -m scripts.create_github_app   (run this yourself -- it writes secrets)"),
+         "create it by hand in GitHub's UI (Settings -> Developer settings -> GitHub Apps -> "
+         "New GitHub App), then paste the App ID / webhook secret / base64-encoded private "
+         "key into .env yourself"),
     Step(3, "Install the App on your repo(s)", "app_installed",
          "open https://github.com/settings/apps -> your app -> Install App"),
     Step(4, "Configure an LLM provider", "llm_ready",

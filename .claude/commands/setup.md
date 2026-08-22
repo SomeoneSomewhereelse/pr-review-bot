@@ -32,21 +32,32 @@ Then, in a loop until `step` is `null`:
 ## Credential handoff — not optional
 
 `CLAUDE.md` forbids you from opening `.env` for any reason, including a
-single-line read. Two of this project's setup tools write real credentials to
-it:
+single-line read. Step 2 (the GitHub App) and Step 4 (the LLM provider) are
+the two places real credentials reach it, and they work differently:
 
-- `uv run python -m scripts.init_env`
-- `uv run python -m scripts.create_github_app`
+- **Step 2** is done entirely by hand in GitHub's UI — the operator collects
+  the App ID, webhook secret, and base64-encoded private key themselves and
+  pastes them into `.env` directly. There is no script call to hand off
+  here; the handoff is the same as any other `.env` edit — you never open,
+  read, or write to it, full stop, and a `PreToolUse` hook enforces this
+  independently of your own judgment.
+- **Step 4** writes credentials via a script: `uv run python -m
+  scripts.init_env`. **Never run this yourself.** Ask the user to run it in
+  this session with the `!` prefix, so its output lands in the conversation
+  without you invoking it:
 
-**Never run either of these yourself.** Ask the user to run it in this session
-with the `!` prefix, so its output lands in the conversation without you
-invoking it:
+  > Run this yourself: `! uv run python -m scripts.init_env`
 
-> Run this yourself: `! uv run python -m scripts.create_github_app`
+  It prints names and lengths only, never values, so its output is safe to
+  read and reason about afterwards. The doctor is safe for you to run as
+  often as you like — it is read-only, and reports names, lengths, and
+  booleans only.
 
-Both print names and lengths only, never values, so their output is safe to
-read and reason about afterwards. The doctor is safe for you to run as often as
-you like — it is read-only, and reports names, lengths, and booleans only.
+`scripts.create_github_app` also still exists — an optional, still-tested
+automated alternative to Step 2's by-hand process, not the documented
+default. If the user chooses to use it anyway, it writes credentials the
+same way `init_env` does and must never be run by you either; hand it off
+the same way: `! uv run python -m scripts.create_github_app`.
 
 If the user asks you to check or fix a value inside `.env`, decline and ask
 them to do it themselves. That is the rule working, not an obstacle to route

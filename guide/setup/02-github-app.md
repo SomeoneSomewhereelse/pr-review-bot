@@ -1,151 +1,121 @@
 # Step 2: Create the GitHub App
 
 The GitHub App is the bot's identity: it's what lets the service read a
-pull request's diff and post (and later edit) a review comment.
+pull request's diff and post (and later edit) a review comment. This is
+done entirely by hand in GitHub's UI — the same skill you'll need later
+anyway to install the App (Step 3, also always a browser step) or to change
+its permissions, rotate its webhook secret, or remove it from a repo.
 
-## The one-command path
+## Create the App
 
-```bash
-uv run python -m scripts.create_github_app --name your-app-name
-```
-
-Run this yourself — it writes real credentials to `.env`, so it must never
-be run by an agent.
-
-`--name` defaults to `pr-review-engine`, but GitHub App names are globally
-unique, so the exact default will already be taken if anyone else has run
-this — pick your own.
-
-You don't need a `--base-url` yet. This early, there's no real one to give
-it: the tunnel (Local track) or Render URL (Hosted track) isn't created
-until Step 6. Leave the flag off and the script falls back to the
-obviously-fake `https://example.invalid` rather than silently creating a
-webhook pointed nowhere useful — Step 7 (`scripts/deploy.py`) corrects the
-webhook URL automatically once your real one exists. Only pass `--base-url`
-yourself if you already have a stable URL at this point (e.g. a named
-tunnel or a Render service you set up earlier).
-
-This drives GitHub's **App Manifest flow**: it opens a browser form that
-POSTs a manifest to `github.com/settings/apps/new`, you approve it, GitHub
-redirects back with a one-time code, and the script exchanges that code for
-the App ID, private key, and webhook secret — all in one round trip. That
-replaces creating the App by hand, generating a private key by hand, and
-base64-encoding it by hand.
-
-!!! warning "Running this over SSH, on a headless box, or any remote session?"
-    The default flow above needs the browser that approves the App to reach
-    `localhost` **on the same machine running this command** — it opens a
-    tiny local server and waits for GitHub to redirect back to it. If your
-    terminal and your browser aren't on the same machine (SSH into a server,
-    a cloud VM, a container with no GUI), that silently doesn't work: no
-    browser opens, or the wrong machine's browser opens, and the command
-    just blocks for up to 5 minutes before timing out with no explanation.
-
-    **First choice, zero flags needed:** set up SSH local port forwarding —
-    `ssh -L 8765:localhost:8765 that-host`, or whatever equivalent your own
-    SSH client offers (Termius and most GUI clients have one). This tunnels
-    through the *exact SSH connection you already have* — no VPN, no shared
-    network, nothing extra required, the same way `scp` already works over
-    that connection — and makes the remote's `localhost:8765` answer as
-    *your own device's* `localhost:8765`. Once that's running, the plain
-    command above (no flags) already works: open your own browser, approve
-    the App, done.
-
-    **If setting that up isn't convenient** (an SSH client with no
-    forwarding option, or you'd rather not), add `--manual` instead:
-
-    ```bash
-    uv run python -m scripts.create_github_app --name your-app-name --manual
-    ```
-
-    This needs no local browser, no localhost access, and no network path
-    beyond the SSH connection you already have. It writes a small HTML file
-    and prints its path; move that file to *any* machine that has a browser
-    using that same SSH connection — `scp`/`sftp`, or your SSH client's own
-    file-transfer feature if it has one — then open it there. (If your SSH
-    client has no file-transfer feature at all, `scp <that-path> yourlaptop:`
-    from a second terminal on your own machine works the same way, or paste
-    the file's contents through the terminal into a new local file if even
-    that isn't available — it's plain HTML, nothing binary.) It submits
-    itself and takes you to GitHub's approval page exactly like the
-    automatic flow does. After you approve, GitHub redirects to a page that
-    will fail to load — that's expected, it's a placeholder with nothing
-    behind it. Copy the full URL from your browser's address bar at that
-    point (it carries a one-time code) and paste it back into the terminal
-    running the command, which is waiting for exactly that. The rest —
-    exchanging the code, writing `.env` — happens exactly as it does in the
-    automatic flow.
-
-The App is created with:
-
-- **Permissions**: `pull_requests: write`, `contents: read`, `issues: write`,
-  `metadata: read`.
-- **Event**: `pull_request`.
-- **Webhook URL**: a placeholder at creation time — the tunnel or Render URL
-  doesn't exist yet. Step 7 (`scripts/deploy.py`) corrects it once your
-  public URL is known.
-
-!!! warning "Keep the App private"
-    Do not publish the App to the GitHub Marketplace. Leaving
-    `GITHUB_TARGET_REPO` unset (step 3) makes the bot act on *every* repo the
-    installation covers, and that's only a safe default because only
-    accounts *you* choose can install a private App in the first place. A
-    public App would let any third party self-install and have their events
-    accepted in that same track-all mode.
-
-## Creating the App entirely by hand
-
-This is a *different* fallback from `--manual` above — that flag still runs
-the script and still gets you real credentials automatically once you paste
-the code back; this path uses none of the script at all, doing every step
-directly in GitHub's UI. Reach for this only if you'd genuinely rather not
-run the script (e.g. you don't trust an unfamiliar script with `.env`, or
-you're troubleshooting something the script itself is doing wrong) — for the
-no-local-browser problem specifically, `--manual` above is less work.
-
-If you don't already have a `.env` (the one-command path above creates it
-for you; this path doesn't), start from the committed template:
+If you don't already have a `.env`, start from the committed template:
 
 ```bash
 cp .env.example .env
 ```
 
-Then create the App by hand in GitHub's UI (**Settings → Developer settings
-→ GitHub Apps → New GitHub App**), giving it the same permissions and event
-listed above. Checking boxes by hand is exactly the kind of step a typo
-survives — `uv run python -m scripts.doctor`'s `app-permissions` row reads
-the App's actual permissions back from GitHub and compares them against
-what this project's code needs, regardless of which path created the App,
-so a missed or extra checkbox doesn't go unnoticed.
+Go to **Settings → Developer settings → GitHub Apps → New GitHub App** and
+fill in the form:
 
-The form has its own **Webhook secret** field — unlike the one-command path,
-GitHub does not generate this for you here, so type in your own value (any
-random string) and copy that same value into `GITHUB_WEBHOOK_SECRET` in
-`.env`. It's easy to skip since nothing about the App's settings *page*
-prompts for it afterward, but the service refuses to start without it — it's
-one of the four required boot credentials.
+- **GitHub App name** — must be globally unique across all of GitHub, so
+  the obvious choice (e.g. `pr-review-engine`) will likely already be
+  taken. Pick your own.
+- **Homepage URL** — required by the form, but there's no real URL yet:
+  the tunnel (Local track) or Render URL (Hosted track) isn't created
+  until Step 6. Enter the obviously-fake `https://example.invalid` rather
+  than a real-looking placeholder that could be mistaken for a working
+  link.
+- **Webhook → Active** — check it.
+- **Webhook → Webhook URL** — same placeholder, with the path this
+  project's webhook handler expects: `https://example.invalid/webhook`.
+  Step 7 (`scripts/deploy.py`) corrects this to your real URL once it
+  exists — that's normal, not something to fix here.
+- **Webhook → Webhook secret** — GitHub does not generate this for you;
+  type in your own value (any random string long enough to not guess —
+  `openssl rand -hex 32` if you have it, or just type something long and
+  random by hand). Keep this value visible for a moment; you'll paste it
+  into `.env` in the next section. It's easy to miss since nothing about
+  the App's settings *page* prompts for it afterward, but the service
+  refuses to start without it — it's one of the four required boot
+  credentials.
+- **Repository permissions** — set exactly:
 
-Then collect three IDs from the App's settings page — only two of which this
-project uses:
+    | Permission | Access |
+    | --- | --- |
+    | Contents | Read-only |
+    | Issues | Read and write |
+    | Pull requests | Read and write |
+    | Metadata | Read-only (mandatory; GitHub sets this automatically) |
 
+    Nothing else. `pull_requests`+`issues` write because a PR review
+    comment is posted as an issue comment on GitHub's API; `contents` read
+    to fetch the diff.
+- **Subscribe to events** — check **Pull request** only.
+- **Where can this GitHub App be installed?** — **Only on this account.**
+  See the warning below for why this matters.
+
+Then click **Create GitHub App**.
+
+Checking boxes by hand is exactly the kind of step a typo survives —
+`uv run python -m scripts.doctor`'s `app-permissions` row reads the App's
+*actual* permissions and event subscriptions back from GitHub and compares
+them against what this project's code needs, so a missed or extra checkbox
+doesn't go unnoticed. Run it once you've collected the credentials below.
+
+!!! warning "Keep the App private"
+    "Only on this account" above is not a default to leave alone — publishing
+    the App to the GitHub Marketplace ("Any account") is a real, clickable
+    option on the same form, and nothing currently automates catching the
+    mistake if you pick it. Leaving `GITHUB_TARGET_REPO` unset (step 3) makes
+    the bot act on *every* repo the installation covers, and that's only a
+    safe default because only accounts *you* choose can install a private
+    App in the first place. A public App would let any third party
+    self-install and have their events accepted in that same track-all mode.
+
+## Collect the credentials into `.env`
+
+Three of this project's four required boot credentials come from this step
+(the fourth, `DATABASE_URL`, comes later):
+
+- **Webhook secret** — the value you just typed into the form → paste it
+  into `GITHUB_WEBHOOK_SECRET` in `.env`.
 - **App ID** → `GITHUB_APP_ID`. A short integer, near the top of the App's
-  **General** settings page.
-- **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Required** no matter
-  how the App was created — never auto-discovered or guessed on your behalf.
-  It only exists once the App is installed on an account, so the next step
-  covers how to capture it.
-- **Client ID** — sits on the same settings page, and is easy to grab by
-  mistake, but this project **does not use it at all**.
+  **General** settings page (the page you land on right after creating it).
+- **Private key** — click **Generate a private key** on that same page to
+  download a `.pem` file, then base64-encode it with this project's own
+  script — never a raw file path:
 
-Download the private key as a `.pem` file, then base64-encode it with this
-project's own script — never a raw file path:
+    ```bash
+    uv run python -m scripts.encode_credential github-app-private-key.pem
+    ```
 
-```bash
-uv run python -m scripts.encode_credential github-app-private-key.pem
-```
+    Paste the output into `GITHUB_APP_PRIVATE_KEY` in `.env` (verbatim, the
+    whole base64 string — never a file path).
 
-Paste the output into `GITHUB_APP_PRIVATE_KEY` in `.env` (verbatim, the
-whole base64 string — never a file path).
+The same settings page also shows a **Client ID** — easy to grab by
+mistake, but this project **does not use it at all**.
+
+One more ID exists — **Installation ID** → `GITHUB_APP_INSTALLATION_ID` —
+but it only exists once the App is installed on an account, which is the
+next step. **Required** no matter how the App was created — never
+auto-discovered or guessed on your behalf.
+
+## An automated alternative exists, but isn't the documented path here
+
+`scripts/create_github_app.py` drives GitHub's **App Manifest flow**
+instead: a browser form POSTs a manifest to `github.com/settings/apps/new`,
+you approve it, and the script exchanges GitHub's one-time redirect code for
+the App ID, private key, and webhook secret in one round trip, writing them
+to `.env` itself. It still works (`uv run python -m scripts.create_github_app
+--name your-app-name --help` for its options) and remains fully tested, but
+it's no longer the path this guide walks through: automating a one-time
+setup step didn't carry its weight against the manual process above, which
+needs no coordination between your terminal and your browser (no
+localhost/SSH/remote considerations at all — you can do it from any device,
+any time), doesn't require trusting an unfamiliar script with real
+credentials, and is the same skill you already need for Step 3 and for
+maintaining the App afterward. If you use it anyway: run it yourself, never
+through an agent — it writes real credentials to `.env`.
 
 ## Next
 
