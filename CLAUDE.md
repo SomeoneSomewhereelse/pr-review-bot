@@ -29,13 +29,20 @@ which is why this section exists and is kept first in the file.
   unrelated keyword can print a full secret value if it happens to occur on
   the same line — this has actually happened twice in this project (a
   `tail -c 20` on a `.env` line, and later a `grep` for an unrelated string
-  that shared a line with `GCP_SERVICE_ACCOUNT_KEY`). The only safe way
-  to check whether a secret-bearing file has a var *set at all* is a pattern
-  that structurally cannot capture a value, e.g. `grep -oE '^[A-Z_0-9]+=' .env`
-  (key names only, values discarded). Do not use the `Read` tool on a
-  secret-bearing file for the same reason — it returns the full file content
-  into your context, which is exactly the "display a byte of the value"
-  failure mode in another guise.
+  that shared a line with `GCP_SERVICE_ACCOUNT_KEY`). A pattern that
+  structurally cannot capture a value at all, e.g. `grep -oE '^[A-Z_0-9]+='`
+  (key names only, values discarded), is the *general shape* a safe
+  presence-check takes. **This is not a standing exception for `.env`
+  itself, even in that narrow form** — `.env` is covered by the absolute
+  "never open, any tool, full stop" rule below, which wins over this bullet
+  for that one file specifically: do not run even this narrow pattern
+  against `.env`; ask the user whether a var is set instead. (This bullet
+  has already been misread twice as licensing exactly that — see
+  `ISSUES.md` — so if a command's target is `.env`, the answer is always
+  "ask the user," full stop, regardless of how safe the pattern looks.) Do
+  not use the `Read` tool on a secret-bearing file for the same reason — it
+  returns the full file content into your context, which is exactly the
+  "display a byte of the value" failure mode in another guise.
 - **Never dump broad environment/config state.** `env`, `printenv`, bare
   `set`, Python's `os.environ`, or serializing a settings/config object
   wholesale (`print(settings)`, `settings.dict()`/`.model_dump()`,
