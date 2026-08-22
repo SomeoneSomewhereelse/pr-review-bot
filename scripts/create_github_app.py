@@ -19,24 +19,29 @@ approving browser's device:
 
 - Same machine (the common case): the default _run_server_flow, unchanged --
   a local callback server, browser auto-opened, fully automatic.
-- Different device, same network (Tailscale, a LAN, a VPN -- e.g. approving
-  from a phone or laptop while this runs on an SSH'd-into host they share a
-  tailnet with): --bind-host, still _run_server_flow, just listening on an
-  address the OTHER device can reach instead of localhost. Still no
-  copy-pasting -- the operator opens one ordinary http:// URL on their own
-  device and the rest is automatic, same as the local case. (The same result
-  is reachable with zero code changes via SSH local port forwarding --
-  `ssh -L 8765:localhost:8765 host` -- which makes the default flow's
-  `localhost` correct again from the operator's side; --bind-host is for
-  when setting that up isn't convenient.)
-- No shared network at all (an isolated remote host, e.g. a bare cloud VM
-  with only port 22 open): nothing above can work -- there is no path from
-  the approving device to this one. --manual (_run_manual_flow) is the
+- Different device, on some network this machine is also reachable on (a
+  VPN, a LAN, a mesh network like Tailscale -- any of them, this is just an
+  address, not a specific product): --bind-host, still _run_server_flow,
+  just listening on an address the OTHER device can reach instead of
+  localhost. Still no copy-pasting -- the operator opens one ordinary
+  http:// URL on their own device and the rest is automatic, same as the
+  local case. (The same result is reachable with zero code changes via SSH
+  local port forwarding -- `ssh -L 8765:localhost:8765 host`, or whatever
+  equivalent the operator's SSH client offers -- which makes the default
+  flow's `localhost` correct again from the operator's side; --bind-host is
+  for when setting that up isn't convenient.)
+- No such network (an isolated remote host reachable only by SSH, e.g. a
+  bare cloud VM with only port 22 open): --bind-host has nothing to bind to
+  that the approving device could reach. --manual (_run_manual_flow) is the
   fallback for exactly this case: it writes the same auto-submitting form to
-  a plain HTML file the operator copies to WHATEVER machine has a browser
-  (scp, AirDrop, anything), and reads the resulting redirect URL back from
-  them directly instead of catching it with a listener -- no network path
-  required at all, just a file and a copy-paste.
+  a plain HTML file, which the operator moves to WHATEVER machine has a
+  browser using the same connection they already used to reach this one --
+  scp/sftp over that same SSH session, or an SSH client's built-in file
+  transfer -- no additional network path, VPN, or third-party service
+  required, only what SSH access already implies. Reading the resulting
+  redirect URL back from the operator directly (instead of catching it with
+  a listener) is what lets this skip needing any network path at all beyond
+  that.
 
 A `data:` URL pasted straight into the browser's address bar was considered
 as a zero-file-transfer alternative to --manual, but Chrome blocks top-level
