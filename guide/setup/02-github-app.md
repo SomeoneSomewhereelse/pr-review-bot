@@ -32,6 +32,33 @@ the App ID, private key, and webhook secret — all in one round trip. That
 replaces creating the App by hand, generating a private key by hand, and
 base64-encoding it by hand.
 
+!!! warning "Running this over SSH, on a headless box, or any remote session?"
+    The default flow above needs the browser that approves the App to reach
+    `localhost` **on the same machine running this command** — it opens a
+    tiny local server and waits for GitHub to redirect back to it. If your
+    terminal and your browser aren't on the same machine (SSH into a server,
+    a cloud VM, a container with no GUI), that silently doesn't work: no
+    browser opens, or the wrong machine's browser opens, and the command
+    just blocks for up to 5 minutes before timing out with no explanation.
+
+    Add `--manual` instead:
+
+    ```bash
+    uv run python -m scripts.create_github_app --name your-app-name --manual
+    ```
+
+    This needs no local browser and no localhost access at all. It writes a
+    small HTML file and prints its path — copy that file to *any* machine
+    that has a browser (`scp` it to your laptop, for instance) and open it
+    there; it submits itself and takes you to GitHub's approval page exactly
+    like the automatic flow does. After you approve, GitHub redirects to a
+    page that will fail to load — that's expected, it's a placeholder with
+    nothing behind it. Copy the full URL from your browser's address bar at
+    that point (it carries a one-time code) and paste it back into the
+    terminal running the command, which is waiting for exactly that. The
+    rest — exchanging the code, writing `.env` — happens exactly as it does
+    in the automatic flow.
+
 The App is created with:
 
 - **Permissions**: `pull_requests: write`, `contents: read`, `issues: write`,
@@ -49,7 +76,15 @@ The App is created with:
     public App would let any third party self-install and have their events
     accepted in that same track-all mode.
 
-## The manual fallback
+## Creating the App entirely by hand
+
+This is a *different* fallback from `--manual` above — that flag still runs
+the script and still gets you real credentials automatically once you paste
+the code back; this path uses none of the script at all, doing every step
+directly in GitHub's UI. Reach for this only if you'd genuinely rather not
+run the script (e.g. you don't trust an unfamiliar script with `.env`, or
+you're troubleshooting something the script itself is doing wrong) — for the
+no-local-browser problem specifically, `--manual` above is less work.
 
 If you don't already have a `.env` (the one-command path above creates it
 for you; this path doesn't), start from the committed template:
@@ -74,10 +109,10 @@ project uses:
 
 - **App ID** → `GITHUB_APP_ID`. A short integer, near the top of the App's
   **General** settings page.
-- **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Required** for
-  either path (one-command or manual) — never auto-discovered or guessed on
-  your behalf. It only exists once the App is installed on an account, so
-  the next step covers how to capture it.
+- **Installation ID** → `GITHUB_APP_INSTALLATION_ID`. **Required** no matter
+  how the App was created — never auto-discovered or guessed on your behalf.
+  It only exists once the App is installed on an account, so the next step
+  covers how to capture it.
 - **Client ID** — sits on the same settings page, and is easy to grab by
   mistake, but this project **does not use it at all**.
 

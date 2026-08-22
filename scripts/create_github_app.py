@@ -14,6 +14,17 @@ hand, generating a private key by hand, and base64-encoding it by hand.
 guide/setup/02-github-app.md records that this project's own App was made
 this way.
 
+Two ways to catch that redirect. The default (_run_server_flow) runs a local
+callback server and auto-opens a browser -- fully automatic, but it only
+works when the approving browser can reach `localhost` on THIS machine. Over
+SSH, on a headless box, or any remote session, that silently doesn't hold:
+webbrowser.open() opens nothing (or opens the wrong machine's browser), and
+the script just blocks for a 300s timeout with no diagnosis. --manual
+(_run_manual_flow) needs no localhost access at all: it writes the same
+auto-submitting form to a plain HTML file the operator opens on WHATEVER
+machine has a browser, and reads the resulting redirect URL back from them
+directly instead of catching it with a listener.
+
 The webhook URL is a placeholder at creation time -- the tunnel or Render URL
 does not exist yet. scripts/deploy.py's github-app check corrects it later
 ("points here -- set only if wrong"), which is why an ephemeral tunnel URL is
@@ -29,6 +40,7 @@ import http.server
 import json
 import secrets
 import sys
+import tempfile
 import threading
 import urllib.parse
 import webbrowser
@@ -44,6 +56,15 @@ _CALLBACK_PORT = 8765
 # Long enough for a human to read GitHub's approval screen, short enough that a
 # closed browser tab does not hang the terminal forever.
 _CALLBACK_TIMEOUT = 300.0
+
+# --manual's redirect target. Deliberately never resolves -- same "obviously
+# fake" convention as --base-url's own default -- so the operator's browser
+# always fails to load it, but the code+state GitHub attaches to the redirect
+# still show up in the address bar for them to copy. This is what makes
+# --manual work with NO listener anywhere: the local-server flow needs the
+# approving browser to reach localhost on the machine running this script,
+# which fails over SSH/headless with no diagnosis beyond a 300s timeout.
+_MANUAL_REDIRECT = "https://example.invalid/callback"
 
 # Exactly what the bot needs, and nothing more. pull_requests+issues write
 # because a PR review comment is an issue comment on GitHub's API; contents
@@ -108,6 +129,43 @@ def exchange_code(code: str) -> AppCredentials:
     )
 
 
+def parse_redirect_code(pasted: str, expected_state: str) -> str:
+    """Extract the one-time code from what --manual's operator pasted back:
+    either the full URL GitHub's browser redirect landed on (recommended --
+    it carries `state`, so this can run the same CSRF check the local-server
+    flow's do_GET does), or just the bare code on its own.
+
+    Raises SystemExit on anything unusable, mirroring exchange_code()'s own
+    reporting convention: a clear, structural message, never a value dump.
+    """
+    pasted = pasted.strip()
+    if not pasted:
+        raise SystemExit("nothing pasted -- start over")
+    if "://" not in pasted:
+        return pasted
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(pasted).query)
+    if params.get("state", [""])[0] != expected_state:
+        raise SystemExit("state mismatch in the pasted URL -- start over")
+    code = params.get("code", [""])[0]
+    if not code:
+        raise SystemExit("no code in the pasted URL")
+    return code
+
+
+def _render_manifest_form(manifest_json: str, state: str) -> str:
+    """The auto-submitting page that POSTs the manifest to GitHub. Shared by
+    the local-server flow (served over http://localhost) and --manual (written
+    to a plain file, opened over file:// or copied elsewhere first) -- a form
+    POST isn't subject to CORS, so which origin serves this page doesn't
+    matter."""
+    return (
+        "<!doctype html><body onload='document.forms[0].submit()'>"
+        f"<form action='{_NEW_APP_URL}?state={state}' method='post'>"
+        f"<input type='hidden' name='manifest' value='{manifest_json}'>"
+        "<button type='submit'>Create the GitHub App</button></form></body>"
+    )
+
+
 def write_credentials(
     creds: AppCredentials, path: Path, overwrite: bool = False
 ) -> dict[str, int]:
@@ -165,12 +223,7 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         one-time code, and stdout is not where that belongs."""
 
     def _form(self) -> str:
-        return (
-            "<!doctype html><body onload='document.forms[0].submit()'>"
-            f"<form action='{_NEW_APP_URL}?state={type(self).state}' method='post'>"
-            f"<input type='hidden' name='manifest' value='{type(self).manifest_json}'>"
-            "<button type='submit'>Create the GitHub App</button></form></body>"
-        )
+        return _render_manifest_form(type(self).manifest_json, type(self).state)
 
     def _reply(self, status: int, html: str) -> None:
         body = html.encode("utf-8")
@@ -181,21 +234,16 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Create this project's GitHub App")
-    parser.add_argument("--name", default="pr-review-engine",
-                        help="App name (must be globally unique on GitHub)")
-    parser.add_argument("--base-url", default="https://example.invalid",
-                        help="placeholder public URL; scripts/deploy.py corrects it later")
-    parser.add_argument("--env-path", default=".env", help="where to write the credentials")
-    parser.add_argument("--overwrite", action="store_true",
-                        help="replace an existing env file")
-    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-
+def _run_server_flow(app_name: str, base_url: str, state: str) -> str | None:
+    """The default, fully-automatic flow: a local server serves the
+    auto-submitting form and catches GitHub's redirect. Needs the approving
+    browser to reach `localhost` on THIS machine -- see --manual/
+    _run_manual_flow for anywhere that doesn't hold (SSH, a headless box, a
+    remote session)."""
     redirect = f"http://localhost:{_CALLBACK_PORT}/callback"
-    manifest = build_manifest(args.name, args.base_url, redirect)
+    manifest = build_manifest(app_name, base_url, redirect)
     _CallbackHandler.manifest_json = html.escape(json.dumps(manifest), quote=True)
-    _CallbackHandler.state = secrets.token_urlsafe(16)
+    _CallbackHandler.state = state
     _CallbackHandler.code = None
     _CallbackHandler.state_mismatch = False
     _CallbackHandler.received.clear()
@@ -208,24 +256,34 @@ def main(argv: list[str] | None = None) -> int:
             "close whatever else is using that port and try again",
             file=sys.stderr,
         )
-        return 1
+        return None
     threading.Thread(target=server.serve_forever, daemon=True).start()
     start = f"http://localhost:{_CALLBACK_PORT}/"
     print(f"opening {start} -- approve the App in your browser")
-    webbrowser.open(start)
+    opened = webbrowser.open(start)
+    if not opened:
+        print(
+            "no browser could be opened automatically here -- if you're on a remote or "
+            "headless machine (SSH, a container, a cloud VM), Ctrl+C and re-run with "
+            "--manual instead, which needs no local browser or localhost access at all",
+            file=sys.stderr,
+        )
     try:
         # The handler sets this once GitHub's redirect arrives. A single Event
         # (created before the wait, not inside the loop) is what makes this a
         # real block rather than a spin.
         if not _CallbackHandler.received.wait(timeout=_CALLBACK_TIMEOUT):
             print(
-                f"timed out after {_CALLBACK_TIMEOUT:.0f}s waiting for GitHub's redirect",
+                f"timed out after {_CALLBACK_TIMEOUT:.0f}s waiting for GitHub's redirect -- "
+                "if you're on a remote or headless machine, that's almost always why: the "
+                "approving browser can't reach localhost on this machine. Re-run with "
+                "--manual instead.",
                 file=sys.stderr,
             )
-            return 1
+            return None
     except KeyboardInterrupt:
         print("cancelled", file=sys.stderr)
-        return 1
+        return None
     finally:
         server.shutdown()
 
@@ -234,9 +292,80 @@ def main(argv: list[str] | None = None) -> int:
             print("state mismatch in GitHub's redirect -- start over", file=sys.stderr)
         else:
             print("no code in GitHub's redirect", file=sys.stderr)
+        return None
+    return _CallbackHandler.code
+
+
+def _run_manual_flow(
+    app_name: str, base_url: str, state: str, *, tmp_dir: Path | None = None
+) -> str | None:
+    """No local server, no localhost dependency at all: write the same
+    auto-submitting form to a plain HTML file, let the operator open it on
+    WHATEVER machine has a browser (copy it there first if this one has
+    none), and read the resulting redirect URL back from them directly.
+    GitHub's redirect still fires -- it just lands on a page that fails to
+    load (_MANUAL_REDIRECT never resolves, deliberately). The code survives
+    in the browser's address bar regardless of whether the page loads.
+
+    `tmp_dir` lets tests redirect the written file into `tmp_path` instead of
+    the real system temp dir; production calls leave it as the default.
+    """
+    manifest = build_manifest(app_name, base_url, _MANUAL_REDIRECT)
+    manifest_json = html.escape(json.dumps(manifest), quote=True)
+    page = _render_manifest_form(manifest_json, state)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".html", prefix="github-app-manifest-",
+        delete=False, encoding="utf-8", dir=tmp_dir,
+    ) as f:
+        f.write(page)
+        page_path = f.name
+
+    print(f"wrote {page_path}")
+    print(
+        "Open that file in any browser -- this machine's, or copy it elsewhere first "
+        "(e.g. `scp` it to your laptop) if this machine has none. It submits itself; "
+        "approve the App on GitHub's page.\n"
+        "GitHub then redirects to a page that will fail to load "
+        f"({_MANUAL_REDIRECT}) -- that's expected. Copy the full URL from your "
+        "browser's address bar at that point (it carries the code) and paste it below."
+    )
+    try:
+        pasted = input("Paste the redirected URL (or just the code): ")
+    except (EOFError, KeyboardInterrupt):
+        print("cancelled", file=sys.stderr)
+        return None
+    return parse_redirect_code(pasted, state)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Create this project's GitHub App")
+    parser.add_argument("--name", default="pr-review-engine",
+                        help="App name (must be globally unique on GitHub)")
+    parser.add_argument("--base-url", default="https://example.invalid",
+                        help="placeholder public URL; scripts/deploy.py corrects it later")
+    parser.add_argument("--env-path", default=".env", help="where to write the credentials")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="replace an existing env file")
+    parser.add_argument(
+        "--manual", action="store_true",
+        help="no local callback server or auto-opened browser -- write a manifest HTML "
+             "file to open on any machine instead, then paste back the redirect URL "
+             "yourself. Use this over SSH, on a headless box, or anywhere the approving "
+             "browser can't reach localhost on this machine.",
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+
+    state = secrets.token_urlsafe(16)
+    code = (
+        _run_manual_flow(args.name, args.base_url, state)
+        if args.manual
+        else _run_server_flow(args.name, args.base_url, state)
+    )
+    if code is None:
         return 1
 
-    creds = exchange_code(_CallbackHandler.code)
+    creds = exchange_code(code)
     lengths = write_credentials(creds, Path(args.env_path), overwrite=args.overwrite)
     for name, length in lengths.items():
         print(f"wrote {name} (len {length})")
