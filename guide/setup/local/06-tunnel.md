@@ -8,6 +8,48 @@ trigger — the thing that makes this a webhook-driven bot rather than a
 script you run by hand — is never exercised. A tunnel is what makes
 `localhost:8000` reachable from GitHub's side.
 
+## Optional milestone: verify the pipeline before investing in the tunnel
+
+If you want proof the App auth, diff-fetch, and comment-upsert pipeline
+works *before* setting up a tunnel, this is optional but worth doing now,
+before installing anything below:
+
+```bash
+uv run python -m scripts.manual_verify_step3
+```
+
+It proves the pipeline against a real PR, with **no public-URL dependency**
+at all. It does not prove the *trigger* (GitHub delivering the webhook) —
+only steps 6–7 do that — so treat it as a confidence check, not a
+substitute for the tunnel.
+
+## Install it
+
+`cloudflared` isn't in Step 1's shared prerequisites because it's only
+needed on this track. Install it, then confirm with `cloudflared --version`:
+
+=== "Linux"
+
+    ```bash
+    sudo apt install cloudflared   # or download the binary
+    ```
+
+=== "macOS"
+
+    ```bash
+    brew install cloudflared
+    ```
+
+=== "Windows"
+
+    ```powershell
+    winget install Cloudflare.cloudflared
+    ```
+
+Official download page: <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>.
+`uv run python -m scripts.doctor` also checks for it and prints the same
+install hint if it's missing.
+
 ## Start one
 
 In a **second terminal** (the first will run the service in step 8):
@@ -35,20 +77,6 @@ terminal. Set that as `PUBLIC_BASE_URL` in `.env`.
     the new URL. A **named** Cloudflare tunnel gives a stable hostname
     instead, but it needs a Cloudflare account and DNS configuration — out
     of scope for this track.
-
-## Optional milestone: verify the pipeline before investing in the tunnel
-
-If you want proof the App auth, diff-fetch, and comment-upsert pipeline
-works *before* setting up a tunnel, this is optional but worth doing:
-
-```bash
-uv run python -m scripts.manual_verify_step3
-```
-
-It proves the pipeline against a real PR, with **no public-URL dependency**
-at all. It does not prove the *trigger* (GitHub delivering the webhook) —
-only steps 6–7 do that — so treat it as a confidence check, not a
-substitute for the tunnel.
 
 ## Next
 

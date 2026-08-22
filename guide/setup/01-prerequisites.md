@@ -1,18 +1,10 @@
 # Step 1: Install prerequisites
 
-Get the checkout running and its test suite green before touching any
-credentials — that proves the toolchain works before anything harder is
-layered on top.
-
-```bash
-git clone <your-fork-or-clone-url>
-cd pr-review-bot   # or whatever your clone created
-uv sync
-uv run pytest
-```
-
-If `uv run pytest` passes, the checkout is sound and every tool below is
-already in place.
+The goal of this step is to get the checkout running and its test suite
+green before touching any credentials — that proves the toolchain works
+before anything harder is layered on top. Get everything below in place
+*first*, then run the test suite at the end of this page — running it any
+earlier just means hitting an avoidable failure.
 
 ## What you need
 
@@ -48,7 +40,8 @@ requirements: `tests/conftest.py`'s `db_url` fixture spins up a throwaway
 Postgres 16 container via `testcontainers` automatically when Docker is
 present, or reuses a `DATABASE_URL` you already point at a reachable
 local/CI Postgres. Without *either* one, the DB-touching tests fail with an
-opaque testcontainers error that doesn't say "install Docker."
+opaque testcontainers error that doesn't say "install Docker" — so get one
+of the two in place before running the test suite below.
 
 ## Installing Docker
 
@@ -80,6 +73,25 @@ requirement itself.
     ```
 
     Official install page: <https://docs.docker.com/get-docker/>
+
+## Get the checkout running
+
+With Python, uv, git, and Docker (or a `DATABASE_URL`) all in place:
+
+```bash
+git clone <your-fork-or-clone-url>   # e.g. https://github.com/<you>/pr-review-bot.git
+cd pr-review-bot   # or whatever your clone created
+uv sync
+uv run pytest
+```
+
+`<your-fork-or-clone-url>` is whatever URL you're getting this project's
+source from — your own fork if you plan to push changes anywhere, or a
+direct clone of the upstream repo otherwise; either works equally well for
+running the bot.
+
+If `uv run pytest` passes, the checkout is sound and every tool above is
+correctly in place.
 
 ## Next
 

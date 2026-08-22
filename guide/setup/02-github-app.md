@@ -6,18 +6,24 @@ pull request's diff and post (and later edit) a review comment.
 ## The one-command path
 
 ```bash
-uv run python -m scripts.create_github_app --name your-app-name --base-url https://your-real-host
+uv run python -m scripts.create_github_app --name your-app-name
 ```
 
 Run this yourself — it writes real credentials to `.env`, so it must never
 be run by an agent.
 
-Both flags matter: `--base-url` has no real-looking default on purpose —
-omit it and the script falls back to the obviously-fake
-`https://example.invalid` rather than silently creating a webhook pointed
-nowhere useful, so pass your own tunnel or Render URL. `--name` defaults to
-`pr-review-engine`, but GitHub App names are globally unique, so the exact
-default will already be taken if anyone else has run this — pick your own.
+`--name` defaults to `pr-review-engine`, but GitHub App names are globally
+unique, so the exact default will already be taken if anyone else has run
+this — pick your own.
+
+You don't need a `--base-url` yet. This early, there's no real one to give
+it: the tunnel (Local track) or Render URL (Hosted track) isn't created
+until Step 6. Leave the flag off and the script falls back to the
+obviously-fake `https://example.invalid` rather than silently creating a
+webhook pointed nowhere useful — Step 7 (`scripts/deploy.py`) corrects the
+webhook URL automatically once your real one exists. Only pass `--base-url`
+yourself if you already have a stable URL at this point (e.g. a named
+tunnel or a Render service you set up earlier).
 
 This drives GitHub's **App Manifest flow**: it opens a browser form that
 POSTs a manifest to `github.com/settings/apps/new`, you approve it, GitHub
@@ -45,10 +51,26 @@ The App is created with:
 
 ## The manual fallback
 
-If you'd rather create the App by hand in GitHub's UI (**Settings → Developer
-settings → GitHub Apps → New GitHub App**), give it the same permissions and
-event listed above, then collect three IDs from the App's settings page —
-only two of which this project uses:
+If you don't already have a `.env` (the one-command path above creates it
+for you; this path doesn't), start from the committed template:
+
+```bash
+cp .env.example .env
+```
+
+Then create the App by hand in GitHub's UI (**Settings → Developer settings
+→ GitHub Apps → New GitHub App**), giving it the same permissions and event
+listed above.
+
+The form has its own **Webhook secret** field — unlike the one-command path,
+GitHub does not generate this for you here, so type in your own value (any
+random string) and copy that same value into `GITHUB_WEBHOOK_SECRET` in
+`.env`. It's easy to skip since nothing about the App's settings *page*
+prompts for it afterward, but the service refuses to start without it — it's
+one of the four required boot credentials.
+
+Then collect three IDs from the App's settings page — only two of which this
+project uses:
 
 - **App ID** → `GITHUB_APP_ID`. A short integer, near the top of the App's
   **General** settings page.

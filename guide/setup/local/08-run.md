@@ -12,6 +12,13 @@ Render free-tier sleep to work around, so nothing extra is needed here
 
 ## Open a real PR to review
 
+This needs two things `scripts.seed_demo_pr` relies on that haven't come up
+yet: the [`gh` CLI](https://cli.github.com/) installed and authenticated
+(`gh auth login`) as an account with push access to a repo, and
+`GITHUB_TARGET_REPO` (step 3 — left it unset there since it's optional for
+the bot itself) set to that one repo, e.g. `GITHUB_TARGET_REPO=you/some-repo`
+in `.env.config`. That repo also needs the App installed on it (step 3).
+
 ```bash
 uv run python -m scripts.seed_demo_pr
 ```

@@ -19,21 +19,24 @@ card, and is what every live rehearsal of this project has used.
 
 ## Set it
 
-`LLM_PROVIDER` is operational config, not a secret — set it directly in
-`.env.config`:
-
-```bash
-LLM_PROVIDER=groq
-```
-
-The credential itself **is** a secret and belongs in `.env`. Set it by
-running this project's own prompt-driven script yourself — it asks for the
-real key interactively and writes it for you, so no credential value ever
-needs to pass through an agent or a command-line argument:
+Run this project's own prompt-driven script yourself — it scaffolds `.env`
+and `.env.config` from the committed templates if they don't exist yet
+(e.g. if you used Step 2's manual fallback and only have `.env` so far), and
+interactively prompts for every setting either file declares, `LLM_PROVIDER`
+included — so answer `groq` (or your chosen provider) when it asks:
 
 ```bash
 uv run python -m scripts.init_env
 ```
+
+When it asks for the matching credential, that's the secret half — it
+writes straight to `.env` and is never echoed back, so no credential value
+ever needs to pass through an agent or a command-line argument.
+
+`LLM_PROVIDER` itself is operational config, not a secret, so once
+`.env.config` exists you can also hand-edit the line there directly
+(`LLM_PROVIDER=groq`) any time you want to switch providers later, without
+re-running `init_env`.
 
 ## Model pricing is optional
 
