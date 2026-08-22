@@ -1,0 +1,200 @@
+"""Exercises .claude/hooks/check_env_access.py via subprocess, mirroring the
+exact exec-form invocation Claude Code's PreToolUse hook actually uses (no
+shell, literal argv) -- see the script's own module docstring for what it
+does and why. This is a repo-tooling script, not part of the app/scripts
+package, so it's tested by invoking it directly rather than importing it."""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+_HOOK = Path(__file__).resolve().parent.parent / ".claude" / "hooks" / "check_env_access.py"
+
+
+def _run(tool_name: str, tool_input: dict) -> tuple[bool, str]:
+    """(blocked, raw_stdout). blocked is True iff the hook printed a deny."""
+    payload = json.dumps({"tool_name": tool_name, "tool_input": tool_input})
+    result = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input=payload, capture_output=True, text=True, check=True,
+    )
+    return bool(result.stdout.strip()), result.stdout.strip()
+
+
+def _is_denied(out: str) -> bool:
+    parsed = json.loads(out)
+    return parsed["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# --- The actual danger surface: path-bearing fields and Bash commands ---
+
+def test_blocks_read_of_env_by_path():
+    blocked, out = _run("Read", {"file_path": ".env"})
+    assert blocked and _is_denied(out)
+
+
+def test_blocks_edit_targeting_env():
+    blocked, out = _run("Edit", {"file_path": ".env", "old_string": "x", "new_string": "y"})
+    assert blocked and _is_denied(out)
+
+
+def test_blocks_write_targeting_env():
+    blocked, out = _run("Write", {"file_path": ".env", "content": "GITHUB_APP_ID=1"})
+    assert blocked and _is_denied(out)
+
+
+def test_blocks_grep_path_pointed_at_env():
+    blocked, out = _run("Grep", {"pattern": "KEY", "path": ".env"})
+    assert blocked and _is_denied(out)
+
+
+def test_blocks_plain_bash_cat():
+    blocked, out = _run("Bash", {"command": "cat .env"})
+    assert blocked and _is_denied(out)
+
+
+def test_blocks_bash_mid_pipeline():
+    blocked, _ = _run("Bash", {"command": "cat .env | less"})
+    assert blocked
+
+
+def test_blocks_windows_backslash_path():
+    blocked, _ = _run("Bash", {"command": r"type C:\project\.env"})
+    assert blocked
+
+
+# --- Exempted lookalikes ---
+
+def test_allows_env_example():
+    blocked, _ = _run("Read", {"file_path": ".env.example"})
+    assert not blocked
+
+
+def test_allows_env_config():
+    blocked, _ = _run("Edit", {"file_path": ".env.config", "old_string": "a", "new_string": "b"})
+    assert not blocked
+
+
+def test_allows_env_config_example_copy():
+    blocked, _ = _run("Bash", {"command": "cp .env.config.example .env.config"})
+    assert not blocked
+
+
+def test_allows_unrelated_command():
+    blocked, _ = _run("Bash", {"command": "git status"})
+    assert not blocked
+
+
+def test_allows_unrelated_file_path():
+    blocked, _ = _run("Read", {"file_path": "app/config.py"})
+    assert not blocked
+
+
+# --- Free-text fields: the false positive this hook shipped with once ---
+
+def test_allows_write_content_mentioning_env_in_prose():
+    """Regression: an earlier version matched the whole payload, so writing
+    documentation that talks about .env (this project's guide, CLAUDE.md)
+    was blocked outright."""
+    blocked, _ = _run("Write", {
+        "file_path": "guide/setup/02-github-app.md",
+        "content": "Paste it into GITHUB_APP_ID in .env. cp .env.example .env first.",
+    })
+    assert not blocked
+
+
+def test_allows_edit_old_new_string_mentioning_env():
+    blocked, _ = _run("Edit", {
+        "file_path": "CLAUDE.md",
+        "old_string": "never touch .env",
+        "new_string": "never touch .env, full stop",
+    })
+    assert not blocked
+
+
+def test_allows_grep_pattern_searching_for_the_literal_string():
+    """Searching FOR the string ".env" across other files is not the same
+    as operating on the real .env -- only `path` is checked, never `pattern`."""
+    blocked, _ = _run("Grep", {"pattern": r"\.env", "path": "guide/"})
+    assert not blocked
+
+
+# --- git/gh message-value exemption ---
+
+def test_allows_simple_git_commit_message_mentioning_env():
+    blocked, _ = _run("Bash", {"command": 'git commit -m "explains .env usage"'})
+    assert not blocked
+
+
+def test_allows_single_quoted_git_commit_message():
+    blocked, _ = _run("Bash", {"command": "git commit -m 'explains .env usage'"})
+    assert not blocked
+
+
+def test_allows_gh_pr_create_body_mentioning_env():
+    blocked, _ = _run("Bash", {
+        "command": 'gh pr create --title "x" --body "mentions .env in the description"',
+    })
+    assert not blocked
+
+
+def test_allows_the_real_heredoc_commit_message_shape():
+    """The exact pattern this project's own commits use for multi-line
+    messages -- the shape that broke twice before this exemption existed."""
+    command = (
+        "git commit -m \"$(cat <<'EOF'\n"
+        "docs: explains .env in the body\n\n"
+        "Also mentions cp .env.example .env for context.\n"
+        "EOF\n"
+        ")\""
+    )
+    blocked, _ = _run("Bash", {"command": command})
+    assert not blocked
+
+
+def test_still_blocks_git_add_env():
+    """The exemption must never cover an actual pathspec, only message-flag
+    values."""
+    blocked, _ = _run("Bash", {"command": "git add .env"})
+    assert blocked
+
+
+def test_still_blocks_git_show_reading_env():
+    blocked, _ = _run("Bash", {"command": "git show HEAD:.env"})
+    assert blocked
+
+
+def test_still_blocks_a_smuggled_command_substitution_inside_dash_m():
+    """A message value containing $( or a backtick could be executing a real
+    command rather than writing prose -- must not be exempted."""
+    blocked, _ = _run("Bash", {"command": 'git commit -m "$(cat .env)"'})
+    assert blocked
+
+
+def test_message_exemption_does_not_apply_to_non_git_commands():
+    """Only git/gh get this treatment -- an arbitrary command with a -m flag
+    (unrelated to git) must still be checked in full."""
+    blocked, _ = _run("Bash", {"command": 'mytool -m "mentions .env" .env'})
+    assert blocked
+
+
+# --- Malformed input ---
+
+def test_malformed_json_fails_toward_checking_the_raw_payload():
+    result = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input="not json but mentions .env anyway",
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout.strip()
+
+
+def test_malformed_json_without_env_mention_is_silent():
+    result = subprocess.run(
+        [sys.executable, str(_HOOK)],
+        input="not json at all",
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout.strip() == ""

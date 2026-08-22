@@ -34,6 +34,23 @@ letter/digit/underscore/dot, so it counts as a boundary without special-
 casing it). See CLAUDE.md's Secret Handling section and
 `.env`-mixes-secrets-with-other-content: never open it with any tool, full
 stop, not even a narrow/safe-looking pattern.
+
+GIT/GH MESSAGE EXEMPTION: Bash's `command` string is checked in full (see
+above -- no separate path field to isolate), which also caught a git/gh
+commit/PR message that happens to mention ".env" in prose, e.g. `git commit
+-m "explains .env usage"` -- discovered when this project's own commit
+convention (a heredoc-wrapped multi-line `-m`) got blocked writing a commit
+message ABOUT the previous fix. For a command whose first word is `git` or
+`gh`, the VALUE of a message-bearing flag (-m/--message/-b/--body/--title,
+either shape: `-m "text"` or the heredoc idiom `-m "$(cat <<'EOF'
+...body...
+EOF
+)"`) is dropped from the text being checked, but only if that value itself
+contains no `$(` or backtick -- a value that does keeps its full text in the
+check, since that could be smuggling an actual command (e.g. `-m "$(cat
+.env)"`) rather than writing prose. Everything else in a git/gh command
+(the subcommand, a real pathspec like `git add .env` or `git show
+HEAD:.env`) is never exempted and stays fully checked.
 """
 
 from __future__ import annotations
@@ -57,11 +74,42 @@ _REASON = (
     "it themselves."
 )
 
+_GIT_LIKE = re.compile(r"^\s*(git|gh)\b")
+_HEREDOC_MESSAGE_FLAG = re.compile(
+    r"\$\(\s*cat\s*<<\s*'(?P<delim>[A-Za-z_][A-Za-z0-9_]*)'\s*\n"
+    r"(?P<body>.*?)\n(?P=delim)\s*\n?\)",
+    re.DOTALL,
+)
+_QUOTED_MESSAGE_FLAG = re.compile(
+    r"(?:-m|--message|-b|--body|--title)(?:=|\s+)(\"[^\"]*\"|'[^']*')"
+)
+_LOOKS_LIKE_A_COMMAND = re.compile(r"\$\(|`")
+
+
+def _neutralize_git_message_values(command: str) -> str:
+    """Drop the plain-text VALUE of a git/gh message-bearing flag from
+    `command`, leaving everything else (subcommand, real pathspecs, flag
+    names themselves) untouched. See the module docstring's "GIT/GH MESSAGE
+    EXEMPTION" section."""
+    if not _GIT_LIKE.match(command):
+        return command
+
+    def _drop_if_plain(match: re.Match, value: str) -> str:
+        return match.group(0) if _LOOKS_LIKE_A_COMMAND.search(value) else ""
+
+    command = _HEREDOC_MESSAGE_FLAG.sub(
+        lambda m: _drop_if_plain(m, m.group("body")), command
+    )
+    command = _QUOTED_MESSAGE_FLAG.sub(
+        lambda m: _drop_if_plain(m, m.group(1)), command
+    )
+    return command
+
 
 def _texts_to_check(tool_name: str, tool_input: dict) -> list[str]:
     texts = [str(tool_input[field]) for field in _PATH_FIELDS if field in tool_input]
     if tool_name == "Bash" and "command" in tool_input:
-        texts.append(str(tool_input["command"]))
+        texts.append(_neutralize_git_message_values(str(tool_input["command"])))
     return texts
 
 
