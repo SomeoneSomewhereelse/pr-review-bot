@@ -65,12 +65,23 @@ doesn't go unnoticed. Run it once you've collected the credentials below.
 !!! warning "Keep the App private"
     "Only on this account" above is not a default to leave alone — publishing
     the App to the GitHub Marketplace ("Any account") is a real, clickable
-    option on the same form, and nothing currently automates catching the
-    mistake if you pick it. Leaving `GITHUB_TARGET_REPO` unset (step 3) makes
+    option on the same form. Leaving `GITHUB_TARGET_REPO` unset (step 3) makes
     the bot act on *every* repo the installation covers, and that's only a
     safe default because only accounts *you* choose can install a private
     App in the first place. A public App would let any third party
     self-install and have their events accepted in that same track-all mode.
+
+!!! warning "Unlike permissions, this one isn't automatically verified"
+    `doctor`'s `app-permissions` check (mentioned above) reads the App's
+    actual permissions and event subscriptions back from GitHub and catches
+    drift — but it does not check whether the App ended up public or
+    private. Nothing in this project currently does. If you pick "Any
+    account" by mistake here, or someone changes it later in the App's own
+    settings, no `doctor` row will ever flag it. The automated script this
+    guide used to document made this mistake structurally impossible — it
+    hardcoded `public: False` in the manifest it submitted. Creating the App
+    by hand trades that guarantee away: getting this one checkbox right, and
+    noticing if it's ever wrong later, is on you.
 
 ## Collect the credentials into `.env`
 
