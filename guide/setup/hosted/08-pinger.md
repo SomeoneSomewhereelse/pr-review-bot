@@ -38,16 +38,18 @@ the monitor's existence and interval rather than report `SKIPPED`.
 
 ## Your first review
 
-This needs two things `scripts.seed_demo_pr` relies on that haven't come up
-yet: the [`gh` CLI](https://cli.github.com/) installed and authenticated
-(`gh auth login`) as an account with push access to a repo, and
-`GITHUB_TARGET_REPO` set locally to that one repo, e.g.
+This needs `gh` (Step 1) authenticated as an account with push access to a
+repo, and `GITHUB_TARGET_REPO` set locally to that one repo, e.g.
 `GITHUB_TARGET_REPO=you/some-repo` in `.env.config` — this only needs to be
 set on your machine, since the script runs entirely locally; it doesn't need
 to be pushed to Render for this demo (step 3's `GITHUB_TARGET_REPO` on the
 deployed service is a separate, still-optional narrowing of which installed
 repos the bot itself acts on). That repo also needs the App installed on it
-(step 3).
+(step 3) — and on the **same** GitHub account `gh` is authenticated as
+(Step 1's warning about this). Once `GITHUB_TARGET_REPO` is set, re-run
+`uv run python -m scripts.doctor` — its `gh-auth` and `target-repo` rows
+will FAIL with the specific account/repo mismatch if there is one, rather
+than you finding out from `seed_demo_pr` failing below.
 
 ```bash
 uv run python -m scripts.seed_demo_pr

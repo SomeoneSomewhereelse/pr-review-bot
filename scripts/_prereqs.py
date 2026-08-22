@@ -73,9 +73,22 @@ TUNNEL_TOOL = Tool(
     "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
 )
 
+GH = Tool(
+    "gh", "the GitHub CLI (gh)",
+    {
+        "Linux": "see https://github.com/cli/cli/blob/trunk/docs/install_linux.md "
+                 "(most distros: add the cli.github.com apt/dnf/... repo, then install `gh`)",
+        "Darwin": "`brew install gh`",
+        "Windows": "`winget install GitHub.cli`",
+    },
+    "https://cli.github.com/",
+)
+
 # Docker is NOT here: it is only one of the ways to satisfy the database
-# prerequisite -- see database_available().
-REQUIRED_TOOLS: tuple[Tool, ...] = (GIT,)
+# prerequisite -- see database_available(). gh IS here unconditionally, not
+# track-gated like TUNNEL_TOOL: both tracks' step 8 (scripts.seed_demo_pr)
+# need it to clone/push/open the demo PR.
+REQUIRED_TOOLS: tuple[Tool, ...] = (GIT, GH)
 
 
 def is_available(tool: Tool) -> bool:

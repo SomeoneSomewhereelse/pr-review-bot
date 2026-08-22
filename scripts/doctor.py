@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from typing import NamedTuple
 
@@ -237,6 +238,120 @@ def check_github_install() -> deploy.CheckResult:
     return deploy.CheckResult("github-install", "PASS", f"installation={installation_id}")
 
 
+def check_target_repo_covered() -> deploy.CheckResult:
+    """Whether GITHUB_TARGET_REPO (if set) is covered by the App's actual
+    installation. READ-ONLY -- reuses github_app.repos_not_covered, the exact
+    comparison scripts/deploy.py's github-app check uses, so the two can
+    never drift on what "covered" means; only that check's other half
+    (writing the webhook) is deliberately not duplicated here.
+
+    Step 2 (create the App) and step 3 (install it) both happen in a
+    BROWSER, under whichever GitHub account that browser session happens to
+    be logged into -- not necessarily the account GITHUB_TARGET_REPO's repo
+    belongs to. Nothing before this check ever compares the two; this is
+    that comparison, from the App-installation side. See check_gh_auth for
+    the other side: whether the LOCAL `gh` CLI's authenticated account can
+    actually reach the same repo.
+    """
+    repos = settings.target_repos()
+    if not repos:
+        return deploy.CheckResult(
+            "target-repo", "SKIPPED", "GITHUB_TARGET_REPO unset (track-all mode)"
+        )
+    if not all(name in _probes.present_secrets() for name in _APP_CREDENTIALS):
+        return deploy.CheckResult(
+            "target-repo", "SKIPPED", "needs the App credentials (see local-config)"
+        )
+    try:
+        installation_id = github_app.discover_installation_id_for_app()
+        covered = github_app.list_installation_repos(installation_id)
+    except Exception as exc:  # noqa: BLE001 -- structural report, never the value
+        return deploy.CheckResult(
+            "target-repo", "FAIL", f"could not verify ({type(exc).__name__})"
+        )
+    missing = github_app.repos_not_covered(covered, repos)
+    if missing:
+        return deploy.CheckResult(
+            "target-repo", "FAIL",
+            "not covered by the App's installation: " + ", ".join(missing) +
+            " -- either a typo in GITHUB_TARGET_REPO, or the App was created/installed "
+            "in the browser under a different GitHub account than this repo belongs to; "
+            "check the App's Installed repositories list on GitHub",
+        )
+    return deploy.CheckResult(
+        "target-repo", "PASS", f"installation={installation_id}; covered ({len(repos)} repo(s))"
+    )
+
+
+def _run_gh(*args: str) -> subprocess.CompletedProcess[str]:
+    """A single read-only `gh` invocation. Never raises on a nonzero exit --
+    callers read .returncode -- and always bounded, so an interactive prompt
+    gh might otherwise print (e.g. no terminal attached) can't hang doctor."""
+    return subprocess.run(
+        ["gh", *args], capture_output=True, text=True, timeout=15, check=False
+    )
+
+
+def check_gh_auth() -> deploy.CheckResult:
+    """Whether the LOCAL `gh` CLI (needed by scripts.seed_demo_pr, step 8) is
+    authenticated, and -- once GITHUB_TARGET_REPO is set -- whether that
+    authenticated account can actually push to it. READ-ONLY: every gh
+    subcommand used here only queries state (`auth status`, `api user`,
+    `repo view`), never mutates anything.
+
+    This is the local-CLI side of the same mismatch check_target_repo_covered
+    covers from the App-installation side: Steps 2-3 authenticate through a
+    BROWSER, `gh auth login` authenticates this MACHINE, and nothing ties the
+    two to the same GitHub account. A user who approved the App as one
+    account but ran `gh auth login` as another discovers it, today, only when
+    `scripts.seed_demo_pr` fails outright at step 8 -- this surfaces it as
+    soon as GITHUB_TARGET_REPO is set instead, and names the likely cause
+    rather than just relaying gh's own error text.
+    """
+    if not _prereqs.is_available(_prereqs.GH):
+        return deploy.CheckResult("gh-auth", "SKIPPED", "install gh first (see prereqs)")
+
+    try:
+        status = _run_gh("auth", "status")
+    except subprocess.TimeoutExpired:
+        return deploy.CheckResult("gh-auth", "FAIL", "gh auth status timed out")
+    if status.returncode != 0:
+        return deploy.CheckResult(
+            "gh-auth", "FAIL", "gh is installed but not authenticated -- run `gh auth login`"
+        )
+
+    login = _run_gh("api", "user", "--jq", ".login")
+    who = login.stdout.strip() if login.returncode == 0 and login.stdout.strip() else "(unknown)"
+
+    repos = settings.target_repos()
+    if not repos:
+        return deploy.CheckResult(
+            "gh-auth", "PASS",
+            f"authenticated as {who}; set GITHUB_TARGET_REPO later to verify repo access",
+        )
+
+    cant_push = []
+    for repo in sorted(repos):
+        view = _run_gh(
+            "repo", "view", repo, "--json", "viewerPermission", "--jq", ".viewerPermission"
+        )
+        permission = view.stdout.strip() if view.returncode == 0 else ""
+        if permission not in {"WRITE", "MAINTAIN", "ADMIN"}:
+            cant_push.append(f"{repo} ({permission or 'not visible to this account'})")
+
+    if cant_push:
+        return deploy.CheckResult(
+            "gh-auth", "FAIL",
+            f"authenticated as {who}, which cannot push to: " + ", ".join(cant_push) +
+            " -- if the App was created/installed under a different GitHub account in "
+            "your browser, `gh auth login` (or `gh auth switch`) to that same account; "
+            "otherwise GITHUB_TARGET_REPO may be pointed at the wrong repo",
+        )
+    return deploy.CheckResult(
+        "gh-auth", "PASS", f"authenticated as {who}; can push to all of GITHUB_TARGET_REPO"
+    )
+
+
 def check_webhook(base: str) -> deploy.CheckResult:
     """Whether the App's webhook points at `base`. READ-ONLY -- deliberately
     does not call deploy.py's equivalent check, which PATCHes the URL when it
@@ -274,6 +389,8 @@ def build_state(track: str, base: str) -> tuple[State, list[deploy.CheckResult]]
         deploy._safe("config", deploy.check_config),
         deploy._safe("pricing", deploy.check_pricing),
         deploy._safe("github-install", check_github_install),
+        deploy._safe("target-repo", check_target_repo_covered),
+        deploy._safe("gh-auth", check_gh_auth),
         deploy._safe("database", deploy.check_database),
         deploy._safe("provider", deploy.check_provider),
     ]

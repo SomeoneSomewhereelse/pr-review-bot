@@ -2,13 +2,29 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 
+from app import github_app
 from app.config import settings
 from scripts import deploy, doctor
 
 SENTINEL = "SENTINEL-2b6d40af91ce7385-DO-NOT-LEAK"
+
+
+@pytest.fixture(autouse=True)
+def no_real_gh_calls(monkeypatch):
+    """check_gh_auth shells out to the real `gh` CLI. Stubbed to "not
+    authenticated" by default for every test in this file -- otherwise the
+    suite's result would depend on whatever GitHub account (if any) happens
+    to be authenticated on the machine actually running the tests, and
+    `gh auth status` makes a real network call. Tests that exercise
+    check_gh_auth's own behavior override this via monkeypatch."""
+    monkeypatch.setattr(
+        doctor, "_run_gh",
+        lambda *args: subprocess.CompletedProcess(args, returncode=1, stdout="", stderr=""),
+    )
 
 
 @pytest.fixture
@@ -18,7 +34,7 @@ def bare(monkeypatch):
         "github_app_id", "github_app_private_key", "github_webhook_secret",
         "database_url", "llm_provider", "groq_api_key", "gemini_api_key",
         "gcp_service_account_key", "public_base_url", "render_api_key",
-        "uptimerobot_api_key",
+        "uptimerobot_api_key", "github_target_repo",
     ):
         monkeypatch.setattr(settings, field, type(getattr(settings, field))(), raising=False)
 
@@ -166,6 +182,147 @@ def test_hosted_step_eight_is_reachable_when_public_url_clears_but_pinger_fails(
     step = doctor.current_step("hosted", state)
     assert step is not None
     assert step.number == 8
+
+
+def test_target_repo_covered_skips_when_target_repo_is_unset(bare):
+    assert doctor.check_target_repo_covered().status == "SKIPPED"
+
+
+def test_target_repo_covered_skips_without_app_credentials(bare, monkeypatch):
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    result = doctor.check_target_repo_covered()
+    assert result.status == "SKIPPED"
+    assert "App credentials" in result.detail
+
+
+def test_target_repo_covered_passes_when_installation_covers_it(bare, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", lambda: 42)
+    monkeypatch.setattr(github_app, "list_installation_repos", lambda _id: ["owner/repo"])
+
+    result = doctor.check_target_repo_covered()
+
+    assert result.status == "PASS"
+    assert "installation=42" in result.detail
+
+
+def test_target_repo_covered_names_the_account_mismatch_as_a_possible_cause(bare, monkeypatch):
+    """This is the check that closes the App-installation side of a
+    browser-account vs. gh-account mismatch (see check_gh_auth for the other
+    side) -- the detail must actually name that as a candidate cause, not
+    just say 'not covered'."""
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", lambda: 42)
+    monkeypatch.setattr(github_app, "list_installation_repos", lambda _id: ["owner/other"])
+
+    result = doctor.check_target_repo_covered()
+
+    assert result.status == "FAIL"
+    assert "owner/repo" in result.detail
+    assert "different GitHub account" in result.detail
+
+
+def test_target_repo_covered_reports_a_lookup_failure_structurally(bare, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+
+    def _raise():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", _raise)
+
+    result = doctor.check_target_repo_covered()
+
+    assert result.status == "FAIL"
+    assert "RuntimeError" in result.detail
+
+
+def test_gh_auth_skips_when_gh_is_not_installed(bare, monkeypatch):
+    monkeypatch.setattr(doctor._prereqs, "is_available", lambda _tool: False)
+    result = doctor.check_gh_auth()
+    assert result.status == "SKIPPED"
+
+
+def test_gh_auth_fails_when_not_authenticated(bare, monkeypatch):
+    """The autouse no_real_gh_calls fixture already stubs this to "not
+    authenticated" -- this test just pins that gh-auth reports it as a FAIL
+    naming the fix, rather than SKIPPED or a silent PASS."""
+    monkeypatch.setattr(doctor._prereqs, "is_available", lambda _tool: True)
+    result = doctor.check_gh_auth()
+    assert result.status == "FAIL"
+    assert "gh auth login" in result.detail
+
+
+def test_gh_auth_passes_with_no_target_repo_once_authenticated(bare, monkeypatch):
+    monkeypatch.setattr(doctor._prereqs, "is_available", lambda _tool: True)
+
+    def _run_gh(*args):
+        if args == ("auth", "status"):
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ("api", "user"):
+            return subprocess.CompletedProcess(args, 0, "octocat\n", "")
+        raise AssertionError(f"unexpected gh invocation: {args}")
+
+    monkeypatch.setattr(doctor, "_run_gh", _run_gh)
+
+    result = doctor.check_gh_auth()
+
+    assert result.status == "PASS"
+    assert "octocat" in result.detail
+
+
+def test_gh_auth_flags_a_repo_it_cannot_push_to(bare, monkeypatch):
+    """This is the local-CLI side of the browser-account mismatch (see
+    test_target_repo_covered_names_the_account_mismatch_as_a_possible_cause
+    for the App-installation side) -- the detail must name the account
+    mismatch as a candidate cause, not just relay gh's own permission text."""
+    monkeypatch.setattr(doctor._prereqs, "is_available", lambda _tool: True)
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+
+    def _run_gh(*args):
+        if args == ("auth", "status"):
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ("api", "user"):
+            return subprocess.CompletedProcess(args, 0, "octocat\n", "")
+        if args[:3] == ("repo", "view", "owner/repo"):
+            return subprocess.CompletedProcess(args, 0, "READ\n", "")
+        raise AssertionError(f"unexpected gh invocation: {args}")
+
+    monkeypatch.setattr(doctor, "_run_gh", _run_gh)
+
+    result = doctor.check_gh_auth()
+
+    assert result.status == "FAIL"
+    assert "owner/repo" in result.detail
+    assert "different GitHub account" in result.detail
+
+
+def test_gh_auth_passes_when_it_can_push_to_the_target_repo(bare, monkeypatch):
+    monkeypatch.setattr(doctor._prereqs, "is_available", lambda _tool: True)
+    monkeypatch.setattr(settings, "github_target_repo", "owner/repo")
+
+    def _run_gh(*args):
+        if args == ("auth", "status"):
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ("api", "user"):
+            return subprocess.CompletedProcess(args, 0, "octocat\n", "")
+        if args[:3] == ("repo", "view", "owner/repo"):
+            return subprocess.CompletedProcess(args, 0, "WRITE\n", "")
+        raise AssertionError(f"unexpected gh invocation: {args}")
+
+    monkeypatch.setattr(doctor, "_run_gh", _run_gh)
+
+    result = doctor.check_gh_auth()
+
+    assert result.status == "PASS"
 
 
 def test_main_runs_the_full_wiring_and_prints_plain_text(capsys):

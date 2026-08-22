@@ -967,6 +967,21 @@ def test_list_installation_repos_returns_full_names(fake_transport):
     assert github_app.list_installation_repos(123456) == ["someone/repo-a", "someone/repo-b"]
 
 
+def test_repos_not_covered_is_empty_when_nothing_configured():
+    assert github_app.repos_not_covered(["owner/a"], frozenset()) == []
+
+
+def test_repos_not_covered_names_only_the_missing_entries():
+    missing = github_app.repos_not_covered(
+        ["owner/a"], frozenset({"owner/a", "owner/missing"})
+    )
+    assert missing == ["owner/missing"]
+
+
+def test_repos_not_covered_matches_case_insensitively():
+    assert github_app.repos_not_covered(["owner/repo"], frozenset({"Owner/Repo"})) == []
+
+
 def test_list_installation_repos_uses_the_given_installation_id_not_settings(
     fake_transport, monkeypatch
 ):

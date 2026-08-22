@@ -14,6 +14,7 @@ earlier just means hitting an avoidable failure.
 | [**uv**](https://docs.astral.sh/uv/) | this project's package/venv manager | `uv --version` |
 | **git** | to clone the repo | `git --version` |
 | **Docker, *or* a local Postgres** | the test suite needs a real, disposable Postgres | see below |
+| [**`gh`**](https://cli.github.com/) | needed later to open the live demo PR (Step 8) — install and authenticate it now, since it's a one-time setup step like everything else on this page | `gh --version` |
 
 Checking your Python version:
 
@@ -102,6 +103,53 @@ If you'd rather not run Docker at all, install Postgres 16 directly from
 `export DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres`)
 — a `localhost` host is what makes this count as local for the warning
 above.
+
+## Installing and authenticating `gh`
+
+=== "Linux"
+
+    See <https://github.com/cli/cli/blob/trunk/docs/install_linux.md> — most
+    distros install it from a package repo (e.g. `sudo apt install gh` once
+    that repo is added).
+
+=== "macOS"
+
+    ```bash
+    brew install gh
+    ```
+
+=== "Windows"
+
+    ```powershell
+    winget install GitHub.cli
+    ```
+
+Then authenticate it:
+
+```bash
+gh auth login
+```
+
+This walks you through a browser-based login and picks up wherever you're
+already logged into GitHub in your default browser.
+
+!!! warning "Use the same GitHub account everywhere in this guide"
+    Step 2 (create the App) and Step 3 (install the App) both happen in a
+    **browser** — whatever account that browser session is logged into ends
+    up owning and hosting the App. `gh auth login` separately authenticates
+    **this machine's `gh` CLI**, which Step 8 uses to push a branch and open
+    a real PR. Nothing connects the two: if you have more than one GitHub
+    account (e.g. personal + work), it's easy to end up with the App on one
+    account and `gh` authenticated as another, and end up with a repo `gh`
+    can't push to or an installation that doesn't cover it.
+
+    Avoid the whole problem by using **one account** for `gh auth login`
+    here, approving the App in Steps 2–3, and owning the repo you'll later
+    set `GITHUB_TARGET_REPO` to. If you're ever unsure which account is
+    currently active, `gh auth status` names it. `uv run python -m
+    scripts.doctor`'s `gh-auth` and `target-repo` rows also catch a mismatch
+    directly, once `GITHUB_TARGET_REPO` is set in Step 8 — but it's simpler
+    to just not create one.
 
 ## Get the checkout running
 

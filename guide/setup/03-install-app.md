@@ -8,6 +8,12 @@ install itself, so there's no CLI or script for it.
 3. Choose **All repositories**, or select specific repos (e.g. a throwaway
    test repo while you're getting set up).
 
+Whichever GitHub account this browser session installs the App on is the
+account that matters from here on — including for Step 8's demo PR, which
+needs `gh` (Step 1) authenticated as *that same* account. Step 1's warning
+about this covers what goes wrong when they don't match and how `doctor`
+catches it if they don't.
+
 ## Set `GITHUB_APP_INSTALLATION_ID`
 
 **Required** — never auto-discovered or guessed on your behalf; the service

@@ -279,6 +279,26 @@ def list_installation_repos(installation_id: int) -> list[str]:
     return [repo["full_name"] for repo in data.get("repositories", [])]
 
 
+def repos_not_covered(covered: list[str], repos: frozenset[str]) -> list[str]:
+    """Entries of `repos` absent from `covered`, sorted, comparing
+    case-insensitively (GitHub repo names are case-insensitive, so an
+    allowlist entry need not match `covered`'s reported casing exactly).
+    Empty if `repos` is empty -- nothing configured means nothing to verify.
+
+    Shared by scripts/deploy.py's github-app check (which also fixes the
+    webhook afterward) and scripts/doctor.py's read-only equivalent, so this
+    comparison itself can never have two implementations to drift apart --
+    doctor.py's module docstring calls that out as the thing most worth
+    avoiding. Takes `covered` already-fetched rather than an installation_id,
+    since both callers already have it (list_installation_repos is not
+    cheap enough to call twice per check).
+    """
+    if not repos:
+        return []
+    covered_casefold = {c.casefold() for c in covered}
+    return sorted(r for r in repos if r.casefold() not in covered_casefold)
+
+
 def set_webhook_url(url: str) -> None:
     """Idempotently point the App's webhook at `url` (PATCH /app/hook/config, App JWT)."""
     gh = _app_jwt_client()
