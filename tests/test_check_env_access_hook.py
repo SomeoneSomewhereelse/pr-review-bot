@@ -224,3 +224,49 @@ def test_malformed_json_without_env_mention_is_silent():
         capture_output=True, text=True, check=True,
     )
     assert result.stdout.strip() == ""
+
+
+# --- The real configured invocation, not just the script directly ---
+#
+# Every test above runs the script via sys.executable, bypassing the `uv run
+# ...` command Claude Code actually invokes per .claude/settings.json. That
+# gap is exactly how a real bug escaped notice: the hook was configured with
+# `uv run --no-sync python ...`, which still lets uv touch the project's own
+# .venv -- and broke outright on a native-Windows session sharing this
+# checkout with WSL, where uv's Windows build couldn't repair a .venv built
+# by Linux uv (a lib64 symlink it can't delete). --no-project avoids .venv
+# entirely, which these tests both verify functionally and pin by name so
+# the invocation can't silently drift back to something venv-dependent.
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_SETTINGS = _REPO_ROOT / ".claude" / "settings.json"
+
+
+def _configured_hook_command() -> list[str]:
+    with _SETTINGS.open() as f:
+        settings = json.load(f)
+    hook = settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    return [hook["command"], *hook["args"]]
+
+
+def _run_via_configured_invocation(tool_name: str, tool_input: dict) -> bool:
+    payload = json.dumps({"tool_name": tool_name, "tool_input": tool_input})
+    result = subprocess.run(
+        _configured_hook_command(),
+        input=payload, capture_output=True, text=True, cwd=_REPO_ROOT, check=True,
+    )
+    return bool(result.stdout.strip())
+
+
+def test_configured_invocation_blocks_env_by_path():
+    assert _run_via_configured_invocation("Read", {"file_path": ".env"})
+
+
+def test_configured_invocation_allows_env_example():
+    assert not _run_via_configured_invocation("Read", {"file_path": ".env.example"})
+
+
+def test_configured_invocation_does_not_depend_on_project_sync():
+    command = _configured_hook_command()
+    assert "--no-project" in command
+    assert "--no-sync" not in command
