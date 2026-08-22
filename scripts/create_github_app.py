@@ -14,40 +14,30 @@ hand, generating a private key by hand, and base64-encoding it by hand.
 guide/setup/02-github-app.md records that this project's own App was made
 this way.
 
-Three ways to catch that redirect, depending on what's reachable from the
-approving browser's device:
+Two ways to catch that redirect. The default (_run_server_flow) runs a local
+callback server and auto-opens a browser -- fully automatic, but it only
+works when the approving browser can reach `localhost` on THIS machine. Over
+SSH, on a headless box, or any remote session, that silently doesn't hold:
+webbrowser.open() opens nothing (or opens the wrong machine's browser), and
+the script just blocks for a 300s timeout with no diagnosis. --manual
+(_run_manual_flow) needs no localhost access at all: it writes the same
+auto-submitting form to a plain HTML file the operator moves to WHATEVER
+machine has a browser -- scp/sftp over the same SSH connection already in
+use, or an SSH client's own file-transfer feature, no additional network
+path required -- and reads the resulting redirect URL back from them
+directly instead of catching it with a listener.
 
-- Same machine (the common case): the default _run_server_flow, unchanged --
-  a local callback server, browser auto-opened, fully automatic.
-- Different device, on some network this machine is also reachable on (a
-  VPN, a LAN, a mesh network like Tailscale -- any of them, this is just an
-  address, not a specific product): --bind-host, still _run_server_flow,
-  just listening on an address the OTHER device can reach instead of
-  localhost. Still no copy-pasting -- the operator opens one ordinary
-  http:// URL on their own device and the rest is automatic, same as the
-  local case. (The same result is reachable with zero code changes via SSH
-  local port forwarding -- `ssh -L 8765:localhost:8765 host`, or whatever
-  equivalent the operator's SSH client offers -- which makes the default
-  flow's `localhost` correct again from the operator's side; --bind-host is
-  for when setting that up isn't convenient.)
-- No such network (an isolated remote host reachable only by SSH, e.g. a
-  bare cloud VM with only port 22 open): --bind-host has nothing to bind to
-  that the approving device could reach. --manual (_run_manual_flow) is the
-  fallback for exactly this case: it writes the same auto-submitting form to
-  a plain HTML file, which the operator moves to WHATEVER machine has a
-  browser using the same connection they already used to reach this one --
-  scp/sftp over that same SSH session, or an SSH client's built-in file
-  transfer -- no additional network path, VPN, or third-party service
-  required, only what SSH access already implies. Reading the resulting
-  redirect URL back from the operator directly (instead of catching it with
-  a listener) is what lets this skip needing any network path at all beyond
-  that.
-
-A `data:` URL pasted straight into the browser's address bar was considered
-as a zero-file-transfer alternative to --manual, but Chrome blocks top-level
-navigation to a typed/pasted `data:` URL (anti-phishing, since ~2018) --
-so it would silently fail for the majority of mobile users. Not used here
-for that reason.
+(A third mode, --bind-host, briefly existed to let a DIFFERENT device on
+some shared network with this one -- a VPN, a LAN, Tailscale -- approve
+fully automatically by listening on a non-localhost address instead of
+copy-pasting. Removed 2026-08-22: its entire value over --manual was
+skipping one URL paste, for a flag, a redirect/bind rewrite, a mutual-
+exclusivity check, and a guide branch explaining network topology --
+--manual already covers the same case with zero of that. A `data:` URL
+pasted into the address bar was considered too, as a zero-file-transfer
+alternative to --manual itself, but Chrome blocks top-level navigation to a
+typed/pasted `data:` URL (anti-phishing, since ~2018), so it would silently
+fail for the majority of mobile users -- never used for that reason.)
 
 The webhook URL is a placeholder at creation time -- the tunnel or Render URL
 does not exist yet. scripts/deploy.py's github-app check corrects it later
@@ -258,20 +248,13 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def _run_server_flow(
-    app_name: str, base_url: str, state: str, *, bind_host: str = "localhost"
-) -> str | None:
+def _run_server_flow(app_name: str, base_url: str, state: str) -> str | None:
     """The default, fully-automatic flow: a local server serves the
-    auto-submitting form and catches GitHub's redirect. With the default
-    bind_host="localhost", this needs the approving browser to be on THIS
-    machine. Passing --bind-host (some other address of this machine's --
-    a Tailscale IP/hostname, a LAN IP) instead extends the same automatic
-    flow to a *different* device that shares a network with this one: the
-    operator opens that address on their own device's browser, and
-    everything else works exactly as it does in the same-machine case --
-    still no copy-pasting. See --manual/_run_manual_flow for when there's no
-    shared network at all (SSH to an isolated host, a headless box)."""
-    redirect = f"http://{bind_host}:{_CALLBACK_PORT}/callback"
+    auto-submitting form and catches GitHub's redirect. Needs the approving
+    browser to reach `localhost` on THIS machine -- see --manual/
+    _run_manual_flow for anywhere that doesn't hold (SSH, a headless box, a
+    remote session)."""
+    redirect = f"http://localhost:{_CALLBACK_PORT}/callback"
     manifest = build_manifest(app_name, base_url, redirect)
     _CallbackHandler.manifest_json = html.escape(json.dumps(manifest), quote=True)
     _CallbackHandler.state = state
@@ -280,32 +263,24 @@ def _run_server_flow(
     _CallbackHandler.received.clear()
 
     try:
-        server = http.server.HTTPServer((bind_host, _CALLBACK_PORT), _CallbackHandler)
+        server = http.server.HTTPServer(("localhost", _CALLBACK_PORT), _CallbackHandler)
     except OSError as exc:
         print(
-            f"could not bind to {bind_host}:{_CALLBACK_PORT} ({type(exc).__name__}) -- "
+            f"could not bind to localhost:{_CALLBACK_PORT} ({type(exc).__name__}) -- "
             "close whatever else is using that port and try again",
             file=sys.stderr,
         )
         return None
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    start = f"http://{bind_host}:{_CALLBACK_PORT}/"
-    if bind_host == "localhost":
-        print(f"opening {start} -- approve the App in your browser")
-        opened = webbrowser.open(start)
-        if not opened:
-            print(
-                "no browser could be opened automatically here -- if you're on a remote or "
-                "headless machine (SSH, a container, a cloud VM), Ctrl+C and re-run with "
-                "--manual instead, which needs no local browser or localhost access at all",
-                file=sys.stderr,
-            )
-    else:
-        # bind_host names a device other than this one's browser -- opening a
-        # browser HERE would be opening it on the wrong machine, so don't.
+    start = f"http://localhost:{_CALLBACK_PORT}/"
+    print(f"opening {start} -- approve the App in your browser")
+    opened = webbrowser.open(start)
+    if not opened:
         print(
-            f"open {start} in a browser on a device that can reach this machine at "
-            f"{bind_host} (e.g. over the same Tailscale/VPN/LAN) -- approve the App there"
+            "no browser could be opened automatically here -- if you're on a remote or "
+            "headless machine (SSH, a container, a cloud VM), Ctrl+C and re-run with "
+            "--manual instead, which needs no local browser or localhost access at all",
+            file=sys.stderr,
         )
     try:
         # The handler sets this once GitHub's redirect arrives. A single Event
@@ -314,16 +289,9 @@ def _run_server_flow(
         if not _CallbackHandler.received.wait(timeout=_CALLBACK_TIMEOUT):
             print(
                 f"timed out after {_CALLBACK_TIMEOUT:.0f}s waiting for GitHub's redirect -- "
-                + (
-                    "if you're on a remote or headless machine, that's almost always why: the "
-                    "approving browser can't reach localhost on this machine. Re-run with "
-                    "--manual instead, or --bind-host if the other device shares a network "
-                    "with this one."
-                    if bind_host == "localhost"
-                    else f"make sure the other device can actually reach {bind_host} on "
-                    f"port {_CALLBACK_PORT} (firewall, same tailnet/VPN/LAN). If it can't, "
-                    "re-run with --manual instead."
-                ),
+                "if you're on a remote or headless machine, that's almost always why: the "
+                "approving browser can't reach localhost on this machine. Re-run with "
+                "--manual instead.",
                 file=sys.stderr,
             )
             return None
@@ -397,26 +365,16 @@ def main(argv: list[str] | None = None) -> int:
         "--manual", action="store_true",
         help="no local callback server or auto-opened browser -- write a manifest HTML "
              "file to open on any machine instead, then paste back the redirect URL "
-             "yourself. Use this when there's no shared network at all between this "
-             "machine and the approving browser's device.",
-    )
-    parser.add_argument(
-        "--bind-host", default="localhost",
-        help="address to listen on and to send GitHub's redirect to, instead of "
-             "localhost -- e.g. this machine's Tailscale IP/hostname or LAN IP. Use "
-             "this to approve from a different device (a phone, a laptop) that shares "
-             "a network with this machine, still fully automatic. Leave unset for the "
-             "default same-machine flow.",
+             "yourself. Use this over SSH, on a headless box, or anywhere the approving "
+             "browser can't reach localhost on this machine.",
     )
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    if args.manual and args.bind_host != "localhost":
-        parser.error("--bind-host has no effect with --manual, which uses no listener at all")
 
     state = secrets.token_urlsafe(16)
     code = (
         _run_manual_flow(args.name, args.base_url, state)
         if args.manual
-        else _run_server_flow(args.name, args.base_url, state, bind_host=args.bind_host)
+        else _run_server_flow(args.name, args.base_url, state)
     )
     if code is None:
         return 1

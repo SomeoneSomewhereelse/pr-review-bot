@@ -41,57 +41,40 @@ base64-encoding it by hand.
     browser opens, or the wrong machine's browser opens, and the command
     just blocks for up to 5 minutes before timing out with no explanation.
 
-    Which fix applies depends on whether your browser's device can reach
-    this machine over *some* network — any kind: a VPN, the same LAN, a
-    mesh network. (Tailscale is one example of that, not a requirement —
-    `--bind-host` below just takes whatever address your device can reach
-    this one at; nothing here assumes a specific product.)
-
-    **Your browser's device can reach this machine on some network.** Use
-    `--bind-host` with an address of this machine that device can actually
-    reach (that VPN/mesh network's IP or hostname for this machine, or a
-    plain LAN IP):
-
-    ```bash
-    uv run python -m scripts.create_github_app --name your-app-name --bind-host 100.x.y.z
-    ```
-
-    This stays fully automatic — no copy-pasting. Open the URL it prints
-    (`http://100.x.y.z:8765/`) in your own device's browser, approve the App,
-    and the rest happens exactly like the same-machine case. (The same
-    result with zero extra flags: set up SSH local port forwarding —
+    **First choice, zero flags needed:** set up SSH local port forwarding —
     `ssh -L 8765:localhost:8765 that-host`, or whatever equivalent your own
-    SSH client offers — which makes the remote's `localhost:8765` answer as
-    *your* device's `localhost:8765`, so the plain command with no flags at
-    all already works.)
+    SSH client offers (Termius and most GUI clients have one). This tunnels
+    through the *exact SSH connection you already have* — no VPN, no shared
+    network, nothing extra required, the same way `scp` already works over
+    that connection — and makes the remote's `localhost:8765` answer as
+    *your own device's* `localhost:8765`. Once that's running, the plain
+    command above (no flags) already works: open your own browser, approve
+    the App, done.
 
-    **Your browser's device can't reach this machine at all — only SSH got
-    you here** (e.g. a bare cloud VM with nothing but port 22 open, no VPN,
-    no shared network of any kind). `--bind-host` can't help: there's
-    nothing for it to bind to that your device could reach. Add `--manual`
-    instead:
+    **If setting that up isn't convenient** (an SSH client with no
+    forwarding option, or you'd rather not), add `--manual` instead:
 
     ```bash
     uv run python -m scripts.create_github_app --name your-app-name --manual
     ```
 
-    This needs no local browser and no localhost access at all — and,
-    importantly, no network path beyond the SSH connection you already have.
-    It writes a small HTML file and prints its path; move that file to
-    *any* machine that has a browser using that same SSH connection itself
-    — `scp`/`sftp`, or your SSH client's own file-transfer feature if it has
-    one — then open it there. (If your SSH client has no file-transfer
-    feature at all, `scp <that-path-below> yourlaptop:` from a second
-    terminal on your own machine works the same way, or paste the file's
-    contents through the terminal into a new local file if even that isn't
-    available — it's plain HTML, nothing binary.) It submits itself and
-    takes you to GitHub's approval page exactly like the automatic flow
-    does. After you approve, GitHub redirects to a page that will fail to
-    load — that's expected, it's a placeholder with nothing behind it. Copy
-    the full URL from your browser's address bar at that point (it carries
-    a one-time code) and paste it back into the terminal running the
-    command, which is waiting for exactly that. The rest — exchanging the
-    code, writing `.env` — happens exactly as it does in the automatic flow.
+    This needs no local browser, no localhost access, and no network path
+    beyond the SSH connection you already have. It writes a small HTML file
+    and prints its path; move that file to *any* machine that has a browser
+    using that same SSH connection — `scp`/`sftp`, or your SSH client's own
+    file-transfer feature if it has one — then open it there. (If your SSH
+    client has no file-transfer feature at all, `scp <that-path> yourlaptop:`
+    from a second terminal on your own machine works the same way, or paste
+    the file's contents through the terminal into a new local file if even
+    that isn't available — it's plain HTML, nothing binary.) It submits
+    itself and takes you to GitHub's approval page exactly like the
+    automatic flow does. After you approve, GitHub redirects to a page that
+    will fail to load — that's expected, it's a placeholder with nothing
+    behind it. Copy the full URL from your browser's address bar at that
+    point (it carries a one-time code) and paste it back into the terminal
+    running the command, which is waiting for exactly that. The rest —
+    exchanging the code, writing `.env` — happens exactly as it does in the
+    automatic flow.
 
 The App is created with:
 
@@ -129,7 +112,11 @@ cp .env.example .env
 
 Then create the App by hand in GitHub's UI (**Settings → Developer settings
 → GitHub Apps → New GitHub App**), giving it the same permissions and event
-listed above.
+listed above. Checking boxes by hand is exactly the kind of step a typo
+survives — `uv run python -m scripts.doctor`'s `app-permissions` row reads
+the App's actual permissions back from GitHub and compares them against
+what this project's code needs, regardless of which path created the App,
+so a missed or extra checkbox doesn't go unnoticed.
 
 The form has its own **Webhook secret** field — unlike the one-command path,
 GitHub does not generate this for you here, so type in your own value (any

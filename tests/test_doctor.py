@@ -184,6 +184,75 @@ def test_hosted_step_eight_is_reachable_when_public_url_clears_but_pinger_fails(
     assert step.number == 8
 
 
+def test_app_permissions_skips_without_app_credentials(bare):
+    assert doctor.check_app_permissions().status == "SKIPPED"
+
+
+def test_app_permissions_passes_when_it_matches_the_manifest_exactly(bare, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+    monkeypatch.setattr(
+        github_app, "get_app_permissions",
+        lambda: (dict(doctor.create_github_app.MANIFEST_PERMISSIONS),
+                  list(doctor.create_github_app.MANIFEST_EVENTS)),
+    )
+
+    result = doctor.check_app_permissions()
+
+    assert result.status == "PASS"
+
+
+def test_app_permissions_fails_when_under_permissioned(bare, monkeypatch):
+    """This is the check that makes creating the App by hand as safe as the
+    automated manifest flow -- a hand-created App missing a permission the
+    bot's code actually needs must FAIL, naming it, not just SKIP or PASS
+    because credentials happen to be present."""
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+    monkeypatch.setattr(
+        github_app, "get_app_permissions", lambda: ({"contents": "read"}, ["pull_request"])
+    )
+
+    result = doctor.check_app_permissions()
+
+    assert result.status == "FAIL"
+    assert "issues" in result.detail
+
+
+def test_app_permissions_warns_but_does_not_fail_when_over_permissioned(bare, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+    over_permissioned = dict(doctor.create_github_app.MANIFEST_PERMISSIONS, administration="write")
+    monkeypatch.setattr(
+        github_app, "get_app_permissions",
+        lambda: (over_permissioned, list(doctor.create_github_app.MANIFEST_EVENTS)),
+    )
+
+    result = doctor.check_app_permissions()
+
+    assert result.status == "WARN"
+    assert "administration" in result.detail
+
+
+def test_app_permissions_reports_a_lookup_failure_structurally(bare, monkeypatch):
+    monkeypatch.setattr(settings, "github_app_id", "1", raising=False)
+    monkeypatch.setattr(settings, "github_app_private_key", "x", raising=False)
+    monkeypatch.setattr(settings, "github_webhook_secret", "x", raising=False)
+
+    def _raise():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(github_app, "get_app_permissions", _raise)
+
+    result = doctor.check_app_permissions()
+
+    assert result.status == "FAIL"
+    assert "RuntimeError" in result.detail
+
+
 def test_target_repo_covered_skips_when_target_repo_is_unset(bare):
     assert doctor.check_target_repo_covered().status == "SKIPPED"
 

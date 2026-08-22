@@ -1014,6 +1014,69 @@ def test_list_installation_repos_uses_the_given_installation_id_not_settings(
     assert not any("/app/installations/999999/access_tokens" in r.url for r in token_requests)
 
 
+def test_get_app_permissions_returns_permissions_and_events(fake_transport):
+    fake_transport.route(
+        "GET", "/app",
+        {"permissions": {"issues": "write", "contents": "read"}, "events": ["pull_request"]},
+    )
+    permissions, events = github_app.get_app_permissions()
+    assert permissions == {"issues": "write", "contents": "read"}
+    assert events == ["pull_request"]
+
+
+def test_get_app_permissions_defaults_missing_fields_to_empty(fake_transport):
+    fake_transport.route("GET", "/app", {})
+    assert github_app.get_app_permissions() == ({}, [])
+
+
+def test_diff_app_permissions_reports_nothing_when_exactly_matching():
+    under, over = github_app.diff_app_permissions(
+        {"issues": "write"}, ["pull_request"], {"issues": "write"}, ("pull_request",)
+    )
+    assert under == []
+    assert over == []
+
+
+def test_diff_app_permissions_flags_a_missing_permission_as_under():
+    under, over = github_app.diff_app_permissions({}, [], {"issues": "write"}, ())
+    assert any("issues" in line and "need write" in line for line in under)
+    assert over == []
+
+
+def test_diff_app_permissions_flags_a_weaker_permission_as_under():
+    under, _over = github_app.diff_app_permissions(
+        {"issues": "read"}, [], {"issues": "write"}, ()
+    )
+    assert any("have read" in line and "need write" in line for line in under)
+
+
+def test_diff_app_permissions_flags_a_broader_permission_as_over_not_under():
+    _under, over = github_app.diff_app_permissions(
+        {"issues": "admin"}, [], {"issues": "write"}, ()
+    )
+    assert any("have admin" in line for line in over)
+    assert _under == []
+
+
+def test_diff_app_permissions_flags_an_unrequested_extra_permission_as_over():
+    _under, over = github_app.diff_app_permissions(
+        {"issues": "write", "administration": "write"}, [], {"issues": "write"}, ()
+    )
+    assert any("administration" in line for line in over)
+
+
+def test_diff_app_permissions_flags_a_missing_event_as_under():
+    under, _over = github_app.diff_app_permissions({}, [], {}, ("pull_request",))
+    assert any("pull_request" in line for line in under)
+
+
+def test_diff_app_permissions_flags_an_extra_event_as_over():
+    _under, over = github_app.diff_app_permissions(
+        {}, ["pull_request", "issues"], {}, ("pull_request",)
+    )
+    assert any("issues" in line for line in over)
+
+
 def test_get_webhook_url_returns_the_configured_url(fake_transport):
     fake_transport.route("GET", "/app/hook/config", {"url": "https://x.test/webhook"})
     assert github_app.get_webhook_url() == "https://x.test/webhook"

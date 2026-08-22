@@ -299,6 +299,64 @@ def repos_not_covered(covered: list[str], repos: frozenset[str]) -> list[str]:
     return sorted(r for r in repos if r.casefold() not in covered_casefold)
 
 
+_PERMISSION_LEVELS = {"read": 1, "write": 2, "admin": 3}
+
+
+def get_app_permissions() -> tuple[dict[str, str], list[str]]:
+    """(permissions, events) the App ACTUALLY has recorded on GitHub right
+    now (GET /app, App JWT) -- not what create_github_app.py's manifest
+    originally requested at creation time. An operator can edit an App's
+    permissions or event subscriptions by hand in GitHub's UI at any point
+    after creation, whether the App itself was created by the manifest flow
+    or entirely by hand; this is what lets scripts/doctor.py's
+    app-permissions check catch that drift either way.
+    """
+    gh = _app_jwt_client()
+    _, data = gh.requester.requestJsonAndCheck("GET", "/app")
+    return data.get("permissions", {}), data.get("events", [])
+
+
+def diff_app_permissions(
+    actual_permissions: dict[str, str],
+    actual_events: list[str],
+    wanted_permissions: dict[str, str],
+    wanted_events: tuple[str, ...],
+) -> tuple[list[str], list[str]]:
+    """(under, over): human-readable lines describing every permission/event
+    gap against `wanted_permissions`/`wanted_events`, in EITHER direction.
+
+    under-permissioned entries are a functional risk -- the bot cannot do
+    something its own code needs (e.g. it can't post a review comment
+    without `issues: write`). over-permissioned entries are a
+    least-privilege nit -- the App can do more than this project's code ever
+    uses, which is a real (if smaller) risk of its own, but not something
+    that breaks the bot. scripts/doctor.py's app-permissions check reports
+    the first as FAIL and the second as WARN.
+    """
+    under: list[str] = []
+    over: list[str] = []
+
+    for name, wanted_level in wanted_permissions.items():
+        actual_level = actual_permissions.get(name)
+        actual_rank = _PERMISSION_LEVELS.get(actual_level or "", 0)
+        wanted_rank = _PERMISSION_LEVELS[wanted_level]
+        if actual_rank < wanted_rank:
+            under.append(f"{name}: have {actual_level or '(none)'}, need {wanted_level}")
+        elif actual_rank > wanted_rank:
+            over.append(f"{name}: have {actual_level}, only need {wanted_level}")
+    extra_permissions = sorted(set(actual_permissions) - set(wanted_permissions))
+    over.extend(
+        f"{name}: have {actual_permissions[name]}, not used at all" for name in extra_permissions
+    )
+
+    missing_events = sorted(set(wanted_events) - set(actual_events))
+    under.extend(f"event {e!r} not subscribed" for e in missing_events)
+    extra_events = sorted(set(actual_events) - set(wanted_events))
+    over.extend(f"event {e!r} subscribed but not used" for e in extra_events)
+
+    return under, over
+
+
 def set_webhook_url(url: str) -> None:
     """Idempotently point the App's webhook at `url` (PATCH /app/hook/config, App JWT)."""
     gh = _app_jwt_client()

@@ -20,7 +20,7 @@ from typing import NamedTuple
 
 from app import github_app
 from app.config import settings
-from scripts import _prereqs, _probes, deploy
+from scripts import _prereqs, _probes, create_github_app, deploy
 
 TRACKS = ("local", "hosted")
 
@@ -221,6 +221,57 @@ def check_llm_provider() -> deploy.CheckResult:
     return deploy.CheckResult("llm-provider", "PASS", f"provider={provider}")
 
 
+def check_app_permissions() -> deploy.CheckResult:
+    """Whether the App's ACTUAL permissions and event subscriptions on
+    GitHub match what this project's code needs (app.github_app.
+    diff_app_permissions against scripts/create_github_app.MANIFEST_
+    PERMISSIONS/MANIFEST_EVENTS -- the same constants the manifest flow
+    itself requests, so there is exactly one definition of "what this App
+    needs" for both creating it and verifying it). READ-ONLY: GET /app only.
+
+    This is what makes creating the App entirely by hand
+    (guide/setup/02-github-app.md) as safe as the automated manifest flow,
+    and also catches drift the manifest flow alone can't: GitHub Apps can be
+    edited by hand in the UI at any point after creation (add a permission,
+    subscribe to an extra event), regardless of how the App was originally
+    made. This check reads the App's CURRENT state, not its creation-time
+    manifest, so it catches both.
+
+    Missing/weaker-than-needed permissions or a missing event are FAIL: the
+    bot cannot do something its own code depends on. Broader-than-needed
+    permissions or an extra event are WARN, not FAIL: a least-privilege nit,
+    not something that breaks the bot -- mirrors the "pricing is a warning
+    only" precedent elsewhere in this file for a non-blocking finding.
+    """
+    if not all(name in _probes.present_secrets() for name in _APP_CREDENTIALS):
+        return deploy.CheckResult(
+            "app-permissions", "SKIPPED", "needs the App credentials (see local-config)"
+        )
+    try:
+        actual_permissions, actual_events = github_app.get_app_permissions()
+    except Exception as exc:  # noqa: BLE001 -- structural report, never the value
+        return deploy.CheckResult(
+            "app-permissions", "FAIL",
+            f"could not read the App's permissions ({type(exc).__name__})",
+        )
+    under, over = github_app.diff_app_permissions(
+        actual_permissions, actual_events,
+        create_github_app.MANIFEST_PERMISSIONS, create_github_app.MANIFEST_EVENTS,
+    )
+    if under:
+        detail = "missing/insufficient: " + "; ".join(under)
+        if over:
+            detail += " (also broader than needed: " + "; ".join(over) + ")"
+        detail += " -- fix in the App's settings: https://github.com/settings/apps"
+        return deploy.CheckResult("app-permissions", "FAIL", detail)
+    if over:
+        return deploy.CheckResult(
+            "app-permissions", "WARN",
+            "broader than needed (least-privilege nit, not blocking): " + "; ".join(over),
+        )
+    return deploy.CheckResult("app-permissions", "PASS", "")
+
+
 def check_github_install() -> deploy.CheckResult:
     """Whether the App has exactly one installation. READ-ONLY."""
     if not all(name in _probes.present_secrets() for name in _APP_CREDENTIALS):
@@ -388,6 +439,7 @@ def build_state(track: str, base: str) -> tuple[State, list[deploy.CheckResult]]
         deploy._safe("llm-provider", check_llm_provider),
         deploy._safe("config", deploy.check_config),
         deploy._safe("pricing", deploy.check_pricing),
+        deploy._safe("app-permissions", check_app_permissions),
         deploy._safe("github-install", check_github_install),
         deploy._safe("target-repo", check_target_repo_covered),
         deploy._safe("gh-auth", check_gh_auth),
