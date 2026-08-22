@@ -13,7 +13,7 @@ earlier just means hitting an avoidable failure.
 | **Python 3.12** | pinned in `.python-version` | see below |
 | [**uv**](https://docs.astral.sh/uv/) | this project's package/venv manager | `uv --version` |
 | **git** | to clone the repo | `git --version` |
-| **Docker, *or* a reachable `DATABASE_URL`** | the test suite and the app both need a real Postgres | see below |
+| **Docker, *or* a local Postgres** | the test suite needs a real, disposable Postgres | see below |
 
 Checking your Python version:
 
@@ -35,19 +35,39 @@ Checking your Python version:
     py --version
     ```
 
-The Docker-or-`DATABASE_URL` line is one conditional, not two separate
+The Docker-or-local-Postgres line is one conditional, not two separate
 requirements: `tests/conftest.py`'s `db_url` fixture spins up a throwaway
 Postgres 16 container via `testcontainers` automatically when Docker is
-present, or reuses a `DATABASE_URL` you already point at a reachable
-local/CI Postgres. Without *either* one, the DB-touching tests fail with an
+present, or reuses a `DATABASE_URL` **environment variable** you already
+have exported. Without *either* one, the DB-touching tests fail with an
 opaque testcontainers error that doesn't say "install Docker" — so get one
 of the two in place before running the test suite below.
 
+This is a real, exported shell variable, not a line written into `.env` —
+the test suite reads `os.environ` directly and never loads `.env` (that
+loading is `Settings`' own mechanism, used by the app itself from Step 2
+onward, not by the test harness). `export DATABASE_URL=...` before running
+`pytest`, or prefix the command with it, e.g.
+`DATABASE_URL=postgresql://... uv run pytest`.
+
+!!! warning "This DATABASE_URL must be local — not Supabase or any other remote Postgres"
+    The test suite `TRUNCATE`s tables between tests, so `tests/conftest.py`
+    refuses to run against any `DATABASE_URL` whose host isn't `localhost`,
+    `127.0.0.1`, or `.internal` (CI's own Postgres) — a remote host like a
+    Supabase pooler hits an immediate `AssertionError`, not the opaque
+    testcontainers error. That error names an escape hatch,
+    `ALLOW_REMOTE_TEST_DB=1`, but **don't reach for it here**: setting it
+    would let every future test run truncate whatever real database
+    `DATABASE_URL` points at — a real problem once that's also the Supabase
+    project you point the app at for real in Step 5. If you don't want
+    Docker, install Postgres natively instead (see below) rather than
+    pointing this at a hosted service.
+
 ## Installing Docker
 
-Skip this if you already have a `DATABASE_URL` pointing at a Postgres you
-can reach — Docker is only one way to satisfy that prerequisite, not the
-requirement itself.
+Skip this if you already have Postgres reachable at `localhost` some other
+way (see the native install below) — Docker is only one way to satisfy
+that prerequisite, not the requirement itself.
 
 === "Linux"
 
@@ -74,15 +94,25 @@ requirement itself.
 
     Official install page: <https://docs.docker.com/get-docker/>
 
+## Installing Postgres natively (no Docker)
+
+If you'd rather not run Docker at all, install Postgres 16 directly from
+<https://www.postgresql.org/download/>, create a database, then export
+`DATABASE_URL` in your shell before running the test suite (e.g.
+`export DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres`)
+— a `localhost` host is what makes this count as local for the warning
+above.
+
 ## Get the checkout running
 
-With Python, uv, git, and Docker (or a `DATABASE_URL`) all in place:
+With Python, uv, git, and Docker (or a local Postgres exported as
+`DATABASE_URL`) all in place:
 
 ```bash
 git clone <your-fork-or-clone-url>   # e.g. https://github.com/<you>/pr-review-bot.git
 cd pr-review-bot   # or whatever your clone created
 uv sync
-uv run pytest
+uv run pytest   # if you're not using Docker: DATABASE_URL=postgresql://... uv run pytest
 ```
 
 `<your-fork-or-clone-url>` is whatever URL you're getting this project's
