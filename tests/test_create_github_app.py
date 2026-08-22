@@ -341,6 +341,98 @@ def test_server_flow_timeout_hints_at_manual(monkeypatch, capsys):
     assert "timed out" in err
 
 
+def test_server_flow_uses_bind_host_for_redirect_and_binding(monkeypatch, capsys):
+    """--bind-host must flow into both the manifest's redirect_url (what the
+    OTHER device's browser is sent back to) and the actual server bind
+    address (what makes that redirect reachable at all)."""
+
+    class _FakeServer:
+        def serve_forever(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    class _FakeEvent:
+        def clear(self):
+            pass
+
+        def wait(self, timeout=None):
+            cga._CallbackHandler.code = "abc123"
+            cga._CallbackHandler.state_mismatch = False
+            return True
+
+    bind_calls = []
+    monkeypatch.setattr(
+        cga.http.server, "HTTPServer",
+        lambda addr, handler: bind_calls.append(addr) or _FakeServer(),
+    )
+    monkeypatch.setattr(
+        cga.threading, "Thread",
+        lambda *a, **k: type("T", (), {"start": lambda self: None})(),
+    )
+    monkeypatch.setattr(
+        cga.webbrowser, "open",
+        lambda *_a, **_k: pytest.fail("must not auto-open a browser for a non-localhost bind_host"),
+    )
+    monkeypatch.setattr(cga._CallbackHandler, "received", _FakeEvent())
+
+    code = cga._run_server_flow(
+        "bot", "https://e.com", "expected-state", bind_host="100.64.1.2"
+    )
+
+    assert code == "abc123"
+    assert bind_calls == [("100.64.1.2", cga._CALLBACK_PORT)]
+    manifest = json.loads(html.unescape(cga._CallbackHandler.manifest_json))
+    assert manifest["redirect_url"] == f"http://100.64.1.2:{cga._CALLBACK_PORT}/callback"
+    out = capsys.readouterr().out
+    assert "100.64.1.2" in out
+
+
+def test_server_flow_timeout_with_bind_host_mentions_reachability_not_manual_only(
+    monkeypatch, capsys
+):
+    class _FakeServer:
+        def serve_forever(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    class _FakeEvent:
+        def clear(self):
+            pass
+
+        def wait(self, timeout=None):
+            return False
+
+    monkeypatch.setattr(cga.http.server, "HTTPServer", lambda *a, **k: _FakeServer())
+    monkeypatch.setattr(
+        cga.threading, "Thread",
+        lambda *a, **k: type("T", (), {"start": lambda self: None})(),
+    )
+    monkeypatch.setattr(
+        cga.webbrowser, "open",
+        lambda *_a, **_k: pytest.fail("must not auto-open a browser for a non-localhost bind_host"),
+    )
+    monkeypatch.setattr(cga._CallbackHandler, "received", _FakeEvent())
+
+    code = cga._run_server_flow(
+        "bot", "https://e.com", "expected-state", bind_host="100.64.1.2"
+    )
+
+    assert code is None
+    err = capsys.readouterr().err
+    assert "100.64.1.2" in err
+    assert "reach" in err
+
+
+def test_main_rejects_bind_host_together_with_manual(capsys):
+    with pytest.raises(SystemExit):
+        cga.main(["--manual", "--bind-host", "100.64.1.2"])
+    assert "--bind-host" in capsys.readouterr().err
+
+
 def test_main_manual_flow_end_to_end_writes_credentials(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cga.secrets, "token_urlsafe", lambda _n: "FIXEDSTATE")
     monkeypatch.setattr(

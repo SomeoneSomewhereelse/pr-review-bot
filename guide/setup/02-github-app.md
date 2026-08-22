@@ -41,6 +41,30 @@ base64-encoding it by hand.
     browser opens, or the wrong machine's browser opens, and the command
     just blocks for up to 5 minutes before timing out with no explanation.
 
+    Which fix applies depends on whether your browser's device shares a
+    network with the machine running this command:
+
+    **Same network (Tailscale, a VPN, the same LAN)** — e.g. you're SSH'd
+    into a box from a phone or laptop that's on the same tailnet. Use
+    `--bind-host` with an address of that machine your device can actually
+    reach (a Tailscale IP/hostname, a LAN IP):
+
+    ```bash
+    uv run python -m scripts.create_github_app --name your-app-name --bind-host 100.x.y.z
+    ```
+
+    This stays fully automatic — no copy-pasting. Open the URL it prints
+    (`http://100.x.y.z:8765/`) in your own device's browser, approve the App,
+    and the rest happens exactly like the same-machine case. (The same
+    result with zero extra flags: set up SSH local port forwarding —
+    `ssh -L 8765:localhost:8765 that-host`, or Termius's own port-forwarding
+    option — which makes the remote's `localhost:8765` answer as *your*
+    device's `localhost:8765`, so the plain command with no flags at all
+    already works.)
+
+    **No shared network at all** (an isolated remote host — a bare cloud VM
+    with only SSH exposed, nothing your device can reach directly) —
+    `--bind-host` can't help here; there's no network path for it to use.
     Add `--manual` instead:
 
     ```bash
@@ -49,15 +73,15 @@ base64-encoding it by hand.
 
     This needs no local browser and no localhost access at all. It writes a
     small HTML file and prints its path — copy that file to *any* machine
-    that has a browser (`scp` it to your laptop, for instance) and open it
-    there; it submits itself and takes you to GitHub's approval page exactly
-    like the automatic flow does. After you approve, GitHub redirects to a
-    page that will fail to load — that's expected, it's a placeholder with
-    nothing behind it. Copy the full URL from your browser's address bar at
-    that point (it carries a one-time code) and paste it back into the
-    terminal running the command, which is waiting for exactly that. The
-    rest — exchanging the code, writing `.env` — happens exactly as it does
-    in the automatic flow.
+    that has a browser (`scp` it to your laptop or phone, AirDrop, anything)
+    and open it there; it submits itself and takes you to GitHub's approval
+    page exactly like the automatic flow does. After you approve, GitHub
+    redirects to a page that will fail to load — that's expected, it's a
+    placeholder with nothing behind it. Copy the full URL from your
+    browser's address bar at that point (it carries a one-time code) and
+    paste it back into the terminal running the command, which is waiting
+    for exactly that. The rest — exchanging the code, writing `.env` —
+    happens exactly as it does in the automatic flow.
 
 The App is created with:
 
