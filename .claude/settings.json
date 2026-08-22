@@ -5,7 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "grep -qP '(^|[^A-Za-z0-9_.])\\.env([^A-Za-z0-9_.]|$)' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Blocked: this tool call references .env. CLAUDE.md absolute rule -- never touch .env with any tool, full stop, not even a narrow/safe-looking pattern (see the Secret handling section). Ask the user to check or edit it themselves.\"}}'; true"
+            "command": "uv",
+            "args": ["run", "--no-sync", "python", ".claude/hooks/check_env_access.py"]
           }
         ]
       }
