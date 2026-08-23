@@ -122,6 +122,18 @@ def test_github_app_page_encodes_the_pem_with_the_project_script():
     assert "base64 -w0" not in text
 
 
+def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
+    """Regression: scripts.deploy's main() exits 2 immediately ("a public
+    base URL ... is required") before it ever reaches the installation-id
+    discovery check -- and Step 3 is before Step 6, so no PUBLIC_BASE_URL or
+    RENDER_EXTERNAL_URL exists yet at this point in the guide. scripts.doctor
+    needs no base URL and discovers the same installation id via its
+    github-install check, so that's what this page must point at instead."""
+    text = (_SETUP / "03-install-app.md").read_text(encoding="utf-8")
+    assert "uv run python -m scripts.doctor" in text
+    assert "```bash\nuv run python -m scripts.deploy\n```" not in text
+
+
 def test_setup_index_sends_the_reader_to_a_track():
     text = (_SETUP / "index.md").read_text(encoding="utf-8")
     assert "local/05" in text and "hosted/05" in text

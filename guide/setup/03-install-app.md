@@ -25,12 +25,17 @@ You don't have to hunt it down by hand: with `GITHUB_APP_INSTALLATION_ID`
 still blank, run
 
 ```bash
-uv run python -m scripts.deploy
+uv run python -m scripts.doctor
 ```
 
-Its `github-app` check discovers the real installation and names it in the
-failure detail even while the var is unset. Copy that value into `.env` as
-`GITHUB_APP_INSTALLATION_ID`, then re-run to confirm the check now passes.
+not `scripts.deploy` — this early, before a public URL exists (that's Step
+6), `deploy` refuses to run at all (`a public base URL
+(PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) is required`, exit 2) before it ever
+reaches an installation-discovery check. `doctor` needs no public URL for
+this: its `github-install` row calls the same GitHub API discovery and
+prints `installation=<id>` on success, using only the App credentials you
+already set in Step 2. Copy that id into `.env` as
+`GITHUB_APP_INSTALLATION_ID`.
 
 ## `GITHUB_TARGET_REPO` is a separate, optional narrowing
 
