@@ -126,6 +126,44 @@ def test_key_usage_caps_accept_positive_values():
     assert settings.key_usage_token_cap == 1
 
 
+def test_blank_env_value_falls_back_to_default_for_int_field(monkeypatch):
+    """Regression: a key present in .env with nothing after the `=` (e.g. the
+    template's unfilled `GITHUB_APP_INSTALLATION_ID=` line, which is exactly
+    how a user following the setup guide's Step 2 hits this before Step 3)
+    reaches pydantic as the literal string "" -- which used to fail int
+    coercion and raise ValidationError at import, rather than falling back to
+    the default the way a fully absent var already does."""
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "")
+    assert Settings(_env_file=None).github_app_installation_id == 0
+
+
+def test_blank_env_value_falls_back_to_default_for_time_field(monkeypatch):
+    monkeypatch.setenv("KEY_USAGE_RESET_TIME_UTC", "")
+    assert Settings(_env_file=None).key_usage_reset_time_utc == time(4, 0)
+
+
+def test_blank_env_value_does_not_mask_a_real_value(monkeypatch):
+    """The blank-value drop must only catch genuinely empty values -- a real
+    value set alongside a blank one elsewhere must still come through."""
+    monkeypatch.setenv("GITHUB_APP_ID", "42")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "")
+    settings = Settings(_env_file=None)
+    assert settings.github_app_id == 42
+    assert settings.github_app_installation_id == 0
+
+
+def test_importing_config_with_installation_id_blank_in_env_file_does_not_raise(tmp_path):
+    """The exact real-world reproduction: an .env file (not just a process env
+    var) with the template's unfilled line still present. This is what a
+    fresh `cp .env.example .env` followed by Step 2 (App ID, webhook secret,
+    private key set; installation ID not yet known) leaves behind."""
+    env = tmp_path / ".env"
+    env.write_text("GITHUB_APP_ID=42\nGITHUB_APP_INSTALLATION_ID=\n")
+    settings = Settings(_env_file=(str(env),))
+    assert settings.github_app_id == 42
+    assert settings.github_app_installation_id == 0
+
+
 def test_env_config_wins_over_env(tmp_path):
     """.env.config is the designated home for operational config, so it must
     win if a key somehow appears in both files."""

@@ -1,6 +1,6 @@
 from datetime import time
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Env-var names that hold plain operational config, not credentials. LISTED =
@@ -53,6 +53,24 @@ class Settings(BaseSettings):
     # stale line left in .env. A real process env var still beats both, which is
     # why Render is unaffected: neither file exists in the container.
     model_config = SettingsConfigDict(env_file=(".env", ".env.config"), extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_values_fall_back_to_defaults(cls, data):
+        """A key present in .env/.env.config with nothing after the `=` (e.g.
+        an unfilled template line like `GITHUB_APP_INSTALLATION_ID=`) reaches
+        here as the literal string "" -- pydantic then tries to coerce that
+        into the field's real type (int, time, ...) and raises at import
+        time, rather than falling back to the default the way a fully absent
+        var already does. Drop any blank value so "not filled in yet" behaves
+        identically whether the var is absent or present-but-empty (design
+        spec 2026-08-18 section 6e's "never crash at import" intent already
+        covered the absent case; this closes the present-but-blank gap it
+        missed).
+        """
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if value != ""}
+        return data
 
     github_app_id: int = 0
     github_app_installation_id: int = 0
