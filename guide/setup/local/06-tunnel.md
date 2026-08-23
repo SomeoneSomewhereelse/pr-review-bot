@@ -8,21 +8,6 @@ trigger — the thing that makes this a webhook-driven bot rather than a
 script you run by hand — is never exercised. A tunnel is what makes
 `localhost:8000` reachable from GitHub's side.
 
-## Optional milestone: verify the pipeline before investing in the tunnel
-
-If you want proof the App auth, diff-fetch, and comment-upsert pipeline
-works *before* setting up a tunnel, this is optional but worth doing now,
-before installing anything below:
-
-```bash
-uv run python -m scripts.manual_verify_step3
-```
-
-It proves the pipeline against a real PR, with **no public-URL dependency**
-at all. It does not prove the *trigger* (GitHub delivering the webhook) —
-only steps 6–7 do that — so treat it as a confidence check, not a
-substitute for the tunnel.
-
 ## Install it
 
 `cloudflared` isn't in Step 1's shared prerequisites because it's only

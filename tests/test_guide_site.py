@@ -171,6 +171,20 @@ def test_tunnel_page_explains_the_ephemeral_url():
     assert "changes" in text.lower(), "the URL changing each restart must be stated"
 
 
+def test_tunnel_page_no_longer_points_at_manual_verify_step3():
+    """Regression: this milestone told the reader to run manual_verify_step3
+    against GITHUB_TARGET_REPO + PR #1 before either exists -- Step 3 leaves
+    GITHUB_TARGET_REPO unset by design, and the demo PR isn't opened until
+    Step 8's seed_demo_pr. On a fresh account with no repo/PR yet, the
+    script silently ran against an empty repo name and crashed with a raw
+    PyGithub 404 traceback instead of a clear error. doctor's own
+    app-permissions/github-install/target-repo checks already verify the
+    App auth and privileges live, so this milestone was redundant as well
+    as broken -- unwired rather than fixed, same as scripts.init_env."""
+    text = (_SETUP / "local" / "06-tunnel.md").read_text(encoding="utf-8")
+    assert "manual_verify_step3" not in text
+
+
 def test_local_verify_page_uses_the_project_health_check():
     """spec section 5: curl on Windows PowerShell aliases Invoke-WebRequest."""
     text = (_SETUP / "local" / "07-webhook.md").read_text(encoding="utf-8")
