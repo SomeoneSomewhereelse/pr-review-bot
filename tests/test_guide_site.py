@@ -134,6 +134,21 @@ def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
     assert "```bash\nuv run python -m scripts.deploy\n```" not in text
 
 
+def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env():
+    """init_env.py stays in the repo but unwired from the guide: the two
+    config files are already `cp`'d into existence by Step 2, so Step 4
+    just has the operator edit LLM_PROVIDER/the credential by hand and
+    verify with doctor -- one fewer script in the documented path, and one
+    fewer place a malformed answer can reach app/config.py before doctor
+    ever gets a chance to report it structurally."""
+    step2 = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
+    assert "cp .env.config.example .env.config" in step2
+
+    step4 = (_SETUP / "04-llm-provider.md").read_text(encoding="utf-8")
+    assert "scripts.init_env" not in step4
+    assert "uv run python -m scripts.doctor" in step4
+
+
 def test_setup_index_sends_the_reader_to_a_track():
     text = (_SETUP / "index.md").read_text(encoding="utf-8")
     assert "local/05" in text and "hosted/05" in text

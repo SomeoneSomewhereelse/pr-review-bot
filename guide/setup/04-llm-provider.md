@@ -19,24 +19,28 @@ card, and is what every live rehearsal of this project has used.
 
 ## Set it
 
-Run this project's own prompt-driven script yourself — it scaffolds `.env`
-and `.env.config` from the committed templates if they don't exist yet
-(e.g. if you used Step 2's manual fallback and only have `.env` so far), and
-interactively prompts for every setting either file declares, `LLM_PROVIDER`
-included — so answer `groq` (or your chosen provider) when it asks:
+Two edits, by hand, in the two files Step 2 already had you `cp` from their
+templates:
+
+1. **`.env.config`** — operational, not a secret, safe to open directly.
+   `LLM_PROVIDER` already defaults to `groq`; leave it as-is, or change the
+   line to `gemini`/`vertex` if you picked a different provider above.
+2. **`.env`** — the matching credential goes here, in the line the template
+   already names for your provider (`GROQ_API_KEY`, `GEMINI_API_KEY`, or
+   `GCP_SERVICE_ACCOUNT_KEY`). Paste the value in yourself; nothing writes it
+   for you, and nothing needs to read it back to confirm it — the next
+   command does that.
 
 ```bash
-uv run python -m scripts.init_env
+uv run python -m scripts.doctor
 ```
 
-When it asks for the matching credential, that's the secret half — it
-writes straight to `.env` and is never echoed back, so no credential value
-ever needs to pass through an agent or a command-line argument.
+`doctor`'s `llm-provider` row confirms the provider you set has a matching
+credential in place, without ever printing the credential itself.
 
-`LLM_PROVIDER` itself is operational config, not a secret, so once
-`.env.config` exists you can also hand-edit the line there directly
-(`LLM_PROVIDER=groq`) any time you want to switch providers later, without
-re-running `init_env`.
+Switching providers later is the same two edits — change `LLM_PROVIDER` in
+`.env.config` and make sure the new provider's credential is set in `.env` —
+any time, with no script to re-run.
 
 ## Model pricing is optional
 

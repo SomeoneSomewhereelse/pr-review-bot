@@ -8,10 +8,14 @@ its permissions, rotate its webhook secret, or remove it from a repo.
 
 ## Create the App
 
-If you don't already have a `.env`, start from the committed template:
+If you don't already have them, start from the committed templates for both
+files this project reads config from — `.env` (credentials, this step) and
+`.env.config` (operational settings like `LLM_PROVIDER`, needed from Step 4
+on) — so there's one `cp` to remember instead of two separate prompts later:
 
 ```bash
 cp .env.example .env
+cp .env.config.example .env.config
 ```
 
 Go to **Settings → Developer settings → GitHub Apps → New GitHub App** and
