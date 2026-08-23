@@ -2,12 +2,18 @@
 test writes to tmp_path; none touches the repo's real .env."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from app.config import OPERATIONAL_KEYS
 from scripts import init_env
 
 SENTINEL = "SENTINEL-4e8b03d5f7a91c62-EXISTING"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_key_names_returns_names_only_never_values(tmp_path):
@@ -170,6 +176,31 @@ def test_ask_treats_a_blank_retry_as_skip(monkeypatch):
     responses = iter(["4:00", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
     assert init_env._ask("KEY_USAGE_RESET_TIME_UTC", already_set=False) is None
+
+
+def test_running_init_env_with_an_already_malformed_value_does_not_crash(tmp_path):
+    """The exact reported bug: a value already written to .env/.env.config
+    (e.g. from before this file's own answer-validation existed) that fails
+    Settings' own validation used to crash init_env's own module import --
+    app/config.py built its `settings` singleton unconditionally at import
+    time, and init_env imports Settings/OPERATIONAL_KEYS from that same
+    module, which is enough to trigger it regardless of whether init_env
+    ever touches the singleton itself. Fixed by making that singleton lazy
+    (see app/config.py's module-level __getattr__).
+
+    Runs the real script end-to-end in a subprocess against an isolated
+    tmp_path, with empty example files so it has nothing left to prompt
+    for -- this only needs to prove the import itself survives.
+    """
+    (tmp_path / ".env.example").write_text("", encoding="utf-8")
+    (tmp_path / ".env.config.example").write_text("", encoding="utf-8")
+    (tmp_path / ".env.config").write_text("KEY_USAGE_RESET_TIME_UTC=4:00\n", encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    result = subprocess.run(
+        [sys.executable, "-m", "scripts.init_env"],
+        cwd=tmp_path, env=env, input="", capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_merge_env_reproduces_the_kept_app_credentials_bug_scenario(tmp_path):

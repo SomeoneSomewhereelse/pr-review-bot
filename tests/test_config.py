@@ -3,7 +3,10 @@ silently reverting to unbounded/disabled behavior at runtime.
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 from datetime import time
 from pathlib import Path
 
@@ -296,29 +299,62 @@ def test_llm_provider_has_no_implicit_default(monkeypatch):
     assert Settings(_env_file=None).llm_provider == ""
 
 
-def test_importing_config_with_llm_provider_unset_does_not_raise(monkeypatch):
-    """A pydantic *required* field would raise at import, because
-    app/config.py builds Settings() at module scope -- which would break
-    pytest and scripts/doctor.py before either could report the problem
-    (design spec 2026-08-18 section 6e). This pins that trap shut.
+def test_importing_config_with_llm_provider_unset_does_not_raise(tmp_path):
+    """A pydantic *required* field would raise the moment anything first
+    reads `settings` -- LLM_PROVIDER has no implicit default specifically so
+    this can't happen (design spec 2026-08-18 section 6e).
 
-    reload() rebinds app.config's module-level `settings` to a brand-new
-    Settings() instance -- every OTHER already-imported module's own
-    `from app.config import settings` still points at the pre-reload
-    singleton, so leaving the swap in place desyncs the two for the rest of
-    the process (a later test doing a fresh in-function `from app.config
-    import settings` would silently pick up the orphaned new instance while
-    e.g. app/providers/credentials.py keeps reading the old one -- confirmed
-    by 7 unrelated full-suite failures before this restore was added). The
-    try/finally restores the original singleton so reload is exercised (and
-    a genuine raise there still fails this test) without leaking a second,
-    diverging Settings object into the rest of the suite.
+    Runs in a real subprocess, in true isolation: app.config's `settings`
+    singleton is now lazy (see its module-level __getattr__) and caches on
+    first access for the life of a process, so an in-process
+    importlib.reload can't reliably exercise a fresh construction once some
+    earlier test in this same pytest run has already triggered that cache --
+    reload re-executes the module body, but there is no longer an
+    unconditional `settings = Settings()` statement in it to rebind the
+    already-cached attribute.
     """
-    monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    import importlib
-    import app.config
-    original_settings = app.config.settings
-    try:
-        importlib.reload(app.config)  # must not raise
-    finally:
-        app.config.settings = original_settings
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    env.pop("LLM_PROVIDER", None)
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.config; app.config.settings; print('ok')"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_importing_config_with_a_malformed_value_does_not_raise(tmp_path):
+    """Regression: scripts/init_env.py imports Settings (the class) and
+    OPERATIONAL_KEYS, never touching the `settings` singleton itself -- but
+    app/config.py used to build that singleton unconditionally at import
+    time regardless of what any caller actually needed, so a single
+    already-malformed value left over in .env/.env.config (e.g. from before
+    init_env's own answer-validation existed) crashed the bare import with a
+    raw traceback, before init_env's own code could even run.
+
+    A real subprocess with no .env/.env.config in its cwd, so the injected
+    process env var is the only source for this key -- pydantic-settings
+    validates a value from either source identically, so this exercises the
+    same code path a bad line in .env.config would.
+    """
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT), "KEY_USAGE_RESET_TIME_UTC": "4:00"}
+    result = subprocess.run(
+        [sys.executable, "-c", "from app.config import Settings, OPERATIONAL_KEYS; print('ok')"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
+def test_first_real_access_to_settings_still_raises_on_a_malformed_value(tmp_path):
+    """The lazy singleton changes WHEN a genuinely invalid value is caught,
+    never WHETHER it is -- the app's own boot path (app/main.py) still reads
+    `settings` immediately on startup, so a real misconfiguration must still
+    fail loudly the moment anything actually asks for it."""
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT), "KEY_USAGE_RESET_TIME_UTC": "4:00"}
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.config; app.config.settings"],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "ValidationError" in result.stderr

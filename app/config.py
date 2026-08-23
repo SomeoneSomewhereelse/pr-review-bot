@@ -81,10 +81,11 @@ class Settings(BaseSettings):
 
     # No implicit default: guessing a provider means silently running (and
     # billing) against one the operator never chose. Validated in
-    # app/main.py's lifespan rather than as a pydantic required field --
-    # `settings = Settings()` below is module-scope, so a required field would
-    # raise at IMPORT, breaking pytest and scripts/doctor.py before either
-    # could report the problem (design spec 2026-08-18 section 6e).
+    # app/main.py's lifespan rather than as a pydantic required field -- a
+    # required field would raise the moment anything first reads `settings`
+    # (see the lazy `__getattr__` below), breaking pytest and
+    # scripts/doctor.py before either could report the problem (design spec
+    # 2026-08-18 section 6e).
     llm_provider: str = ""
     # ``llm_model`` is consumed by the gemini provider only. Groq is a
     # different model family (Llama, via a different vendor), so it
@@ -182,4 +183,28 @@ class Settings(BaseSettings):
         return frozenset(r.strip() for r in self.github_target_repo.split(",") if r.strip())
 
 
-settings = Settings()
+# Deliberately lazy: constructing Settings() reads and validates the real
+# .env/.env.config, and raises ValidationError if either genuinely
+# misconfigures a field (not just leaves one blank -- see
+# _blank_values_fall_back_to_defaults above for that case). Building it
+# eagerly at import time meant merely IMPORTING this module -- even just for
+# the Settings class itself, never touching this singleton -- forced that
+# validation immediately. scripts/init_env.py hit exactly this: it imports
+# Settings only to validate one answer at a time via Settings.model_validate,
+# but a single already-malformed value left over in .env/.env.config (e.g.
+# from before this file's own blank-value fix existed) crashed the import
+# with a raw traceback before init_env's own code ever ran.
+#
+# This __getattr__ defers construction to first access instead, so importing
+# this module no longer forces validation of whatever is currently on disk.
+# It does NOT change whether a genuinely invalid value raises -- only when:
+# the app's own boot path (app/main.py) still reads `settings` immediately on
+# startup, so a real misconfiguration still fails loudly there, exactly as
+# before and as the existing tests for this (e.g.
+# test_key_usage_reset_time_rejects_garbage) already pin.
+def __getattr__(name: str) -> Settings:
+    if name == "settings":
+        global settings
+        settings = Settings()
+        return settings
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
