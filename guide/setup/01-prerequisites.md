@@ -47,9 +47,21 @@ of the two in place before running the test suite below.
 This is a real, exported shell variable, not a line written into `.env` —
 the test suite reads `os.environ` directly and never loads `.env` (that
 loading is `Settings`' own mechanism, used by the app itself from Step 2
-onward, not by the test harness). `export DATABASE_URL=...` before running
-`pytest`, or prefix the command with it, e.g.
-`DATABASE_URL=postgresql://... uv run pytest`.
+onward, not by the test harness).
+
+=== "bash"
+
+    ```bash
+    export DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres
+    uv run pytest
+    ```
+
+=== "PowerShell"
+
+    ```powershell
+    $env:DATABASE_URL = "postgresql://postgres:<password>@localhost:5432/postgres"
+    uv run pytest
+    ```
 
 !!! warning "This DATABASE_URL must be local — not Supabase or any other remote Postgres"
     The test suite `TRUNCATE`s tables between tests, so `tests/conftest.py`
@@ -99,10 +111,9 @@ that prerequisite, not the requirement itself.
 
 If you'd rather not run Docker at all, install Postgres 16 directly from
 <https://www.postgresql.org/download/>, create a database, then export
-`DATABASE_URL` in your shell before running the test suite (e.g.
-`export DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres`)
-— a `localhost` host is what makes this count as local for the warning
-above.
+`DATABASE_URL` in your shell before running the test suite the same way
+shown above — a `localhost` host is what makes this count as local for the
+warning above.
 
 ## Installing and authenticating `gh`
 
@@ -160,8 +171,11 @@ With Python, uv, git, and Docker (or a local Postgres exported as
 git clone <your-fork-or-clone-url>   # e.g. https://github.com/<you>/pr-review-bot.git
 cd pr-review-bot   # or whatever your clone created
 uv sync
-uv run pytest   # if you're not using Docker: DATABASE_URL=postgresql://... uv run pytest
+uv run pytest
 ```
+
+If you're not using Docker, export `DATABASE_URL` first as shown earlier on
+this page, then run `uv run pytest`.
 
 `<your-fork-or-clone-url>` is whatever URL you're getting this project's
 source from — your own fork if you plan to push changes anywhere, or a
