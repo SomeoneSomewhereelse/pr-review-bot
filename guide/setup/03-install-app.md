@@ -34,8 +34,16 @@ not `scripts.deploy` — this early, before a public URL exists (that's Step
 reaches an installation-discovery check. `doctor` needs no public URL for
 this: its `github-install` row calls the same GitHub API discovery and
 prints `installation=<id>` on success, using only the App credentials you
-already set in Step 2. Copy that id into `.env` as
-`GITHUB_APP_INSTALLATION_ID`.
+already set in Step 2.
+
+!!! warning "doctor only prints this value -- it does not save it for you"
+    `doctor` is [read-only and never writes a file](../index.md) — the id it
+    prints is gone the moment your terminal scrolls past it unless you act
+    on it.
+    Copy that number into `.env` yourself as `GITHUB_APP_INSTALLATION_ID`
+    before moving on. Skip this and every later `doctor`/`deploy` run keeps
+    reporting it as missing, and the service refuses to boot outright once
+    you reach Step 8.
 
 ## `GITHUB_TARGET_REPO` is a separate, optional narrowing
 
