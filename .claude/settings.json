@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "uv",
-            "args": ["run", "--no-project", "python", ".claude/hooks/check_env_access.py"]
+            "args": ["run", "--no-project", "python", "${CLAUDE_PROJECT_DIR}/.claude/hooks/check_env_access.py"]
           }
         ]
       }
