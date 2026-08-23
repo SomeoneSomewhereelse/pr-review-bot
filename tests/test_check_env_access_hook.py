@@ -325,9 +325,18 @@ def _configured_hook_command() -> list[str]:
 
 
 def _run_via_configured_invocation(tool_name: str, tool_input: dict) -> bool:
+    """Runs the exact configured command, with Claude Code's own
+    ${CLAUDE_PROJECT_DIR} path-placeholder substitution applied by hand --
+    Claude Code expands it before spawning the hook subprocess, but a bare
+    subprocess.run here (no shell, no Claude Code in the loop) never would,
+    so without this the literal placeholder string would be passed straight
+    to `python` as an unresolvable path."""
+    command = [
+        arg.replace("${CLAUDE_PROJECT_DIR}", str(_REPO_ROOT)) for arg in _configured_hook_command()
+    ]
     payload = json.dumps({"tool_name": tool_name, "tool_input": tool_input})
     result = subprocess.run(
-        _configured_hook_command(),
+        command,
         input=payload, capture_output=True, text=True, cwd=_REPO_ROOT, check=True,
     )
     return bool(result.stdout.strip())
@@ -345,3 +354,16 @@ def test_configured_invocation_does_not_depend_on_project_sync():
     command = _configured_hook_command()
     assert "--no-project" in command
     assert "--no-sync" not in command
+
+
+def test_configured_invocation_does_not_depend_on_session_cwd():
+    """Regression: the hook script's own path was relative
+    (.claude/hooks/check_env_access.py), so it crashed with "No such file or
+    directory" whenever the invoking process's cwd wasn't the project root
+    -- confirmed live after a `cd` into a subdirectory left every subsequent
+    tool call broken. ${CLAUDE_PROJECT_DIR} is Claude Code's own placeholder
+    for the absolute project root, substituted before the subprocess starts
+    regardless of cwd -- pinned by name so this can't silently drift back to
+    a bare relative path."""
+    command = _configured_hook_command()
+    assert any("${CLAUDE_PROJECT_DIR}" in arg for arg in command)
