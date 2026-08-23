@@ -120,6 +120,58 @@ def test_merge_env_drops_a_stale_duplicate_when_the_second_occurrence_is_updated
     assert merged == "A=new\n"
 
 
+def test_format_error_rejects_malformed_time():
+    """Regression: init_env used to accept "4:00" verbatim with no
+    validation, write it straight to .env.config, and only surface the
+    problem later as a pydantic crash out of doctor.py/app.config -- at
+    IMPORT time, before doctor could report anything. See app/config.py's
+    time-typed key_usage_reset_time_utc field: it requires zero-padded
+    HH:MM, same as the reset-time tests in tests/test_config.py."""
+    assert init_env._format_error("KEY_USAGE_RESET_TIME_UTC", "4:00") is not None
+
+
+def test_format_error_accepts_a_valid_time():
+    assert init_env._format_error("KEY_USAGE_RESET_TIME_UTC", "04:00") is None
+
+
+def test_format_error_rejects_non_positive_usage_cap():
+    assert init_env._format_error("KEY_USAGE_TOKEN_CAP", "0") is not None
+
+
+def test_format_error_accepts_a_positive_usage_cap():
+    assert init_env._format_error("KEY_USAGE_TOKEN_CAP", "5") is None
+
+
+def test_format_error_skips_keys_not_declared_as_settings_fields():
+    """Numbered credential slots (GROQ_API_KEY_1, ...) aren't literal Settings
+    fields -- they're resolved dynamically at runtime, so there is nothing to
+    validate against here; this must not raise or misclassify them."""
+    assert init_env._format_error("GROQ_API_KEY_1", "anything at all") is None
+
+
+def test_format_error_never_echoes_the_rejected_value():
+    """Pydantic's default ValidationError text embeds the rejected value
+    verbatim (input_value=...) -- for a secret field that would be exactly
+    the un-redacted-exception leak CLAUDE.md's Secret handling section
+    warns about, and this script's own stated contract is that a value is
+    never echoed back. Only the generic, value-free `msg` may ever surface."""
+    error = init_env._format_error("KEY_USAGE_RESET_TIME_UTC", SENTINEL)
+    assert error is not None
+    assert SENTINEL not in error
+
+
+def test_ask_reprompts_on_an_invalid_value_and_accepts_a_valid_retry(monkeypatch):
+    responses = iter(["4:00", "04:00"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    assert init_env._ask("KEY_USAGE_RESET_TIME_UTC", already_set=False) == "04:00"
+
+
+def test_ask_treats_a_blank_retry_as_skip(monkeypatch):
+    responses = iter(["4:00", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(responses))
+    assert init_env._ask("KEY_USAGE_RESET_TIME_UTC", already_set=False) is None
+
+
 def test_merge_env_reproduces_the_kept_app_credentials_bug_scenario(tmp_path):
     """This is the exact scenario from the bug report: an operator ran
     create_github_app.py, then re-ran init_env.py answering "keep it?" for

@@ -28,7 +28,9 @@ import re
 import sys
 from pathlib import Path
 
-from app.config import OPERATIONAL_KEYS
+from pydantic import ValidationError
+
+from app.config import OPERATIONAL_KEYS, Settings
 
 # Captures the NAME and discards the value -- the whole point. A value may
 # contain '=', spaces, quotes, or '#' and none of it can reach the result.
@@ -127,6 +129,36 @@ def write_env(text: str, path: Path, overwrite: bool = False) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def _format_error(name: str, value: str) -> str | None:
+    """Structural-only description of why `value` fails Settings' own
+    validation for this key, or None if it's fine (or the key isn't a plain
+    Settings field, e.g. a numbered credential slot like GROQ_API_KEY_1,
+    which is resolved dynamically rather than declared).
+
+    Validates via Settings.model_validate({field: value}) -- pydantic's
+    BaseModel entry point, not BaseSettings' __init__ -- so this checks ONLY
+    the one field against its declared type/constraints, using every other
+    field's default, with no .env/.env.config/process-env source consulted
+    at all.
+
+    Deliberately surfaces only each error's `msg` -- pydantic's default
+    ValidationError text embeds the rejected value itself
+    (`input_value=...`), which for a secret field would be exactly the
+    un-redacted-exception leak CLAUDE.md's Secret handling section warns
+    about, and this script's own contract is that a value is "never echoed
+    back".
+    """
+    field = name.lower()
+    if field not in Settings.model_fields:
+        return None
+    try:
+        Settings.model_validate({field: value})
+    except ValidationError as exc:
+        messages = [err["msg"] for err in exc.errors() if err["loc"] == (field,)]
+        return "; ".join(messages) if messages else "invalid value"
+    return None
+
+
 def _ask(name: str, already_set: bool) -> str | None:
     """Prompt for one key. None means 'leave it out of the written file'."""
     if already_set:
@@ -142,8 +174,14 @@ def _ask(name: str, already_set: bool) -> str | None:
         except OSError as exc:
             print(f"could not read that file ({type(exc).__name__}); skipping", file=sys.stderr)
             return None
-    value = input(f"{name}: ").strip()
-    return value or None
+    while True:
+        value = input(f"{name}: ").strip()
+        if not value:
+            return None
+        error = _format_error(name, value)
+        if error is None:
+            return value
+        print(f"{name}: {error} -- try again", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
