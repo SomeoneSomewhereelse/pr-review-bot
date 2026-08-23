@@ -5,13 +5,30 @@ uv run python -m scripts.deploy
 ```
 
 This points the GitHub App's webhook at your current `PUBLIC_BASE_URL` (only
-patching it if it's wrong — see the chicken-and-egg note below) and runs the
-same verification checklist `scripts/doctor.py` composes from.
+patching it if it's wrong) and runs the same verification checklist
+`scripts/doctor.py` composes from.
 
-On this track, expect five rows -- `boot-creds-live`, `provider-live`,
+## Two rows are expected to look wrong here, not broken
+
+**The webhook itself.** Step 2 had you type in a fake placeholder
+(`https://example.invalid/webhook`) because no public URL existed yet — the
+App needed *something* there to be created. This command only patches the
+webhook when it doesn't already match `PUBLIC_BASE_URL`, so the first run
+reports it corrected the URL from that placeholder — that's this
+chicken-and-egg resolving itself, not a mistake to go back and fix at Step 2.
+
+**The `health` row.** Expect it to `FAIL` here. It works by answering
+`/healthz` through your tunnel, but the local service that would answer it
+isn't started until [Step 8](08-run.md) — so right now there's nothing on
+the other end of the tunnel to respond at all. Ignore that one row for now;
+it turns green once Step 8's `uvicorn` is running, and the `--health-only`
+command below re-checks just that row afterward, without needing any App
+credential.
+
+On this track, also expect five rows -- `boot-creds-live`, `provider-live`,
 `api-key-live`, `render-service`, and `uptime-pinger` -- to report `SKIPPED`
 cleanly with no `RENDER_API_KEY` or `UPTIMEROBOT_API_KEY` set — that is
-expected here, not a problem. Those checks exist for the hosted track;
+expected here too, not a problem. Those checks exist for the hosted track;
 nothing in `app/` knows Render exists at all.
 
 ## Re-run this each session

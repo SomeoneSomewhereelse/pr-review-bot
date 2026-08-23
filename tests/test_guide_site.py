@@ -192,6 +192,21 @@ def test_local_verify_page_uses_the_project_health_check():
     assert "curl " not in text
 
 
+def test_webhook_page_explains_the_chicken_and_egg_it_points_at():
+    """Regression: the page used to say '...see the chicken-and-egg note
+    below' with no note actually written anywhere on the page -- a dangling
+    forward-reference since the page's very first commit. Two things are
+    genuinely confusing to a first-time reader at this exact step and both
+    need to be explained inline: the webhook getting silently rewritten from
+    Step 2's placeholder, and check_health_endpoint (deploy.py) FAILing
+    because Step 8's local service isn't running yet."""
+    text = (_SETUP / "local" / "07-webhook.md").read_text(encoding="utf-8")
+    assert "chicken-and-egg note below" not in text
+    assert "chicken-and-egg" in text
+    assert "example.invalid/webhook" in text
+    assert "FAIL" in text and "Step 8" in text
+
+
 def test_hosted_track_pages_match_doctors_titles():
     from scripts import doctor
 
