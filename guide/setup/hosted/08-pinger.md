@@ -38,18 +38,16 @@ the monitor's existence and interval rather than report `SKIPPED`.
 
 ## Your first review
 
-This needs `gh` (Step 1) authenticated as an account with push access to a
-repo, and `GITHUB_TARGET_REPO` set locally to that one repo, e.g.
-`GITHUB_TARGET_REPO=you/some-repo` in `.env.config` — this only needs to be
-set on your machine, since the script runs entirely locally; it doesn't need
-to be pushed to Render for this demo (step 3's `GITHUB_TARGET_REPO` on the
-deployed service is a separate, still-optional narrowing of which installed
-repos the bot itself acts on). That repo also needs the App installed on it
-(step 3) — and on the **same** GitHub account `gh` is authenticated as
-(Step 1's warning about this). Once `GITHUB_TARGET_REPO` is set, re-run
-`uv run python -m scripts.doctor` — its `gh-auth` and `target-repo` rows
-will FAIL with the specific account/repo mismatch if there is one, rather
-than you finding out from `seed_demo_pr` failing below.
+This uses the repo you picked, installed the App on, and set as
+`GITHUB_TARGET_REPO` back in [Step 3](../03-install-app.md) — that setting
+only needs to exist on your own machine for this demo, since `seed_demo_pr`
+runs entirely locally; it doesn't need to be pushed to Render (the deployed
+service's own copy of `GITHUB_TARGET_REPO` is a separate, still-optional
+narrowing of which installed repos the bot itself acts on). If you skipped
+setting it locally, do it now — `uv run python -m scripts.doctor`'s
+`gh-auth` and `target-repo` rows will FAIL with the specific account/repo
+mismatch if there is one, rather than you finding out from `seed_demo_pr`
+failing below.
 
 ```bash
 uv run python -m scripts.seed_demo_pr

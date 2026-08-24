@@ -122,6 +122,29 @@ def test_github_app_page_encodes_the_pem_with_the_project_script():
     assert "base64 -w0" not in text
 
 
+def test_install_app_page_sets_up_the_demo_repo_both_tracks_rely_on():
+    """Regression: both tracks' Step 8 needs a repo with push access, the App
+    installed on it, and GITHUB_TARGET_REPO set -- but nothing before either
+    track's Step 8 ever told the reader to arrange any of that, so a
+    fresh-account reader hit `seed_demo_pr` failing with no repo configured.
+    Step 3 is the one step already shared by both tracks that's about
+    installing the App on repos in the first place, so the fix lives here:
+    pick/create a repo before installing, then set GITHUB_TARGET_REPO to it
+    right away -- instead of leaving both to be discovered at Step 8."""
+    text = (_SETUP / "03-install-app.md").read_text(encoding="utf-8")
+    assert "gh repo create" in text
+    assert "GITHUB_TARGET_REPO=" in text
+
+
+def test_step_8_pages_point_back_to_step_3_instead_of_repeating_it():
+    """The repo/App-install/GITHUB_TARGET_REPO prerequisite now lives once,
+    in Step 3 -- each track's Step 8 should link back to it rather than
+    re-explain it end to end."""
+    for path in (_SETUP / "local" / "08-run.md", _SETUP / "hosted" / "08-pinger.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "../03-install-app.md" in text
+
+
 def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
     """Regression: scripts.deploy's main() exits 2 immediately ("a public
     base URL ... is required") before it ever reaches the installation-id

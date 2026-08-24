@@ -3,10 +3,26 @@
 This step only happens in a browser — GitHub does not permit an App to
 install itself, so there's no CLI or script for it.
 
+## Pick a repo before you install
+
+Whichever repo(s) you install the App on below is also what Step 8 — the
+last step of *either* track — uses to open a real demo PR. Decide that now,
+rather than discovering the gap when that step's `seed_demo_pr` fails
+because no repo was ever set. If you don't already have one you're happy
+pushing throwaway commits to, create one (needs `gh` from Step 1,
+authenticated as the account you're about to install the App on — see that
+step's warning about keeping one account consistent through this guide):
+
+```bash
+gh repo create <you>/pr-review-bot-demo --private --clone=false
+```
+
+## Install it
+
 1. Go to `https://github.com/settings/apps/<your-app-slug>`.
 2. Click **Install App**.
-3. Choose **All repositories**, or select specific repos (e.g. a throwaway
-   test repo while you're getting set up).
+3. Choose **All repositories** (covers the repo above automatically), or
+   select specific repos and make sure the one above is included.
 
 Whichever GitHub account this browser session installs the App on is the
 account that matters from here on — including for Step 8's demo PR, which
@@ -45,19 +61,34 @@ already set in Step 2.
     reporting it as missing, and the service refuses to boot outright once
     you reach Step 8.
 
-## `GITHUB_TARGET_REPO` is a separate, optional narrowing
+## Set `GITHUB_TARGET_REPO` to that same repo
 
 Choosing "All repositories" above decides which repos the *installation*
 covers — which repos the App can see at all. `GITHUB_TARGET_REPO` is a
-different, optional setting on top of that: an allowlist that further
-narrows which of the *installed* repos the bot actually acts on. It doesn't
-change what the App can see, only what it responds to.
+separate, optional setting on top of that: an allowlist that further narrows
+which of the *installed* repos the bot actually acts on. It doesn't change
+what the App can see, only what it responds to.
 
-Leaving `GITHUB_TARGET_REPO` unset means the bot acts on **every** repo the
-installation covers. That's only a safe default because the App is
-private (step 2) — only accounts you chose could install it in the first
-place. If the App were public, an unset `GITHUB_TARGET_REPO` would mean
-accepting events from any repo any third party chose to install it on.
+Leaving it unset means the bot acts on **every** repo the installation
+covers. That's only a safe default because the App is private (step 2) —
+only accounts you chose could install it in the first place. If the App
+were public, an unset `GITHUB_TARGET_REPO` would mean accepting events from
+any repo any third party chose to install it on.
+
+Optional for the deployed service's own behavior or not, set it now anyway,
+in `.env.config`, to the repo you just installed on:
+
+```
+GITHUB_TARGET_REPO=<you>/pr-review-bot-demo
+```
+
+Step 8 (both tracks) needs a concrete answer to "which repo does the demo PR
+go on", and `doctor`'s `target-repo` row and `scripts/seed_demo_pr` both read
+this exact same setting — so setting it here, once, means Step 8 needs no
+further setup, and re-running `doctor` from this point on actually exercises
+the `gh-auth`/`target-repo` checks instead of leaving them `SKIPPED`. You can
+always blank it out again later to switch the deployed bot back to
+track-all mode.
 
 ## Next
 

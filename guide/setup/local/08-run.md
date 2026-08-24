@@ -12,13 +12,9 @@ Render free-tier sleep to work around, so nothing extra is needed here
 
 ## Open a real PR to review
 
-This needs `gh` (Step 1) authenticated as an account with push access to a
-repo, and `GITHUB_TARGET_REPO` (step 3 — left it unset there since it's
-optional for the bot itself) set to that one repo, e.g.
-`GITHUB_TARGET_REPO=you/some-repo` in `.env.config`. That repo also needs the
-App installed on it (step 3) — and on the **same** GitHub account `gh` is
-authenticated as (Step 1's warning about this). Once `GITHUB_TARGET_REPO` is
-set, re-run `uv run python -m scripts.doctor` — its `gh-auth` and
+This uses the repo you picked, installed the App on, and set as
+`GITHUB_TARGET_REPO` back in [Step 3](../03-install-app.md). If you skipped
+that, do it now — `uv run python -m scripts.doctor`'s `gh-auth` and
 `target-repo` rows will FAIL with the specific account/repo mismatch if
 there is one, rather than you finding out from `seed_demo_pr` failing below.
 
