@@ -136,6 +136,18 @@ def test_install_app_page_sets_up_the_demo_repo_both_tracks_rely_on():
     assert "GITHUB_TARGET_REPO=" in text
 
 
+def test_install_app_page_creates_the_repo_with_a_default_branch():
+    """Regression: `gh repo create ... --clone=false` with no initial commit
+    leaves a repo with no default branch. seed_demo_pr (Step 8) then pushes a
+    branch and asks `gh pr create` to open a PR against that nonexistent
+    default branch, which fails with a cryptic `GraphQL: can't be blank
+    (createPullRequest)` instead of a clear error. --add-readme gives the
+    repo an initial commit, and thus a real default branch to PR against."""
+    text = (_SETUP / "03-install-app.md").read_text(encoding="utf-8")
+    assert "gh repo create" in text
+    assert "--add-readme" in text
+
+
 def test_step_8_pages_point_back_to_step_3_instead_of_repeating_it():
     """The repo/App-install/GITHUB_TARGET_REPO prerequisite now lives once,
     in Step 3 -- each track's Step 8 should link back to it rather than

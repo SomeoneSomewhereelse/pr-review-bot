@@ -14,8 +14,16 @@ authenticated as the account you're about to install the App on — see that
 step's warning about keeping one account consistent through this guide):
 
 ```bash
-gh repo create <you>/pr-review-bot-demo --private --clone=false
+gh repo create <you>/pr-review-bot-demo --private --clone=false --add-readme
 ```
+
+`--add-readme` matters here, not just cosmetic: without an initial commit a
+fresh repo has no default branch yet, and Step 8's `seed_demo_pr` pushes a
+new branch and asks `gh pr create` to open a PR against that (nonexistent)
+default branch — which fails with a cryptic `GraphQL: can't be blank
+(createPullRequest)` instead of a clear "no such branch" error. The README
+commit is what gives the repo a real default branch to open the demo PR
+against.
 
 ## Install it
 
