@@ -13,6 +13,7 @@
 | `github-app` | The App has exactly one installation, every repo in GITHUB_TARGET_REPO is covered by it, and its webhook points here (set only if wrong) | yes |
 | `health` | /healthz answers BOTH GET and HEAD -- UptimeRobot's free tier sends HEAD, so a GET-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable and the app has provisioned its tickets table | needs an operator key |
+| `runtime-config` | runtime_config has every column store.py's schema declares -- a column added after the table was first provisioned is never backfilled by the app's own CREATE TABLE IF NOT EXISTS boot DDL | needs an operator key |
 | `provider` | The provider that will actually run -- LLM_PROVIDER, or an active DB override -- has its credential set | needs an operator key |
 | `provider-live` | The actively-resolved provider's credential is present on the deployed Render service, not just locally | needs an operator key |
 | `api-key-live` | The actively-resolved provider's actively-resolved key slot is present on the deployed Render service | needs an operator key |

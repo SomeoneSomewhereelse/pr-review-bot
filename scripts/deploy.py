@@ -1,6 +1,6 @@
 """Deploy verification CLI for the hosted Render + Supabase deployment.
 
-Runs eleven independent checks and prints one aligned table. Every check runs
+Runs twelve independent checks and prints one aligned table. Every check runs
 regardless of earlier failures, so a single run surfaces every problem rather
 than only the first. Exit codes: 0 all ok, 1 at least one check failed, 2 the
 CLI could not run at all.
@@ -33,6 +33,7 @@ from github import GithubException
 from app import github_app
 from app.config import settings
 from app.providers import pricing, registry
+from app.queue import store
 from scripts import _override, _render
 from scripts._prereqs import _looks_like_local_test_db
 
@@ -502,6 +503,87 @@ def check_database() -> CheckResult:
     if provisioned is None:
         return CheckResult(name, "FAIL", "connected; tickets absent -- app never booted on this DB")
     return CheckResult(name, "PASS", "connected; tickets present")
+
+
+def _missing_runtime_config_columns() -> list[str] | None:
+    """Names from store.RUNTIME_CONFIG_COLUMNS absent from the live
+    runtime_config table, in declared order -- or None if the table itself
+    doesn't exist yet, a distinct situation from "every column is missing"
+    (see check_runtime_config_schema).
+
+    store.py's schema is declared, not migrated (CREATE TABLE IF NOT EXISTS
+    is a no-op against a table that already exists), so a column added there
+    after a database's runtime_config was first provisioned never reaches it
+    on its own -- this is exactly the gap that left review_draft_prs missing
+    against the real Render database and made sync_config_db() crash with a
+    raw UndefinedColumn instead of naming the problem.
+
+    Raises psycopg.Error on a connection failure -- callers already have
+    their own way of reporting that.
+    """
+    with psycopg.connect(settings.database_url, connect_timeout=_DB_CONNECT_TIMEOUT) as conn:
+        row = conn.execute("SELECT to_regclass('public.runtime_config')").fetchone()
+        if (row[0] if row else None) is None:
+            return None
+        live = {
+            row[0]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'runtime_config'"
+            ).fetchall()
+        }
+    return [name for name, _ in store.RUNTIME_CONFIG_COLUMNS if name not in live]
+
+
+def _runtime_config_alter_statements(missing: list[str]) -> str:
+    """One `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` line per name in
+    `missing`, in the type each is declared with in
+    store.RUNTIME_CONFIG_COLUMNS -- the exact, ready-to-run fix for the
+    no-migration-code gap _missing_runtime_config_columns() documents."""
+    by_name = dict(store.RUNTIME_CONFIG_COLUMNS)
+    return "\n".join(
+        f"ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS {name} {by_name[name]};"
+        for name in missing
+    )
+
+
+def check_runtime_config_schema() -> CheckResult:
+    """Whether the live runtime_config table has every column store.py's
+    schema declares -- catches a column added to RUNTIME_CONFIG_COLUMNS
+    after a database's runtime_config was already provisioned, which the
+    app's own CREATE TABLE IF NOT EXISTS boot DDL can never backfill (see
+    _missing_runtime_config_columns's docstring). Without this, the first
+    symptom is sync_config_db() crashing with a raw UndefinedColumn on
+    whichever of these six columns it happens to write.
+    """
+    name = "runtime-config"
+    if not settings.database_url:
+        return CheckResult(name, "SKIPPED", "set DATABASE_URL to check runtime_config's schema")
+    try:
+        missing = _missing_runtime_config_columns()
+    except psycopg.Error as exc:
+        return CheckResult(name, "FAIL", f"cannot check runtime_config ({type(exc).__name__})")
+    problem = _runtime_config_schema_problem(missing)
+    if problem:
+        return CheckResult(name, "FAIL", problem)
+    return CheckResult(name, "PASS", "all declared columns present")
+
+
+def _runtime_config_schema_problem(missing: list[str] | None) -> str | None:
+    """Detail message for `missing` (as returned by
+    _missing_runtime_config_columns()), or None if there's nothing wrong.
+    Shared by check_runtime_config_schema (wraps this in a CheckResult) and
+    sync_config_db (prints it and refuses to write), so the two can never
+    describe this gap differently."""
+    if missing is None:
+        return "runtime_config does not exist -- deploy once so boot DDL provisions it"
+    if not missing:
+        return None
+    return (
+        "missing column(s): " + ", ".join(missing) + "\nstore.py's schema is declared, not "
+        "migrated, so these were never backfilled -- add them manually:\n"
+        + _runtime_config_alter_statements(missing)
+    )
 
 
 def _resolved_provider() -> tuple[str, str | None]:
@@ -1108,6 +1190,22 @@ def sync_config_db() -> int:
     reset = settings.key_usage_reset_time_utc.isoformat()
     wanted = (base, cap, factor, tokens, reset, settings.review_draft_prs)
 
+    # A column store.py's schema declares but the live table never got (CREATE
+    # TABLE IF NOT EXISTS is a no-op against an already-provisioned table --
+    # see _missing_runtime_config_columns) used to surface here as a raw
+    # UndefinedColumn from the INSERT below. Checked before that INSERT is
+    # even attempted, so the fix an operator needs is what they see, not a
+    # driver exception.
+    try:
+        missing = _missing_runtime_config_columns()
+    except psycopg.Error as exc:
+        print(f"database error ({type(exc).__name__})", file=sys.stderr)
+        return 2
+    problem = _runtime_config_schema_problem(missing)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 2
+
     print(_verify_database_url_reachable())
     now = datetime.now(timezone.utc).isoformat()
     columns = ", ".join(_DB_SYNCED_COLUMNS)
@@ -1396,6 +1494,10 @@ CHECKS: tuple[CheckSpec, ...] = (
     CheckSpec("database", lambda: check_database(),
               "Postgres is reachable and the app has provisioned its tickets table",
               False),
+    CheckSpec("runtime-config", lambda: check_runtime_config_schema(),
+              "runtime_config has every column store.py's schema declares -- a column "
+              "added after the table was first provisioned is never backfilled by the "
+              "app's own CREATE TABLE IF NOT EXISTS boot DDL", False),
     CheckSpec("provider", lambda: check_provider(),
               "The provider that will actually run -- LLM_PROVIDER, or an active DB "
               "override -- has its credential set", False),
@@ -1415,7 +1517,7 @@ CHECKS: tuple[CheckSpec, ...] = (
 
 
 def run_checks(repos: frozenset[str], base: str) -> list[CheckResult]:
-    """All eleven, foundational (and cheap, where possible) first, so a
+    """All twelve, foundational (and cheap, where possible) first, so a
     misconfiguration is reported before the checks that would fail as a
     consequence of it. Order and content come from CHECKS, which
     scripts/gen_docs.py also renders -- so the table an operator reads can

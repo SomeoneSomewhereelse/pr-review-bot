@@ -26,6 +26,35 @@ from app.providers import registry
 from app.queue import cooldown_config
 from app.specialists.schemas import ReviewResult
 
+# (name, SQL type + constraints) for every runtime_config column, in DDL
+# order. The single source of truth for that table's shape: _SCHEMA below
+# builds its CREATE TABLE from this, and scripts/deploy.py's
+# check_runtime_config_schema() reads the same names to verify the live
+# database actually has them all. CREATE TABLE IF NOT EXISTS is a no-op
+# against a table that already exists, so a column added here after first
+# boot never reaches an already-provisioned database on its own -- that gap
+# is exactly what left a real deployment's runtime_config missing
+# review_draft_prs (added after this table was first provisioned there) and
+# is why deploy.py carries a check for it rather than relying on this file
+# alone.
+RUNTIME_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("id", "INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1)"),
+    ("provider", "TEXT"),
+    ("updated_at", "TEXT NOT NULL"),
+    ("cooldown_base_seconds", "DOUBLE PRECISION"),
+    ("cooldown_max_seconds", "DOUBLE PRECISION"),
+    ("cooldown_factor", "DOUBLE PRECISION"),
+    ("gemini_key_index", "INTEGER"),
+    ("groq_key_index", "INTEGER"),
+    ("vertex_key_index", "INTEGER"),
+    ("gemini_model", "TEXT"),
+    ("groq_model", "TEXT"),
+    ("vertex_model", "TEXT"),
+    ("key_usage_token_cap", "INTEGER"),
+    ("key_usage_reset_time_utc", "TEXT"),
+    ("review_draft_prs", "BOOLEAN"),
+)
+
 # Declared, not migrated: this is the final shape, provisioned in one pass on
 # first boot. No ALTER statements -- a fresh clone carries no migration code
 # (design spec 2026-08-18 section 6d), and an existing database is recreated
@@ -52,21 +81,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     UNIQUE (repo_full_name, pr_number)
 );
 CREATE TABLE IF NOT EXISTS runtime_config (
-    id                       INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    provider                 TEXT,
-    updated_at               TEXT NOT NULL,
-    cooldown_base_seconds    DOUBLE PRECISION,
-    cooldown_max_seconds     DOUBLE PRECISION,
-    cooldown_factor          DOUBLE PRECISION,
-    gemini_key_index         INTEGER,
-    groq_key_index           INTEGER,
-    vertex_key_index         INTEGER,
-    gemini_model             TEXT,
-    groq_model               TEXT,
-    vertex_model             TEXT,
-    key_usage_token_cap      INTEGER,
-    key_usage_reset_time_utc TEXT,
-    review_draft_prs         BOOLEAN
+""" + ",\n".join(
+    f"    {name:<25} {sql_type}" for name, sql_type in RUNTIME_CONFIG_COLUMNS
+) + """
 );
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -52,6 +52,21 @@ def _shipped_db_synced_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _runtime_config_schema_ok_by_default(request, monkeypatch):
+    """sync_env() calls sync_config_db(), which now checks the live schema
+    before writing -- so any test whose psycopg.connect is stubbed (most
+    sync_env()/sync_config_db() tests, which never open a real DB) would
+    otherwise have _missing_runtime_config_columns() read "table absent" off
+    whatever canned fetchone() the stub returns, and refuse for a reason the
+    test isn't about. Skipped for a test that requests the real `db` fixture
+    (directly, or via _real_db_target/_runtime_config_missing_review_draft_prs)
+    -- those want the genuine check running against the real test database."""
+    if "db" in request.fixturenames:
+        return
+    monkeypatch.setattr(deploy, "_missing_runtime_config_columns", lambda: [])
+
+
+@pytest.fixture(autouse=True)
 def _shipped_model_defaults(monkeypatch):
     """Pin every provider's model var to its Settings class default, so these
     tests describe the SHIPPED configuration rather than whatever the
@@ -868,6 +883,67 @@ def test_check_database_failure_never_leaks_the_connection_string(monkeypatch):
     assert SENTINEL_PASSWORD not in rendered
 
 
+def test_runtime_config_schema_skips_with_a_hint_when_unset(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "")
+    result = deploy.check_runtime_config_schema()
+    assert result.status == "SKIPPED"
+    assert "DATABASE_URL" in result.detail
+
+
+def test_runtime_config_schema_passes_against_the_provisioned_test_database(
+    db, db_url, monkeypatch
+):
+    monkeypatch.setattr(settings, "database_url", db_url)
+    result = deploy.check_runtime_config_schema()
+    assert result.status == "PASS"
+
+
+@pytest.fixture
+def _runtime_config_missing_review_draft_prs(db, db_exec):
+    """Drops review_draft_prs to reproduce the real gap (CREATE TABLE IF NOT
+    EXISTS can't backfill a column into an already-provisioned table), then
+    restores it. The test database's schema is session-scoped and persists
+    across tests (only its rows are truncated between them -- see the `db`
+    fixture), so a test that breaks the schema must repair it itself or every
+    later test in the session inherits a mutant runtime_config table."""
+    db_exec("ALTER TABLE runtime_config DROP COLUMN review_draft_prs")
+    yield
+    db_exec("ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS review_draft_prs BOOLEAN")
+
+
+def test_runtime_config_schema_fails_naming_a_missing_column_and_the_fix(
+    _runtime_config_missing_review_draft_prs, db_url, monkeypatch
+):
+    """review_draft_prs shipped in app/queue/store.py's _SCHEMA after the live
+    database's runtime_config table already existed -- CREATE TABLE IF NOT
+    EXISTS is a no-op against it, so this reproduces exactly the gap that
+    left review_draft_prs missing on the real Render database (the bug this
+    check exists to catch before --sync-config-db hits a raw UndefinedColumn)."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    result = deploy.check_runtime_config_schema()
+    assert result.status == "FAIL"
+    assert "review_draft_prs" in result.detail
+    assert (
+        "ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS review_draft_prs BOOLEAN"
+        in result.detail
+    )
+
+
+def test_runtime_config_schema_reports_an_absent_table_distinctly(
+    db, db_url, db_exec, monkeypatch
+):
+    """Missing entirely (never booted on this DB) is a different fix -- deploy
+    once so the boot DDL provisions it -- than a column missing from an
+    already-provisioned table, which needs a manual ALTER. Conflating the two
+    would recommend 15 ALTER statements against a table that doesn't exist."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    db_exec("DROP TABLE runtime_config")
+    result = deploy.check_runtime_config_schema()
+    assert result.status == "FAIL"
+    assert "does not exist" in result.detail
+    assert "ALTER TABLE" not in result.detail
+
+
 RENDER_SERVICES = "https://api.render.com/v1/services"
 
 
@@ -1101,10 +1177,11 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
 
 
 def _stub_all_checks(monkeypatch, statuses):
-    """Replace all eleven checks with constant results, in report order."""
+    """Replace all twelve checks with constant results, in report order."""
     names = [
         "config", "pricing", "boot-creds-live", "github-app", "health", "database",
-        "provider", "provider-live", "api-key-live", "render-service", "uptime-pinger",
+        "runtime-config", "provider", "provider-live", "api-key-live",
+        "render-service", "uptime-pinger",
     ]
     fns = [
         "check_config",
@@ -1113,6 +1190,7 @@ def _stub_all_checks(monkeypatch, statuses):
         "check_installation_and_webhook",
         "check_health_endpoint",
         "check_database",
+        "check_runtime_config_schema",
         "check_provider",
         "check_provider_live",
         "check_api_key_live",
@@ -1132,7 +1210,7 @@ def runnable(monkeypatch):
 
 
 def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 8 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
@@ -1140,7 +1218,7 @@ def test_main_returns_zero_when_all_pass_or_skip(runnable, monkeypatch, capsys):
 def test_main_returns_one_when_any_check_fails(runnable, monkeypatch, capsys):
     _stub_all_checks(
         monkeypatch,
-        ["PASS", "PASS", "PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS",
+        ["PASS", "PASS", "PASS", "FAIL", "PASS", "PASS", "PASS", "PASS", "PASS", "PASS",
          "SKIPPED", "SKIPPED"],
     )
     assert deploy.main([]) == 1
@@ -1152,7 +1230,7 @@ def test_main_with_sync_env_falls_through_to_the_checklist_on_success(
 ):
     """Spec section 8 step 7: a successful sync must not skip the post-sync
     checklist -- it is the thing that proves the sync actually took."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 8 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 0)
     assert deploy.main(["--sync-env"]) == 0
     assert "all checks passed" in capsys.readouterr().out
@@ -1164,7 +1242,7 @@ def test_main_with_sync_env_returns_early_without_the_checklist_on_failure(
     """A non-zero sync_env() must short-circuit main() before run_checks/
     render_report ever run -- printing the table after a failed sync would
     misleadingly suggest the sync itself is fine."""
-    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 8 + ["SKIPPED"] * 4)
     monkeypatch.setattr(deploy, "sync_env", lambda: 2)
     assert deploy.main(["--sync-env"]) == 2
     assert "all checks passed" not in capsys.readouterr().out
@@ -1175,7 +1253,7 @@ def test_main_proceeds_without_a_target_repo_track_all_mode(monkeypatch, capsys)
     must not block main() the way a missing base URL does."""
     monkeypatch.setattr(settings, "github_target_repo", "")
     monkeypatch.setattr(settings, "public_base_url", BASE)
-    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 8 + ["SKIPPED"] * 4)
     assert deploy.main([]) == 0
     assert "all checks passed" in capsys.readouterr().out
 
@@ -1219,11 +1297,11 @@ def test_main_health_only_json_emits_a_parseable_check(monkeypatch, capsys):
 
 
 def test_main_json_emits_the_full_checklist_as_one_object(runnable, monkeypatch, capsys):
-    _stub_all_checks(monkeypatch, ["PASS"] * 7 + ["SKIPPED"] * 4)
+    _stub_all_checks(monkeypatch, ["PASS"] * 8 + ["SKIPPED"] * 4)
     assert deploy.main(["--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert [c["name"] for c in payload["checks"]] == [spec.name for spec in deploy.CHECKS]
-    assert payload["summary"] == {"passed": 7, "warned": 0, "failed": 0, "skipped": 4}
+    assert payload["summary"] == {"passed": 8, "warned": 0, "failed": 0, "skipped": 4}
     assert "all checks passed" in payload["table"]
 
 
@@ -1250,25 +1328,26 @@ def test_main_rejects_health_only_combined_with_sync_env(monkeypatch, capsys):
     assert "mutually exclusive" in capsys.readouterr().err
 
 
-def test_run_checks_reports_all_eleven_in_order(runnable, monkeypatch):
-    _stub_all_checks(monkeypatch, ["PASS"] * 11)
+def test_run_checks_reports_all_twelve_in_order(runnable, monkeypatch):
+    _stub_all_checks(monkeypatch, ["PASS"] * 12)
     results = deploy.run_checks(frozenset({"owner/repo"}), BASE)
     assert [r.name for r in results] == [
         "config", "pricing", "boot-creds-live", "github-app", "health", "database",
-        "provider", "provider-live", "api-key-live", "render-service", "uptime-pinger",
+        "runtime-config", "provider", "provider-live", "api-key-live",
+        "render-service", "uptime-pinger",
     ]
 
 
 def test_an_exploding_check_becomes_a_fail_and_does_not_abort_the_run(runnable, monkeypatch):
     """A complete table is the deliverable; one broken check must not deprive
-    the operator of the other ten diagnoses (spec section 7.3)."""
+    the operator of the other eleven diagnoses (spec section 7.3)."""
     def _boom():
         raise ValueError("unexpected")
 
-    _stub_all_checks(monkeypatch, ["PASS"] * 11)
+    _stub_all_checks(monkeypatch, ["PASS"] * 12)
     monkeypatch.setattr(deploy, "check_database", _boom)
     results = deploy.run_checks(frozenset({"owner/repo"}), BASE)
-    assert len(results) == 11
+    assert len(results) == 12
     database = next(r for r in results if r.name == "database")
     assert database.status == "FAIL"
     assert "ValueError" in database.detail
@@ -2029,6 +2108,22 @@ def test_sync_config_db_writes_review_draft_prs_into_runtime_config(
     assert deploy.sync_config_db() == 0
     row = db_query("SELECT review_draft_prs FROM runtime_config WHERE id = 1")[0]
     assert row == (True,)
+
+
+def test_sync_config_db_refuses_with_an_actionable_message_when_a_column_is_missing(
+    _real_db_target, _runtime_config_missing_review_draft_prs, capsys
+):
+    """Reproduces the real incident: review_draft_prs missing from an
+    already-provisioned runtime_config used to surface as a raw
+    UndefinedColumn from the INSERT below. It must instead refuse early with
+    the exact ALTER TABLE fix, and must never reach that INSERT at all."""
+    assert deploy.sync_config_db() == 2
+    err = capsys.readouterr().err
+    assert "review_draft_prs" in err
+    assert (
+        "ALTER TABLE runtime_config ADD COLUMN IF NOT EXISTS review_draft_prs BOOLEAN" in err
+    )
+    assert "UndefinedColumn" not in err
 
 
 def test_sync_config_db_reports_already_in_sync_on_a_second_run(_real_db_target, capsys):
@@ -2809,10 +2904,10 @@ def test_checks_registry_matches_what_run_checks_actually_runs(monkeypatch):
     names = [spec.name for spec in deploy.CHECKS]
     assert names == [
         "config", "pricing", "boot-creds-live", "github-app", "health",
-        "database", "provider", "provider-live", "api-key-live",
-        "render-service", "uptime-pinger",
+        "database", "runtime-config", "provider", "provider-live",
+        "api-key-live", "render-service", "uptime-pinger",
     ]
-    _stub_all_checks(monkeypatch, ["PASS"] * 11)
+    _stub_all_checks(monkeypatch, ["PASS"] * 12)
     results = deploy.run_checks(frozenset(), "https://example.invalid")
     assert [r.name for r in results] == names
 
