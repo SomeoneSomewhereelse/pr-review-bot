@@ -258,15 +258,35 @@ def test_supabase_page_pins_the_session_pooler_port():
     assert "5432" in text and "6543" in text, "both ports named, so the wrong one is unmistakable"
 
 
-def test_render_page_lists_exactly_the_four_boot_vars():
-    """spec section 4b: SETUP.md walked through nine; only four are needed to
-    boot, and deploy.py's own check already names which."""
-    from scripts import deploy
-
+def test_render_page_leaves_env_vars_blank_for_sync_env_to_push():
+    """Regression: this page used to tell the reader to hand-type exactly
+    four env vars into Render's dashboard to get the service booting -- but
+    app/main.py's lifespan also requires GITHUB_APP_INSTALLATION_ID and a
+    valid LLM_PROVIDER, so that first deploy always crash-looped. Since
+    --sync-env (Step 7) doesn't actually need the service already booted,
+    just already created, this page now has the reader leave every var
+    blank and get RENDER_API_KEY here instead, deferring all of it to
+    Step 7 in one push -- so it must no longer instruct hand-entering vars."""
     text = (_SETUP / "hosted" / "06-render.md").read_text(encoding="utf-8")
-    for name in deploy._BOOT_CREDENTIAL_NAMES:
-        assert name in text
+    assert "leave all of them blank" in text.lower() or "leave them blank" in text.lower()
     assert "RENDER_API_KEY" in text, "must say it is NOT a service env var"
+    assert "Set exactly four env vars" not in text
+
+
+def test_render_page_offers_the_point_at_upstream_option():
+    """The upstream repo's own URL is a valid, lower-setup alternative to
+    forking for Render's Blueprint flow -- confirmed by hand -- so Step 6
+    should offer it alongside forking/pushing a new repo, not just the two
+    options that need push access."""
+    text = (_SETUP / "hosted" / "06-render.md").read_text(encoding="utf-8")
+    assert "fork" in text.lower()
+    assert "upstream" in text.lower()
+
+
+def test_sync_page_is_where_the_boot_vars_actually_get_pushed():
+    text = (_SETUP / "hosted" / "07-sync.md").read_text(encoding="utf-8")
+    assert "--sync-env" in text
+    assert "Application startup complete" in text
 
 
 def test_pinger_page_warns_about_the_exact_url():

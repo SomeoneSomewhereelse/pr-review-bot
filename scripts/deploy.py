@@ -302,15 +302,23 @@ def check_pricing() -> CheckResult:
     return CheckResult("pricing", "PASS", "")
 
 
-# The vars app/main.py's lifespan touches unconditionally at every boot
-# (GITHUB_WEBHOOK_SECRET always; GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY via
-# discover_installation_id() whenever GITHUB_APP_INSTALLATION_ID is unset;
-# DATABASE_URL via init_pool()) -- a rename/drop of any of these that never
-# reached Render crashes the whole ASGI app at startup, not just one feature.
+# The vars app/main.py's lifespan touches unconditionally at every boot --
+# LLM_PROVIDER (must be a supported provider) and GITHUB_WEBHOOK_SECRET
+# (must be non-empty) checked directly; GITHUB_APP_INSTALLATION_ID (must be
+# non-empty) then re-verified against GitHub via discover_and_verify_
+# installation_id(), which itself needs GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY
+# to make that call; DATABASE_URL via init_pool(). Unlike an earlier version
+# of this list, GITHUB_APP_INSTALLATION_ID's discovery is never skipped
+# because it's "already set" -- app/main.py refuses to start at all if it's
+# unset (ISSUES.md 2026-08-21), so it's just as boot-critical as the other
+# five. A rename/drop of any of these six that never reached Render crashes
+# the whole ASGI app at startup, not just one feature.
 _BOOT_CREDENTIAL_NAMES = (
     "GITHUB_APP_ID",
+    "GITHUB_APP_INSTALLATION_ID",
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_WEBHOOK_SECRET",
+    "LLM_PROVIDER",
     "DATABASE_URL",
 )
 

@@ -1,19 +1,10 @@
 # Step 7: Sync config and verify
 
-The four boot vars from Step 6 are enough for the service to start. Everything
-else — `LLM_PROVIDER`, the provider credential, model vars, and operational
-settings — is pushed in one shot with `--sync-env`.
-
-## Get a Render API key
-
-`--sync-env` and `doctor`/`deploy`'s live checks need a `RENDER_API_KEY` to
-act on your behalf — this is separate from anything set on the Render
-service itself (Step 6's warning). Get one from the Render dashboard →
-**Account Settings → API Keys**, then set it as `RENDER_API_KEY` locally in
-`.env`. It's operator-local tooling, never something the service itself
-sees.
-
-With `RENDER_API_KEY` set locally, this is a complete, repeatable deploy:
+Step 6 created the service with every var left blank — deliberately, since
+hand-typing ~30 of them into a web form (several as long base64 blobs) is
+exactly how a typo slips in unnoticed. This is what actually pushes all of
+them, correctly, and turns that expected-failing first deploy into a real,
+running one, with `RENDER_API_KEY` (Step 6) already set locally:
 
 === "bash"
 
@@ -43,6 +34,21 @@ already in flight has taken well under a minute.
 ## Claude Code shortcut
 
 Claude Code users can run `/deploy` instead, which wraps the same CLI.
+
+## Verify
+
+Before considering this step done:
+
+- The deploy's logs end with uvicorn's `Application startup complete.`
+- `https://<your-service>.onrender.com/healthz` returns `{"status":"ok"}`.
+
+## Troubleshooting
+
+If it fails with `error connecting in 'pool-1'` or a `RuntimeError` about the
+connection not opening, the usual cause is a Supabase project that was not
+ready yet, or a mistyped pooler string (Step 5). Fix the value locally (in
+`.env`) and re-run `--sync-env` — it pushes the corrected value and triggers
+a fresh deploy the same way.
 
 ## Next
 

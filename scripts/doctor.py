@@ -81,9 +81,10 @@ _HOSTED: tuple[Step, ...] = (
          "create it at https://supabase.com, then set DATABASE_URL to the "
          "Session-mode pooler string (port 5432, NOT 6543)"),
     Step(6, "Create the Render service", "public_url",
-         "Render dashboard -> New + -> Blueprint -> render.yaml, then set the four "
-         "boot vars (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, "
-         "DATABASE_URL)"),
+         "Render dashboard -> New + -> Blueprint -> point it at a repo with "
+         "render.yaml (the upstream repo's URL works too) -- leave every var "
+         "blank, then get a RENDER_API_KEY and run Step 7's --sync-env to push "
+         "them all"),
     Step(7, "Sync config and verify", "webhook",
          "uv run python -m scripts.deploy --sync-env"),
     Step(8, "Add the keep-warm pinger", "keepalive",

@@ -10,9 +10,9 @@ psycopg3-only, so a real reachable Postgres is a hard requirement.
 
 !!! warning "Wait for ready before deploying"
     A connection attempt against a still-provisioning project fails, and
-    Render does **not** retry a failed deploy — see the next page's
-    troubleshooting note. Confirm the dashboard shows the project ready
-    before moving on to Step 6.
+    Render does **not** retry a failed deploy — see Step 7's troubleshooting
+    note. Confirm the dashboard shows the project ready before moving on to
+    Step 6.
 
 ## Copy the connection string
 
@@ -35,7 +35,7 @@ postgresql://postgres.<project-ref>:<password>@aws-<region>.pooler.supabase.com:
 ## Set it
 
 Set the resulting connection string as `DATABASE_URL` — locally in `.env`
-for now; it goes into the Render dashboard too, in the next step.
+for now; Step 7's `--sync-env` pushes it (and everything else) to Render.
 
 Optional hardening: libpq's default `sslmode=prefer` gets an encrypted
 connection but performs no certificate verification. For MITM protection use
