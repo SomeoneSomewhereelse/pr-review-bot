@@ -47,6 +47,8 @@ targets the Hosted track exclusively.
 | Runtime placement | **Separate service** from the review engine — own process, own Render deploy, own `onboarding/CLAUDE.md` |
 | UI shape | Single-page accordion, one collapsible frame per external service, status badge in each header |
 | Frame navigation | **Sequential unlock** — a frame stays disabled until everything it depends on is validated |
+| Frame re-edit | **Locks on completion**; an explicit "Change" action re-opens it. Editing and resubmitting re-locks every later frame until re-validated |
+| Accessibility / locale | Mobile-responsive; full RTL support; light/dark/system theme + English/Hebrew language toggle, **mirroring `app/static/dashboard.html`'s existing implementation** rather than inventing a new pattern |
 | Sub-project build order | Render key capture first (no prerequisites, cheap to validate), then GitHub, Supabase, LLM UI, UptimeRobot, then the Render service-creation/sync frame last |
 
 ## 3. Architecture
@@ -92,21 +94,31 @@ JSON-API convention in this repo, not a new frontend framework.
 
 ```
 onboarding/
-  CLAUDE.md            scoped rules for this sub-project (section 7)
+  CLAUDE.md            scoped rules for this sub-project (section 8)
   main.py              FastAPI app + lifespan; GET /healthz
   render_client.py     validate_key(key: str) -> RenderAccountInfo | RenderKeyInvalid
   router.py            POST /api/render/validate-key; GET / serves the static page
   static/
-    index.html          accordion shell markup (all 6 frame headers; only
-                         frame 1 is functional this slice, 2-6 render as
-                         disabled/"coming soon")
-    wizard.js            frame status state machine, sessionStorage helpers,
-                         the fetch call for frame 1
-    wizard.css
-  tests/
-    test_render_client.py   mocked httpx responses: valid key, invalid key
-                             (401), 5xx, timeout
-    test_router.py          endpoint-level tests against a mocked render_client
+    index.html          the whole wizard page — accordion shell markup (all
+                         6 frame headers; only frame 1 is functional this
+                         slice, 2-6 render as disabled/"coming soon"), inline
+                         <style> (incl. mobile/RTL/theme, section 7), and
+                         inline <script> (frame state machine, locking,
+                         sessionStorage helpers, i18n, the fetch call for
+                         frame 1) — one self-contained file, following
+                         app/static/dashboard.html's existing convention
+                         rather than separate .js/.css assets
+
+tests/                 (repo-root — this project's existing testpaths, not
+                        a per-service tests/ directory)
+  test_onboarding_main.py         GET/HEAD /healthz
+  test_onboarding_render_client.py  mocked httpx responses: valid key,
+                                     invalid key (401), 5xx, timeout
+  test_onboarding_router.py       endpoint-level tests against a mocked
+                                   render_client
+  test_onboarding_page.py         content-substring checks on the served
+                                   page (frame markup, locking, i18n/RTL/
+                                   theme markers) — see section 10
 ```
 
 ## 5. API contract
@@ -154,14 +166,62 @@ own credentials, extended here to a visitor's.
    `{"valid": false, "reason": "render_unreachable"}`.
 6. Browser, on `valid: true`: stores the key under a namespaced
    `sessionStorage` key (`onboarding.renderApiKey`), flips frame 1's header
-   badge to "✓ validated — owner: `<owner_name>`", collapses frame 1, and
-   unlocks frame 2 (which remains a disabled placeholder until sub-project 2
-   lands).
+   badge to "✓ validated — owner: `<owner_name>`", collapses frame 1, **locks
+   it** (see below), and unlocks frame 2 (which remains a disabled
+   placeholder until sub-project 2 lands).
    On `valid: false`: frame 1 shows an inline error matching the `reason`
    (distinct copy for each), stays open and expanded, nothing is written to
    `sessionStorage`.
 
-## 7. `onboarding/CLAUDE.md` (to be created verbatim by the implementation)
+**Locking a completed frame.** Once a frame reaches `done`, its header no
+longer opens on click — a distinct "Change" control (shown only in the
+`done` state) is the sole way back in. Clicking it re-opens the frame in its
+editable state, pre-filled with nothing (the previous key is never re-shown,
+consistent with never surfacing a credential value once it's been entered).
+Submitting a revised value **re-locks every later frame** back to `locked`
+until this frame is revalidated — an earlier frame's value may be a real
+input to a later one (concretely: not yet for frame 1 → frame 2, but this is
+the general contract every later frame in sub-projects 2-6 inherits, several
+of which perform side-effecting actions like creating a GitHub App or a
+Supabase project, where silently allowing a stale resubmission risks
+creating a duplicate resource). This is why locking defaults to "on" rather
+than being decided per-frame later.
+
+## 7. Mobile, RTL, theme, and language support
+
+The wizard must work well on a phone screen, support right-to-left layout
+for Hebrew, and offer the same light/dark/system theme and English/Hebrew
+language controls already implemented in `app/static/dashboard.html` —
+mirroring that file's exact pattern rather than inventing a new one:
+
+- **Theme** — a `themeToggleBtn` opens a small popup with light/dark/system
+  radio options, persisted to `localStorage`, applied via
+  `document.documentElement.setAttribute("data-theme", ...)` against the
+  same `:root` / `prefers-color-scheme` / `[data-theme]` CSS custom-property
+  structure `dashboard.html` already defines (light values on bare `:root`,
+  dark values under both the media-query guard and `:root[data-theme="dark"]`).
+- **Language** — a `langToggleBtn` opens a popup with English/Hebrew radio
+  options, persisted to `localStorage`, applied by setting `lang`/`dir` on
+  `<html>` and re-rendering every `[data-i18n]`-tagged element plus every
+  dynamically-generated string (frame badges, error messages, the "Change"
+  control) through a `STRINGS` lookup table and `t()` helper, exactly like
+  `dashboard.html`'s existing implementation.
+- **RTL** — `dir="rtl"` plus CSS logical properties (`margin-inline`,
+  `padding-inline`, `inset-inline-*`) in place of physical `left`/`right`,
+  matching `dashboard.html`'s existing approach — not a separate RTL
+  stylesheet.
+- **Mobile** — the wizard's natural layout (a stacked list of frames) is
+  already single-column, but touch targets (the Validate/Change buttons,
+  frame headers) need adequate tap-target sizing, and the theme/language
+  popups reuse `dashboard.html`'s existing `positionPopup()` viewport-
+  clamping logic so they never overflow a narrow screen.
+
+This reuse is deliberate: `dashboard.html`'s pattern is already proven —
+tested, RTL-correct, and visually consistent with the rest of this project's
+web surface — so the wizard should read as the same product, not a
+differently-themed one-off.
+
+## 8. `onboarding/CLAUDE.md` (to be created verbatim by the implementation)
 
 ```markdown
 # onboarding/ — self-service setup wizard
@@ -209,7 +269,7 @@ section 3), not an oversight to fix.
   service's threat model be reasoned about independently.
 ```
 
-## 8. Error handling
+## 9. Error handling
 
 - Backend: `render_client.validate_key()` catches `httpx` timeout/connection
   errors and non-2xx responses explicitly, mapping each to one of the two
@@ -223,7 +283,7 @@ section 3), not an oversight to fix.
   request; if it fails, the visitor clicks again. Automatic retries are not
   warranted for a manually-triggered, low-frequency action.
 
-## 9. Testing strategy
+## 10. Testing strategy
 
 - `render_client.py`: unit tests against mocked `httpx` responses covering
   valid key, invalid key (401), Render 5xx, and a timeout — no live Render
@@ -238,8 +298,14 @@ section 3), not an oversight to fix.
 - Frontend: manual click-through verification for this slice — no build step
   exists yet to hang an automated JS test runner off, and a single functional
   frame doesn't yet justify standing one up. Revisit once more frames land.
+  Content-substring assertions against the served HTML/JS (this repo's
+  existing convention — see `tests/test_dashboard_page.py`) cover the frame
+  state machine, the locking/"Change" behavior, and that the i18n/RTL/theme
+  markup (`data-i18n` attributes, both `STRINGS.en` and `STRINGS.he` keys,
+  the `dir` attribute switch) is actually present, without needing to
+  execute JS.
 
-## 10. Out of scope (tracked separately, not part of this spec)
+## 11. Out of scope (tracked separately, not part of this spec)
 
 - **`RENDER_API_KEY` becoming required** in the existing review engine's own
   `app/config.py` / `scripts/deploy.py` / `scripts/doctor.py` — a real
