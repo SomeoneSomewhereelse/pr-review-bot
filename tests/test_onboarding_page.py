@@ -8,6 +8,7 @@ from __future__ import annotations
 from httpx import ASGITransport, AsyncClient
 
 from onboarding.main import app
+from scripts.create_github_app import MANIFEST_EVENTS, MANIFEST_PERMISSIONS
 
 FRAME_IDS = [
     "render-key", "github-app", "supabase", "llm-provider",
@@ -137,15 +138,28 @@ async def test_manifest_callback_handler_present():
 
 
 async def test_manifest_permissions_match_the_cli_script():
-    """Mirrors scripts/create_github_app.py's MANIFEST_PERMISSIONS/
-    MANIFEST_EVENTS — kept in sync by this test, not a shared module (there
-    is no shared JS/Python boundary to put one in)."""
+    """The page's JS MANIFEST_PERMISSIONS/MANIFEST_EVENTS must mirror
+    scripts/create_github_app.py's, which is the single source of truth (a
+    paired comment in each file points at the other; there is no shared
+    JS/Python boundary a real shared constant could live in).
+
+    This reads the actual Python constants rather than re-listing the same
+    literals a second time: a copy of the literals here would keep passing
+    after someone edited only the CLI script, which is exactly the drift this
+    test exists to catch."""
     client = await _client()
     body = (await client.get("/")).text
-    assert '"pull_requests": "write"' in body or "pull_requests: \"write\"" in body
-    assert '"contents": "read"' in body or "contents: \"read\"" in body
-    assert '"issues": "write"' in body or "issues: \"write\"" in body
-    assert '"metadata": "read"' in body or "metadata: \"read\"" in body
+    for name, level in MANIFEST_PERMISSIONS.items():
+        assert f'{name}: "{level}"' in body, f"page is missing permission {name}: {level}"
+    for event in MANIFEST_EVENTS:
+        assert f'"{event}"' in body, f"page is missing default event {event}"
+    # The page must not silently grant MORE than the CLI script does either.
+    js_perms = body[body.index("const MANIFEST_PERMISSIONS = {"):]
+    js_perms = js_perms[:js_perms.index("};")]
+    assert js_perms.count(":") == len(MANIFEST_PERMISSIONS)
+    js_events = body[body.index("const MANIFEST_EVENTS = ["):]
+    js_events = js_events[:js_events.index("];")]
+    assert js_events.count('"') == 2 * len(MANIFEST_EVENTS)
     assert "public: false" in body
 
 
@@ -180,3 +194,63 @@ async def test_restore_from_session_handles_partial_github_app_state():
     body = (await client.get("/")).text
     assert "showGithubAppReadyToInstall()" in body
     assert "function restoreFromSession" in body
+
+
+async def test_frame2_has_a_reset_path_wired_into_lock_and_change():
+    """showGithubAppReadyToInstall() hides the create section for good unless
+    something reverses it. Without that reversal, both re-entry paths strand
+    frame 2: its own "Change" reopens a frame that can only offer "Install
+    App" (with stale credentials still in sessionStorage, so a refresh
+    silently re-completes the frame), and relocking it from frame 1 clears
+    the storage but leaves "Install App" on screen, where clicking it hits
+    installGithubApp()'s !stored branch and shows a misleading error."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function resetGithubAppCreateSection" in body
+
+    lock_body = body[body.index("function lockFrame"):body.index("function unlockFrame")]
+    assert "resetGithubAppCreateSection()" in lock_body
+    assert 'id === "github-app"' in lock_body
+
+    change_body = body[
+        body.index("function beginChange"):body.index("async function validateRenderKey")
+    ]
+    assert "resetGithubAppCreateSection()" in change_body
+    # beginChange must clear this frame's own stored credentials too — only
+    # lockFrame/relockDownstreamOf did that before, and neither runs on a
+    # frame's own Change. (Scoped to frame 2 deliberately: frame 1's
+    # equivalent gap is a separate parked issue, see root ISSUES.md.)
+    assert 'sessionStorage.removeItem(STORAGE_KEYS["github-app"])' in change_body
+
+
+async def test_created_but_not_installed_state_is_visible_to_the_visitor():
+    """Spec section 3 step 7: after approving the App on GitHub the visitor
+    must see an explicit intermediate state. Toggling two `display`
+    properties inside a collapsed <details> whose badge still reads "Not
+    started" is invisible — the frame has to open and the badge has to say
+    what happened."""
+    client = await _client()
+    body = (await client.get("/")).text
+    show_body = body[
+        body.index("function showGithubAppReadyToInstall"):body.index("function githubAppError")
+    ]
+    assert 'frameEl("github-app").open = true' in show_body
+    assert 'setFrameStatus("github-app", "app_created")' in show_body
+    assert body.count("badge_app_created:") == 2  # STRINGS.en + STRINGS.he
+
+
+async def test_stored_github_app_credentials_are_parsed_defensively():
+    """A corrupted sessionStorage value (extension, devtools, an older
+    version of this page) must not throw out of the DOMContentLoaded handler
+    and take every later listener with it — same failure mode, and same
+    defensive shape, as readStoredLang/readStoredTheme."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function readStoredGithubApp" in body
+    # Exactly one parse of this key on the whole page — the guarded one
+    # inside the helper. Any other call site must go through the helper.
+    assert body.count('JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"])') == 1
+    helper_body = body[body.index("function readStoredGithubApp"):]
+    helper_body = helper_body[:helper_body.index("\n  }")]
+    assert "try {" in helper_body
+    assert "catch" in helper_body

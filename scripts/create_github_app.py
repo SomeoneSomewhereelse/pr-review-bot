@@ -83,6 +83,13 @@ _MANUAL_REDIRECT = "https://example.invalid/callback"
 # Exactly what the bot needs, and nothing more. pull_requests+issues write
 # because a PR review comment is an issue comment on GitHub's API; contents
 # read to fetch the diff; metadata read is mandatory for any App.
+#
+# These two are the SOURCE OF TRUTH, and they are duplicated in JS in
+# onboarding/static/index.html (the self-service wizard builds the same
+# manifest from the browser; there is no shared JS/Python boundary a single
+# constant could live in). Change them here first, then mirror them there —
+# tests/test_onboarding_page.py::test_manifest_permissions_match_the_cli_script
+# imports these very objects and fails if the page drifts from them.
 MANIFEST_PERMISSIONS = {
     "pull_requests": "write",
     "contents": "read",

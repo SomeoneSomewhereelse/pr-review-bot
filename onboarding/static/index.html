@@ -277,6 +277,7 @@
       change_button: "Change",
       badge_locked: "Locked", badge_ready: "Not started",
       badge_error: "Error", badge_done: "✓ Validated",
+      badge_app_created: "✓ App created — install it next",
       err_empty_key: "Paste your Render API key first.",
       err_invalid_key: "That key was rejected by Render. Double-check it and try again.",
       err_unreachable: "Render's API is unreachable right now. Try again in a moment.",
@@ -316,6 +317,7 @@
       change_button: "שינוי",
       badge_locked: "נעול", badge_ready: "טרם התחיל",
       badge_error: "שגיאה", badge_done: "✓ אומת",
+      badge_app_created: "✓ האפליקציה נוצרה — כעת התקינו אותה",
       err_empty_key: "הדביקו קודם את מפתח ה-API של Render.",
       err_invalid_key: "המפתח נדחה על ידי Render. בדקו אותו שוב ונסו שנית.",
       err_unreachable: "שירות ה-API של Render אינו זמין כרגע. נסו שוב בעוד רגע.",
@@ -399,6 +401,23 @@
     "github-app": "onboarding.githubApp",
   };
 
+  // Never JSON.parse this key's value directly: a corrupted/foreign-shaped
+  // stored value would throw out of whatever handler read it (including
+  // DOMContentLoaded, taking every later listener with it). Same defensive
+  // read-then-validate shape as readStoredLang/readStoredTheme above.
+  function readStoredGithubApp() {
+    try {
+      return JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // SOURCE OF TRUTH: scripts/create_github_app.py's MANIFEST_PERMISSIONS /
+  // MANIFEST_EVENTS. These two lists must stay identical — the CLI script and
+  // this wizard create the same App. Change them there first, then here;
+  // tests/test_onboarding_page.py::test_manifest_permissions_match_the_cli_script
+  // imports the Python constants and fails if these drift.
   const MANIFEST_PERMISSIONS = {
     pull_requests: "write", contents: "read", issues: "write", metadata: "read",
   };
@@ -453,6 +472,10 @@
     setFrameStatus(id, "locked");
     const key = STORAGE_KEYS[id];
     if (key) sessionStorage.removeItem(key);
+    // Frame 2's create/install sections are a one-way toggle otherwise: the
+    // storage clear above would leave "Install App" on screen with nothing
+    // behind it, and clicking it would report a misleading GitHub error.
+    if (id === "github-app") resetGithubAppCreateSection();
   }
 
   function unlockFrame(id) {
@@ -480,6 +503,15 @@
     el.dataset.locked = "false";
     el.open = true;
     setFrameStatus(id, "ready");
+    // relockDownstreamOf only clears *later* frames' storage, so a frame
+    // changing itself keeps its own stale value — which for frame 2 means a
+    // mid-change refresh would silently re-complete it from sessionStorage.
+    // Scoped to frame 2 on purpose; frame 1's equivalent gap is a separate
+    // parked issue (root ISSUES.md).
+    if (id === "github-app") {
+      sessionStorage.removeItem(STORAGE_KEYS["github-app"]);
+      resetGithubAppCreateSection();
+    }
   }
 
   async function validateRenderKey() {
@@ -561,6 +593,19 @@
   function showGithubAppReadyToInstall() {
     document.getElementById("github-app-create-section").style.display = "none";
     document.getElementById("github-app-install-section").style.display = "block";
+    // Toggling those two sections is invisible on a collapsed <details> whose
+    // badge still reads "Not started" — and the visitor has just approved a
+    // real App on GitHub, so they need to see that it worked (spec section 3
+    // step 7's intermediate state).
+    frameEl("github-app").open = true;
+    setFrameStatus("github-app", "app_created");
+  }
+
+  function resetGithubAppCreateSection() {
+    document.getElementById("github-app-install-section").style.display = "none";
+    document.getElementById("github-app-create-section").style.display = "block";
+    document.getElementById("github-app-error").textContent = "";
+    currentGithubAppErrorKey = null;
   }
 
   function githubAppError(key) {
@@ -627,7 +672,7 @@
   }
 
   function installGithubApp() {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    const stored = readStoredGithubApp();
     if (!stored || !stored.slug) {
       githubAppError("err_github_callback_invalid");
       return;
@@ -648,7 +693,7 @@
       githubAppError("err_github_callback_invalid");
       return;
     }
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    const stored = readStoredGithubApp();
     if (!stored) {
       githubAppError("err_github_callback_invalid");
       return;
@@ -694,7 +739,7 @@
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
       completeFrame("render-key", "restored", null);
     }
-    const githubApp = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    const githubApp = readStoredGithubApp();
     if (githubApp && githubApp.installation_id) {
       completeFrame("github-app", "restored", null);
     } else if (githubApp) {
