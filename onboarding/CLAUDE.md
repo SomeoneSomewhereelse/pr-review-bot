@@ -70,6 +70,38 @@ section 3), not an oversight to fix.
   grows should be paired with its own equivalent test asserting it's the
   only such exit for *that* frame's secret.
 
+## What sub-project 2 (GitHub App automation) adds to these rules
+
+- **`exchange-manifest-code` is a deliberate exception to "never echo a
+  credential."** It mints and returns App credentials that belong to the
+  visitor who just created them — this is different from every other
+  endpoint in this service, which only ever verifies a credential already
+  submitted to it. A new endpoint that returns secret material needs the
+  same justification this one has (the value is freshly created for, and
+  belongs to, the caller) before following this exception rather than the
+  default rule.
+- **`verify-installation`'s request body carries a GitHub App's full
+  private key** — the same sensitivity tier as this project's own
+  `GITHUB_APP_PRIVATE_KEY`. Treat it accordingly: never logged, never in an
+  unhandled exception's message, narrow `except` clauses only.
+- **Multi-navigation flows use a `sessionStorage`-held random `state`,
+  generated client-side before each redirect and checked on return before
+  any exchange happens.** This is the CSRF pattern for any frame that
+  involves a full-page round trip to an external site (this one, and
+  Supabase's OAuth in sub-project 3) — reuse it rather than inventing a
+  per-frame variant.
+- **`GET /`'s CSP carries `form-action 'self' https://github.com;`**
+  specifically for this frame's manifest-creation form POST. A future frame
+  that needs to form-POST to a *different* external origin adds that origin
+  to this same directive rather than loosening `default-src`.
+- **`onboarding/config.py`'s `public_base_url` is validated in
+  `onboarding/main.py`'s `lifespan`, not as a pydantic-required field** —
+  same reasoning as `app/config.py`/`app/main.py`'s own pattern: a
+  required field would raise at import time, breaking pytest collection
+  before a clear error could ever be reported. Frame 2 cannot construct a
+  working manifest without it, so the service still refuses to boot without
+  it — just via an explicit check, not a schema constraint.
+
 ## The test suite looks hung on a fresh worktree — it isn't
 
 The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly

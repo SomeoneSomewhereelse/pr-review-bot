@@ -626,9 +626,79 @@
     }
   }
 
+  function installGithubApp() {
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    if (!stored || !stored.slug) {
+      githubAppError("err_github_callback_invalid");
+      return;
+    }
+    const state = crypto.randomUUID();
+    sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
+    location.href = `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new?state=${encodeURIComponent(state)}`;
+  }
+
+  async function handleGithubInstallCallback() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("gh_step") !== "install") return;
+    history.replaceState(null, "", location.pathname);
+    const expectedState = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
+    sessionStorage.removeItem(GITHUB_MANIFEST_STATE_KEY);
+    const installationId = params.get("installation_id");
+    if (!expectedState || params.get("state") !== expectedState || !installationId) {
+      githubAppError("err_github_callback_invalid");
+      return;
+    }
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    if (!stored) {
+      githubAppError("err_github_callback_invalid");
+      return;
+    }
+    let resp;
+    try {
+      resp = await fetch("/api/github/verify-installation", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          app_id: stored.app_id,
+          private_key_b64: stored.private_key_b64,
+          installation_id: parseInt(installationId, 10),
+        }),
+      });
+    } catch (err) {
+      githubAppError("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      githubAppError("err_github_unreachable");
+      return;
+    }
+    if (body.valid) {
+      stored.installation_id = parseInt(installationId, 10);
+      stored.account_login = body.account_login;
+      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+      completeFrame("github-app", "account_prefix", body.account_login);
+    } else if (body.reason === "installation_not_found") {
+      githubAppError("err_github_installation_not_found");
+    } else if (body.reason === "invalid_credentials") {
+      githubAppError("err_github_invalid_credentials");
+    } else {
+      githubAppError("err_github_unreachable");
+    }
+  }
+
   function restoreFromSession() {
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
       completeFrame("render-key", "restored", null);
+    }
+    const githubApp = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    if (githubApp && githubApp.installation_id) {
+      completeFrame("github-app", "restored", null);
+    } else if (githubApp) {
+      showGithubAppReadyToInstall();
     }
   }
 
@@ -685,6 +755,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
+    document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
     guardLockedFrames();
     attachChangeButtons();
 
@@ -705,6 +776,7 @@
     applyLanguage(currentLang);
     restoreFromSession();
     handleGithubManifestCallback();
+    handleGithubInstallCallback();
   });
 </script>
 </body>

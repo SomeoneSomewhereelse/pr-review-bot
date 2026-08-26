@@ -147,3 +147,36 @@ async def test_manifest_permissions_match_the_cli_script():
     assert '"issues": "write"' in body or "issues: \"write\"" in body
     assert '"metadata": "read"' in body or "metadata: \"read\"" in body
     assert "public: false" in body
+
+
+async def test_installation_verify_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/github/verify-installation"') == 1
+
+
+async def test_frame2_has_an_install_button():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="github-app-install-submit"' in body
+
+
+async def test_install_callback_handler_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "async function handleGithubInstallCallback" in body
+    assert '"install"' in body or "'install'" in body
+
+
+async def test_github_app_credential_never_persists_to_local_storage():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'localStorage.setItem(STORAGE_KEYS["github-app"]' not in body
+    assert 'localStorage.getItem(STORAGE_KEYS["github-app"]' not in body
+
+
+async def test_restore_from_session_handles_partial_github_app_state():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "showGithubAppReadyToInstall()" in body
+    assert "function restoreFromSession" in body
