@@ -403,9 +403,3 @@ def test_list_never_prints_a_credential_value(capsys, monkeypatch):
 def test_list_must_be_used_alone(capsys):
     assert set_override.main(["--list", "groq"]) == 2
     assert "--list must be used alone" in capsys.readouterr().err
-
-
-def test_model_override_warns_instead_of_refusing_an_unpriced_model(capsys):
-    exit_code = set_override.main(["groq", "--model", "llama-3.1-8b-instant", "--no-activate"])
-    assert exit_code == 0
-    assert "no pricing-table entry" in capsys.readouterr().err

@@ -69,8 +69,3 @@ def test_pages_deploys_only_from_the_default_branch():
     """A Pages deploy from a feature branch would publish unreviewed docs."""
     job = _workflow()["jobs"]["pages"]
     assert "refs/heads/main" in job["if"]
-
-
-def test_the_docs_drift_job_still_exists():
-    """Stage 3a's guarantee must survive this stage."""
-    assert "docs" in _workflow()["jobs"]

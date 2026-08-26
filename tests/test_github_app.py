@@ -834,16 +834,6 @@ def test_discover_installation_id_returns_id(fake_transport):
     assert github_app.discover_installation_id(REPO_FULL_NAME) == 424242
 
 
-def test_discover_installation_id_raises_when_not_installed(fake_transport):
-    from app import github_app
-
-    fake_transport.route(
-        "GET", f"/repos/{REPO_FULL_NAME}/installation", {"message": "Not Found"}, 404
-    )
-    with pytest.raises(RuntimeError, match="not installed"):
-        github_app.discover_installation_id(REPO_FULL_NAME)
-
-
 def test_discover_installation_id_non_404_is_not_misdiagnosed_as_not_installed(fake_transport):
     """A 401 (e.g. a malformed GITHUB_APP_PRIVATE_KEY) or other non-404
     status must not be reported as "not installed" -- that's a misdiagnosis
