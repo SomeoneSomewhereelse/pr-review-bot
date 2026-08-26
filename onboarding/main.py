@@ -5,13 +5,28 @@ docs/superpowers/specs/2026-08-26-onboarding-wizard-render-frame-design.md.
 """
 from __future__ import annotations
 
+import contextlib
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from onboarding.config import settings
 from onboarding.router import router
 
-app = FastAPI(title="onboarding-wizard")
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    if not settings.public_base_url:
+        raise RuntimeError(
+            "PUBLIC_BASE_URL is unset — refusing to start. Frame 2's GitHub "
+            "App manifest needs this service's own real public URL to build "
+            "redirect_url/setup_url; without it the manifest flow cannot work."
+        )
+    yield
+
+
+app = FastAPI(title="onboarding-wizard", lifespan=lifespan)
 app.include_router(router)
 
 
