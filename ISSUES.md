@@ -310,6 +310,22 @@ Proactive findings, not incidents — nothing here actually happened. Format:
 - **Follow-up:** what closing it (or verifying it) would take
 ```
 
+### Supabase OAuth app is a shared resource across all visitors — abuse or Supabase's own heuristics can throttle/revoke it for everyone
+- **Found during:** sub-project 3 (Supabase provisioning) brainstorm, 2026-08-26
+- **What:** the planned Supabase frame authorizes every visitor through one operator-registered OAuth app (`SUPABASE_OAUTH_CLIENT_ID`/`SUPABASE_OAUTH_CLIENT_SECRET`). Unlike the Render frame (each visitor's own key) or the GitHub frame (each visitor mints their own App), this credential is a single shared identity across the whole visitor population.
+- **Why it matters:** same risk category as the documented Gemini AI-Studio Trust & Safety block (root `CLAUDE.md`'s "LLM API testing hygiene" section) — a burst of activity from one visitor, or Supabase's own abuse heuristics, could throttle or revoke the shared app's Management API access, breaking the Supabase frame for every future visitor until re-registered, not just the one who triggered it.
+- **Status:** open
+- **Follow-up:** design a countermeasure before or shortly after this frame reaches real visitors. Candidates raised during brainstorming: per-visitor rate limiting at this service's own layer, a CAPTCHA/friction step before the OAuth redirect, or active monitoring for revocation with a clear "this frame is temporarily down" fallback state. Not solved in sub-project 3's spec or plan — deliberately deferred.
+
+### Supabase OAuth App registration's plan-tier availability is undocumented
+- **Found during:** sub-project 3 (Supabase provisioning) brainstorm, 2026-08-26
+- **What:** no Supabase documentation (pricing page, billing FAQ, the "Build a Supabase Integration" guide) states whether registering an OAuth App (organization settings → OAuth Apps tab) requires a paid org plan, or costs anything at all. Searched directly across all three; the absence is the finding — it's simply never addressed either way.
+- **Why it matters:** this project is committed to $0 demo cost (root `CLAUDE.md`'s Cost section, `cost.md`). If OAuth Apps require a paid organization tier, sub-project 3's design dependency on one would break that constraint.
+- **Status:** needs-verification
+- **Follow-up:** the operator confirms this directly when manually registering the OAuth app — a one-time, deliberate dashboard action sub-project 3's design already requires. No purchase happens automatically or by surprise, since that registration step is manual and operator-initiated, not something the wizard or any automation triggers.
+
+---
+
 **2026-08-21 pre-flight audit — cleared.** Nine gaps were traced ahead of
 the first real-production run against live GitHub repos/orgs (pre-existing
 PRs, deleted comments, revoked permissions, drafts, renames, retargets,
