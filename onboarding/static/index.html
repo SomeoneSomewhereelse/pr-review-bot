@@ -303,8 +303,21 @@
   const THEME_ICON = { light: "☀️", dark: "🌙", system: "🖥️" };
   const LANG_LABEL = { en: "🇺🇸 English", he: "🇮🇱 עברית" };
 
-  let currentLang = localStorage.getItem("onboarding_lang") || "en";
-  let currentTheme = localStorage.getItem("onboarding_theme") || "system";
+  const KNOWN_LANGS = ["en", "he"];
+  const KNOWN_THEMES = ["light", "dark", "system"];
+
+  function readStoredLang() {
+    const stored = localStorage.getItem("onboarding_lang");
+    return KNOWN_LANGS.includes(stored) ? stored : "en";
+  }
+
+  function readStoredTheme() {
+    const stored = localStorage.getItem("onboarding_theme");
+    return KNOWN_THEMES.includes(stored) ? stored : "system";
+  }
+
+  let currentLang = readStoredLang();
+  let currentTheme = readStoredTheme();
 
   function t(key) {
     return STRINGS[currentLang][key] || STRINGS.en[key] || key;

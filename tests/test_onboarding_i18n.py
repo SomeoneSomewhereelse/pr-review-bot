@@ -69,3 +69,24 @@ async def test_theme_and_language_preferences_use_local_storage():
     body = (await client.get("/")).text
     assert 'localStorage.getItem("onboarding_lang")' in body
     assert 'localStorage.getItem("onboarding_theme")' in body
+
+
+async def test_stored_lang_and_theme_are_validated_against_known_values():
+    """An unrecognized localStorage value (a stale value from a future
+    version, a manual edit, corruption) must not be trusted verbatim: an
+    unguarded `localStorage.getItem("onboarding_lang") || "en"` lets a value
+    like "fr" through, and STRINGS["fr"] is undefined — t()'s
+    STRINGS[currentLang][key] then throws inside the DOMContentLoaded
+    handler, aborting it before any event listeners (Validate, Change,
+    theme/lang toggles, popups) get attached. The fix must clamp both
+    values to their known-good sets at read time, not just trust-or-default."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'localStorage.getItem("onboarding_lang") || "en"' not in body
+    assert 'localStorage.getItem("onboarding_theme") || "system"' not in body
+    assert 'KNOWN_LANGS' in body
+    assert 'KNOWN_THEMES' in body
+    assert '["en", "he"]' in body
+    assert '["light", "dark", "system"]' in body
+    assert "KNOWN_LANGS.includes(stored) ? stored : \"en\"" in body
+    assert "KNOWN_THEMES.includes(stored) ? stored : \"system\"" in body
