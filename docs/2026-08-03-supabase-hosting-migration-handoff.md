@@ -17,7 +17,7 @@ not something that exists independently of that machine being on.
 
 Mid-planning, the user raised a real new requirement: **the instructor might
 ask to be added as a collaborator on the testbed repo
-(`SomeoneSomewhereelse/pr-review-bot-testbed`) and test the bot themselves**,
+(`TovTechOrg/pr-review-bot-testbed`) and test the bot themselves**,
 on their own schedule — not just watch it work once during the graded call.
 That means the bot needs a **persistent, always-reachable public URL**, not
 a per-session tunnel tied to a laptop being awake.

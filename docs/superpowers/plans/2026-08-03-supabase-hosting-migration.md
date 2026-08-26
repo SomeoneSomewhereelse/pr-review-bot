@@ -604,7 +604,7 @@ In `app/webhook.py`'s `_enqueue_from_payload`, after extracting `repo_full_name`
 
 - [ ] **Step 4: Point the scripts at the config**
 
-In `scripts/seed_demo_pr.py`, `scripts/manual_verify_step3.py`, `scripts/demo_provider_swap.py`, replace the hardcoded `"SomeoneSomewhereelse/pr-review-bot-testbed"` literal with `settings.github_target_repo` (import `from app.config import settings`).
+In `scripts/seed_demo_pr.py`, `scripts/manual_verify_step3.py`, `scripts/demo_provider_swap.py`, replace the hardcoded `"TovTechOrg/pr-review-bot-testbed"` literal with `settings.github_target_repo` (import `from app.config import settings`).
 
 - [ ] **Step 5: Run tests + lint**
 

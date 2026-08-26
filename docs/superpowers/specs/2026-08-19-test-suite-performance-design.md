@@ -432,7 +432,7 @@ eval'd shell with every outbound call hard-stubbed to raise: the premise held
 ### 8g. CI (section 6, step 5)
 
 **Pass** — `lint-and-test` completed in 41s on push
-(run [32282918106](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32282918106)),
+(run [32282918106](https://github.com/TovTechOrg/pr-review-bot/actions/runs/32282918106)),
 no `TRUNCATE`/connection-related failures. Measured while `addopts` still said
 `-n auto`; as noted in 8a, CI runners are small enough that `auto` and a pinned
 `4` resolve to comparable worker counts there, so this result was not expected
@@ -440,7 +440,7 @@ to be invalidated by the pin.
 
 **Re-confirmed after the pin landed:** `lint-and-test` completed in 44s on the
 push that included the `-n 4` config change and the final-review fix wave
-(run [32296335505](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/runs/32296335505)),
+(run [32296335505](https://github.com/TovTechOrg/pr-review-bot/actions/runs/32296335505)),
 still no `TRUNCATE`/connection-related failures — comparable to the pre-pin
 41s, as predicted.
 

@@ -1,6 +1,6 @@
 site_name: PR Review Engine
 site_description: Autonomous code-review engine — deploy your own
-site_url: https://someonesomewhereelse.github.io/pr-review-bot/
+site_url: https://tovtechorg.github.io/pr-review-bot/
 docs_dir: guide
 theme:
   name: material

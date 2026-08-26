@@ -147,7 +147,7 @@ construction). Column list and `Ticket` fields are unchanged.
   Local/CI point it at the throwaway Postgres; prod at Supabase's Session-mode
   pooler URL (IPv4 — Supabase *direct* is IPv6-only and Render egress is IPv4).
 - Add **`github_target_repo: str`** (env `GITHUB_TARGET_REPO`, e.g.
-  `SomeoneSomewhereelse/pr-review-bot-testbed`) — the single repo this deployment
+  `TovTechOrg/pr-review-bot-testbed`) — the single repo this deployment
   serves. The webhook gates on it (§7) and scripts read it instead of a hardcoded
   literal. Still one repo — this is configuration, not multi-tenancy.
 - Add **`public_base_url: str`** (env `PUBLIC_BASE_URL`, **not a secret**) —

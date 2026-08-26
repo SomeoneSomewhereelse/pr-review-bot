@@ -383,7 +383,7 @@ def test_readme_no_longer_carries_the_operations_manual():
 # tarball, CI on a fork). A rename of the repo or its owner is expected to
 # fail this test -- that is the point: _GUIDE_URL is printed to operators, and
 # a stale host sends them to someone else's site or a 404.
-_EXPECTED_GUIDE_BASE = "https://someonesomewhereelse.github.io/pr-review-bot/"
+_EXPECTED_GUIDE_BASE = "https://tovtechorg.github.io/pr-review-bot/"
 
 
 def test_deploy_points_at_a_guide_page_that_exists():

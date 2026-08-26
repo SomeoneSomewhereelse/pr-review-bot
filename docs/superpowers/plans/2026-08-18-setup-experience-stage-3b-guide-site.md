@@ -810,7 +810,7 @@ Expected: FAIL — `_GUIDE_URL` does not exist and `SETUP.md` references remain.
 In `scripts/deploy.py`, replace `_README_ANCHOR` with:
 
 ```python
-_GUIDE_BASE = "https://someonesomewhereelse.github.io/pr-review-bot"
+_GUIDE_BASE = "https://tovtechorg.github.io/pr-review-bot"
 _GUIDE_URL = f"{_GUIDE_BASE}/operations/deploy/"
 ```
 

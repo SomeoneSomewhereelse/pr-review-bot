@@ -1,6 +1,6 @@
 # Autonomous Code Review Engine
 
-[![CI](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/SomeoneSomewhereelse/pr-review-bot/actions/workflows/ci.yml)
+[![CI](https://github.com/TovTechOrg/pr-review-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/TovTechOrg/pr-review-bot/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)
 ![uv](https://img.shields.io/badge/package%20manager-uv-de5fe9.svg)
 
@@ -10,7 +10,7 @@ the results as a single comment on the PR itself. Three specialists run in
 parallel, and later pushes edit that same comment in place rather than
 piling up new ones.
 
-**[Deploy your own →](https://someonesomewhereelse.github.io/pr-review-bot/setup/)**
+**[Deploy your own →](https://tovtechorg.github.io/pr-review-bot/setup/)**
 — the full setup guide, from a fresh clone to a first posted review comment,
 covering both a local run and a hosted Render + Supabase deployment. The same
 pages live in [`guide/`](guide/setup/index.md) if you would rather read them

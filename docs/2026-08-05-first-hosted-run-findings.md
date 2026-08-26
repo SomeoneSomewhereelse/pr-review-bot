@@ -41,7 +41,7 @@ documentation research alone.
    assumed one did, for Render's Blueprint deploy to point at — only the
    separate testbed repo (`GITHUB_TARGET_REPO`) was real. A genuine plan gap,
    not an execution mistake. Resolved by creating
-   `https://github.com/SomeoneSomewhereelse/pr-review-bot` and pushing the
+   `https://github.com/TovTechOrg/pr-review-bot` and pushing the
    worktree branch (`master` + all 6 Phase-1 hardening commits) as its `main`,
    so the hosted run tested exactly the hardening this run exists to validate.
 

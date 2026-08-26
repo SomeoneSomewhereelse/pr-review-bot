@@ -617,7 +617,7 @@ In `docs/superpowers/specs/2026-08-03-demo-plan-design.md`, do the same at line
 
 - [ ] **Step 5: Verify only records still name the account**
 
-Run: `grep -rn "SomeoneSomewhereelse\|tov-pr-review-bot-testbed" --include="*.py" --include="*.md" . | grep -v "^./.venv"`
+Run: `grep -rn "TovTechOrg\|tov-pr-review-bot-testbed" --include="*.py" --include="*.md" . | grep -v "^./.venv"`
 Expected: hits only in `docs/2026-08-03-supabase-hosting-migration-handoff.md`,
 `docs/superpowers/plans/2026-08-03-supabase-hosting-migration.md`, and
 `docs/superpowers/specs/2026-08-03-supabase-hosting-migration-design.md`.

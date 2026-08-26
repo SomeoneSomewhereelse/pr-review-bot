@@ -32,7 +32,7 @@ visible from reading the code alone:
 ### 1. The deployed service was 61 commits stale — this blocked the entire premise of Segment B
 
 `render.yaml`'s service builds from a separate GitHub remote
-(`SomeoneSomewhereelse/pr-review-bot`, this project's own repo — not the
+(`TovTechOrg/pr-review-bot`, this project's own repo — not the
 testbed repo), and that remote's `main` had not been pushed to since Aug 7.
 The DB-backed provider-override feature, Vertex's retirement, and all the
 deploy-hardening work existed only in the local working tree. First symptom:

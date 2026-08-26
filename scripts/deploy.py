@@ -39,7 +39,7 @@ from scripts._prereqs import _looks_like_local_test_db
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
-_GUIDE_BASE = "https://someonesomewhereelse.github.io/pr-review-bot"
+_GUIDE_BASE = "https://tovtechorg.github.io/pr-review-bot"
 _GUIDE_URL = f"{_GUIDE_BASE}/operations/deploy/"
 _HTTP_TIMEOUT = 10.0
 _DB_CONNECT_TIMEOUT = 10
