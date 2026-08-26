@@ -5,11 +5,15 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from onboarding import github_client, render_client, router as router_module
-from onboarding.config import settings
+from onboarding import github_client, render_client
+from onboarding.config import Settings, settings
 from onboarding.main import app
 
 SENTINEL_KEY = "rnd_SENTINEL_DO_NOT_LOG_9f3a"
+# PEM-shaped so a leak would be unmistakable in a diff or a response body.
+SENTINEL_PRIVATE_KEY = (
+    "-----BEGIN RSA PRIVATE KEY-----SENTINEL_DO_NOT_ECHO_4c1b-----END RSA PRIVATE KEY-----"
+)
 
 
 async def _client() -> AsyncClient:
@@ -94,17 +98,29 @@ async def test_validation_error_never_echoes_the_submitted_key():
 
 
 async def test_index_serves_configured_base_url(monkeypatch):
-    """The real onboarding/static/index.html doesn't gain the
-    __ONBOARDING_BASE_URL__ token until Task 5 — this task only implements
-    the substitution mechanism, so it verifies that mechanism directly by
-    patching the module-level _INDEX_HTML constant, rather than depending on
-    Task 5's page content already existing."""
+    """Exercises the REAL onboarding/static/index.html, which carries the
+    __ONBOARDING_BASE_URL__ token as of Task 5 — no _INDEX_HTML stand-in, so
+    the page a visitor actually gets is what's under test."""
     monkeypatch.setattr(settings, "public_base_url", "https://onboarding.example.com")
-    monkeypatch.setattr(router_module, "_INDEX_HTML", "<html>__ONBOARDING_BASE_URL__</html>")
     client = await _client()
     resp = await client.get("/")
-    assert "https://onboarding.example.com" in resp.text
+    assert 'window.ONBOARDING_BASE_URL = "https://onboarding.example.com";' in resp.text
     assert "__ONBOARDING_BASE_URL__" not in resp.text
+
+
+async def test_index_never_serves_a_trailing_slash_base_url(monkeypatch):
+    """End-to-end cover for onboarding/config.py's normalization, through the
+    real page: index.html's buildManifest() appends `/?gh_step=...` to this
+    value, so a surviving trailing slash would produce a `//?gh_step=...`
+    redirect_url that Starlette will not route back to `/` — a 404 arriving
+    only AFTER the visitor has created a real GitHub App whose one-time
+    credentials are then unrecoverable."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://onboarding.example.com/")
+    monkeypatch.setattr(settings, "public_base_url", Settings().public_base_url)
+    client = await _client()
+    resp = await client.get("/")
+    assert 'window.ONBOARDING_BASE_URL = "https://onboarding.example.com";' in resp.text
+    assert 'https://onboarding.example.com/"' not in resp.text
 
 
 async def test_index_csp_allows_form_post_to_github():
@@ -169,6 +185,28 @@ async def test_verify_installation_reports_failure_reason(monkeypatch):
         json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": 100},
     )
     assert resp.json() == {"valid": False, "reason": "installation_not_found"}
+
+
+async def test_verify_installation_validation_error_never_echoes_the_private_key():
+    """The same guard as test_validation_error_never_echoes_the_submitted_key,
+    for the one endpoint whose body carries a GitHub App's full private key —
+    the most sensitive artifact in this wizard. FastAPI's *default* 422 body
+    includes the rejected input verbatim; only onboarding/main.py's app-wide
+    RequestValidationError handler stops that, and it protects this router
+    solely because main.py mounts the router on the app the handler is
+    registered on (onboarding/CLAUDE.md calls this out as a non-obvious
+    cross-file dependency a future remount could lose silently)."""
+    client = await _client()
+    # Misnamed field ("private_key" rather than "private_key_b64") fails
+    # pydantic validation with the credential sitting in the rejected input.
+    resp = await client.post(
+        "/api/github/verify-installation",
+        json={"app_id": 42, "private_key": SENTINEL_PRIVATE_KEY, "installation_id": 100},
+    )
+    assert resp.status_code == 422
+    assert SENTINEL_PRIVATE_KEY not in resp.text
+    assert "SENTINEL_DO_NOT_ECHO" not in resp.text
+    assert "input" not in resp.text
 
 
 async def test_verify_installation_response_never_echoes_the_private_key(monkeypatch):
