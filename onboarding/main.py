@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from onboarding.router import router
+
 app = FastAPI(title="onboarding-wizard")
+app.include_router(router)
 
 
 @app.get("/healthz")
