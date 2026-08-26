@@ -46,9 +46,52 @@
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    padding: 2rem 1rem 4rem;
   }
-  main { max-width: 640px; margin: 0 auto; }
+  header.topbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  button.control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    min-height: 2.5rem;
+  }
+  button.control:hover { border-color: var(--accent); }
+  .popup-backdrop { position: fixed; inset: 0; background: transparent; display: none; z-index: 10; }
+  .popup-backdrop.open { display: block; }
+  .popup {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+    min-width: 220px;
+    max-width: min(90vw, 320px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
+  .popup h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+  .radio-group { display: flex; flex-direction: column; gap: 0.5rem; }
+  .radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.25rem;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 2rem 1rem 4rem; }
   h1 { font-size: 1.5rem; }
   p.lede { color: var(--text-muted); }
   details.frame {
@@ -107,73 +150,192 @@
   }
   .frame-error { color: var(--fail); min-height: 1.2em; }
   @media (max-width: 480px) {
+    header.topbar { justify-content: center; }
     details.frame > summary { padding: 0.75rem 0.9rem; }
     .frame-change { width: 100%; text-align: center; }
   }
 </style>
 </head>
 <body>
-<main>
-  <h1>Set up your own PR review bot</h1>
-  <p class="lede">Work through each step below. Nothing you enter here is
-    stored on this server — it stays in your browser for this session
-    only.</p>
+  <header class="topbar">
+    <button id="themeToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
+    <button id="langToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
+  </header>
 
-  <details id="frame-render-key" class="frame" data-status="ready" data-locked="false" open>
-    <summary>
-      <span class="frame-title">1. Render API key</span>
-      <span class="frame-badge">Not started</span>
-      <button class="frame-change" type="button" data-frame="render-key">Change</button>
-    </summary>
-    <div class="frame-body">
-      <p>Get a key from Render's dashboard: Account Settings &rarr; API Keys.</p>
-      <input id="render-key-input" type="password" placeholder="rnd_...">
-      <button id="render-key-submit" type="button">Validate</button>
-      <p id="render-key-error" class="frame-error"></p>
+  <div id="themePopupBackdrop" class="popup-backdrop">
+    <div class="popup" role="dialog" aria-modal="true" aria-labelledby="themePopupTitle">
+      <h2 id="themePopupTitle"></h2>
+      <div class="radio-group">
+        <label><input type="radio" name="theme" value="light"> <span data-i18n="theme_light"></span></label>
+        <label><input type="radio" name="theme" value="dark"> <span data-i18n="theme_dark"></span></label>
+        <label><input type="radio" name="theme" value="system"> <span data-i18n="theme_system"></span></label>
+      </div>
     </div>
-  </details>
+  </div>
 
-  <details id="frame-github-app" class="frame" data-status="locked" data-locked="true">
-    <summary>
-      <span class="frame-title">2. GitHub App</span>
-      <span class="frame-badge">Locked</span>
-    </summary>
-    <div class="frame-body"><p>Coming soon.</p></div>
-  </details>
+  <div id="langPopupBackdrop" class="popup-backdrop">
+    <div class="popup" role="dialog" aria-modal="true" aria-labelledby="langPopupTitle">
+      <h2 id="langPopupTitle"></h2>
+      <div class="radio-group">
+        <label><input type="radio" name="lang" value="en"> 🇺🇸 English</label>
+        <label><input type="radio" name="lang" value="he"> 🇮🇱 עברית</label>
+      </div>
+    </div>
+  </div>
 
-  <details id="frame-supabase" class="frame" data-status="locked" data-locked="true">
-    <summary>
-      <span class="frame-title">3. Supabase database</span>
-      <span class="frame-badge">Locked</span>
-    </summary>
-    <div class="frame-body"><p>Coming soon.</p></div>
-  </details>
+  <main>
+    <h1 data-i18n="heading"></h1>
+    <p class="lede" data-i18n="lede"></p>
 
-  <details id="frame-llm-provider" class="frame" data-status="locked" data-locked="true">
-    <summary>
-      <span class="frame-title">4. LLM provider</span>
-      <span class="frame-badge">Locked</span>
-    </summary>
-    <div class="frame-body"><p>Coming soon.</p></div>
-  </details>
+    <details id="frame-render-key" class="frame" data-status="ready" data-locked="false" open>
+      <summary>
+        <span class="frame-title" data-i18n="frame1_title"></span>
+        <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="render-key" data-i18n="change_button"></button>
+      </summary>
+      <div class="frame-body">
+        <p data-i18n="frame1_instructions"></p>
+        <input id="render-key-input" type="password">
+        <button id="render-key-submit" type="button" data-i18n="validate_button"></button>
+        <p id="render-key-error" class="frame-error"></p>
+      </div>
+    </details>
 
-  <details id="frame-uptime-pinger" class="frame" data-status="locked" data-locked="true">
-    <summary>
-      <span class="frame-title">5. Keep-warm pinger</span>
-      <span class="frame-badge">Locked</span>
-    </summary>
-    <div class="frame-body"><p>Coming soon.</p></div>
-  </details>
+    <details id="frame-github-app" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame2_title"></span>
+        <span class="frame-badge"></span>
+      </summary>
+      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+    </details>
 
-  <details id="frame-render-deploy" class="frame" data-status="locked" data-locked="true">
-    <summary>
-      <span class="frame-title">6. Deploy to Render</span>
-      <span class="frame-badge">Locked</span>
-    </summary>
-    <div class="frame-body"><p>Coming soon.</p></div>
-  </details>
-</main>
+    <details id="frame-supabase" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame3_title"></span>
+        <span class="frame-badge"></span>
+      </summary>
+      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+    </details>
+
+    <details id="frame-llm-provider" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame4_title"></span>
+        <span class="frame-badge"></span>
+      </summary>
+      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+    </details>
+
+    <details id="frame-uptime-pinger" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame5_title"></span>
+        <span class="frame-badge"></span>
+      </summary>
+      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+    </details>
+
+    <details id="frame-render-deploy" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame6_title"></span>
+        <span class="frame-badge"></span>
+      </summary>
+      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+    </details>
+  </main>
+
 <script>
+  const STRINGS = {
+    en: {
+      page_title: "Set up your own reviewer",
+      heading: "Set up your own PR review bot",
+      lede: "Work through each step below. Nothing you enter here is stored on this server — it stays in your browser for this session only.",
+      theme_light: "Light", theme_dark: "Dark", theme_system: "System",
+      theme_popup_title: "Theme", lang_popup_title: "Language",
+      frame1_title: "1. Render API key",
+      frame1_instructions: "Get a key from Render's dashboard: Account Settings → API Keys.",
+      frame1_placeholder: "rnd_...",
+      frame2_title: "2. GitHub App",
+      frame3_title: "3. Supabase database",
+      frame4_title: "4. LLM provider",
+      frame5_title: "5. Keep-warm pinger",
+      frame6_title: "6. Deploy to Render",
+      coming_soon: "Coming soon.",
+      validate_button: "Validate",
+      change_button: "Change",
+      badge_locked: "Locked", badge_ready: "Not started",
+      badge_error: "Error", badge_done: "✓ Validated",
+      err_empty_key: "Paste your Render API key first.",
+      err_invalid_key: "That key was rejected by Render. Double-check it and try again.",
+      err_unreachable: "Render's API is unreachable right now. Try again in a moment.",
+      err_network: "Could not reach the wizard's server. Try again.",
+      checking: "checking…",
+      restored: "restored from this session",
+      owner_prefix: "owner: ",
+    },
+    he: {
+      page_title: "הקמת בודק ה-PR שלך",
+      heading: "הקמת בוט בדיקת PR משלך",
+      lede: "עברו על כל שלב למטה. שום דבר שתזינו כאן לא נשמר בשרת הזה — הוא נשאר בדפדפן שלכם למשך הפעלה זו בלבד.",
+      theme_light: "בהיר", theme_dark: "כהה", theme_system: "מערכת",
+      theme_popup_title: "עיצוב", lang_popup_title: "שפה",
+      frame1_title: "1. מפתח API של Render",
+      frame1_instructions: "קבלו מפתח מלוח הבקרה של Render: Account Settings ← API Keys.",
+      frame1_placeholder: "rnd_...",
+      frame2_title: "2. אפליקציית GitHub",
+      frame3_title: "3. מסד נתונים ב-Supabase",
+      frame4_title: "4. ספק LLM",
+      frame5_title: "5. פינגר לשמירה על פעילות",
+      frame6_title: "6. פריסה ל-Render",
+      coming_soon: "בקרוב.",
+      validate_button: "אימות",
+      change_button: "שינוי",
+      badge_locked: "נעול", badge_ready: "טרם התחיל",
+      badge_error: "שגיאה", badge_done: "✓ אומת",
+      err_empty_key: "הדביקו קודם את מפתח ה-API של Render.",
+      err_invalid_key: "המפתח נדחה על ידי Render. בדקו אותו שוב ונסו שנית.",
+      err_unreachable: "שירות ה-API של Render אינו זמין כרגע. נסו שוב בעוד רגע.",
+      err_network: "לא ניתן להתחבר לשרת האשף. נסו שוב.",
+      checking: "בודק…",
+      restored: "שוחזר מהפעלה זו",
+      owner_prefix: "בעלים: ",
+    },
+  };
+
+  const THEME_ICON = { light: "☀️", dark: "🌙", system: "🖥️" };
+  const LANG_LABEL = { en: "🇺🇸 English", he: "🇮🇱 עברית" };
+
+  let currentLang = localStorage.getItem("onboarding_lang") || "en";
+  let currentTheme = localStorage.getItem("onboarding_theme") || "system";
+
+  function t(key) {
+    return STRINGS[currentLang][key] || STRINGS.en[key] || key;
+  }
+
+  function applyTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem("onboarding_theme", theme);
+    document.documentElement.setAttribute("data-theme", theme === "system" ? "" : theme);
+    document.getElementById("themeToggleBtn").textContent = `${THEME_ICON[theme]} ${t("theme_" + theme)}`;
+    document.querySelector(`input[name="theme"][value="${theme}"]`).checked = true;
+  }
+
+  function applyLanguage(lang) {
+    currentLang = lang;
+    localStorage.setItem("onboarding_lang", lang);
+    document.documentElement.setAttribute("lang", lang);
+    document.documentElement.setAttribute("dir", lang === "he" ? "rtl" : "ltr");
+    document.title = t("page_title");
+    document.getElementById("langToggleBtn").textContent = LANG_LABEL[lang];
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.getElementById("render-key-input").placeholder = t("frame1_placeholder");
+    document.getElementById("themePopupTitle").textContent = t("theme_popup_title");
+    document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
+    document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
+    refreshFrameBadges();
+    applyTheme(currentTheme);
+  }
+
   const STORAGE_KEYS = {
     "render-key": "onboarding.renderApiKey",
   };
@@ -183,12 +345,9 @@
     "uptime-pinger", "render-deploy",
   ];
 
-  const BADGE_TEXT = {
-    locked: "Locked",
-    ready: "Not started",
-    error: "Error",
-    done: "✓ Validated",
-  };
+  const frameState = {};
+  FRAME_ORDER.forEach((id) => { frameState[id] = {status: "locked", detail: null}; });
+  frameState["render-key"].status = "ready";
 
   function frameEl(id) {
     return document.getElementById(`frame-${id}`);
@@ -198,10 +357,20 @@
     return frameEl(id).querySelector(".frame-badge");
   }
 
+  function renderBadge(id) {
+    const {status, detail} = frameState[id];
+    const label = t("badge_" + status);
+    badgeEl(id).textContent = detail ? `${label} — ${detail}` : label;
+  }
+
+  function refreshFrameBadges() {
+    FRAME_ORDER.forEach(renderBadge);
+  }
+
   function setFrameStatus(id, status, detail) {
-    const el = frameEl(id);
-    el.dataset.status = status;
-    badgeEl(id).textContent = detail ? `${BADGE_TEXT[status]} — ${detail}` : BADGE_TEXT[status];
+    frameState[id] = {status, detail: detail || null};
+    frameEl(id).dataset.status = status;
+    renderBadge(id);
   }
 
   function nextFrame(id) {
@@ -250,10 +419,10 @@
     const errorEl = document.getElementById("render-key-error");
     errorEl.textContent = "";
     if (!key) {
-      errorEl.textContent = "Paste your Render API key first.";
+      errorEl.textContent = t("err_empty_key");
       return;
     }
-    setFrameStatus("render-key", "ready", "checking…");
+    setFrameStatus("render-key", "ready", t("checking"));
     let resp;
     try {
       resp = await fetch("/api/render/validate-key", {
@@ -263,26 +432,26 @@
       });
     } catch (err) {
       setFrameStatus("render-key", "error");
-      errorEl.textContent = "Could not reach the wizard's server. Try again.";
+      errorEl.textContent = t("err_network");
       return;
     }
     const body = await resp.json();
     if (body.valid) {
       sessionStorage.setItem(STORAGE_KEYS["render-key"], key);
       input.value = "";
-      completeFrame("render-key", `owner: ${body.owner_name}`);
+      completeFrame("render-key", `${t("owner_prefix")}${body.owner_name}`);
     } else if (body.reason === "invalid_key") {
       setFrameStatus("render-key", "error");
-      errorEl.textContent = "That key was rejected by Render. Double-check it and try again.";
+      errorEl.textContent = t("err_invalid_key");
     } else {
       setFrameStatus("render-key", "error");
-      errorEl.textContent = "Render's API is unreachable right now. Try again in a moment.";
+      errorEl.textContent = t("err_unreachable");
     }
   }
 
   function restoreFromSession() {
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
-      completeFrame("render-key", "restored from this session");
+      completeFrame("render-key", t("restored"));
     }
   }
 
@@ -306,10 +475,56 @@
     });
   }
 
+  function positionPopup(popup, anchorBtn) {
+    const margin = 8;
+    const rect = anchorBtn.getBoundingClientRect();
+    const isRtl = document.documentElement.getAttribute("dir") === "rtl";
+    popup.style.top = `${rect.bottom + margin}px`;
+    popup.style.left = "auto";
+    popup.style.right = "auto";
+    const popupWidth = popup.offsetWidth;
+    if (isRtl) {
+      const maxRight = window.innerWidth - popupWidth - margin;
+      const right = Math.min(Math.max(window.innerWidth - rect.right, margin), maxRight);
+      popup.style.right = `${right}px`;
+    } else {
+      const maxLeft = window.innerWidth - popupWidth - margin;
+      const left = Math.max(margin, Math.min(rect.left, maxLeft));
+      popup.style.left = `${left}px`;
+    }
+  }
+
+  function openPopup(id, anchorBtn) {
+    closeAllPopups();
+    const backdrop = document.getElementById(id);
+    backdrop.classList.add("open");
+    positionPopup(backdrop.querySelector(".popup"), anchorBtn);
+  }
+
+  function closeAllPopups() {
+    document.querySelectorAll(".popup-backdrop").forEach((el) => el.classList.remove("open"));
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
     guardLockedFrames();
     attachChangeButtons();
+
+    document.getElementById("themeToggleBtn").addEventListener("click", (event) => openPopup("themePopupBackdrop", event.currentTarget));
+    document.getElementById("langToggleBtn").addEventListener("click", (event) => openPopup("langPopupBackdrop", event.currentTarget));
+    document.querySelectorAll(".popup-backdrop").forEach((backdrop) => {
+      backdrop.addEventListener("click", (event) => {
+        if (event.target === backdrop) closeAllPopups();
+      });
+    });
+    document.querySelectorAll('input[name="theme"]').forEach((radio) => {
+      radio.addEventListener("change", (event) => { applyTheme(event.target.value); closeAllPopups(); });
+    });
+    document.querySelectorAll('input[name="lang"]').forEach((radio) => {
+      radio.addEventListener("change", (event) => { applyLanguage(event.target.value); closeAllPopups(); });
+    });
+
+    applyLanguage(currentLang);
     restoreFromSession();
   });
 </script>
