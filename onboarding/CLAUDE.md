@@ -41,3 +41,31 @@ section 3), not an oversight to fix.
   the operator's own long-lived credentials (`app/config.py`'s `Settings`)
   and a visitor's transient ones — keeping these separate is what lets each
   service's threat model be reasoned about independently.
+
+## What the implementation adds to these rules
+
+- **The app-wide `RequestValidationError` handler lives in `onboarding/main.py`,
+  not `router.py`.** It's what turns a malformed request into the generic
+  `{"detail": "invalid request"}` 422 instead of FastAPI's default response
+  (which echoes the rejected input, including a submitted credential). Every
+  relay endpoint lives in `router.py` and inherits this protection only
+  because `main.py` mounts `router` on the same `app` the handler is
+  registered on — a non-obvious cross-file dependency. A new relay endpoint
+  added to `router.py` gets this for free; the same router mounted on a
+  *different* app (a test harness building its own `FastAPI()`, a future
+  split-out service) would lose it silently.
+- **A visitor's credential goes to `sessionStorage`, never `localStorage`,**
+  on the browser side too — not just "no database" on the backend. This
+  page's own non-secret theme/language preferences legitimately use
+  `localStorage` (they should persist across tabs/sessions); a credential
+  must not, since `localStorage` persists past the tab closing. Any new
+  frame that holds a visitor secret client-side follows the render-key
+  frame's `STORAGE_KEYS` / `sessionStorage` pattern, not the theme/lang one.
+- **`tests/test_onboarding_page.py::test_render_key_leaves_the_page_exactly_once`
+  mechanically enforces `body.count("fetch(") == 1`.** This is deliberate: a
+  visitor credential should have exactly one, auditable exit path per page
+  load. Adding a second relay call (a new frame's own `fetch()`) will fail
+  this test — that's the signal to update the test alongside the new call,
+  not to route around it. Each credential-carrying `fetch()` this page ever
+  grows should be paired with its own equivalent test asserting it's the
+  only such exit for *that* frame's secret.

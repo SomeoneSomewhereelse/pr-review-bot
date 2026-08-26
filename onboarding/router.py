@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from onboarding import render_client
 
@@ -21,12 +21,19 @@ _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
 
 class RenderKeyRequest(BaseModel):
-    api_key: str
+    api_key: str = Field(max_length=512)
 
 
 @router.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
-    return HTMLResponse(_INDEX_HTML)
+    return HTMLResponse(_INDEX_HTML, headers={
+        "Content-Security-Policy": (
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            "script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"
+        ),
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+    })
 
 
 @router.post("/api/render/validate-key")

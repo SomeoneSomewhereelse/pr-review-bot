@@ -22,6 +22,19 @@ async def test_index_serves_html():
     assert "text/html" in resp.headers["content-type"]
 
 
+async def test_index_sets_security_headers():
+    """This page's whole purpose is collecting a visitor's Render API key;
+    without these headers any site could iframe it for a clickjacking or
+    credential-phishing overlay."""
+    client = await _client()
+    resp = await client.get("/")
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["referrer-policy"] == "no-referrer"
+    csp = resp.headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
 async def test_valid_key_returns_owner_name(monkeypatch):
     async def fake_validate_key(api_key: str):
         assert api_key == SENTINEL_KEY

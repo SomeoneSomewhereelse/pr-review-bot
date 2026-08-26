@@ -90,3 +90,37 @@ async def test_stored_lang_and_theme_are_validated_against_known_values():
     assert '["light", "dark", "system"]' in body
     assert "KNOWN_LANGS.includes(stored) ? stored : \"en\"" in body
     assert "KNOWN_THEMES.includes(stored) ? stored : \"system\"" in body
+
+
+async def test_dynamic_badge_and_error_content_re_translate_on_language_switch():
+    """Spec section 7 requires every dynamically-generated string (frame
+    badges, error messages) to re-render on a language switch, not just
+    [data-i18n]-tagged elements. A frozen, already-rendered detail/error
+    string (e.g. built once at success/failure time) would not do that —
+    so badges must be composed from a re-translatable key each render, and
+    the currently-shown error message must be tracked by key so it can be
+    re-applied when the language changes."""
+    client = await _client()
+    body = (await client.get("/")).text
+
+    # Badge detail is derived from a translation key at render time, not a
+    # frozen pre-rendered string.
+    assert "function renderBadge" in body
+    assert "detailKey" in body
+    assert "t(detailKey)" in body
+
+    # Every place an error is shown for the render-key frame also records
+    # which translation key produced it.
+    assert "currentRenderKeyErrorKey" in body
+    assert 'currentRenderKeyErrorKey = "err_empty_key";' in body
+    assert 'currentRenderKeyErrorKey = "err_invalid_key";' in body
+    assert 'currentRenderKeyErrorKey = "err_unreachable";' in body
+    assert 'currentRenderKeyErrorKey = "err_network";' in body
+
+    # applyLanguage re-applies the tracked error key so a visible error
+    # message gets re-translated, not left frozen in the old language.
+    assert "function applyLanguage" in body
+    apply_language_start = body.index("function applyLanguage")
+    apply_language_body = body[apply_language_start:apply_language_start + 1200]
+    assert "currentRenderKeyErrorKey" in apply_language_body
+    assert "t(currentRenderKeyErrorKey)" in apply_language_body

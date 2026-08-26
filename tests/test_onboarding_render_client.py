@@ -67,3 +67,30 @@ async def test_empty_owners_list_is_invalid():
         respx.get(OWNERS_URL).mock(return_value=httpx.Response(200, json=[]))
         result = await render_client.validate_key(SENTINEL_KEY)
     assert result == render_client.RenderKeyInvalid(reason="invalid_key")
+
+
+async def test_malformed_200_body_is_unreachable_not_a_crash():
+    """A non-JSON or unexpectedly-shaped 200 body must not let a traceback
+    (which could carry request/response context) escape validate_key."""
+    with respx.mock:
+        respx.get(OWNERS_URL).mock(return_value=httpx.Response(200, text="not json"))
+        result = await render_client.validate_key(SENTINEL_KEY)
+    assert result == render_client.RenderKeyInvalid(reason="render_unreachable")
+
+
+async def test_malformed_200_body_wrong_shape_is_unreachable():
+    with respx.mock:
+        respx.get(OWNERS_URL).mock(return_value=httpx.Response(200, json={"not": "a list"}))
+        result = await render_client.validate_key(SENTINEL_KEY)
+    assert result == render_client.RenderKeyInvalid(reason="render_unreachable")
+
+
+async def test_sends_the_key_as_a_bearer_token():
+    with respx.mock:
+        route = respx.get(OWNERS_URL).mock(
+            return_value=httpx.Response(
+                200, json=[{"owner": {"name": "Ada Lovelace"}, "cursor": "x"}]
+            )
+        )
+        await render_client.validate_key(SENTINEL_KEY)
+    assert route.calls.last.request.headers["Authorization"] == f"Bearer {SENTINEL_KEY}"

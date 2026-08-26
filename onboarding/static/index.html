@@ -346,6 +346,9 @@
     document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
     document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
     refreshFrameBadges();
+    if (currentRenderKeyErrorKey) {
+      document.getElementById("render-key-error").textContent = t(currentRenderKeyErrorKey);
+    }
     applyTheme(currentTheme);
   }
 
@@ -359,8 +362,10 @@
   ];
 
   const frameState = {};
-  FRAME_ORDER.forEach((id) => { frameState[id] = {status: "locked", detail: null}; });
+  FRAME_ORDER.forEach((id) => { frameState[id] = {status: "locked", detailKey: null, detailValue: null}; });
   frameState["render-key"].status = "ready";
+
+  let currentRenderKeyErrorKey = null;
 
   function frameEl(id) {
     return document.getElementById(`frame-${id}`);
@@ -371,8 +376,9 @@
   }
 
   function renderBadge(id) {
-    const {status, detail} = frameState[id];
+    const {status, detailKey, detailValue} = frameState[id];
     const label = t("badge_" + status);
+    const detail = detailKey ? `${t(detailKey)}${detailValue ?? ""}` : "";
     badgeEl(id).textContent = detail ? `${label} — ${detail}` : label;
   }
 
@@ -380,8 +386,8 @@
     FRAME_ORDER.forEach(renderBadge);
   }
 
-  function setFrameStatus(id, status, detail) {
-    frameState[id] = {status, detail: detail || null};
+  function setFrameStatus(id, status, detailKey, detailValue) {
+    frameState[id] = {status, detailKey: detailKey || null, detailValue: detailValue ?? null};
     frameEl(id).dataset.status = status;
     renderBadge(id);
   }
@@ -409,11 +415,11 @@
     FRAME_ORDER.slice(FRAME_ORDER.indexOf(id) + 1).forEach(lockFrame);
   }
 
-  function completeFrame(id, detail) {
+  function completeFrame(id, detailKey, detailValue) {
     const el = frameEl(id);
     el.dataset.locked = "true";
     el.open = false;
-    setFrameStatus(id, "done", detail);
+    setFrameStatus(id, "done", detailKey, detailValue);
     const next = nextFrame(id);
     if (next) unlockFrame(next);
   }
@@ -431,11 +437,13 @@
     const key = input.value.trim();
     const errorEl = document.getElementById("render-key-error");
     errorEl.textContent = "";
+    currentRenderKeyErrorKey = null;
     if (!key) {
+      currentRenderKeyErrorKey = "err_empty_key";
       errorEl.textContent = t("err_empty_key");
       return;
     }
-    setFrameStatus("render-key", "ready", t("checking"));
+    setFrameStatus("render-key", "ready", "checking");
     let resp;
     try {
       resp = await fetch("/api/render/validate-key", {
@@ -445,26 +453,38 @@
       });
     } catch (err) {
       setFrameStatus("render-key", "error");
+      currentRenderKeyErrorKey = "err_network";
       errorEl.textContent = t("err_network");
       return;
     }
-    const body = await resp.json();
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      setFrameStatus("render-key", "error");
+      currentRenderKeyErrorKey = "err_unreachable";
+      errorEl.textContent = t("err_unreachable");
+      return;
+    }
     if (body.valid) {
       sessionStorage.setItem(STORAGE_KEYS["render-key"], key);
       input.value = "";
-      completeFrame("render-key", `${t("owner_prefix")}${body.owner_name}`);
+      completeFrame("render-key", "owner_prefix", body.owner_name);
     } else if (body.reason === "invalid_key") {
       setFrameStatus("render-key", "error");
+      currentRenderKeyErrorKey = "err_invalid_key";
       errorEl.textContent = t("err_invalid_key");
     } else {
       setFrameStatus("render-key", "error");
+      currentRenderKeyErrorKey = "err_unreachable";
       errorEl.textContent = t("err_unreachable");
     }
   }
 
   function restoreFromSession() {
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
-      completeFrame("render-key", t("restored"));
+      completeFrame("render-key", "restored", null);
     }
   }
 

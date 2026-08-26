@@ -43,7 +43,11 @@ async def validate_key(api_key: str) -> RenderValidation:
     if response.status_code != 200:
         return RenderKeyInvalid(reason="render_unreachable")
 
-    body = response.json()
-    if not body:
-        return RenderKeyInvalid(reason="invalid_key")
-    return RenderKeyValid(owner_name=body[0]["owner"]["name"])
+    try:
+        body = response.json()
+        if not body:
+            return RenderKeyInvalid(reason="invalid_key")
+        owner_name = body[0]["owner"]["name"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        return RenderKeyInvalid(reason="render_unreachable")
+    return RenderKeyValid(owner_name=owner_name)
