@@ -205,8 +205,20 @@
       <summary>
         <span class="frame-title" data-i18n="frame2_title"></span>
         <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="github-app" data-i18n="change_button"></button>
       </summary>
-      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+      <div class="frame-body">
+        <div id="github-app-create-section">
+          <p data-i18n="frame2_instructions"></p>
+          <input id="github-app-name-input" type="text">
+          <button id="github-app-create-submit" type="button" data-i18n="create_app_button"></button>
+        </div>
+        <div id="github-app-install-section" style="display: none;">
+          <p data-i18n="frame2_install_instructions"></p>
+          <button id="github-app-install-submit" type="button" data-i18n="install_button"></button>
+        </div>
+        <p id="github-app-error" class="frame-error"></p>
+      </div>
     </details>
 
     <details id="frame-supabase" class="frame" data-status="locked" data-locked="true">
@@ -243,6 +255,8 @@
   </main>
 
 <script>
+  window.ONBOARDING_BASE_URL = "__ONBOARDING_BASE_URL__";
+
   const STRINGS = {
     en: {
       page_title: "Set up your own reviewer",
@@ -270,6 +284,18 @@
       checking: "checking…",
       restored: "restored from this session",
       owner_prefix: "owner: ",
+      frame2_instructions: "Name your GitHub App (must be unique on GitHub), then click Create App. This will be created under whichever GitHub account you're currently logged into in this browser — check that's the right one before continuing.",
+      frame2_name_placeholder: "my-pr-review-bot",
+      create_app_button: "Create App",
+      frame2_install_instructions: "Your App was created. Now install it on the account/repos you want it to review.",
+      install_button: "Install App",
+      err_github_name_empty: "Name your App first.",
+      err_github_callback_invalid: "That didn't come back from GitHub as expected. Please try again.",
+      err_github_exchange_failed: "GitHub rejected that — the code may have expired. Try creating the App again.",
+      err_github_unreachable: "GitHub is unreachable right now. Try again in a moment.",
+      err_github_installation_not_found: "GitHub couldn't find that installation. Try installing again.",
+      err_github_invalid_credentials: "GitHub rejected the App's credentials. Try creating the App again.",
+      account_prefix: "account: ",
     },
     he: {
       page_title: "הקמת בודק ה-PR שלך",
@@ -297,6 +323,18 @@
       checking: "בודק…",
       restored: "שוחזר מהפעלה זו",
       owner_prefix: "בעלים: ",
+      frame2_instructions: "תנו שם לאפליקציית ה-GitHub שלכם (חייב להיות ייחודי ב-GitHub), ואז לחצו על יצירת אפליקציה. האפליקציה תיווצר תחת חשבון ה-GitHub שאליו אתם מחוברים כרגע בדפדפן זה — ודאו שזה החשבון הנכון לפני שתמשיכו.",
+      frame2_name_placeholder: "my-pr-review-bot",
+      create_app_button: "יצירת אפליקציה",
+      frame2_install_instructions: "האפליקציה נוצרה. כעת התקינו אותה על החשבון/המאגרים שברצונכם שתבדוק.",
+      install_button: "התקנת אפליקציה",
+      err_github_name_empty: "תנו שם לאפליקציה קודם.",
+      err_github_callback_invalid: "התגובה מ-GitHub לא הייתה כצפוי. נסו שוב.",
+      err_github_exchange_failed: "GitHub דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו ליצור את האפליקציה מחדש.",
+      err_github_unreachable: "GitHub אינו זמין כרגע. נסו שוב בעוד רגע.",
+      err_github_installation_not_found: "GitHub לא מצא את ההתקנה. נסו להתקין שוב.",
+      err_github_invalid_credentials: "GitHub דחה את פרטי האפליקציה. נסו ליצור את האפליקציה מחדש.",
+      account_prefix: "חשבון: ",
     },
   };
 
@@ -342,6 +380,7 @@
       el.textContent = t(el.getAttribute("data-i18n"));
     });
     document.getElementById("render-key-input").placeholder = t("frame1_placeholder");
+    document.getElementById("github-app-name-input").placeholder = t("frame2_name_placeholder");
     document.getElementById("themePopupTitle").textContent = t("theme_popup_title");
     document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
     document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
@@ -349,12 +388,22 @@
     if (currentRenderKeyErrorKey) {
       document.getElementById("render-key-error").textContent = t(currentRenderKeyErrorKey);
     }
+    if (currentGithubAppErrorKey) {
+      document.getElementById("github-app-error").textContent = t(currentGithubAppErrorKey);
+    }
     applyTheme(currentTheme);
   }
 
   const STORAGE_KEYS = {
     "render-key": "onboarding.renderApiKey",
+    "github-app": "onboarding.githubApp",
   };
+
+  const MANIFEST_PERMISSIONS = {
+    pull_requests: "write", contents: "read", issues: "write", metadata: "read",
+  };
+  const MANIFEST_EVENTS = ["pull_request"];
+  const GITHUB_MANIFEST_STATE_KEY = "onboarding.githubManifestState";
 
   const FRAME_ORDER = [
     "render-key", "github-app", "supabase", "llm-provider",
@@ -366,6 +415,7 @@
   frameState["render-key"].status = "ready";
 
   let currentRenderKeyErrorKey = null;
+  let currentGithubAppErrorKey = null;
 
   function frameEl(id) {
     return document.getElementById(`frame-${id}`);
@@ -482,6 +532,100 @@
     }
   }
 
+  function buildManifest(appName) {
+    return {
+      name: appName,
+      url: window.ONBOARDING_BASE_URL,
+      public: false,
+      hook_attributes: {url: "https://example.invalid/webhook", active: true},
+      redirect_url: `${window.ONBOARDING_BASE_URL}/?gh_step=manifest`,
+      setup_url: `${window.ONBOARDING_BASE_URL}/?gh_step=install`,
+      default_events: MANIFEST_EVENTS,
+      default_permissions: MANIFEST_PERMISSIONS,
+    };
+  }
+
+  function submitManifestForm(manifest, state) {
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = `https://github.com/settings/apps/new?state=${encodeURIComponent(state)}`;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "manifest";
+    input.value = JSON.stringify(manifest);
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+  }
+
+  function showGithubAppReadyToInstall() {
+    document.getElementById("github-app-create-section").style.display = "none";
+    document.getElementById("github-app-install-section").style.display = "block";
+  }
+
+  function githubAppError(key) {
+    setFrameStatus("github-app", "error");
+    currentGithubAppErrorKey = key;
+    document.getElementById("github-app-error").textContent = t(key);
+  }
+
+  function createGithubApp() {
+    const input = document.getElementById("github-app-name-input");
+    const name = input.value.trim();
+    document.getElementById("github-app-error").textContent = "";
+    currentGithubAppErrorKey = null;
+    if (!name) {
+      githubAppError("err_github_name_empty");
+      return;
+    }
+    const state = crypto.randomUUID();
+    sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
+    submitManifestForm(buildManifest(name), state);
+  }
+
+  async function handleGithubManifestCallback() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("gh_step") !== "manifest") return;
+    history.replaceState(null, "", location.pathname);
+    const expectedState = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
+    sessionStorage.removeItem(GITHUB_MANIFEST_STATE_KEY);
+    const code = params.get("code");
+    if (!expectedState || params.get("state") !== expectedState || !code) {
+      githubAppError("err_github_callback_invalid");
+      return;
+    }
+    let resp;
+    try {
+      resp = await fetch("/api/github/exchange-manifest-code", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({code: code}),
+      });
+    } catch (err) {
+      githubAppError("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      githubAppError("err_github_unreachable");
+      return;
+    }
+    if (body.valid) {
+      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify({
+        app_id: body.app_id, slug: body.slug,
+        private_key_b64: body.private_key_b64, webhook_secret: body.webhook_secret,
+      }));
+      showGithubAppReadyToInstall();
+    } else if (body.reason === "exchange_failed") {
+      githubAppError("err_github_exchange_failed");
+    } else {
+      githubAppError("err_github_unreachable");
+    }
+  }
+
   function restoreFromSession() {
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
       completeFrame("render-key", "restored", null);
@@ -540,6 +684,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
+    document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
     guardLockedFrames();
     attachChangeButtons();
 
@@ -559,6 +704,7 @@
 
     applyLanguage(currentLang);
     restoreFromSession();
+    handleGithubManifestCallback();
   });
 </script>
 </body>
