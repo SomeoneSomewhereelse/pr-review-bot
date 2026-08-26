@@ -227,6 +227,54 @@ and its siblings) an explicit bypass fixture
 (`tests/test_deploy_script.py::_real_db_target`) rather than have them
 accidentally start exercising the refusal path instead of the real one._
 
+### app/static/dashboard.html has the same unguarded-localStorage bug already fixed in onboarding/static/index.html
+- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md` (during verification of Task 5's fix round, unrelated code noticed alongside it)
+- **What:** `app/static/dashboard.html:290-291` seeds `currentLang`/`currentTheme` via `localStorage.getItem(...) || default` with no validation against the known value sets — the exact same defect found and fixed in `onboarding/static/index.html` during this branch's Task 5 fix round. An unrecognized stored value makes `STRINGS[currentLang][key]` throw inside `applyLanguage`, aborting `DOMContentLoaded` before any event listener attaches and breaking the entire dashboard, not just its translations.
+- **Why parked:** Out of scope for the onboarding-wizard plan/branch — `app/` is a different service with its own module boundary (`app/CLAUDE.md`), and this file was never touched by any task in that plan.
+- **Follow-up:** A small, standalone fix to `app/static/dashboard.html`: clamp `currentLang`/`currentTheme` to their known-good sets at read time, mirroring `onboarding/static/index.html`'s `KNOWN_LANGS`/`KNOWN_THEMES` guard (commit `7728980`); add a regression test in `tests/test_dashboard_page.py` for a corrupted/unrecognized stored value.
+
+### onboarding/render_client.py constructs a fresh httpx.AsyncClient per validate_key() call
+- **Found during:** Task 2 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** `validate_key()` opens a new `httpx.AsyncClient` context on every call instead of reusing/injecting one.
+- **Why parked:** Correct and cheap at current call volume (one validation per visitor per wizard session); a shared client would need lifespan management that `onboarding/main.py` deliberately doesn't have (this service has no app-level state).
+- **Follow-up:** Revisit only if a future frame in this wizard starts making many calls to the same external API in a hot path.
+
+### onboarding/static/index.html: no double-submit guard on the Render-key Validate button
+- **Found during:** Task 4 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** `validateRenderKey()` doesn't disable the Validate button/input while a request is in flight; a rapid double-click fires two concurrent `fetch` calls with the same key. Idempotent in practice (both responses apply the same result) — no leak or state corruption. Traces to the plan's own provided code (plan-mandated), not an implementer deviation.
+- **Why parked:** Not a correctness or security issue; deferred to keep the final review's fix wave scoped to findings with real user-visible or security impact.
+- **Follow-up:** Disable the button and input for the duration of the in-flight `fetch`; three lines in `validateRenderKey`.
+
+### onboarding/static/index.html: minor Render-key-frame UX gaps
+- **Found during:** Task 4 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** No dedicated test for the empty-input validation path (the code handles it correctly). No Enter-key submit binding on the password input — only the button's click listener triggers validation, so an on-screen mobile keyboard's "Go" button does nothing. `setFrameStatus("render-key", "ready", t("checking"))` composes into "Not started — checking…", a slightly self-contradictory label during a pending request.
+- **Why parked:** Cosmetic/UX polish, no functional or security impact.
+- **Follow-up:** Add a `badge_checking` STRINGS key (both languages) and a dedicated `checking` frame status instead of reusing `ready`; bind `keydown` → Enter on the password input to call `validateRenderKey()`; add the empty-input test.
+
+### tests/test_onboarding_i18n.py: one RTL test asserts an exact whole-line literal string
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** `test_language_switch_sets_dir_for_rtl` asserts a full literal source line rather than a more targeted substring, making it more brittle than necessary to a harmless refactor of that one line.
+- **Why parked:** The reviewer's own assessment: the brittleness is doing real work here — it pins that the RTL direction is genuinely derived from the selected language, not just that `dir` is set to *something*. Not worth loosening.
+- **Follow-up:** None planned; revisit only if that line needs a legitimate refactor and the test starts failing on unrelated changes.
+
+### onboarding/static/index.html: beginChange doesn't clear sessionStorage for the frame being re-edited
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** `lockFrame` removes a frame's stored value from `sessionStorage`, but `beginChange` (the "Change" button's handler) doesn't. After clicking "Change" on frame 1, the old Render key is still in `sessionStorage`; a reload before resubmitting runs `restoreFromSession()`, which silently re-completes frame 1 with the *old* key and re-unlocks frame 2 — quietly undoing the relock the visitor just triggered.
+- **Why parked:** Benign today (the old key was valid, and `relockDownstreamOf` correctly wiped any downstream frames' values) — but it's an asymmetry in the state machine that will read as a real bug once frames 2-6 (sub-projects 2-6) add their own stored values.
+- **Follow-up:** Add `sessionStorage.removeItem(STORAGE_KEYS[id])` to `beginChange`, mirroring `lockFrame`.
+
+### onboarding/static/index.html: password input has no autocomplete="off"; minor accessibility gaps
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** The Render-key `<input type="password">` has no `autocomplete="off"` — the page's own copy claims "it stays in your browser for this session only," but a browser password manager offering to save the field would persist it across sessions, contradicting that claim (low practical risk today: no `name` attribute and no `<form>` means most browser heuristics won't offer to save it). Separately: `#render-key-error` has no `aria-live="polite"` (a screen-reader user gets no announcement when validation fails), and the theme/language toggle buttons ship with empty `textContent`/no `aria-label` until `applyLanguage` populates them on load.
+- **Why parked:** No functional or security impact; genuine polish.
+- **Follow-up:** Add `autocomplete="off"` to the password input; `aria-live="polite"` to `#render-key-error`; static `aria-label` fallbacks on the two toggle buttons.
+
+### onboarding/render_client.py and router.py: no server-side structural logging
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
+- **What:** The design spec (section 5) anticipated a structural log line on validation failure (e.g. `"render key validation: invalid (401)"`, name/outcome only, never the value). The implementation logs nothing at all — safe, but means a production report of "validation keeps failing" is currently undebuggable (can't distinguish a wave of `invalid_key` submissions from a genuine Render outage).
+- **Why parked:** Zero logging is the stricter, safer default, and this project has a documented history of secret-handling incidents (see the entries above this one) — adding logging under the time pressure of a single fix wave felt like the wrong moment to touch this area.
+- **Follow-up:** Add the structural log line the spec already specifies (status code / outcome enum only, never the key) once this service is closer to being actually deployed.
+
 ---
 
 ## Design Gaps
