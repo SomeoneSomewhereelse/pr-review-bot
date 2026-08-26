@@ -699,14 +699,21 @@ git commit -m "feat: add GitHub App installation verification"
 - [ ] **Step 1: Write the failing tests**
 
 Add to `tests/test_onboarding_router.py` (it already imports `render_client`
-and `app` — add `github_client` and `settings` too):
+and `app` — add `github_client`, `settings`, and the `router` module itself
+too):
 ```python
-from onboarding import github_client
+from onboarding import github_client, router as router_module
 from onboarding.config import settings
 
 
 async def test_index_serves_configured_base_url(monkeypatch):
+    """The real onboarding/static/index.html doesn't gain the
+    __ONBOARDING_BASE_URL__ token until Task 5 — this task only implements
+    the substitution mechanism, so it verifies that mechanism directly by
+    patching the module-level _INDEX_HTML constant, rather than depending on
+    Task 5's page content already existing."""
     monkeypatch.setattr(settings, "public_base_url", "https://onboarding.example.com")
+    monkeypatch.setattr(router_module, "_INDEX_HTML", "<html>__ONBOARDING_BASE_URL__</html>")
     client = await _client()
     resp = await client.get("/")
     assert "https://onboarding.example.com" in resp.text
