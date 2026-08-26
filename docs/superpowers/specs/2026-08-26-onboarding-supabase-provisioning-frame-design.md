@@ -42,7 +42,7 @@ OAuth app for full automation, accepting the new risk — see section 7.
 | Organization selection | Auto-pick if the visitor's account has exactly one organization; otherwise show a simple dropdown of org names/slugs fetched via `GET /v1/organizations`. |
 | Region | Fixed default (`us-east-1`), no visitor choice — consistent with this frame's YAGNI-for-self-service-demo posture. |
 | Project naming | Visitor types it (default `pr-review-bot`, editable) — mirrors sub-project 2's GitHub App naming pattern. |
-| Free-tier project cap | Surfaced as Supabase's actual rejection reason (e.g. "this organization already has the maximum number of free projects"), not a generic failure message. |
+| Free-tier project cap | Surfaced as Supabase's actual rejection *message*, relayed verbatim (see section 4's `create-project` contract) rather than a generic failure — but not as a fixed, guessed reason enum: this project's own testing-hygiene discipline (root `CLAUDE.md`) counsels against hardcoding assumptions about a live API's exact behavior without verifying it, and there is no way to confirm Supabase's precise error wording without a live authenticated call this brainstorm cannot make. |
 | Readiness polling | Browser polls a lightweight relay endpoint every 5 seconds, times out after 5 minutes (≈2.5× the guide's documented ~2-minute typical wait) with a manual "Check again" button on timeout — keeps the backend a stateless per-request relay rather than a long-held blocking connection. |
 | Orphaned project on partial failure | Nothing automatic. If project creation succeeds but a later step fails or the tab closes mid-flow, the wizard does not attempt to delete it — error copy tells the visitor a project may exist and links to their Supabase dashboard. Mirrors the GitHub frame's identical precedent for an orphaned App. |
 | DB password custody | **Generated client-side** by the browser (Web Crypto API, alphanumeric-only character set), not minted by the backend. This keeps it in the same "browser already holds the credential" category as every other frame's visitor-originated secret, rather than growing the mint-and-return exception list — see section 5. |
@@ -165,18 +165,28 @@ this wizard's flow is normally well under typical OAuth token lifetimes.
 | `POST /api/supabase/exchange-oauth-code` | `{code, code_verifier}` | `{valid, access_token, refresh_token, expires_in}` or `{valid: false, reason}` | Mint-and-return exception (alongside GitHub's manifest exchange) |
 | `POST /api/supabase/refresh-access-token` | `{refresh_token}` | `{valid, access_token, refresh_token, expires_in}` or `{valid: false, reason}` | Same exception category |
 | `POST /api/supabase/list-organizations` | `{access_token}` | `{orgs: [{slug, name}]}` or `{valid: false, reason}` | |
-| `POST /api/supabase/create-project` | `{access_token, organization_slug, name, db_pass}` | `{ref, status}` or `{valid: false, reason}` | `db_pass` is browser-generated, not visitor-typed — same "already the browser's own value" category as the Render frame's `api_key`. `reason` includes `free_tier_limit_reached` |
+| `POST /api/supabase/create-project` | `{access_token, organization_slug, name, db_pass}` | `{ref, status}` or `{valid: false, reason, message}` | `db_pass` is browser-generated, not visitor-typed — same "already the browser's own value" category as the Render frame's `api_key`. On a 4xx business-rule rejection (free-tier cap included), `reason` is `"project_creation_rejected"` and `message` carries Supabase's own error text verbatim — this endpoint is a documented second exception to "never echo more than a reason enum," justified the same way `exchange-oauth-code` is: relaying Supabase's own wording is the only way to satisfy "surface the actual rejection" without guessing at API behavior this session cannot verify live |
 | `POST /api/supabase/project-status` | `{access_token, ref}` | `{status}` or `{valid: false, reason}` | Polled by the browser |
 | `POST /api/supabase/connection-info` | `{access_token, ref}` | `{db_user, db_host, db_port, db_name}` or `{valid: false, reason}` | Structurally safe to echo — no password field, ever |
 
 Error `reason` vocabulary: `unauthorized`, `invalid_code`, `forbidden`,
-`rate_limited`, `free_tier_limit_reached`, `supabase_unreachable`,
+`rate_limited`, `project_creation_rejected` (`create-project` only, paired
+with a `message` field — see below), `supabase_unreachable`,
 `pooler_config_unavailable` (`connection-info` only — see step 9).
+
 `create-project`'s reason is derived defensively — Supabase's own 4xx
 responses have no guaranteed structured body (401/403/429 are documented as
-bare descriptions, no schema) — attempt to read a JSON `message` field from
-the error body, fall back to `supabase_unreachable` if it doesn't parse or
-has none.
+bare descriptions, no schema). The backend distinguishes only what the
+status code itself reliably means (`401` → `unauthorized`, `429` →
+`rate_limited`) from everything else 4xx, which is treated as a business-
+rule rejection: attempt to read a JSON `message` field from the error body
+and return `{reason: "project_creation_rejected", message: <that text>}`;
+fall back to `{reason: "supabase_unreachable"}` if the body doesn't parse or
+has no `message` field. This deliberately does not attempt to distinguish
+*which* business rule was violated (free-tier cap vs. anything else
+Supabase might reject) — that would require guessing at exact message
+wording this session cannot verify live; relaying the message verbatim
+lets the visitor read Supabase's own explanation instead.
 
 CSP's `form-action` directive does **not** need a new entry: this flow's
 only full-page navigation (`GET /v1/oauth/authorize`) is a plain redirect,
