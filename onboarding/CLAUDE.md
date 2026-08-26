@@ -69,3 +69,31 @@ section 3), not an oversight to fix.
   not to route around it. Each credential-carrying `fetch()` this page ever
   grows should be paired with its own equivalent test asserting it's the
   only such exit for *that* frame's secret.
+
+## The test suite looks hung on a fresh worktree — it isn't
+
+The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly
+created worktree can take 5-6+ minutes before any test output appears, with
+no progress indication in between. This is not a real hang and nothing to
+debug in this project's code — it is `uv` building that worktree's `.venv`
+from scratch (this repo lives on a Windows-mounted drive under WSL2 —
+`/mnt/c/...` — while `uv`'s package cache lives on a different filesystem,
+so `uv` cannot hardlink packages into the new `.venv` and falls back to a
+full byte-for-byte copy of every package instead; confirmed directly: a
+fresh-worktree install of this project's 79 dependencies took 5m37s,
+preceded by `uv`'s own `warning: Failed to hardlink files; falling back to
+full copy` — the exact fallback this is). Every *new* SDD/git worktree pays
+this cost again, since each starts with an empty `.venv`.
+
+**Practical consequence:** give the first test/`uv run` command in a fresh
+worktree a long timeout (10+ minutes) or run it in the background and wait
+for completion, rather than killing it or concluding something is broken
+partway through. Subsequent runs in the *same* worktree reuse the now-built
+`.venv` and run at normal speed (this project's own suite: ~20-45s, per
+`pyproject.toml`'s `[tool.pytest.ini_options]` xdist tuning comments).
+`export UV_LINK_MODE=copy`
+suppresses the warning text (it does not speed up the copy — the fallback
+already happens either way) if the noise itself is what's confusing; the
+real fix (giving `uv`'s cache and the worktree the same filesystem) is a
+workstation-level environment decision, out of scope for this project's own
+code or config to make on its own.
