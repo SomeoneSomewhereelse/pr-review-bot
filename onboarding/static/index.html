@@ -1,5 +1,317 @@
 <!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Set up your own reviewer</title></head>
-<body><p>Coming soon.</p></body>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up your own reviewer</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #eef0f3;
+    --text: #1f2933;
+    --text-muted: #5c6773;
+    --border: #dde2e7;
+    --accent: #3a6ea5;
+    --ok: #2f7d4f;
+    --fail: #b3454b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12161b;
+      --surface: #1a1f26;
+      --surface-2: #22282f;
+      --text: #e6e9ec;
+      --text-muted: #9aa5b1;
+      --border: #2b323a;
+      --accent: #7ba7d9;
+      --ok: #5fbf87;
+      --fail: #e08086;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12161b;
+    --surface: #1a1f26;
+    --surface-2: #22282f;
+    --text: #e6e9ec;
+    --text-muted: #9aa5b1;
+    --border: #2b323a;
+    --accent: #7ba7d9;
+    --ok: #5fbf87;
+    --fail: #e08086;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    padding: 2rem 1rem 4rem;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; }
+  p.lede { color: var(--text-muted); }
+  details.frame {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+  }
+  details.frame > summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.9rem 1.1rem;
+  }
+  details.frame[data-locked="true"] > summary { cursor: not-allowed; color: var(--text-muted); }
+  details.frame[data-status="done"] > summary { cursor: default; color: var(--text); }
+  details.frame > summary::-webkit-details-marker { display: none; }
+  .frame-title { font-weight: 600; }
+  .frame-badge { font-size: 0.85rem; color: var(--text-muted); }
+  details.frame[data-status="done"] .frame-badge { color: var(--ok); }
+  details.frame[data-status="error"] .frame-badge { color: var(--fail); }
+  .frame-change {
+    display: none;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    min-height: 2.5rem;
+    cursor: pointer;
+  }
+  details.frame[data-status="done"] .frame-change { display: inline-block; }
+  .frame-body { padding: 0 1.1rem 1.1rem; border-top: 1px solid var(--border); }
+  .frame-body input[type="password"] {
+    width: 100%;
+    padding: 0.5rem;
+    margin: 0.5rem 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    min-height: 2.5rem;
+  }
+  .frame-body button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    min-height: 2.5rem;
+    cursor: pointer;
+  }
+  .frame-error { color: var(--fail); min-height: 1.2em; }
+  @media (max-width: 480px) {
+    details.frame > summary { padding: 0.75rem 0.9rem; }
+    .frame-change { width: 100%; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Set up your own PR review bot</h1>
+  <p class="lede">Work through each step below. Nothing you enter here is
+    stored on this server — it stays in your browser for this session
+    only.</p>
+
+  <details id="frame-render-key" class="frame" data-status="ready" data-locked="false" open>
+    <summary>
+      <span class="frame-title">1. Render API key</span>
+      <span class="frame-badge">Not started</span>
+      <button class="frame-change" type="button" data-frame="render-key">Change</button>
+    </summary>
+    <div class="frame-body">
+      <p>Get a key from Render's dashboard: Account Settings &rarr; API Keys.</p>
+      <input id="render-key-input" type="password" placeholder="rnd_...">
+      <button id="render-key-submit" type="button">Validate</button>
+      <p id="render-key-error" class="frame-error"></p>
+    </div>
+  </details>
+
+  <details id="frame-github-app" class="frame" data-status="locked" data-locked="true">
+    <summary>
+      <span class="frame-title">2. GitHub App</span>
+      <span class="frame-badge">Locked</span>
+    </summary>
+    <div class="frame-body"><p>Coming soon.</p></div>
+  </details>
+
+  <details id="frame-supabase" class="frame" data-status="locked" data-locked="true">
+    <summary>
+      <span class="frame-title">3. Supabase database</span>
+      <span class="frame-badge">Locked</span>
+    </summary>
+    <div class="frame-body"><p>Coming soon.</p></div>
+  </details>
+
+  <details id="frame-llm-provider" class="frame" data-status="locked" data-locked="true">
+    <summary>
+      <span class="frame-title">4. LLM provider</span>
+      <span class="frame-badge">Locked</span>
+    </summary>
+    <div class="frame-body"><p>Coming soon.</p></div>
+  </details>
+
+  <details id="frame-uptime-pinger" class="frame" data-status="locked" data-locked="true">
+    <summary>
+      <span class="frame-title">5. Keep-warm pinger</span>
+      <span class="frame-badge">Locked</span>
+    </summary>
+    <div class="frame-body"><p>Coming soon.</p></div>
+  </details>
+
+  <details id="frame-render-deploy" class="frame" data-status="locked" data-locked="true">
+    <summary>
+      <span class="frame-title">6. Deploy to Render</span>
+      <span class="frame-badge">Locked</span>
+    </summary>
+    <div class="frame-body"><p>Coming soon.</p></div>
+  </details>
+</main>
+<script>
+  const STORAGE_KEYS = {
+    "render-key": "onboarding.renderApiKey",
+  };
+
+  const FRAME_ORDER = [
+    "render-key", "github-app", "supabase", "llm-provider",
+    "uptime-pinger", "render-deploy",
+  ];
+
+  const BADGE_TEXT = {
+    locked: "Locked",
+    ready: "Not started",
+    error: "Error",
+    done: "✓ Validated",
+  };
+
+  function frameEl(id) {
+    return document.getElementById(`frame-${id}`);
+  }
+
+  function badgeEl(id) {
+    return frameEl(id).querySelector(".frame-badge");
+  }
+
+  function setFrameStatus(id, status, detail) {
+    const el = frameEl(id);
+    el.dataset.status = status;
+    badgeEl(id).textContent = detail ? `${BADGE_TEXT[status]} — ${detail}` : BADGE_TEXT[status];
+  }
+
+  function nextFrame(id) {
+    return FRAME_ORDER[FRAME_ORDER.indexOf(id) + 1];
+  }
+
+  function lockFrame(id) {
+    const el = frameEl(id);
+    el.dataset.locked = "true";
+    el.open = false;
+    setFrameStatus(id, "locked");
+    const key = STORAGE_KEYS[id];
+    if (key) sessionStorage.removeItem(key);
+  }
+
+  function unlockFrame(id) {
+    const el = frameEl(id);
+    el.dataset.locked = "false";
+    setFrameStatus(id, "ready");
+  }
+
+  function relockDownstreamOf(id) {
+    FRAME_ORDER.slice(FRAME_ORDER.indexOf(id) + 1).forEach(lockFrame);
+  }
+
+  function completeFrame(id, detail) {
+    const el = frameEl(id);
+    el.dataset.locked = "true";
+    el.open = false;
+    setFrameStatus(id, "done", detail);
+    const next = nextFrame(id);
+    if (next) unlockFrame(next);
+  }
+
+  function beginChange(id) {
+    relockDownstreamOf(id);
+    const el = frameEl(id);
+    el.dataset.locked = "false";
+    el.open = true;
+    setFrameStatus(id, "ready");
+  }
+
+  async function validateRenderKey() {
+    const input = document.getElementById("render-key-input");
+    const key = input.value.trim();
+    const errorEl = document.getElementById("render-key-error");
+    errorEl.textContent = "";
+    if (!key) {
+      errorEl.textContent = "Paste your Render API key first.";
+      return;
+    }
+    setFrameStatus("render-key", "ready", "checking…");
+    let resp;
+    try {
+      resp = await fetch("/api/render/validate-key", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: key}),
+      });
+    } catch (err) {
+      setFrameStatus("render-key", "error");
+      errorEl.textContent = "Could not reach the wizard's server. Try again.";
+      return;
+    }
+    const body = await resp.json();
+    if (body.valid) {
+      sessionStorage.setItem(STORAGE_KEYS["render-key"], key);
+      input.value = "";
+      completeFrame("render-key", `owner: ${body.owner_name}`);
+    } else if (body.reason === "invalid_key") {
+      setFrameStatus("render-key", "error");
+      errorEl.textContent = "That key was rejected by Render. Double-check it and try again.";
+    } else {
+      setFrameStatus("render-key", "error");
+      errorEl.textContent = "Render's API is unreachable right now. Try again in a moment.";
+    }
+  }
+
+  function restoreFromSession() {
+    if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
+      completeFrame("render-key", "restored from this session");
+    }
+  }
+
+  function guardLockedFrames() {
+    document.querySelectorAll(".frame").forEach((el) => {
+      el.addEventListener("toggle", () => {
+        if (el.open && el.dataset.locked === "true") {
+          el.open = false;
+        }
+      });
+    });
+  }
+
+  function attachChangeButtons() {
+    document.querySelectorAll(".frame-change").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        beginChange(btn.dataset.frame);
+      });
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
+    guardLockedFrames();
+    attachChangeButtons();
+    restoreFromSession();
+  });
+</script>
+</body>
 </html>
