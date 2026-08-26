@@ -6,9 +6,15 @@ sections 3-4."""
 from __future__ import annotations
 
 import base64
+import json
+import time
 
 import httpx
+import pytest
+import requests as requests_lib
 import respx
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from onboarding import github_client
 
@@ -88,3 +94,130 @@ async def test_exchange_sends_no_authorization_header():
         )
         await github_client.exchange_manifest_code(CODE)
     assert "authorization" not in {h.lower() for h in route.calls.last.request.headers}
+
+
+@pytest.fixture(scope="module")
+def _throwaway_key_material() -> str:
+    """A throwaway RSA key, base64-encoded like the real
+    exchange_manifest_code output would be. Only used for local JWT
+    signing in these tests — every HTTP call is mocked below, so nothing
+    is ever sent anywhere with it."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return base64.b64encode(pem).decode()
+
+
+@pytest.fixture(autouse=True)
+def _no_pygithub_rate_limit_sleep(monkeypatch):
+    """Mirrors tests/test_github_app.py's own fixture of the same name:
+    PyGithub's Requester paces real requests with time.sleep(); every call
+    here goes through fake_transport below, so the throttle protects
+    nothing and only wastes wall-clock."""
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+
+
+class _FakeGithubTransport:
+    """Routes requests by (method, url-substring) to canned JSON responses.
+    PyGithub calls through `requests`, not `httpx` — respx cannot intercept
+    it — so this patches the same requests.adapters.HTTPAdapter.send
+    transport boundary tests/test_github_app.py's own FakeGithubTransport
+    uses, scoped down to what onboarding/github_client.py actually needs
+    (one App-JWT endpoint, no installation-token exchange)."""
+
+    def __init__(self):
+        self.routes: list[tuple[str, str, dict, int]] = []
+
+    def route(self, method: str, url_substring: str, json_body, status_code: int = 200):
+        self.routes.append((method.upper(), url_substring, json_body, status_code))
+
+    def send(self, request: requests_lib.PreparedRequest, **kwargs) -> requests_lib.Response:
+        for method, url_substring, json_body, status_code in sorted(
+            self.routes, key=lambda r: -len(r[1])
+        ):
+            if request.method == method and url_substring in request.url:
+                resp = requests_lib.Response()
+                resp.status_code = status_code
+                resp.headers["Content-Type"] = "application/json"
+                resp._content = json.dumps(json_body).encode("utf-8")
+                resp.encoding = "utf-8"
+                resp.url = request.url
+                resp.reason = "OK"
+                resp.request = request
+                return resp
+        raise AssertionError(f"Unmocked request: {request.method} {request.url}")
+
+
+@pytest.fixture
+def fake_transport(monkeypatch):
+    transport = _FakeGithubTransport()
+    monkeypatch.setattr(requests_lib.adapters.HTTPAdapter, "send", transport.send)
+    return transport
+
+
+async def test_valid_installation_returns_account_and_scope(
+    fake_transport, _throwaway_key_material
+):
+    fake_transport.route(
+        "GET",
+        "/app/installations/456",
+        {"id": 456, "account": {"login": "octocat"}, "repository_selection": "selected"},
+    )
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    )
+    assert result == github_client.InstallationVerified(
+        account_login="octocat", repo_scope="selected"
+    )
+
+
+async def test_installation_not_found_is_reported(fake_transport, _throwaway_key_material):
+    fake_transport.route("GET", "/app/installations/456", {"message": "Not Found"}, 404)
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    )
+    assert result == github_client.InstallationInvalid(reason="installation_not_found")
+
+
+async def test_unauthorized_is_invalid_credentials(fake_transport, _throwaway_key_material):
+    fake_transport.route("GET", "/app/installations/456", {"message": "Bad credentials"}, 401)
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    )
+    assert result == github_client.InstallationInvalid(reason="invalid_credentials")
+
+
+async def test_server_error_is_unreachable(fake_transport, _throwaway_key_material):
+    fake_transport.route("GET", "/app/installations/456", {}, 500)
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    )
+    assert result == github_client.InstallationInvalid(reason="github_unreachable")
+
+
+async def test_malformed_base64_private_key_is_invalid_credentials():
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64="not-valid-base64!!", installation_id=456
+    )
+    assert result == github_client.InstallationInvalid(reason="invalid_credentials")
+
+
+async def test_valid_base64_but_not_a_real_pem_is_invalid_credentials():
+    garbage_pem_b64 = base64.b64encode(b"not a real PEM").decode()
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64=garbage_pem_b64, installation_id=456
+    )
+    assert result == github_client.InstallationInvalid(reason="invalid_credentials")
+
+
+async def test_installation_response_missing_expected_fields_is_unreachable(
+    fake_transport, _throwaway_key_material
+):
+    fake_transport.route("GET", "/app/installations/456", {"id": 456})
+    result = await github_client.verify_installation(
+        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    )
+    assert result == github_client.InstallationInvalid(reason="github_unreachable")
