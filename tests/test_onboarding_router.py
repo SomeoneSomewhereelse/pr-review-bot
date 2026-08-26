@@ -64,3 +64,16 @@ async def test_response_never_echoes_the_submitted_key(monkeypatch):
     client = await _client()
     resp = await client.post("/api/render/validate-key", json={"api_key": SENTINEL_KEY})
     assert SENTINEL_KEY not in resp.text
+
+
+async def test_validation_error_never_echoes_the_submitted_key():
+    """Verify that malformed requests (e.g., wrong field name) never echo
+    the credential in the 422 validation error response."""
+    client = await _client()
+    # Send request with wrong field name (typo) to trigger validation error
+    resp = await client.post("/api/render/validate-key", json={"key": SENTINEL_KEY})
+    assert resp.status_code == 422
+    # Credential must not appear in response text
+    assert SENTINEL_KEY not in resp.text
+    # Response must use generic handler (no "input" field from FastAPI's default)
+    assert "input" not in resp.text
