@@ -61,14 +61,18 @@ section 3), not an oversight to fix.
   must not, since `localStorage` persists past the tab closing. Any new
   frame that holds a visitor secret client-side follows the render-key
   frame's `STORAGE_KEYS` / `sessionStorage` pattern, not the theme/lang one.
-- **`tests/test_onboarding_page.py::test_render_key_leaves_the_page_exactly_once`
-  mechanically enforces `body.count("fetch(") == 1`.** This is deliberate: a
-  visitor credential should have exactly one, auditable exit path per page
-  load. Adding a second relay call (a new frame's own `fetch()`) will fail
-  this test — that's the signal to update the test alongside the new call,
-  not to route around it. Each credential-carrying `fetch()` this page ever
-  grows should be paired with its own equivalent test asserting it's the
-  only such exit for *that* frame's secret.
+- **Every credential-carrying `fetch()` on the page has its own
+  `..._leaves_the_page_exactly_once` test in
+  `tests/test_onboarding_page.py`,** each asserting
+  `body.count('fetch("<that endpoint>"') == 1`. This is deliberate: a visitor
+  credential should have exactly one, auditable exit path per page load. The
+  check was originally a single blanket `body.count("fetch(") == 1`; it was
+  narrowed to per-endpoint counts once frame 2 legitimately added a second
+  and third relay call, which is the *only* acceptable way to satisfy it —
+  loosening a count to `>= 1`, or dropping one, is not. A new frame that
+  adds a relay call adds its own such test alongside; a second `fetch()` to
+  an endpoint that already has one is the signal to stop and ask why that
+  credential now has two exits, not to bump a number.
 
 ## What sub-project 2 (GitHub App automation) adds to these rules
 
@@ -94,13 +98,24 @@ section 3), not an oversight to fix.
   specifically for this frame's manifest-creation form POST. A future frame
   that needs to form-POST to a *different* external origin adds that origin
   to this same directive rather than loosening `default-src`.
-- **`onboarding/config.py`'s `public_base_url` is validated in
+- **`onboarding/config.py`'s `public_base_url` is checked for *presence* in
   `onboarding/main.py`'s `lifespan`, not as a pydantic-required field** —
   same reasoning as `app/config.py`/`app/main.py`'s own pattern: a
   required field would raise at import time, breaking pytest collection
   before a clear error could ever be reported. Frame 2 cannot construct a
   working manifest without it, so the service still refuses to boot without
   it — just via an explicit check, not a schema constraint.
+  Its *shape*, in contrast, does live in a pydantic `field_validator`:
+  whitespace and a trailing `/` are stripped, and anything that is not a
+  plain `http(s)://` base URL is rejected. That split is deliberate, and the
+  shape half is not cosmetic — the value is both concatenated into the
+  manifest's `redirect_url`/`setup_url` (a trailing slash yields an
+  unroutable `//` path, and the 404 lands *after* the visitor has already
+  created a real App whose one-time credentials are then unrecoverable) and
+  substituted raw into a `<script>` block on a page holding a GitHub App
+  private key (a `"` or `<` there is an injection, not a typo). An unset
+  value still normalizes to `""` rather than erroring, so the lifespan check
+  stays the one thing that reports a missing value.
 
 ## The test suite looks hung on a fresh worktree — it isn't
 

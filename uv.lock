@@ -802,12 +802,15 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pygithub" },
+    { name = "pyjwt" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "cryptography" },
     { name = "mkdocs-material" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -830,12 +833,15 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pygithub", specifier = ">=2.4" },
+    { name = "pyjwt", specifier = ">=2.13" },
     { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "requests", specifier = ">=2.32" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "cryptography", specifier = ">=44.0" },
     { name = "mkdocs-material", specifier = ">=9.5" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
