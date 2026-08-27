@@ -419,3 +419,30 @@ async def test_connection_info_reports_failure_reason(monkeypatch):
     client = await _client()
     resp = await client.post("/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20})
     assert resp.json() == {"valid": False, "reason": "pooler_config_unavailable"}
+
+
+async def test_project_status_rejects_a_ref_that_does_not_match_supabases_format():
+    """ref is interpolated into a request path
+    (GET /v1/projects/{ref}) -- reject anything that isn't Supabase's real
+    20-lowercase-letter ref shape before it ever reaches that interpolation."""
+    client = await _client()
+    resp = await client.post(
+        "/api/supabase/project-status", json={"access_token": "a", "ref": "not-a-real-ref"}
+    )
+    assert resp.status_code == 422
+
+
+async def test_project_status_rejects_an_uppercase_ref():
+    client = await _client()
+    resp = await client.post(
+        "/api/supabase/project-status", json={"access_token": "a", "ref": "X" * 20}
+    )
+    assert resp.status_code == 422
+
+
+async def test_connection_info_rejects_a_ref_that_does_not_match_supabases_format():
+    client = await _client()
+    resp = await client.post(
+        "/api/supabase/connection-info", json={"access_token": "a", "ref": "../../etc/passwd"}
+    )
+    assert resp.status_code == 422

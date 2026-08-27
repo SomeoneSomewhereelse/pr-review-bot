@@ -59,12 +59,12 @@ class SupabaseCreateProjectRequest(BaseModel):
 
 class SupabaseProjectStatusRequest(BaseModel):
     access_token: str = Field(max_length=4096)
-    ref: str = Field(max_length=20)
+    ref: str = Field(max_length=20, pattern=r"^[a-z]{20}$")
 
 
 class SupabaseConnectionInfoRequest(BaseModel):
     access_token: str = Field(max_length=4096)
-    ref: str = Field(max_length=20)
+    ref: str = Field(max_length=20, pattern=r"^[a-z]{20}$")
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -22,6 +22,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # rstrip("/") below can never eat into the scheme (e.g. "https:///").
 _BASE_URL_RE = re.compile(r"^https?://[^\s\"'<>?#\\/]+[^\s\"'<>?#\\]*$")
 
+# Same excluded characters as _BASE_URL_RE, for the same reason: this set is
+# reused by supabase_oauth_client_id's validator below, since that value is
+# also substituted raw into a <script> block (onboarding/router.py's
+# index()). Not a URL, so only the quote/angle-bracket/backslash exclusion
+# applies here — no scheme/query/fragment shape to check.
+_INJECTION_CHARS_RE = re.compile(r"[\"'<>\\]")
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
@@ -38,13 +45,44 @@ class Settings(BaseSettings):
     # This service's first operator-level secrets: set once by the operator
     # after manually registering an OAuth app in Supabase org settings ->
     # OAuth Apps (Supabase has no self-registration mechanism, unlike
-    # GitHub's App Manifest flow). Never visitor-supplied. No shape
-    # validator like public_base_url's: a malformed client_id/secret fails
-    # visibly at OAuth-authorize time before any credential is created,
-    # a much lower-stakes failure mode than public_base_url's (an
-    # unrecoverable orphaned GitHub App).
+    # GitHub's App Manifest flow). Never visitor-supplied.
+    # supabase_oauth_client_id gets the same whitespace-strip-and-empty-
+    # sentinel and injection-character validator as public_base_url, since a
+    # pasted value with a trailing newline would otherwise pass the
+    # lifespan's presence check while booting the service into an unusable
+    # state, and it is templated raw into a <script> block the same way
+    # public_base_url is (window.SUPABASE_OAUTH_CLIENT_ID). No exact UUID
+    # format check — just whitespace + injection-safety, matching
+    # public_base_url's validator's spirit without over-engineering a full
+    # format check.
+    # supabase_oauth_client_secret gets only the whitespace-strip-and-empty-
+    # sentinel half: it is never templated into HTML (client_secret stays
+    # server-side), so a malformed value still fails visibly at
+    # OAuth-authorize time before any credential is created — a much
+    # lower-stakes failure mode than public_base_url's (an unrecoverable
+    # orphaned GitHub App).
     supabase_oauth_client_id: str = ""
     supabase_oauth_client_secret: str = ""
+
+    @field_validator("supabase_oauth_client_id")
+    @classmethod
+    def _normalize_supabase_oauth_client_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            # The "unset" sentinel onboarding/main.py's lifespan checks for.
+            return ""
+        if _INJECTION_CHARS_RE.search(value):
+            raise ValueError(
+                "SUPABASE_OAUTH_CLIENT_ID must not contain \", ', <, >, or \\ "
+                "characters"
+            )
+        return value
+
+    @field_validator("supabase_oauth_client_secret")
+    @classmethod
+    def _normalize_supabase_oauth_client_secret(cls, value: str) -> str:
+        # strip() alone also handles the all-whitespace -> "" sentinel case.
+        return value.strip()
 
     @field_validator("public_base_url")
     @classmethod

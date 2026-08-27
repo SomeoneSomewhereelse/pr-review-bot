@@ -39,7 +39,11 @@ def _parse_token_response(response: httpx.Response, invalid_reason: str) -> Supa
     try:
         body = response.json()
         access_token = str(body["access_token"])
-        expires_in = int(body["expires_in"])
+        # expires_in is never read downstream (refresh is reactive, not
+        # timer-based) -- a missing/malformed value shouldn't be able to
+        # fail the whole token exchange, only a genuinely missing
+        # access_token should.
+        expires_in = int(body.get("expires_in") or 0)
     except (ValueError, KeyError, TypeError):
         return SupabaseOAuthFailed(reason="supabase_unreachable")
     refresh_token = body.get("refresh_token")

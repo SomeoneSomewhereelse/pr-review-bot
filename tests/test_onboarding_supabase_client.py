@@ -7,6 +7,8 @@ docs/superpowers/specs/2026-08-26-onboarding-supabase-provisioning-frame-design.
 sections 3-5."""
 from __future__ import annotations
 
+import logging
+
 import httpx
 import pytest
 import respx
@@ -113,6 +115,23 @@ async def test_exchange_response_missing_access_token_is_unreachable():
         )
         result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
+
+
+async def test_response_missing_expires_in_is_tolerated():
+    """expires_in is never read downstream (refresh is reactive, not
+    timer-based per onboarding/CLAUDE.md), so a missing/malformed value
+    must not fail the whole token exchange -- only a genuinely missing
+    access_token should."""
+    with respx.mock:
+        respx.post(TOKEN_URL).mock(
+            return_value=httpx.Response(
+                200, json={"access_token": "sentinel-access", "token_type": "Bearer"}
+            )
+        )
+        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+    assert result == supabase_client.SupabaseTokens(
+        access_token="sentinel-access", refresh_token=None, expires_in=0
+    )
 
 
 async def test_refresh_valid_token_returns_new_tokens():
@@ -248,6 +267,9 @@ async def test_create_project_sends_region_selection_not_deprecated_fields():
 
 
 async def test_create_project_never_logs_or_returns_the_password(caplog):
+    # DEBUG, not the pytest default (WARNING+): a future logger.info/debug
+    # leak of the password would otherwise sail past this test uncaught.
+    caplog.set_level(logging.DEBUG)
     with respx.mock:
         respx.post(PROJECTS_URL).mock(
             return_value=httpx.Response(201, json={"ref": "x" * 20, "status": "INACTIVE"})
