@@ -190,7 +190,7 @@ async def create_project(
         # business rule (free-tier cap or otherwise) was violated.
         try:
             message = response.json().get("message")
-        except ValueError:
+        except (ValueError, AttributeError):
             message = None
         if message:
             return SupabaseProjectRejected(message=str(message))

@@ -301,3 +301,13 @@ async def test_create_project_unreachable_on_5xx():
         respx.post(PROJECTS_URL).mock(return_value=httpx.Response(500))
         result = await supabase_client.create_project("a", "org-one", "name", "pw")
     assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_create_project_4xx_with_non_dict_json_falls_back_to_unreachable():
+    """If a 4xx error body is valid JSON but not a dict (e.g., array or scalar),
+    .get("message") raises AttributeError, which must be caught and degrade to
+    unreachable, not propagate uncaught."""
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(return_value=httpx.Response(403, json=[1, 2, 3]))
+        result = await supabase_client.create_project("a", "org-one", "name", "pw")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
