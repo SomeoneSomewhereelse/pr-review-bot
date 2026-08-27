@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from onboarding import github_client, render_client, supabase_client
+from onboarding import github_client, llm_client, render_client, supabase_client
 from onboarding.config import settings
 
 router = APIRouter()
@@ -65,6 +65,18 @@ class SupabaseProjectStatusRequest(BaseModel):
 class SupabaseConnectionInfoRequest(BaseModel):
     access_token: str = Field(max_length=4096)
     ref: str = Field(max_length=20, pattern=r"^[a-z]{20}$")
+
+
+class LlmGeminiListModelsRequest(BaseModel):
+    api_key: str = Field(max_length=512)
+
+
+class LlmGroqListModelsRequest(BaseModel):
+    api_key: str = Field(max_length=512)
+
+
+class LlmVertexListModelsRequest(BaseModel):
+    service_account_key_b64: str = Field(max_length=16384)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -184,4 +196,28 @@ async def get_supabase_connection_info(payload: SupabaseConnectionInfoRequest) -
             "db_port": result.db_port,
             "db_name": result.db_name,
         }
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/llm/gemini/list-models")
+async def list_gemini_models(payload: LlmGeminiListModelsRequest) -> dict:
+    result = await llm_client.list_gemini_models(payload.api_key)
+    if isinstance(result, llm_client.LlmModelsListed):
+        return {"valid": True, "models": result.models}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/llm/groq/list-models")
+async def list_groq_models(payload: LlmGroqListModelsRequest) -> dict:
+    result = await llm_client.list_groq_models(payload.api_key)
+    if isinstance(result, llm_client.LlmModelsListed):
+        return {"valid": True, "models": result.models}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/llm/vertex/list-models")
+async def list_vertex_models(payload: LlmVertexListModelsRequest) -> dict:
+    result = await llm_client.list_vertex_models(payload.service_account_key_b64)
+    if isinstance(result, llm_client.VertexModelsListed):
+        return {"valid": True, "project_id": result.project_id, "models": result.models}
     return {"valid": False, "reason": result.reason}

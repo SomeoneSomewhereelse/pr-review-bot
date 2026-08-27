@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from onboarding import github_client, render_client, supabase_client
+from onboarding import github_client, llm_client, render_client, supabase_client
 from onboarding.config import Settings, settings
 from onboarding.main import app
 
@@ -446,3 +446,93 @@ async def test_connection_info_rejects_a_ref_that_does_not_match_supabases_forma
         "/api/supabase/connection-info", json={"access_token": "a", "ref": "../../etc/passwd"}
     )
     assert resp.status_code == 422
+
+
+async def test_gemini_list_models_returns_models(monkeypatch):
+    async def fake_list(api_key):
+        assert api_key == "SENTINEL_KEY"
+        return llm_client.LlmModelsListed(models=["gemini-flash-latest", "gemini-2.5-pro"])
+
+    monkeypatch.setattr(llm_client, "list_gemini_models", fake_list)
+    client = await _client()
+    resp = await client.post("/api/llm/gemini/list-models", json={"api_key": "SENTINEL_KEY"})
+    assert resp.json() == {"valid": True, "models": ["gemini-flash-latest", "gemini-2.5-pro"]}
+
+
+async def test_gemini_list_models_reports_failure_reason(monkeypatch):
+    async def fake_list(api_key):
+        return llm_client.LlmApiFailed(reason="unauthorized")
+
+    monkeypatch.setattr(llm_client, "list_gemini_models", fake_list)
+    client = await _client()
+    resp = await client.post("/api/llm/gemini/list-models", json={"api_key": "bad"})
+    assert resp.json() == {"valid": False, "reason": "unauthorized"}
+
+
+async def test_gemini_list_models_validation_error_never_echoes_the_key():
+    sentinel_key = "SENTINEL_DO_NOT_ECHO_KEY"
+    client = await _client()
+    resp = await client.post("/api/llm/gemini/list-models", json={"api_key_typo": sentinel_key})
+    assert resp.status_code == 422
+    assert sentinel_key not in resp.text
+    assert "input" not in resp.text
+
+
+async def test_groq_list_models_returns_models(monkeypatch):
+    async def fake_list(api_key):
+        assert api_key == "SENTINEL_KEY"
+        return llm_client.LlmModelsListed(models=["llama-3.3-70b-versatile"])
+
+    monkeypatch.setattr(llm_client, "list_groq_models", fake_list)
+    client = await _client()
+    resp = await client.post("/api/llm/groq/list-models", json={"api_key": "SENTINEL_KEY"})
+    assert resp.json() == {"valid": True, "models": ["llama-3.3-70b-versatile"]}
+
+
+async def test_groq_list_models_reports_failure_reason(monkeypatch):
+    async def fake_list(api_key):
+        return llm_client.LlmApiFailed(reason="rate_limited")
+
+    monkeypatch.setattr(llm_client, "list_groq_models", fake_list)
+    client = await _client()
+    resp = await client.post("/api/llm/groq/list-models", json={"api_key": "a"})
+    assert resp.json() == {"valid": False, "reason": "rate_limited"}
+
+
+async def test_groq_list_models_validation_error_never_echoes_the_key():
+    sentinel_key = "SENTINEL_DO_NOT_ECHO_KEY"
+    client = await _client()
+    resp = await client.post("/api/llm/groq/list-models", json={"api_key_typo": sentinel_key})
+    assert resp.status_code == 422
+    assert sentinel_key not in resp.text
+    assert "input" not in resp.text
+
+
+async def test_vertex_list_models_returns_models_and_project_id(monkeypatch):
+    async def fake_list(service_account_key_b64):
+        assert service_account_key_b64 == "SENTINEL_B64"
+        return llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+
+    monkeypatch.setattr(llm_client, "list_vertex_models", fake_list)
+    client = await _client()
+    resp = await client.post("/api/llm/vertex/list-models", json={"service_account_key_b64": "SENTINEL_B64"})
+    assert resp.json() == {"valid": True, "project_id": "sentinel-project", "models": ["gemini-2.5-flash"]}
+
+
+async def test_vertex_list_models_reports_failure_reason(monkeypatch):
+    async def fake_list(service_account_key_b64):
+        return llm_client.LlmApiFailed(reason="invalid_service_account_json")
+
+    monkeypatch.setattr(llm_client, "list_vertex_models", fake_list)
+    client = await _client()
+    resp = await client.post("/api/llm/vertex/list-models", json={"service_account_key_b64": "not-json"})
+    assert resp.json() == {"valid": False, "reason": "invalid_service_account_json"}
+
+
+async def test_vertex_list_models_validation_error_never_echoes_the_key():
+    sentinel_key = "SENTINEL_DO_NOT_ECHO_SERVICE_ACCOUNT_KEY"
+    client = await _client()
+    resp = await client.post("/api/llm/vertex/list-models", json={"key_typo": sentinel_key})
+    assert resp.status_code == 422
+    assert sentinel_key not in resp.text
+    assert "input" not in resp.text
