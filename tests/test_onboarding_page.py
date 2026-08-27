@@ -565,3 +565,88 @@ async def test_supabase_oauth_callback_storage_write_is_guarded():
     catch_body = fn_body[catch_pos:fn_body.index("await fetchSupabaseOrganizations();")]
     assert "supabaseError(" in catch_body
     assert body.count("err_supabase_storage_failed:") == 2  # STRINGS.en + STRINGS.he
+
+
+async def test_frame4_has_a_three_way_provider_selector():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="llm-provider-choice-gemini"' in body
+    assert 'id="llm-provider-choice-groq"' in body
+    assert 'id="llm-provider-choice-vertex"' in body
+
+
+async def test_frame4_has_credential_inputs_and_model_picker():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="llm-provider-api-key-input"' in body
+    assert 'id="llm-provider-file-input"' in body
+    assert 'id="llm-provider-model-select"' in body
+    assert 'id="llm-provider-continue-submit"' in body
+
+
+async def test_gemini_llm_endpoint_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('endpoint = "/api/llm/gemini/list-models"') == 1
+
+
+async def test_groq_llm_endpoint_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('endpoint = "/api/llm/groq/list-models"') == 1
+
+
+async def test_llm_provider_credential_has_exactly_one_fetch_call_site():
+    """All three providers (Gemini/Groq here, Vertex in Task 5) share one
+    fetch() call site in validateLlmProviderCredential() rather than one
+    fetch() per provider — the per-provider endpoint tests above establish
+    each credential still has exactly one path to that shared call site,
+    the same one-exit-path invariant onboarding/CLAUDE.md documents for
+    every other credential-carrying fetch on this page, adapted for this
+    frame's shared-call-site shape.
+
+    Scoped to validateLlmProviderCredential()'s own body rather than the
+    whole page: callSupabaseRelay() (frame 3, pre-existing) also names its
+    parameter `endpoint` and its fetch call has the identical literal
+    shape "await fetch(endpoint, {" purely coincidentally -- an unscoped
+    count would false-positive against that unrelated function."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function validateLlmProviderCredential")
+    fn_body = body[fn_start:body.index("function confirmLlmProviderModel")]
+    assert fn_body.count("await fetch(endpoint, {") == 1
+
+
+async def test_llm_provider_never_persists_to_local_storage():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'sessionStorage.setItem(STORAGE_KEYS["llm-provider"]' in body
+    assert 'localStorage.setItem(STORAGE_KEYS["llm-provider"]' not in body
+
+
+async def test_model_confirm_requires_both_credential_and_model():
+    """Frame unlock gate: both a live-validated credential AND an explicit
+    model pick are required (spec section 2) — no fallback if either is
+    missing."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "if (!model || !pendingLlmProviderCredential)" in body
+
+
+async def test_frame4_locked_by_default():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert (
+        'id="frame-llm-provider" class="frame" data-status="locked" '
+        'data-locked="true"'
+    ) in body
+
+
+async def test_empty_model_list_shows_dedicated_message():
+    """A credential that validates but returns zero eligible models is a
+    dead end under the "both required" gate (spec section 2) — it gets its
+    own message rather than silently showing an empty dropdown."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "if (!models.length) {" in body
+    assert 'llmProviderError("err_llm_no_models_available");' in body

@@ -251,8 +251,25 @@
       <summary>
         <span class="frame-title" data-i18n="frame4_title"></span>
         <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="llm-provider" data-i18n="change_button"></button>
       </summary>
-      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+      <div class="frame-body">
+        <p data-i18n="frame4_instructions"></p>
+        <div class="radio-group">
+          <label><input type="radio" name="llm-provider-choice" value="gemini" id="llm-provider-choice-gemini"> <span data-i18n="frame4_provider_gemini"></span></label>
+          <label><input type="radio" name="llm-provider-choice" value="groq" id="llm-provider-choice-groq"> <span data-i18n="frame4_provider_groq"></span></label>
+          <label><input type="radio" name="llm-provider-choice" value="vertex" id="llm-provider-choice-vertex"> <span data-i18n="frame4_provider_vertex"></span></label>
+        </div>
+        <input id="llm-provider-api-key-input" type="password" style="display: none;">
+        <input id="llm-provider-file-input" type="file" accept="application/json" style="display: none;">
+        <button id="llm-provider-validate-submit" type="button" data-i18n="validate_button" style="display: none;"></button>
+        <div id="llm-provider-model-section" style="display: none;">
+          <p data-i18n="frame4_model_instructions"></p>
+          <select id="llm-provider-model-select"></select>
+          <button id="llm-provider-continue-submit" type="button" data-i18n="continue_button"></button>
+        </div>
+        <p id="llm-provider-error" class="frame-error"></p>
+      </div>
     </details>
 
     <details id="frame-uptime-pinger" class="frame" data-status="locked" data-locked="true">
@@ -337,6 +354,24 @@
       err_supabase_pooler_config_unavailable: "Your project's database connection isn't ready yet. Try again in a moment.",
       err_supabase_provisioning_failed: "Supabase couldn't finish setting up your project. Try creating it again.",
       err_supabase_provisioning_timeout: "Still provisioning — this is taking longer than usual. You can check again, or come back later.",
+      continue_button: "Continue",
+      provider_prefix: "provider: ",
+      frame4_instructions: "Pick which LLM provider your deployed service will use, then paste or upload its credential.",
+      frame4_provider_gemini: "Gemini (AI Studio API key)",
+      frame4_provider_groq: "Groq (API key)",
+      frame4_provider_vertex: "Vertex AI (GCP service-account file)",
+      frame4_model_instructions: "Choose the model your deployed service will use.",
+      err_llm_no_provider: "Pick a provider first.",
+      err_llm_empty_key: "Paste your API key first.",
+      err_llm_no_file: "Choose your GCP service-account JSON file first.",
+      err_llm_invalid_service_account_json: "That file isn't a valid GCP service-account key. Check you picked the right file.",
+      err_llm_unauthorized: "That credential was rejected. Double-check it and try again.",
+      err_llm_forbidden: "That credential doesn't have access. Double-check its permissions and try again.",
+      err_llm_rate_limited: "Too many requests right now. Try again in a moment.",
+      err_llm_unreachable: "That provider is unreachable right now. Try again in a moment.",
+      err_llm_no_models_available: "This credential is valid, but no usable models are available. Check your account/project has an eligible model enabled.",
+      err_llm_no_model_selected: "Pick a model first.",
+      err_llm_storage_failed: "Couldn't save this in your browser. Try again.",
     },
     he: {
       page_title: "הקמת בודק ה-PR שלך",
@@ -398,6 +433,24 @@
       err_supabase_pooler_config_unavailable: "חיבור מסד הנתונים של הפרויקט עדיין לא מוכן. נסו שוב בעוד רגע.",
       err_supabase_provisioning_failed: "Supabase לא הצליח לסיים את הקמת הפרויקט. נסו ליצור אותו מחדש.",
       err_supabase_provisioning_timeout: "עדיין בהקמה — זה לוקח יותר זמן מהרגיל. אפשר לבדוק שוב, או לחזור מאוחר יותר.",
+      continue_button: "המשך",
+      provider_prefix: "ספק: ",
+      frame4_instructions: "בחרו איזה ספק LLM השירות שלכם ישתמש בו, ואז הדביקו או העלו את פרטי ההתחברות שלו.",
+      frame4_provider_gemini: "Gemini (מפתח API של AI Studio)",
+      frame4_provider_groq: "Groq (מפתח API)",
+      frame4_provider_vertex: "Vertex AI (קובץ חשבון שירות של GCP)",
+      frame4_model_instructions: "בחרו את המודל שהשירות שלכם ישתמש בו.",
+      err_llm_no_provider: "בחרו ספק קודם.",
+      err_llm_empty_key: "הדביקו קודם את מפתח ה-API שלכם.",
+      err_llm_no_file: "בחרו קודם את קובץ חשבון השירות של GCP.",
+      err_llm_invalid_service_account_json: "הקובץ הזה אינו מפתח חשבון שירות תקין של GCP. ודאו שבחרתם בקובץ הנכון.",
+      err_llm_unauthorized: "פרטי ההתחברות נדחו. בדקו אותם שוב ונסו שנית.",
+      err_llm_forbidden: "לפרטי ההתחברות האלה אין הרשאה מספקת. בדקו את ההרשאות שלהם ונסו שוב.",
+      err_llm_rate_limited: "יותר מדי בקשות כרגע. נסו שוב בעוד רגע.",
+      err_llm_unreachable: "הספק אינו זמין כרגע. נסו שוב בעוד רגע.",
+      err_llm_no_models_available: "פרטי ההתחברות תקינים, אך אין מודלים זמינים לשימוש. ודאו שיש לחשבון/לפרויקט שלכם מודל מתאים מופעל.",
+      err_llm_no_model_selected: "בחרו מודל קודם.",
+      err_llm_storage_failed: "לא ניתן היה לשמור זאת בדפדפן זה. נסו שוב.",
     },
   };
 
@@ -465,6 +518,7 @@
     "render-key": "onboarding.renderApiKey",
     "github-app": "onboarding.githubApp",
     "supabase": "onboarding.supabase",
+    "llm-provider": "onboarding.llmProvider",
   };
 
   const SUPABASE_PENDING_KEY = "onboarding.supabasePending";
@@ -560,6 +614,7 @@
     // shape, one step longer.
     if (id === "github-app") resetGithubAppCreateSection();
     if (id === "supabase") resetSupabaseConnectSection();
+    if (id === "llm-provider") resetLlmProviderSection();
   }
 
   function unlockFrame(id) {
@@ -600,6 +655,163 @@
       sessionStorage.removeItem(STORAGE_KEYS["supabase"]);
       resetSupabaseConnectSection();
     }
+    if (id === "llm-provider") {
+      sessionStorage.removeItem(STORAGE_KEYS["llm-provider"]);
+      resetLlmProviderSection();
+    }
+  }
+
+  let currentLlmProviderErrorKey = null;
+  let pendingLlmProviderCredential = null;
+
+  function resetLlmProviderSection() {
+    document.querySelectorAll('input[name="llm-provider-choice"]').forEach((r) => { r.checked = false; });
+    const apiKeyInput = document.getElementById("llm-provider-api-key-input");
+    apiKeyInput.value = "";
+    apiKeyInput.style.display = "none";
+    const fileInput = document.getElementById("llm-provider-file-input");
+    fileInput.value = "";
+    fileInput.style.display = "none";
+    document.getElementById("llm-provider-validate-submit").style.display = "none";
+    document.getElementById("llm-provider-model-section").style.display = "none";
+    document.getElementById("llm-provider-model-select").innerHTML = "";
+    document.getElementById("llm-provider-error").textContent = "";
+    currentLlmProviderErrorKey = null;
+    pendingLlmProviderCredential = null;
+  }
+
+  function llmProviderError(key) {
+    currentLlmProviderErrorKey = key;
+    document.getElementById("llm-provider-error").textContent = t(key);
+  }
+
+  function llmProviderErrorForReason(reason) {
+    const map = {
+      unauthorized: "err_llm_unauthorized",
+      forbidden: "err_llm_forbidden",
+      rate_limited: "err_llm_rate_limited",
+      provider_unreachable: "err_llm_unreachable",
+      invalid_service_account_json: "err_llm_invalid_service_account_json",
+    };
+    llmProviderError(map[reason] || "err_llm_unreachable");
+  }
+
+  function getSelectedLlmProvider() {
+    const checked = document.querySelector('input[name="llm-provider-choice"]:checked');
+    return checked ? checked.value : null;
+  }
+
+  function handleLlmProviderChoice() {
+    const provider = getSelectedLlmProvider();
+    document.getElementById("llm-provider-model-section").style.display = "none";
+    document.getElementById("llm-provider-model-select").innerHTML = "";
+    document.getElementById("llm-provider-error").textContent = "";
+    currentLlmProviderErrorKey = null;
+    pendingLlmProviderCredential = null;
+    const apiKeyInput = document.getElementById("llm-provider-api-key-input");
+    const fileInput = document.getElementById("llm-provider-file-input");
+    const submitBtn = document.getElementById("llm-provider-validate-submit");
+    apiKeyInput.style.display = (provider === "gemini" || provider === "groq") ? "block" : "none";
+    fileInput.style.display = (provider === "vertex") ? "block" : "none";
+    submitBtn.style.display = provider ? "block" : "none";
+  }
+
+  function showLlmProviderModels(models, provider, credentialFragment, projectId) {
+    const select = document.getElementById("llm-provider-model-select");
+    select.innerHTML = "";
+    if (!models.length) {
+      llmProviderError("err_llm_no_models_available");
+      return;
+    }
+    models.forEach((m) => {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      select.appendChild(opt);
+    });
+    document.getElementById("llm-provider-model-section").style.display = "block";
+    pendingLlmProviderCredential = {
+      provider,
+      ...credentialFragment,
+      ...(projectId ? {gcp_project: projectId} : {}),
+    };
+  }
+
+  async function validateLlmProviderCredential() {
+    const provider = getSelectedLlmProvider();
+    document.getElementById("llm-provider-error").textContent = "";
+    currentLlmProviderErrorKey = null;
+    document.getElementById("llm-provider-model-section").style.display = "none";
+    document.getElementById("llm-provider-model-select").innerHTML = "";
+    pendingLlmProviderCredential = null;
+    if (!provider) {
+      llmProviderError("err_llm_no_provider");
+      return;
+    }
+    let endpoint, payload, credentialFragment;
+    if (provider === "gemini") {
+      const apiKey = document.getElementById("llm-provider-api-key-input").value.trim();
+      if (!apiKey) {
+        llmProviderError("err_llm_empty_key");
+        return;
+      }
+      endpoint = "/api/llm/gemini/list-models";
+      payload = {api_key: apiKey};
+      credentialFragment = {api_key: apiKey};
+    } else if (provider === "groq") {
+      const apiKey = document.getElementById("llm-provider-api-key-input").value.trim();
+      if (!apiKey) {
+        llmProviderError("err_llm_empty_key");
+        return;
+      }
+      endpoint = "/api/llm/groq/list-models";
+      payload = {api_key: apiKey};
+      credentialFragment = {api_key: apiKey};
+    } else {
+      llmProviderError("err_llm_no_file");
+      return;
+    }
+    let resp;
+    try {
+      resp = await fetch(endpoint, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      llmProviderError("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      llmProviderError("err_llm_unreachable");
+      return;
+    }
+    if (!body.valid) {
+      llmProviderErrorForReason(body.reason);
+      return;
+    }
+    showLlmProviderModels(body.models, provider, credentialFragment, body.project_id);
+  }
+
+  function confirmLlmProviderModel() {
+    const select = document.getElementById("llm-provider-model-select");
+    const model = select.value;
+    if (!model || !pendingLlmProviderCredential) {
+      llmProviderError("err_llm_no_model_selected");
+      return;
+    }
+    const stored = {...pendingLlmProviderCredential, model};
+    try {
+      sessionStorage.setItem(STORAGE_KEYS["llm-provider"], JSON.stringify(stored));
+    } catch (err) {
+      llmProviderError("err_llm_storage_failed");
+      return;
+    }
+    completeFrame("llm-provider", "provider_prefix", stored.provider);
   }
 
   async function validateRenderKey() {
@@ -1204,6 +1416,9 @@
       showSupabaseProvisioning();
       pollUntilReady(Date.now());
     }
+    if (sessionStorage.getItem(STORAGE_KEYS["llm-provider"])) {
+      completeFrame("llm-provider", "restored", null);
+    }
   }
 
   function guardLockedFrames() {
@@ -1263,6 +1478,11 @@
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);
+    document.getElementById("llm-provider-validate-submit").addEventListener("click", validateLlmProviderCredential);
+    document.getElementById("llm-provider-continue-submit").addEventListener("click", confirmLlmProviderModel);
+    document.querySelectorAll('input[name="llm-provider-choice"]').forEach((r) => {
+      r.addEventListener("change", handleLlmProviderChoice);
+    });
     guardLockedFrames();
     attachChangeButtons();
 
