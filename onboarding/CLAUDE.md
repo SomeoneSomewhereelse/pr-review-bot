@@ -240,6 +240,55 @@ section 3), not an oversight to fix.
   storage name matches this service's `GCP_SERVICE_ACCOUNT_KEY`-adjacent
   naming convention for sub-project 6 to read later.
 
+## What sub-project 5 (UptimeRobot keep-warm frame) adds to these rules
+
+- **UptimeRobot's v3 REST API (`Bearer` auth, JSON,
+  `https://api.uptimerobot.com/v3/monitors`) is used for every call this
+  frame makes — never the legacy v2 form-API.** `scripts/deploy.py`'s
+  existing `check_uptime_pinger` still uses v2 for its own read-only
+  `getMonitors` check, and that is intentionally untouched — no reason to
+  migrate a working read-only check. But v2's `POST /newMonitor` was
+  verified live to reject monitor creation on a free-plan account (`403
+  "You are not allowed to use some settings with your current plan"`),
+  while v3 was verified live to accept the identical creation on the same
+  account. Do not "simplify" this frame's client onto v2 without
+  re-verifying that live behavior first.
+- **This frame reads a `sessionStorage` key it does not write:
+  `onboarding.renderServiceUrl`.** Sub-project 6 (Render service creation,
+  not yet built as of this frame) is obligated to write the deployed
+  service's base URL there on its own completion — see
+  `docs/superpowers/specs/2026-08-27-onboarding-uptimerobot-frame-design.md`
+  section 3's forward contract. Until sub-project 6 exists, frame 5's only
+  reachable state is the blocked message (`frame5_blocked_no_render_url`)
+  — this is expected, not a bug. If sub-project 6's actual output shape
+  ends up different from a bare base URL when it's built, reconcile against
+  that key name and format, not against a guess made here.
+- **Dedupe-before-create is load-bearing, not an optimization.** Every
+  credential submission to this frame (including a "Change" resubmit)
+  calls `GET /v3/monitors` before ever calling `POST /v3/monitors` — a
+  monitor is only created if none already watches the derived
+  `<render_service_url>/healthz` target. Removing this check reintroduces
+  orphaned duplicate monitors on every resubmit.
+- **There is no way to detect a read-only (Monitor-Specific) API key
+  server-side — verified live.** `POST /v3/monitors` and `GET
+  /v3/monitors` both return the identical `401 {"message": "Invalid
+  token.", "code": "003-005"}` for a valid-but-read-only key as for a
+  wholly invalid one. Do not add a `reason` value implying this frame can
+  tell the two apart; the only mitigation is UI copy (the input's help
+  text and the `unauthorized` error both name the Main-API-Key requirement
+  explicitly).
+- **The monitor's `friendlyName`/`type`/`interval`/`timeout` are fixed, not
+  visitor-configurable** — `friendlyName` is always the derived target URL
+  itself (matching this project's own production monitor's existing
+  naming), `type: "HTTP"`, `interval: 300`, `timeout: 30`. A future change
+  that lets the visitor choose these needs its own brainstorm, not a quiet
+  addition here.
+- **`onboarding/uptimerobot_client.py` follows the same raw-`httpx`, no-SDK
+  shape as `render_client.py`/`github_client.py`/`supabase_client.py`** —
+  UptimeRobot has no official SDK. Tests mock via `respx`, same as those
+  three modules, not the SDK-boundary mocking `llm_client.py`'s tests
+  needed for `google-genai`.
+
 ## The test suite looks hung on a fresh worktree — it isn't
 
 The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly
