@@ -736,3 +736,116 @@ async def test_switching_llm_provider_clears_stale_credential_input():
     fn_body = body[fn_start:body.index("\n  }\n", fn_start)]
     assert 'apiKeyInput.value = "";' in fn_body
     assert 'fileInput.value = "";' in fn_body
+
+
+async def test_frame5_has_blocked_and_form_sections():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="uptime-pinger-blocked-section"' in body
+    assert 'id="uptime-pinger-form-section"' in body
+
+
+async def test_frame5_has_credential_input_and_submit():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="uptime-pinger-api-key-input"' in body
+    assert 'id="uptime-pinger-submit"' in body
+
+
+async def test_frame5_locked_by_default():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert (
+        'id="frame-uptime-pinger" class="frame" data-status="locked" '
+        'data-locked="true"'
+    ) in body
+
+
+async def test_uptimerobot_endpoint_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/uptimerobot/create-monitor"') == 1
+
+
+async def test_frame5_blocked_state_reads_the_forward_contract_key():
+    """sub-project 6 (not yet built) is obligated to write this key on its
+    own completion -- see design doc section 3's forward contract. Frame 5
+    only ever reads it."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'const RENDER_SERVICE_URL_KEY = "onboarding.renderServiceUrl";' in body
+    assert "function refreshUptimePingerBlockedState" in body
+    assert "sessionStorage.getItem(RENDER_SERVICE_URL_KEY)" in body
+
+
+async def test_frame5_never_persists_to_local_storage():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'sessionStorage.setItem(STORAGE_KEYS["uptime-pinger"]' in body
+    assert 'localStorage.setItem(STORAGE_KEYS["uptime-pinger"]' not in body
+
+
+async def test_uptimerobot_error_sets_frame_status_to_error():
+    """Structural sibling of llmProviderError()/githubAppError() -- all
+    three call setFrameStatus(id, "error") before writing the error text."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function submitUptimeRobotKey")
+    fn_body = body[fn_start:body.index("function uptimePingerErrorKeyForReason")]
+    assert fn_body.count('setFrameStatus("uptime-pinger", "error")') >= 1
+
+
+async def test_unauthorized_error_mentions_the_main_api_key_requirement():
+    """No server-side signal distinguishes a read-only key from an invalid
+    one (design doc section 2) -- mitigated at the UI-copy level instead."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "Main API Key" in body
+
+
+async def test_frame5_strings_present_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    for key in (
+        "frame5_instructions", "frame5_blocked_no_render_url",
+        "err_uptime_empty_key", "err_uptime_unauthorized",
+        "err_uptime_rate_limited", "err_uptime_unreachable",
+        "err_uptime_request_rejected",
+    ):
+        assert f"{key}:" in body
+    assert body.count("frame5_instructions:") == 2  # STRINGS.en + STRINGS.he
+
+
+async def test_language_switch_retranslates_uptime_pinger_error():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'document.getElementById("uptime-pinger-error").textContent = t(currentUptimePingerErrorKey);' in body
+
+
+async def test_frame5_has_a_reset_path_wired_into_lock_and_change():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function resetUptimePingerSection" in body
+    assert 'if (id === "uptime-pinger") resetUptimePingerSection();' in body
+    assert 'if (id === "uptime-pinger") {' in body  # beginChange's storage-clear branch
+
+
+async def test_restore_from_session_completes_uptime_pinger_frame():
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function restoreFromSession")
+    fn_body = body[fn_start:body.index("function guardLockedFrames")]
+    assert 'sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"])' in fn_body
+    assert 'completeFrame("uptime-pinger"' in fn_body
+
+
+async def test_frame5_reevaluates_blocked_state_when_reopened():
+    """Spec section 3: the frame re-checks its precondition each time it's
+    reopened, not only once at unlock -- sub-project 6 may not have run yet
+    the first time frame 5 unlocks, but could have by a later reopen."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert (
+        'document.getElementById("frame-uptime-pinger").addEventListener("toggle"'
+        in body
+    )

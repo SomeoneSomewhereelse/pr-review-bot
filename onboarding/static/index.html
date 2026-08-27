@@ -276,8 +276,19 @@
       <summary>
         <span class="frame-title" data-i18n="frame5_title"></span>
         <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="uptime-pinger" data-i18n="change_button"></button>
       </summary>
-      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+      <div class="frame-body">
+        <div id="uptime-pinger-blocked-section">
+          <p data-i18n="frame5_blocked_no_render_url"></p>
+        </div>
+        <div id="uptime-pinger-form-section" style="display: none;">
+          <p data-i18n="frame5_instructions"></p>
+          <input id="uptime-pinger-api-key-input" type="password">
+          <button id="uptime-pinger-submit" type="button" data-i18n="validate_button"></button>
+        </div>
+        <p id="uptime-pinger-error" class="frame-error"></p>
+      </div>
     </details>
 
     <details id="frame-render-deploy" class="frame" data-status="locked" data-locked="true">
@@ -373,6 +384,15 @@
       err_llm_no_models_available: "This credential is valid, but no usable models are available. Check your account/project has an eligible model enabled.",
       err_llm_no_model_selected: "Pick a model first.",
       err_llm_storage_failed: "Couldn't save this in your browser. Try again.",
+      frame5_instructions: "Paste your UptimeRobot Main API Key (My Settings → API Keys → Main API Key — not a Monitor-Specific key, which won't work here) to create the keep-warm monitor for your deployed service.",
+      frame5_blocked_no_render_url: "Complete your Render deployment first — this step needs its URL.",
+      err_uptime_empty_key: "Paste your UptimeRobot API key first.",
+      err_uptime_unauthorized: "That key was rejected. Note: a Monitor-Specific key won't work here — use your Main API Key from UptimeRobot's My Settings → API Keys.",
+      err_uptime_rate_limited: "Too many requests to UptimeRobot right now. Try again in a moment.",
+      err_uptime_unreachable: "UptimeRobot is unreachable right now. Try again in a moment.",
+      err_uptime_request_rejected: "UptimeRobot rejected that request. Try again in a moment.",
+      monitor_created_detail: "monitor created",
+      monitor_reused_detail: "existing monitor reused",
     },
     he: {
       page_title: "הקמת בודק ה-PR שלך",
@@ -453,6 +473,15 @@
       err_llm_no_models_available: "פרטי ההתחברות תקינים, אך אין מודלים זמינים לשימוש. ודאו שיש לחשבון/לפרויקט שלכם מודל מתאים מופעל.",
       err_llm_no_model_selected: "בחרו מודל קודם.",
       err_llm_storage_failed: "לא ניתן היה לשמור זאת בדפדפן זה. נסו שוב.",
+      frame5_instructions: "הדביקו את מפתח ה-API הראשי שלכם ב-UptimeRobot (My Settings ← API Keys ← Main API Key — לא מפתח Monitor-Specific, שלא יעבוד כאן) כדי ליצור את הפינגר לשמירה על פעילות עבור השירות שפרסתם.",
+      frame5_blocked_no_render_url: "השלימו קודם את פריסת ה-Render שלכם — שלב זה זקוק לכתובת ה-URL שלה.",
+      err_uptime_empty_key: "הדביקו קודם את מפתח ה-API של UptimeRobot.",
+      err_uptime_unauthorized: "המפתח נדחה. שימו לב: מפתח Monitor-Specific לא יעבוד כאן — השתמשו במפתח הראשי (Main API Key) מתוך My Settings ← API Keys ב-UptimeRobot.",
+      err_uptime_rate_limited: "יותר מדי בקשות ל-UptimeRobot כרגע. נסו שוב בעוד רגע.",
+      err_uptime_unreachable: "UptimeRobot אינו זמין כרגע. נסו שוב בעוד רגע.",
+      err_uptime_request_rejected: "UptimeRobot דחה את הבקשה. נסו שוב בעוד רגע.",
+      monitor_created_detail: "הפינגר נוצר",
+      monitor_reused_detail: "נעשה שימוש בפינגר קיים",
     },
   };
 
@@ -516,6 +545,9 @@
     if (currentLlmProviderErrorKey) {
       document.getElementById("llm-provider-error").textContent = t(currentLlmProviderErrorKey);
     }
+    if (currentUptimePingerErrorKey) {
+      document.getElementById("uptime-pinger-error").textContent = t(currentUptimePingerErrorKey);
+    }
     applyTheme(currentTheme);
   }
 
@@ -524,7 +556,14 @@
     "github-app": "onboarding.githubApp",
     "supabase": "onboarding.supabase",
     "llm-provider": "onboarding.llmProvider",
+    "uptime-pinger": "onboarding.uptimeRobot",
   };
+
+  // Written by sub-project 6 on its own completion (not yet built) --
+  // frame 5 only ever reads this key, never writes it. See
+  // docs/superpowers/specs/2026-08-27-onboarding-uptimerobot-frame-design.md
+  // section 3's forward contract.
+  const RENDER_SERVICE_URL_KEY = "onboarding.renderServiceUrl";
 
   const SUPABASE_PENDING_KEY = "onboarding.supabasePending";
 
@@ -620,12 +659,14 @@
     if (id === "github-app") resetGithubAppCreateSection();
     if (id === "supabase") resetSupabaseConnectSection();
     if (id === "llm-provider") resetLlmProviderSection();
+    if (id === "uptime-pinger") resetUptimePingerSection();
   }
 
   function unlockFrame(id) {
     const el = frameEl(id);
     el.dataset.locked = "false";
     setFrameStatus(id, "ready");
+    if (id === "uptime-pinger") refreshUptimePingerBlockedState();
   }
 
   function relockDownstreamOf(id) {
@@ -663,6 +704,10 @@
     if (id === "llm-provider") {
       sessionStorage.removeItem(STORAGE_KEYS["llm-provider"]);
       resetLlmProviderSection();
+    }
+    if (id === "uptime-pinger") {
+      sessionStorage.removeItem(STORAGE_KEYS["uptime-pinger"]);
+      resetUptimePingerSection();
     }
   }
 
@@ -867,6 +912,82 @@
       return;
     }
     completeFrame("llm-provider", "provider_prefix", stored.provider);
+  }
+
+  let currentUptimePingerErrorKey = null;
+
+  function refreshUptimePingerBlockedState() {
+    const hasRenderUrl = !!sessionStorage.getItem(RENDER_SERVICE_URL_KEY);
+    document.getElementById("uptime-pinger-blocked-section").style.display = hasRenderUrl ? "none" : "block";
+    document.getElementById("uptime-pinger-form-section").style.display = hasRenderUrl ? "block" : "none";
+  }
+
+  function resetUptimePingerSection() {
+    document.getElementById("uptime-pinger-api-key-input").value = "";
+    document.getElementById("uptime-pinger-error").textContent = "";
+    currentUptimePingerErrorKey = null;
+    refreshUptimePingerBlockedState();
+  }
+
+  async function submitUptimeRobotKey() {
+    const input = document.getElementById("uptime-pinger-api-key-input");
+    const key = input.value.trim();
+    const errorEl = document.getElementById("uptime-pinger-error");
+    errorEl.textContent = "";
+    currentUptimePingerErrorKey = null;
+    if (!key) {
+      currentUptimePingerErrorKey = "err_uptime_empty_key";
+      errorEl.textContent = t("err_uptime_empty_key");
+      return;
+    }
+    const renderServiceUrl = sessionStorage.getItem(RENDER_SERVICE_URL_KEY);
+    if (!renderServiceUrl) {
+      refreshUptimePingerBlockedState();
+      return;
+    }
+    setFrameStatus("uptime-pinger", "ready", "checking");
+    let resp;
+    try {
+      resp = await fetch("/api/uptimerobot/create-monitor", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: key, render_service_url: renderServiceUrl}),
+      });
+    } catch (err) {
+      setFrameStatus("uptime-pinger", "error");
+      currentUptimePingerErrorKey = "err_network";
+      errorEl.textContent = t("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      setFrameStatus("uptime-pinger", "error");
+      currentUptimePingerErrorKey = "err_uptime_unreachable";
+      errorEl.textContent = t("err_uptime_unreachable");
+      return;
+    }
+    if (body.valid) {
+      sessionStorage.setItem(STORAGE_KEYS["uptime-pinger"], JSON.stringify({api_key: key}));
+      input.value = "";
+      completeFrame("uptime-pinger", body.created ? "monitor_created_detail" : "monitor_reused_detail", null);
+    } else {
+      setFrameStatus("uptime-pinger", "error");
+      currentUptimePingerErrorKey = uptimePingerErrorKeyForReason(body.reason);
+      errorEl.textContent = t(currentUptimePingerErrorKey);
+    }
+  }
+
+  function uptimePingerErrorKeyForReason(reason) {
+    const map = {
+      unauthorized: "err_uptime_unauthorized",
+      rate_limited: "err_uptime_rate_limited",
+      provider_unreachable: "err_uptime_unreachable",
+      request_rejected: "err_uptime_request_rejected",
+    };
+    return map[reason] || "err_uptime_unreachable";
   }
 
   async function validateRenderKey() {
@@ -1474,6 +1595,9 @@
     if (sessionStorage.getItem(STORAGE_KEYS["llm-provider"])) {
       completeFrame("llm-provider", "restored", null);
     }
+    if (sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"])) {
+      completeFrame("uptime-pinger", "restored", null);
+    }
   }
 
   function guardLockedFrames() {
@@ -1535,6 +1659,12 @@
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);
     document.getElementById("llm-provider-validate-submit").addEventListener("click", validateLlmProviderCredential);
     document.getElementById("llm-provider-continue-submit").addEventListener("click", confirmLlmProviderModel);
+    document.getElementById("uptime-pinger-submit").addEventListener("click", submitUptimeRobotKey);
+    document.getElementById("frame-uptime-pinger").addEventListener("toggle", () => {
+      if (document.getElementById("frame-uptime-pinger").open) {
+        refreshUptimePingerBlockedState();
+      }
+    });
     document.querySelectorAll('input[name="llm-provider-choice"]').forEach((r) => {
       r.addEventListener("change", handleLlmProviderChoice);
     });
