@@ -1713,7 +1713,11 @@
       stored.refresh_token = refreshBody.refresh_token;
     }
     stored.expires_in = refreshBody.expires_in;
-    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    try {
+      sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    } catch (err) {
+      return {valid: false, reason: "supabase_unreachable"};
+    }
     try {
       return await attempt(stored.access_token);
     } catch (err) {
