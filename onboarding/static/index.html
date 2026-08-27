@@ -924,19 +924,23 @@
       supabaseError("err_supabase_name_empty");
       return;
     }
-    const state = crypto.randomUUID();
-    const {verifier, challenge} = await generatePkcePair();
-    sessionStorage.setItem(SUPABASE_PENDING_KEY, JSON.stringify({state, verifier, name}));
-    const redirectUri = `${window.ONBOARDING_BASE_URL}/?supabase_step=oauth_callback`;
-    const params = new URLSearchParams({
-      client_id: window.SUPABASE_OAUTH_CLIENT_ID,
-      redirect_uri: redirectUri,
-      response_type: "code",
-      state: state,
-      code_challenge: challenge,
-      code_challenge_method: "S256",
-    });
-    location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
+    try {
+      const state = crypto.randomUUID();
+      const {verifier, challenge} = await generatePkcePair();
+      sessionStorage.setItem(SUPABASE_PENDING_KEY, JSON.stringify({state, verifier, name}));
+      const redirectUri = `${window.ONBOARDING_BASE_URL}/?supabase_step=oauth_callback`;
+      const params = new URLSearchParams({
+        client_id: window.SUPABASE_OAUTH_CLIENT_ID,
+        redirect_uri: redirectUri,
+        response_type: "code",
+        state: state,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+      });
+      location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
+    } catch (err) {
+      supabaseError("err_supabase_unreachable");
+    }
   }
 
   async function handleSupabaseOauthCallback() {

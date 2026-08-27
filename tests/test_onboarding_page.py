@@ -341,3 +341,26 @@ async def test_reactive_refresh_helper_present():
     body = (await client.get("/")).text
     assert "async function callSupabaseRelay" in body
     assert '"unauthorized"' in body
+
+
+async def test_connect_supabase_guards_crypto_failures():
+    """generatePkcePair() calls crypto.subtle.digest, the page's only Web
+    Crypto call outside random-byte generation — insecure context or an
+    unsupported API would throw there. Unlike every fetch() elsewhere in
+    this file (each wrapped in try/catch, routed through supabaseError),
+    an uncaught throw here would leave "Connect Supabase" silently doing
+    nothing with no visible error state. This asserts the guard exists,
+    rather than simulating a crypto.subtle failure — this file's tests are
+    content-substring checks against served HTML/JS, not a JS execution
+    harness (see module docstring)."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_body = body[
+        body.index("async function connectSupabase"):body.index("async function handleSupabaseOauthCallback")
+    ]
+    assert "try {" in fn_body
+    assert "catch (err) {" in fn_body
+    assert "generatePkcePair()" in fn_body
+    # The catch must actually surface a visible error, not swallow it.
+    catch_body = fn_body[fn_body.index("catch (err) {"):]
+    assert "supabaseError(" in catch_body
