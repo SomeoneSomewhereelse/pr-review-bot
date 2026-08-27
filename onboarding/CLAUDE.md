@@ -345,6 +345,16 @@ section 3), not an oversight to fix.
   unchanged and NOT dead code: they remain a correctness safeguard for a
   corrupted or manually-manipulated `sessionStorage` state, not something
   this sub-project needed or was asked to remove.
+- **The GitHub App's webhook URL is corrected in frame 3 (GitHub), not
+  in the "Render service" or "Finish & Deploy" frames**, even though the
+  correction logically depends on the Render service already existing.
+  This is the one point in the whole flow where the private key (needed to
+  sign the webhook-update's App JWT) and the deployed service URL are both
+  available at once — `pushGithubAppToRenderService`'s later push-and-clear
+  step deletes the private key, so the webhook correction must happen
+  first. A failed webhook-set does NOT push-and-clear or complete the
+  frame; it shows a retry affordance instead, since retrying the whole
+  GitHub install flow is not otherwise reachable from that state.
 
 ## The test suite looks hung on a fresh worktree — it isn't
 
