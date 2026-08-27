@@ -73,6 +73,14 @@ section 3), not an oversight to fix.
   adds a relay call adds its own such test alongside; a second `fetch()` to
   an endpoint that already has one is the signal to stop and ask why that
   credential now has two exits, not to bump a number.
+  For an endpoint called through the shared `callSupabaseRelay(...)` helper
+  (sub-project 3's `list-organizations`, `create-project`, `project-status`,
+  `connection-info` — see below) rather than a direct `fetch()`, the audit
+  target is `body.count('callSupabaseRelay("<that endpoint>"') == 1`
+  instead. This is a faithful adaptation of the same one-exit-path
+  invariant to the helper's indirection, not a loosening of it: the
+  endpoint string must still appear exactly once as the call's own
+  argument, wherever in the call chain that argument is spelled.
 
 ## What sub-project 2 (GitHub App automation) adds to these rules
 

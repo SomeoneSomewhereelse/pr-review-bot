@@ -324,8 +324,10 @@
       frame3_provisioning: "Provisioning your Supabase project… this takes about 2 minutes.",
       check_again_button: "Check again",
       badge_provisioning: "Provisioning…",
+      badge_choosing_org: "Choose an organization",
       project_prefix: "project: ",
       err_supabase_name_empty: "Name your project first.",
+      err_supabase_storage_failed: "Couldn't save your Supabase connection in this browser. Try again.",
       err_supabase_callback_invalid: "That didn't come back from Supabase as expected. Please try again.",
       err_supabase_invalid_code: "Supabase rejected that — the code may have expired. Try connecting again.",
       err_supabase_reauthorize: "Your Supabase session expired. Please connect again.",
@@ -383,8 +385,10 @@
       frame3_provisioning: "הפרויקט שלכם ב-Supabase בהקמה… זה לוקח כשתי דקות.",
       check_again_button: "בדיקה מחדש",
       badge_provisioning: "בהקמה…",
+      badge_choosing_org: "בחרו ארגון",
       project_prefix: "פרויקט: ",
       err_supabase_name_empty: "תנו שם לפרויקט קודם.",
+      err_supabase_storage_failed: "לא ניתן לשמור את חיבור ה-Supabase בדפדפן זה. נסו שוב.",
       err_supabase_callback_invalid: "התגובה מ-Supabase לא הייתה כצפוי. נסו שוב.",
       err_supabase_invalid_code: "Supabase דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו להתחבר שוב.",
       err_supabase_reauthorize: "ההתחברות ל-Supabase פגה. אנא התחברו שוב.",
@@ -472,6 +476,18 @@
   function readStoredGithubApp() {
     try {
       return JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"]) || "null");
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Same defensive shape as readStoredGithubApp() above, for frame 3's
+  // sessionStorage key — a corrupted/foreign-shaped stored value must never
+  // throw out of a handler (including DOMContentLoaded, which would take
+  // every later listener with it).
+  function readStoredSupabase() {
+    try {
+      return JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
     } catch (err) {
       return null;
     }
@@ -846,12 +862,24 @@
 
   function supabaseErrorForReason(reason, message) {
     if (reason === "project_creation_rejected" && message) {
+      // Terminal: the org was picked and project creation was rejected for
+      // a business reason (e.g. a free-tier project cap) that retrying the
+      // same request won't fix. Reset first so "Connect Supabase" is back
+      // on screen for the visitor to restart, THEN show the error —
+      // resetSupabaseConnectSection() clears #supabase-error's text too.
+      resetSupabaseConnectSection();
       // Supabase's own error text, relayed verbatim (spec section 4) —
       // not a translated string, since it isn't one of ours.
       setFrameStatus("supabase", "error");
       currentSupabaseErrorKey = null;
       document.getElementById("supabase-error").textContent = message;
       return;
+    }
+    // "unauthorized" here means callSupabaseRelay already tried (or had no
+    // token to try) a refresh and it didn't recover the session — terminal,
+    // since nothing left on screen can retry with the same dead token.
+    if (reason === "unauthorized") {
+      resetSupabaseConnectSection();
     }
     const key = {
       unauthorized: "err_supabase_reauthorize",
@@ -869,7 +897,7 @@
   // refresh-then-retry (spec section 3's "Token refresh" note) rather than
   // tracking a client-side expiry timer.
   async function callSupabaseRelay(endpoint, payload) {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    const stored = readStoredSupabase();
     if (!stored || !stored.access_token) {
       return {valid: false, reason: "unauthorized"};
     }
@@ -905,7 +933,14 @@
     }
     if (!refreshBody.valid) return body;
     stored.access_token = refreshBody.access_token;
-    stored.refresh_token = refreshBody.refresh_token;
+    // Supabase's OAuth schema does not guarantee refresh_token is present in
+    // every response (SupabaseTokens.refresh_token: str | None). Overwriting
+    // unconditionally would clobber a still-valid refresh token with
+    // null/undefined, permanently disabling future refreshes for the rest of
+    // the session.
+    if (refreshBody.refresh_token) {
+      stored.refresh_token = refreshBody.refresh_token;
+    }
     stored.expires_in = refreshBody.expires_in;
     sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
     try {
@@ -977,10 +1012,18 @@
       supabaseErrorForReason(body.reason, body.message);
       return;
     }
-    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify({
-      access_token: body.access_token, refresh_token: body.refresh_token,
-      expires_in: body.expires_in, name: pending.name,
-    }));
+    try {
+      sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify({
+        access_token: body.access_token, refresh_token: body.refresh_token,
+        expires_in: body.expires_in, name: pending.name,
+      }));
+    } catch (err) {
+      // Storage quota/blocked: without this guard the tokens are lost and
+      // this becomes an unhandled rejection with no visible error, unlike
+      // every other step in this function.
+      supabaseError("err_supabase_storage_failed");
+      return;
+    }
     await fetchSupabaseOrganizations();
   }
 
@@ -1002,8 +1045,20 @@
       option.textContent = org.name;
       select.appendChild(option);
     });
+    showSupabaseOrgPicker();
+  }
+
+  function showSupabaseOrgPicker() {
     document.getElementById("supabase-connect-section").style.display = "none";
     document.getElementById("supabase-org-section").style.display = "block";
+    // Mirrors showSupabaseProvisioning() below: restoreFromSession() already
+    // unlocked frame 3 to status "ready" (badge "Not started") and left it
+    // closed before the OAuth redirect. Without this, a visitor with 2+
+    // orgs returns from Supabase's consent screen to a collapsed accordion
+    // row that still says "Not started" — no visible sign their
+    // authorization worked.
+    frameEl("supabase").open = true;
+    setFrameStatus("supabase", "choosing_org");
   }
 
   async function confirmSupabaseOrg() {
@@ -1012,7 +1067,7 @@
   }
 
   async function kickOffProjectCreation(organizationSlug) {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    let stored = readStoredSupabase();
     if (!stored) {
       supabaseError("err_supabase_callback_invalid");
       return;
@@ -1025,6 +1080,10 @@
       supabaseErrorForReason(body.reason, body.message);
       return;
     }
+    // Re-read AFTER the await: callSupabaseRelay may have refreshed and
+    // written new tokens mid-call, and merging onto the pre-await snapshot
+    // would silently discard them.
+    stored = readStoredSupabase() || stored;
     stored.organization_slug = organizationSlug;
     stored.db_pass = dbPass;
     stored.ref = body.ref;
@@ -1055,6 +1114,10 @@
       return "ready";
     }
     if (body.status === "INIT_FAILED") {
+      // Terminal, unlike the poll-timeout case: the project will never
+      // become healthy on its own, so put "Connect Supabase" back on
+      // screen rather than leaving the provisioning section's dead end up.
+      resetSupabaseConnectSection();
       supabaseError("err_supabase_provisioning_failed");
       return "error";
     }
@@ -1066,7 +1129,7 @@
   }
 
   async function pollUntilReady(startedAt) {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    const stored = readStoredSupabase();
     if (!stored || !stored.ref) return;
     const body = await fetchProjectStatus(stored.ref);
     const outcome = await handleProjectStatusResult(body);
@@ -1080,7 +1143,7 @@
   }
 
   async function checkSupabaseStatusOnce() {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    const stored = readStoredSupabase();
     if (!stored || !stored.ref) return;
     document.getElementById("supabase-error").textContent = "";
     currentSupabaseErrorKey = null;
@@ -1093,13 +1156,26 @@
   }
 
   async function fetchSupabaseConnectionInfo() {
-    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
-    if (!stored || !stored.ref || !stored.db_pass) return;
+    let stored = readStoredSupabase();
+    if (!stored || !stored.ref || !stored.db_pass) {
+      // Polling already reported "ready" and stopped by this point — a bare
+      // return here would leave the frame stuck at "Provisioning…" forever
+      // with no error and no button. Also genuinely terminal (missing local
+      // state that can't be recovered by waiting), so reset the same way as
+      // the other dead ends above.
+      resetSupabaseConnectSection();
+      supabaseError("err_supabase_callback_invalid");
+      return;
+    }
     const body = await callSupabaseRelay("/api/supabase/connection-info", {ref: stored.ref});
     if (!body.valid) {
       supabaseErrorForReason(body.reason, body.message);
       return;
     }
+    // Re-read AFTER the await, same reason as kickOffProjectCreation: a
+    // mid-call token refresh must not be clobbered by a stale pre-await
+    // snapshot.
+    stored = readStoredSupabase() || stored;
     // Assembled client-side from db_pass (already held) plus the non-secret
     // shape connection-info returned (spec section 3 step 9) — never from
     // Supabase's own connection_string field, whose password-masking
@@ -1121,7 +1197,7 @@
     } else if (githubApp) {
       showGithubAppReadyToInstall();
     }
-    const supabaseState = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    const supabaseState = readStoredSupabase();
     if (supabaseState && supabaseState.connection_string) {
       completeFrame("supabase", "restored", null);
     } else if (supabaseState && supabaseState.ref) {

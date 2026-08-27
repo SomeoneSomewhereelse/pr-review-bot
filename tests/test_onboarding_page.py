@@ -425,3 +425,143 @@ async def test_restore_from_session_resumes_polling_for_a_ref_without_a_connecti
     assert "showSupabaseProvisioning()" in body
     assert "pollUntilReady(Date.now())" in body
     assert "function restoreFromSession" in body
+
+
+async def test_stored_supabase_credentials_are_parsed_defensively():
+    """Same guard as readStoredGithubApp() -- a corrupted sessionStorage
+    value must not throw out of DOMContentLoaded and take every later
+    listener with it."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function readStoredSupabase" in body
+    helper_body = body[body.index("function readStoredSupabase"):]
+    helper_body = helper_body[:helper_body.index("\n  }")]
+    assert "try {" in helper_body
+    assert "catch" in helper_body
+    # Every other call site must go through the helper -- the only direct
+    # JSON.parse of this key left on the page is inside the helper itself.
+    assert body.count('JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"])') == 1
+
+
+async def test_terminal_supabase_errors_reset_the_connect_section():
+    """INIT_FAILED (from handleProjectStatusResult), an exhausted-refresh
+    unauthorized (from callSupabaseRelay's callers, via
+    supabaseErrorForReason), and project_creation_rejected are dead ends --
+    resetSupabaseConnectSection() must run before the error is shown so
+    "Connect Supabase" is back on screen to restart the flow, not just
+    fold into the existing error-clearing convention."""
+    client = await _client()
+    body = (await client.get("/")).text
+
+    init_failed_start = body.index('body.status === "INIT_FAILED"')
+    init_failed_body = body[init_failed_start:body.index("return \"pending\";")]
+    reset_pos = init_failed_body.index("resetSupabaseConnectSection()")
+    error_pos = init_failed_body.index('supabaseError("err_supabase_provisioning_failed")')
+    assert reset_pos < error_pos
+
+    reason_fn_start = body.index("function supabaseErrorForReason")
+    reason_fn_body = body[reason_fn_start:body.index("async function callSupabaseRelay")]
+
+    rejected_branch = reason_fn_body[:reason_fn_body.index('if (reason === "unauthorized")')]
+    assert "resetSupabaseConnectSection()" in rejected_branch
+    assert rejected_branch.index("resetSupabaseConnectSection()") < rejected_branch.index(
+        'document.getElementById("supabase-error").textContent = message;'
+    )
+
+    unauthorized_branch = reason_fn_body[reason_fn_body.index('if (reason === "unauthorized")'):]
+    assert "resetSupabaseConnectSection();" in unauthorized_branch.split("const key = {")[0]
+
+
+async def test_org_picker_opens_the_frame_and_updates_its_badge():
+    """A visitor with 2+ orgs returns from Supabase's consent screen to a
+    frame restoreFromSession() already unlocked to "ready" (badge "Not
+    started") and left closed -- without opening the frame and re-badging
+    it here, there's no visible sign their authorization worked."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function showSupabaseOrgPicker" in body
+    show_body = body[
+        body.index("function showSupabaseOrgPicker"):body.index("async function confirmSupabaseOrg")
+    ]
+    assert 'frameEl("supabase").open = true' in show_body
+    assert 'setFrameStatus("supabase", "choosing_org")' in show_body
+    assert body.count("badge_choosing_org:") == 2  # STRINGS.en + STRINGS.he
+
+    fetch_orgs_body = body[
+        body.index("async function fetchSupabaseOrganizations"):body.index("function showSupabaseOrgPicker")
+    ]
+    assert "showSupabaseOrgPicker();" in fetch_orgs_body
+
+
+async def test_relay_callers_re_read_storage_after_the_await_before_writing_back():
+    """A stale pre-await snapshot must not clobber tokens callSupabaseRelay
+    refreshed mid-call: the read that feeds the final sessionStorage.setItem
+    must happen after the callSupabaseRelay await, not before."""
+    client = await _client()
+    body = (await client.get("/")).text
+
+    kickoff_body = body[
+        body.index("async function kickOffProjectCreation"):body.index("function showSupabaseProvisioning")
+    ]
+    await_pos = kickoff_body.index("await callSupabaseRelay(")
+    reread_pos = kickoff_body.index("stored = readStoredSupabase() || stored;")
+    write_pos = kickoff_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));')
+    assert await_pos < reread_pos < write_pos
+
+    conn_info_body = body[
+        body.index("async function fetchSupabaseConnectionInfo"):body.index("function restoreFromSession")
+    ]
+    await_pos = conn_info_body.index("await callSupabaseRelay(")
+    reread_pos = conn_info_body.index("stored = readStoredSupabase() || stored;")
+    write_pos = conn_info_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));')
+    assert await_pos < reread_pos < write_pos
+
+
+async def test_connection_info_missing_local_state_shows_an_error_not_a_silent_stall():
+    """Polling already reported "ready" and stopped by this point -- a bare
+    return here used to leave the frame stuck at "Provisioning..." forever
+    with no error and no button."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function fetchSupabaseConnectionInfo")
+    fn_body = body[fn_start:body.index("function restoreFromSession")]
+    guard_body = fn_body[:fn_body.index("const body = await callSupabaseRelay(")]
+    assert "return;" in guard_body
+    assert 'supabaseError("err_supabase_callback_invalid");' in guard_body
+
+
+async def test_refresh_does_not_overwrite_a_valid_refresh_token_with_a_missing_one():
+    """Supabase's OAuth schema does not guarantee refresh_token on every
+    refresh response (SupabaseTokens.refresh_token: str | None) -- an
+    unconditional overwrite would clobber a still-valid refresh token with
+    null/undefined, permanently disabling future refreshes."""
+    client = await _client()
+    body = (await client.get("/")).text
+    relay_start = body.index("async function callSupabaseRelay")
+    relay_body = body[relay_start:body.index("async function connectSupabase")]
+    assert "stored.access_token = refreshBody.access_token;" in relay_body
+    assert "if (refreshBody.refresh_token) {" in relay_body
+    assert "stored.refresh_token = refreshBody.refresh_token;" in relay_body
+    # The unconditional overwrite this replaces must be gone.
+    assert relay_body.count("stored.refresh_token = refreshBody.refresh_token;") == 1
+    guard_pos = relay_body.index("if (refreshBody.refresh_token) {")
+    assign_pos = relay_body.index("stored.refresh_token = refreshBody.refresh_token;")
+    close_brace_pos = relay_body.index("}", assign_pos)
+    assert guard_pos < assign_pos < close_brace_pos
+
+
+async def test_supabase_oauth_callback_storage_write_is_guarded():
+    """A sessionStorage.setItem failure (quota/blocked) must route through
+    supabaseError(...) like every other step in this function, not become
+    an unhandled rejection with the freshly-exchanged tokens lost."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function handleSupabaseOauthCallback")
+    fn_body = body[fn_start:body.index("async function fetchSupabaseOrganizations")]
+    setitem_pos = fn_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"]')
+    try_pos = fn_body.rindex("try {", 0, setitem_pos)
+    catch_pos = fn_body.index("} catch (err) {", setitem_pos)
+    assert try_pos < setitem_pos < catch_pos
+    catch_body = fn_body[catch_pos:fn_body.index("await fetchSupabaseOrganizations();")]
+    assert "supabaseError(" in catch_body
+    assert body.count("err_supabase_storage_failed:") == 2  # STRINGS.en + STRINGS.he
