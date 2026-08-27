@@ -205,3 +205,86 @@ async def create_project(
     except (ValueError, KeyError, TypeError):
         return SupabaseApiFailed(reason="supabase_unreachable")
     return SupabaseProjectCreated(ref=ref, status=status)
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseProjectStatus:
+    status: str
+
+
+async def get_project_status(access_token: str, ref: str) -> SupabaseProjectStatus | SupabaseApiFailed:
+    """GET /v1/projects/{ref} — polled by the browser during provisioning.
+    Target status is ACTIVE_HEALTHY; the caller treats INIT_FAILED as a
+    terminal failure and every other status as still-provisioning."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
+            response = await client.get(
+                f"/projects/{ref}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.HTTPError:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    if response.status_code == 401:
+        return SupabaseApiFailed(reason="unauthorized")
+    if response.status_code == 403:
+        return SupabaseApiFailed(reason="forbidden")
+    if response.status_code == 429:
+        return SupabaseApiFailed(reason="rate_limited")
+    if response.status_code != 200:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    try:
+        status = str(response.json()["status"])
+    except (ValueError, KeyError, TypeError):
+        return SupabaseApiFailed(reason="supabase_unreachable")
+    return SupabaseProjectStatus(status=status)
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseConnectionInfo:
+    db_user: str
+    db_host: str
+    db_port: int
+    db_name: str
+
+
+async def get_connection_info(access_token: str, ref: str) -> SupabaseConnectionInfo | SupabaseApiFailed:
+    """GET /v1/projects/{ref}/config/database/pooler — selects the
+    session-mode (port 5432) PRIMARY entry, matching the manual guide's
+    existing "Session-mode pooler, not transaction mode" requirement.
+    Deliberately never reads Supabase's own connection_string/
+    connectionString fields (see module docstring) — the caller (browser,
+    which already holds db_pass) assembles the final connection string
+    itself from this non-secret shape."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
+            response = await client.get(
+                f"/projects/{ref}/config/database/pooler",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.HTTPError:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    if response.status_code == 401:
+        return SupabaseApiFailed(reason="unauthorized")
+    if response.status_code == 403:
+        return SupabaseApiFailed(reason="forbidden")
+    if response.status_code == 429:
+        return SupabaseApiFailed(reason="rate_limited")
+    if response.status_code != 200:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    try:
+        entries = response.json()
+        matched = next(
+            e for e in entries
+            if e.get("pool_mode") == "session" and e.get("database_type") == "PRIMARY"
+        )
+        db_user = str(matched["db_user"])
+        db_host = str(matched["db_host"])
+        db_port = int(matched["db_port"])
+        db_name = str(matched["db_name"])
+    except (ValueError, KeyError, TypeError, StopIteration):
+        return SupabaseApiFailed(reason="pooler_config_unavailable")
+    return SupabaseConnectionInfo(db_user=db_user, db_host=db_host, db_port=db_port, db_name=db_name)

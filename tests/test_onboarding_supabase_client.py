@@ -311,3 +311,105 @@ async def test_create_project_4xx_with_non_dict_json_falls_back_to_unreachable()
         respx.post(PROJECTS_URL).mock(return_value=httpx.Response(403, json=[1, 2, 3]))
         result = await supabase_client.create_project("a", "org-one", "name", "pw")
     assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+PROJECT_STATUS_URL = "https://api.supabase.com/v1/projects/abcdefghijklmnopqrst"
+POOLER_URL = "https://api.supabase.com/v1/projects/abcdefghijklmnopqrst/config/database/pooler"
+
+_POOLER_ENTRIES = [
+    {
+        "identifier": "abcdefghijklmnopqrst", "database_type": "PRIMARY", "is_using_scram_auth": True,
+        "db_user": "postgres.abcdefghijklmnopqrst", "db_host": "aws-0-us-east-1.pooler.supabase.com",
+        "db_port": 6543, "db_name": "postgres", "connection_string": "postgresql://masked",
+        "connectionString": "postgresql://masked", "default_pool_size": None, "max_client_conn": None,
+        "pool_mode": "transaction",
+    },
+    {
+        "identifier": "abcdefghijklmnopqrst", "database_type": "PRIMARY", "is_using_scram_auth": True,
+        "db_user": "postgres.abcdefghijklmnopqrst", "db_host": "aws-0-us-east-1.pooler.supabase.com",
+        "db_port": 5432, "db_name": "postgres", "connection_string": "postgresql://masked",
+        "connectionString": "postgresql://masked", "default_pool_size": None, "max_client_conn": None,
+        "pool_mode": "session",
+    },
+]
+
+
+async def test_get_project_status_returns_status():
+    with respx.mock:
+        respx.get(PROJECT_STATUS_URL).mock(
+            return_value=httpx.Response(200, json={"status": "ACTIVE_HEALTHY", "ref": "x"})
+        )
+        result = await supabase_client.get_project_status("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseProjectStatus(status="ACTIVE_HEALTHY")
+
+
+async def test_get_project_status_unauthorized():
+    with respx.mock:
+        respx.get(PROJECT_STATUS_URL).mock(return_value=httpx.Response(401))
+        result = await supabase_client.get_project_status("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="unauthorized")
+
+
+async def test_get_project_status_unreachable_on_5xx():
+    with respx.mock:
+        respx.get(PROJECT_STATUS_URL).mock(return_value=httpx.Response(500))
+        result = await supabase_client.get_project_status("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_get_project_status_malformed_body_is_unreachable():
+    with respx.mock:
+        respx.get(PROJECT_STATUS_URL).mock(return_value=httpx.Response(200, json={}))
+        result = await supabase_client.get_project_status("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_get_connection_info_selects_the_session_mode_primary_entry():
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=_POOLER_ENTRIES))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseConnectionInfo(
+        db_user="postgres.abcdefghijklmnopqrst",
+        db_host="aws-0-us-east-1.pooler.supabase.com",
+        db_port=5432,
+        db_name="postgres",
+    )
+
+
+async def test_get_connection_info_never_returns_supabases_own_connection_string_field():
+    """Deliberate: whether connection_string embeds the real password or a
+    masked placeholder cannot be verified from documentation (spec section
+    3 step 9) — the caller assembles the string itself from this shape."""
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=_POOLER_ENTRIES))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert not hasattr(result, "connection_string")
+    assert not hasattr(result, "connectionString")
+
+
+async def test_get_connection_info_no_session_mode_entry_is_pooler_config_unavailable():
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[_POOLER_ENTRIES[0]]))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")
+
+
+async def test_get_connection_info_empty_array_is_pooler_config_unavailable():
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[]))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")
+
+
+async def test_get_connection_info_unauthorized():
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(401))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="unauthorized")
+
+
+async def test_get_connection_info_unreachable_on_5xx():
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(500))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
