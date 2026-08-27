@@ -1502,15 +1502,22 @@ async def test_oauth_code_leaves_the_page_exactly_once():
 
 
 async def test_list_organizations_leaves_the_page_exactly_once():
+    """This endpoint (and create-project, project-status, connection-info)
+    goes through the shared callSupabaseRelay helper rather than a direct
+    fetch() call, so the audit target is "the endpoint string appears
+    exactly once as a callSupabaseRelay(...) argument" — the same
+    one-exit-path property the fetch()-based version of this test checks
+    for exchange-oauth-code and refresh-access-token, adapted for the
+    indirection this shared helper introduces."""
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/list-organizations"') == 1
+    assert body.count('callSupabaseRelay("/api/supabase/list-organizations"') == 1
 
 
 async def test_create_project_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/create-project"') == 1
+    assert body.count('callSupabaseRelay("/api/supabase/create-project"') == 1
 
 
 async def test_refresh_access_token_leaves_the_page_exactly_once():
@@ -2146,15 +2153,19 @@ git commit -m "feat: frame 3 — connect Supabase, resolve org, kick off project
 Add to `tests/test_onboarding_page.py`:
 ```python
 async def test_project_status_leaves_the_page_exactly_once():
+    """Like Task 6's list-organizations/create-project tests: this endpoint
+    goes through the shared callSupabaseRelay helper, not a direct fetch()
+    call, so the audit target is the endpoint string appearing exactly once
+    as a callSupabaseRelay(...) argument."""
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/project-status"') == 1
+    assert body.count('callSupabaseRelay("/api/supabase/project-status"') == 1
 
 
 async def test_connection_info_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/connection-info"') == 1
+    assert body.count('callSupabaseRelay("/api/supabase/connection-info"') == 1
 
 
 async def test_frame3_has_a_check_again_button():
