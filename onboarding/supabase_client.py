@@ -91,3 +91,117 @@ async def refresh_access_token(refresh_token: str) -> SupabaseTokenResult:
     except httpx.HTTPError:
         return SupabaseOAuthFailed(reason="supabase_unreachable")
     return _parse_token_response(response, invalid_reason="unauthorized")
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseOrg:
+    slug: str
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseOrgsListed:
+    orgs: list[SupabaseOrg]
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseApiFailed:
+    reason: str
+    # "unauthorized" | "forbidden" | "rate_limited" | "supabase_unreachable"
+    # | "pooler_config_unavailable" (Task 4 only)
+
+
+SupabaseOrgsResult = SupabaseOrgsListed | SupabaseApiFailed
+
+
+async def list_organizations(access_token: str) -> SupabaseOrgsResult:
+    """GET /v1/organizations — the orgs the visitor's own token can act on.
+    Never logs the access token or the response body."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
+            response = await client.get(
+                "/organizations",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.HTTPError:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    if response.status_code == 401:
+        return SupabaseApiFailed(reason="unauthorized")
+    if response.status_code == 403:
+        return SupabaseApiFailed(reason="forbidden")
+    if response.status_code == 429:
+        return SupabaseApiFailed(reason="rate_limited")
+    if response.status_code != 200:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    try:
+        body = response.json()
+        orgs = [SupabaseOrg(slug=str(o["slug"]), name=str(o["name"])) for o in body]
+    except (ValueError, KeyError, TypeError):
+        return SupabaseApiFailed(reason="supabase_unreachable")
+    return SupabaseOrgsListed(orgs=orgs)
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseProjectCreated:
+    ref: str
+    status: str
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseProjectRejected:
+    message: str
+
+
+async def create_project(
+    access_token: str, organization_slug: str, name: str, db_pass: str
+) -> SupabaseProjectCreated | SupabaseProjectRejected | SupabaseApiFailed:
+    """POST /v1/projects — provisions a new project inside the visitor's own
+    organization, on their own token. db_pass is already the browser's own
+    value (generated client-side, spec section 5) — relayed through, never
+    minted or logged here. Omits the deprecated `region`/`plan` fields and
+    `desired_instance_size` (defaults to the smallest tier) per spec
+    section 3 step 7."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
+            response = await client.post(
+                "/projects",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={
+                    "organization_slug": organization_slug,
+                    "name": name,
+                    "db_pass": db_pass,
+                    "region_selection": {"type": "specific", "code": SUPABASE_REGION_CODE},
+                },
+            )
+    except httpx.HTTPError:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    if response.status_code == 401:
+        return SupabaseApiFailed(reason="unauthorized")
+    if response.status_code == 429:
+        return SupabaseApiFailed(reason="rate_limited")
+    if response.status_code >= 500:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+    if response.status_code >= 400:
+        # No guaranteed structured error body (spec section 4) — relay
+        # Supabase's own message verbatim rather than guessing which
+        # business rule (free-tier cap or otherwise) was violated.
+        try:
+            message = response.json().get("message")
+        except ValueError:
+            message = None
+        if message:
+            return SupabaseProjectRejected(message=str(message))
+        return SupabaseApiFailed(reason="supabase_unreachable")
+    if response.status_code != 201:
+        return SupabaseApiFailed(reason="supabase_unreachable")
+
+    try:
+        body = response.json()
+        ref = str(body["ref"])
+        status = str(body["status"])
+    except (ValueError, KeyError, TypeError):
+        return SupabaseApiFailed(reason="supabase_unreachable")
+    return SupabaseProjectCreated(ref=ref, status=status)

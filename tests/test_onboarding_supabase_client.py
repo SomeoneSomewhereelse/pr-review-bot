@@ -160,3 +160,144 @@ async def test_refresh_5xx_is_unreachable():
         respx.post(TOKEN_URL).mock(return_value=httpx.Response(500))
         result = await supabase_client.refresh_access_token("sentinel-refresh")
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
+
+
+import json as json_module
+
+ORGS_URL = "https://api.supabase.com/v1/organizations"
+PROJECTS_URL = "https://api.supabase.com/v1/projects"
+
+
+async def test_list_organizations_returns_orgs():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json=[
+                    {"id": "1", "slug": "org-one", "name": "Org One"},
+                    {"id": "2", "slug": "org-two", "name": "Org Two"},
+                ],
+            )
+        )
+        result = await supabase_client.list_organizations("sentinel-access")
+    assert result == supabase_client.SupabaseOrgsListed(
+        orgs=[
+            supabase_client.SupabaseOrg(slug="org-one", name="Org One"),
+            supabase_client.SupabaseOrg(slug="org-two", name="Org Two"),
+        ]
+    )
+
+
+async def test_list_organizations_sends_bearer_token():
+    with respx.mock:
+        route = respx.get(ORGS_URL).mock(return_value=httpx.Response(200, json=[]))
+        await supabase_client.list_organizations("sentinel-access")
+    assert route.calls.last.request.headers["authorization"] == "Bearer sentinel-access"
+
+
+async def test_list_organizations_unauthorized():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(return_value=httpx.Response(401))
+        result = await supabase_client.list_organizations("expired")
+    assert result == supabase_client.SupabaseApiFailed(reason="unauthorized")
+
+
+async def test_list_organizations_rate_limited():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(return_value=httpx.Response(429))
+        result = await supabase_client.list_organizations("a")
+    assert result == supabase_client.SupabaseApiFailed(reason="rate_limited")
+
+
+async def test_list_organizations_unreachable_on_5xx():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(return_value=httpx.Response(500))
+        result = await supabase_client.list_organizations("a")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_list_organizations_malformed_body_is_unreachable():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(return_value=httpx.Response(200, text="not json"))
+        result = await supabase_client.list_organizations("a")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_create_project_returns_ref_and_status():
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(
+            return_value=httpx.Response(201, json={"ref": "abcdefghijklmnopqrst", "status": "INACTIVE"})
+        )
+        result = await supabase_client.create_project(
+            "sentinel-access", "org-one", "pr-review-bot", "sentinelpass123"
+        )
+    assert result == supabase_client.SupabaseProjectCreated(ref="abcdefghijklmnopqrst", status="INACTIVE")
+
+
+async def test_create_project_sends_region_selection_not_deprecated_fields():
+    with respx.mock:
+        route = respx.post(PROJECTS_URL).mock(
+            return_value=httpx.Response(201, json={"ref": "x" * 20, "status": "INACTIVE"})
+        )
+        await supabase_client.create_project("sentinel-access", "org-one", "pr-review-bot", "pw")
+    payload = json_module.loads(route.calls.last.request.content)
+    assert payload["region_selection"] == {"type": "specific", "code": "us-east-1"}
+    assert "region" not in payload
+    assert "plan" not in payload
+    assert "desired_instance_size" not in payload
+
+
+async def test_create_project_never_logs_or_returns_the_password(caplog):
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(
+            return_value=httpx.Response(201, json={"ref": "x" * 20, "status": "INACTIVE"})
+        )
+        result = await supabase_client.create_project(
+            "sentinel-access", "org-one", "pr-review-bot", "SENTINEL_DO_NOT_LOG_PASSWORD"
+        )
+    assert "SENTINEL_DO_NOT_LOG_PASSWORD" not in caplog.text
+    assert "SENTINEL_DO_NOT_LOG_PASSWORD" not in repr(result)
+
+
+async def test_create_project_unauthorized():
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(return_value=httpx.Response(401))
+        result = await supabase_client.create_project("expired", "org-one", "name", "pw")
+    assert result == supabase_client.SupabaseApiFailed(reason="unauthorized")
+
+
+async def test_create_project_rate_limited():
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(return_value=httpx.Response(429))
+        result = await supabase_client.create_project("a", "org-one", "name", "pw")
+    assert result == supabase_client.SupabaseApiFailed(reason="rate_limited")
+
+
+async def test_create_project_business_rule_rejection_relays_the_message():
+    """Covers the free-tier-cap case and any other business-rule rejection:
+    relay Supabase's own message verbatim rather than guessing which rule
+    was violated (spec section 4)."""
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(
+            return_value=httpx.Response(
+                403, json={"message": "This organization already has the maximum number of free projects."}
+            )
+        )
+        result = await supabase_client.create_project("a", "org-one", "name", "pw")
+    assert result == supabase_client.SupabaseProjectRejected(
+        message="This organization already has the maximum number of free projects."
+    )
+
+
+async def test_create_project_rejection_without_a_message_falls_back_to_unreachable():
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(return_value=httpx.Response(403, text="not json"))
+        result = await supabase_client.create_project("a", "org-one", "name", "pw")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_create_project_unreachable_on_5xx():
+    with respx.mock:
+        respx.post(PROJECTS_URL).mock(return_value=httpx.Response(500))
+        result = await supabase_client.create_project("a", "org-one", "name", "pw")
+    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
