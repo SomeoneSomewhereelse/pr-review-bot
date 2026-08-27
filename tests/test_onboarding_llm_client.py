@@ -15,6 +15,8 @@ import base64
 import json
 from types import SimpleNamespace
 
+import httpx
+import respx
 from google.auth import exceptions as google_auth_exceptions
 from google.genai import errors as genai_errors
 
@@ -192,3 +194,68 @@ async def test_list_vertex_models_never_logs_the_decoded_key(caplog):
     with caplog.at_level("DEBUG"):
         await llm_client.list_vertex_models("not-valid-base64!!!")
     assert "sentinel" not in caplog.text.lower()
+
+
+MODELS_URL = "https://api.groq.com/openai/v1/models"
+
+
+async def test_list_groq_models_returns_ids_unfiltered():
+    """Deliberately unfiltered (spec section 2): whisper-large-v3 is a
+    non-chat model Groq's API doesn't distinguish from a chat one."""
+    with respx.mock:
+        respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [
+                        {"id": "llama-3.3-70b-versatile", "created": 1, "object": "model", "owned_by": "Meta"},
+                        {"id": "whisper-large-v3", "created": 1, "object": "model", "owned_by": "OpenAI"},
+                    ],
+                },
+            )
+        )
+        result = await llm_client.list_groq_models("sentinel-key")
+    assert result == llm_client.LlmModelsListed(models=["llama-3.3-70b-versatile", "whisper-large-v3"])
+
+
+async def test_list_groq_models_sends_bearer_token():
+    with respx.mock:
+        route = respx.get(MODELS_URL).mock(return_value=httpx.Response(200, json={"object": "list", "data": []}))
+        await llm_client.list_groq_models("sentinel-key")
+    assert route.calls.last.request.headers["authorization"] == "Bearer sentinel-key"
+
+
+async def test_list_groq_models_unauthorized():
+    with respx.mock:
+        respx.get(MODELS_URL).mock(return_value=httpx.Response(401, json={"error": {"message": "invalid key"}}))
+        result = await llm_client.list_groq_models("bad")
+    assert result == llm_client.LlmApiFailed(reason="unauthorized")
+
+
+async def test_list_groq_models_forbidden():
+    with respx.mock:
+        respx.get(MODELS_URL).mock(return_value=httpx.Response(403, json={"error": {"message": "forbidden"}}))
+        result = await llm_client.list_groq_models("a")
+    assert result == llm_client.LlmApiFailed(reason="forbidden")
+
+
+async def test_list_groq_models_rate_limited():
+    with respx.mock:
+        respx.get(MODELS_URL).mock(return_value=httpx.Response(429, json={"error": {"message": "slow down"}}))
+        result = await llm_client.list_groq_models("a")
+    assert result == llm_client.LlmApiFailed(reason="rate_limited")
+
+
+async def test_list_groq_models_unreachable_on_5xx():
+    with respx.mock:
+        respx.get(MODELS_URL).mock(return_value=httpx.Response(500, json={"error": {"message": "oops"}}))
+        result = await llm_client.list_groq_models("a")
+    assert result == llm_client.LlmApiFailed(reason="provider_unreachable")
+
+
+async def test_list_groq_models_network_error_is_unreachable():
+    with respx.mock:
+        respx.get(MODELS_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
+        result = await llm_client.list_groq_models("a")
+    assert result == llm_client.LlmApiFailed(reason="provider_unreachable")

@@ -1,8 +1,9 @@
-"""Thin async wrapper around Gemini and Vertex AI's model-listing calls —
-used to validate a visitor-supplied credential and discover which models it
-can actually reach, without persisting anything server-side. Gemini and
-Vertex share one internal helper since both go through the same
-google-genai SDK, differing only in how genai.Client is constructed. See
+"""Thin async wrapper around Gemini, Vertex AI, and Groq's model-listing
+calls — used to validate a visitor-supplied credential and discover which
+models it can actually reach, without persisting anything server-side.
+Gemini and Vertex share one internal helper since both go through the same
+google-genai SDK, differing only in how genai.Client is constructed; Groq
+uses the official groq SDK directly. See
 docs/superpowers/specs/2026-08-27-onboarding-llm-provider-frame-design.md
 sections 3-4."""
 from __future__ import annotations
@@ -12,6 +13,7 @@ import binascii
 import dataclasses
 import json
 
+import groq
 import httpx
 from google import genai
 from google.auth import exceptions as google_auth_exceptions
@@ -112,3 +114,23 @@ async def list_vertex_models(service_account_key_b64: str) -> VertexModelsListed
     except httpx.HTTPError:
         return LlmApiFailed(reason="provider_unreachable")
     return VertexModelsListed(project_id=project_id, models=models)
+
+
+async def list_groq_models(api_key: str) -> LlmModelsListed | LlmApiFailed:
+    """Live models-listing call against Groq's OpenAI-compatible API —
+    doubles as credential validation. Deliberately unfiltered (spec
+    section 2): Groq's Model type carries no capability field to
+    distinguish chat-completion models from Whisper/TTS/moderation ones.
+    Never logs api_key."""
+    client = groq.AsyncGroq(api_key=api_key)
+    try:
+        response = await client.models.list()
+    except groq.AuthenticationError:
+        return LlmApiFailed(reason="unauthorized")
+    except groq.PermissionDeniedError:
+        return LlmApiFailed(reason="forbidden")
+    except groq.RateLimitError:
+        return LlmApiFailed(reason="rate_limited")
+    except (groq.InternalServerError, groq.APIConnectionError, groq.APITimeoutError):
+        return LlmApiFailed(reason="provider_unreachable")
+    return LlmModelsListed(models=[m.id for m in response.data])
