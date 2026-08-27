@@ -797,10 +797,24 @@ async def test_uptimerobot_error_sets_frame_status_to_error():
 
 async def test_unauthorized_error_mentions_the_main_api_key_requirement():
     """No server-side signal distinguishes a read-only key from an invalid
-    one (design doc section 2) -- mitigated at the UI-copy level instead."""
+    one (design doc section 2) -- mitigated at the UI-copy level instead,
+    which makes this copy the *entire* mitigation.
+
+    Scoped to the err_uptime_unauthorized value on purpose: a bare
+    `"Main API Key" in body` passes on frame5_instructions alone, so the
+    error message could quietly drop the mention and this test would still
+    go green -- the one regression it exists to catch.
+    """
     client = await _client()
     body = (await client.get("/")).text
-    assert "Main API Key" in body
+    values = [
+        line.split("err_uptime_unauthorized:", 1)[1]
+        for line in body.splitlines()
+        if "err_uptime_unauthorized:" in line
+    ]
+    assert len(values) == 2, "expected an en and a he err_uptime_unauthorized"
+    for value in values:
+        assert "Main API Key" in value, f"Main-API-Key mention missing from: {value}"
 
 
 async def test_frame5_strings_present_in_both_languages():
@@ -812,14 +826,19 @@ async def test_frame5_strings_present_in_both_languages():
         "err_uptime_rate_limited", "err_uptime_unreachable",
         "err_uptime_request_rejected",
     ):
-        assert f"{key}:" in body
-    assert body.count("frame5_instructions:") == 2  # STRINGS.en + STRINGS.he
+        # == 2 (STRINGS.en + STRINGS.he), not merely `in body`: a presence
+        # check passes on an en-only definition, which is exactly the
+        # regression this frame's Hebrew half needs guarding against.
+        assert body.count(f"{key}:") == 2, f"{key} is not defined in both languages"
 
 
 async def test_language_switch_retranslates_uptime_pinger_error():
     client = await _client()
     body = (await client.get("/")).text
-    assert 'document.getElementById("uptime-pinger-error").textContent = t(currentUptimePingerErrorKey);' in body
+    assert (
+        'document.getElementById("uptime-pinger-error").textContent = '
+        "t(currentUptimePingerErrorKey);"
+    ) in body
 
 
 async def test_frame5_has_a_reset_path_wired_into_lock_and_change():

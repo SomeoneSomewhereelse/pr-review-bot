@@ -646,3 +646,32 @@ async def test_uptimerobot_empty_render_url_is_rejected():
         json={"api_key": SENTINEL_KEY, "render_service_url": ""},
     )
     assert resp.status_code == 422
+
+
+async def test_uptimerobot_whitespace_only_render_url_is_rejected():
+    """min_length=1 alone lets "   " through, and the client's own .strip()
+    then derives a bare relative "/healthz" as the monitor URL."""
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "   \n\t"},
+    )
+    assert resp.status_code == 422
+    assert SENTINEL_KEY not in resp.text
+
+
+async def test_uptimerobot_render_url_is_stripped_before_the_client_sees_it(monkeypatch):
+    seen = {}
+
+    async def fake_create(api_key, render_service_url):
+        seen["url"] = render_service_url
+        return uptimerobot_client.UptimeRobotMonitorResult(created=True)
+
+    monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "  https://s.onrender.com \n"},
+    )
+    assert resp.status_code == 200
+    assert seen["url"] == "https://s.onrender.com"

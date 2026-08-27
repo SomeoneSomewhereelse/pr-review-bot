@@ -62,11 +62,18 @@ async def create_or_reuse_monitor(api_key: str, render_service_url: str) -> Upti
             list_failure = _failure_for_status(list_resp.status_code)
             if list_failure is not None:
                 return list_failure
+            # The dedupe scan lives INSIDE this try, not after it: `data`
+            # holding non-dict entries (or being a dict, whose iteration
+            # yields str keys) makes `m.get` an AttributeError, which is not
+            # an httpx.HTTPError and would otherwise escape as a 500 --
+            # breaking this module's contract that every failure maps to a
+            # fixed reason and no exception message ever gets out.
             try:
                 monitors = list_resp.json().get("data") or []
+                already_monitored = any(m.get("url") == target_url for m in monitors)
             except (ValueError, AttributeError, TypeError):
                 return UptimeRobotApiFailed(reason="provider_unreachable")
-            if any(m.get("url") == target_url for m in monitors):
+            if already_monitored:
                 return UptimeRobotMonitorResult(created=False)
 
             create_resp = await client.post(

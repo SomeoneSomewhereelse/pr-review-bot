@@ -6,6 +6,8 @@ docs/superpowers/specs/2026-08-27-onboarding-uptimerobot-frame-design.md
 sections 2, 3, 6."""
 from __future__ import annotations
 
+import json
+
 import httpx
 import respx
 
@@ -24,6 +26,15 @@ def _monitor(url, monitor_id=1):
     }
 
 
+def _sent_json(route):
+    """Decode a captured request body instead of substring-matching its raw
+    bytes. A raw-bytes check would silently be asserting httpx's JSON
+    separator style (0.28 emits compact `,`/`:`; 0.27, still allowed by
+    pyproject's `httpx>=0.27`, emits `, `/`: `) rather than this module's
+    own behaviour."""
+    return json.loads(route.calls.last.request.content)
+
+
 async def test_creates_monitor_when_none_exists():
     with respx.mock:
         respx.get(MONITORS_URL).mock(return_value=httpx.Response(200, json={"data": []}))
@@ -32,8 +43,9 @@ async def test_creates_monitor_when_none_exists():
         )
         result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL)
     assert result == uptimerobot_client.UptimeRobotMonitorResult(created=True)
-    sent_body = create_route.calls.last.request.content
-    assert TARGET_URL.encode() in sent_body
+    sent = _sent_json(create_route)
+    assert sent["url"] == TARGET_URL
+    assert sent["friendlyName"] == TARGET_URL
 
 
 async def test_reuses_existing_monitor_without_creating():
@@ -69,9 +81,9 @@ async def test_strips_trailing_slash_before_appending_healthz():
         )
         result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL + "/")
     assert result == uptimerobot_client.UptimeRobotMonitorResult(created=True)
-    sent_body = create_route.calls.last.request.content
-    assert TARGET_URL.encode() in sent_body
-    assert b"//healthz" not in sent_body
+    # Exact equality, not a substring/`"//healthz" not in` check: only an
+    # exact match rules out a doubled slash *and* a stray suffix at once.
+    assert _sent_json(create_route)["url"] == TARGET_URL
 
 
 async def test_strips_trailing_whitespace_before_deriving_target_url():
@@ -82,10 +94,13 @@ async def test_strips_trailing_whitespace_before_deriving_target_url():
         )
         result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL + " \n")
     assert result == uptimerobot_client.UptimeRobotMonitorResult(created=True)
-    sent_body = create_route.calls.last.request.content
-    assert TARGET_URL.encode() in sent_body
-    assert b" " not in sent_body  # No stray spaces in the body
-    assert b"\n" not in sent_body  # No stray newlines in the body
+    # The old form of this assertion was `b" " not in sent_body`, which only
+    # held because httpx 0.28 serialises JSON with compact separators -- it
+    # was testing httpx, not this module. Exact field equality carries the
+    # same guarantee (no surviving whitespace) version-independently.
+    sent = _sent_json(create_route)
+    assert sent["url"] == TARGET_URL
+    assert sent["friendlyName"] == TARGET_URL
 
 
 async def test_unauthorized_key_is_reported():
@@ -99,7 +114,9 @@ async def test_unauthorized_key_is_reported():
 
 async def test_rate_limited_is_reported():
     with respx.mock:
-        respx.get(MONITORS_URL).mock(return_value=httpx.Response(429, json={"message": "rate limited"}))
+        respx.get(MONITORS_URL).mock(
+            return_value=httpx.Response(429, json={"message": "rate limited"})
+        )
         result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL)
     assert result == uptimerobot_client.UptimeRobotApiFailed(reason="rate_limited")
 
@@ -131,6 +148,30 @@ async def test_malformed_list_body_is_unreachable_not_a_crash():
     (which could carry request/response context) escape the function."""
     with respx.mock:
         respx.get(MONITORS_URL).mock(return_value=httpx.Response(200, text="not json"))
+        result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL)
+    assert result == uptimerobot_client.UptimeRobotApiFailed(reason="provider_unreachable")
+
+
+async def test_non_dict_entry_in_the_data_array_is_unreachable_not_a_crash():
+    """The dedupe scan calls m.get("url") on every entry. A non-dict entry
+    makes that an AttributeError, which is NOT an httpx.HTTPError -- before
+    the guard, it escaped uncaught and became a 500 with a traceback instead
+    of this module's documented reason vocabulary."""
+    with respx.mock:
+        respx.get(MONITORS_URL).mock(
+            return_value=httpx.Response(200, json={"data": ["not-a-monitor", None]})
+        )
+        result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL)
+    assert result == uptimerobot_client.UptimeRobotApiFailed(reason="provider_unreachable")
+
+
+async def test_data_object_instead_of_array_is_unreachable_not_a_crash():
+    """Same AttributeError shape by a different route: iterating a dict
+    yields its str keys, so every "monitor" is a string."""
+    with respx.mock:
+        respx.get(MONITORS_URL).mock(
+            return_value=httpx.Response(200, json={"data": {"monitors": []}})
+        )
         result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL)
     assert result == uptimerobot_client.UptimeRobotApiFailed(reason="provider_unreachable")
 

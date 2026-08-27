@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from onboarding import github_client, llm_client, render_client, supabase_client, uptimerobot_client
 from onboarding.config import settings
@@ -82,6 +82,27 @@ class LlmVertexListModelsRequest(BaseModel):
 class UptimeRobotCreateMonitorRequest(BaseModel):
     api_key: str = Field(min_length=1, max_length=512)
     render_service_url: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("render_service_url")
+    @classmethod
+    def _normalize_render_service_url(cls, value: str) -> str:
+        """Strip first, then require non-empty -- min_length=1 alone does not
+        survive stripping.
+
+        A whitespace-only value passes min_length=1, and
+        uptimerobot_client._target_url's own .strip() then derives the bare
+        relative path "/healthz", which would be POSTed to UptimeRobot as a
+        monitor URL. Rejecting it here turns a nonsense monitor (or an
+        opaque provider-side 400 surfaced as `request_rejected`) into an
+        honest 422. Same strip-then-validate shape as onboarding/config.py's
+        public_base_url validator; no shape/regex check beyond that, since
+        this value is written by the wizard itself (sub-project 6's forward
+        contract), not typed by the visitor.
+        """
+        value = value.strip()
+        if not value:
+            raise ValueError("render_service_url must not be empty or whitespace-only")
+        return value
 
 
 @router.get("/", response_class=HTMLResponse)
