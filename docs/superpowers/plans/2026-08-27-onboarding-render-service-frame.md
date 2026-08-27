@@ -1919,6 +1919,444 @@ git commit -m "docs: document sub-project 6's additions to onboarding/CLAUDE.md"
 
 ---
 
+### Task 6: Correct the GitHub App's webhook URL (post-final-review addition)
+
+**Why this task exists:** the final whole-branch review of Tasks 1-5 found
+a Critical gap this plan's original scope silently dropped. Sub-project 2's
+design spec (`docs/superpowers/specs/2026-08-26-onboarding-github-app-frame-design.md`
+section 3, step 2) deliberately left the GitHub App's webhook pointed at a
+placeholder (`https://example.invalid/webhook`) and explicitly assigned the
+correction to this sub-project: *"corrected then, mirroring
+`scripts/deploy.py`'s existing 'points here — set only if wrong' pattern for
+the exact same field."* Without this task, a wizard-deployed instance
+reaches "live" but never receives a single GitHub webhook event — the
+wizard's whole purpose (a working reviewer bot) silently fails to be
+delivered. This task closes that gap using the exact API call
+`app/github_app.py::set_webhook_url` already makes for the operator's own
+deploy, built independently (never imported) for the visitor's own App
+credentials, mirroring `onboarding/github_client.py::verify_installation`'s
+existing App-JWT client-construction pattern in the same file.
+
+**Files:**
+- Modify: `onboarding/github_client.py`
+- Modify: `onboarding/router.py`
+- Modify: `onboarding/static/index.html`
+- Test: `tests/test_onboarding_github_client.py`
+- Test: `tests/test_onboarding_router.py`
+- Test: `tests/test_onboarding_page.py`
+
+**Interfaces:**
+- Consumes: `onboarding/render_client.py`'s existing `readStoredRenderService()`
+  (Task 3) for the deployed service's `service_url`; the existing
+  `handleGithubInstallCallback` function and `stored`/`readStoredGithubApp()`
+  shape (`{app_id, slug, private_key_b64, webhook_secret, installation_id,
+  account_login}`) frame 2 already builds.
+- Produces: `github_client.set_webhook_url(app_id, private_key_b64, url) ->
+  WebhookUrlSet | WebhookUrlSetFailed`; `POST /api/github/set-webhook-url`;
+  nothing later in this plan depends on this task (it is the last one).
+
+- [ ] **Step 1: Write the failing backend tests**
+
+Append to `tests/test_onboarding_github_client.py` (reuses the file's
+existing `fake_transport`/`_throwaway_key_material`/
+`_no_pygithub_rate_limit_sleep` fixtures — do not redefine them):
+
+```python
+async def test_set_webhook_url_succeeds(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {"url": "https://x.onrender.com/webhook"})
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSet()
+
+
+async def test_set_webhook_url_unauthorized_is_invalid_credentials(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {"message": "Bad credentials"}, 401)
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+
+
+async def test_set_webhook_url_not_found_is_invalid_credentials(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {"message": "Not Found"}, 404)
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+
+
+async def test_set_webhook_url_server_error_is_unreachable(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {}, 500)
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="github_unreachable")
+
+
+async def test_set_webhook_url_malformed_base64_private_key_is_invalid_credentials():
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64="not-valid-base64!!", url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `uv run pytest tests/test_onboarding_github_client.py -v -k set_webhook_url`
+Expected: FAIL — `set_webhook_url`/`WebhookUrlSet`/`WebhookUrlSetFailed` not
+defined.
+
+- [ ] **Step 3: Implement `github_client.py`**
+
+Add to `onboarding/github_client.py`, after the existing `verify_installation`
+function:
+
+```python
+@dataclasses.dataclass(frozen=True)
+class WebhookUrlSet:
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class WebhookUrlSetFailed:
+    reason: str  # "invalid_credentials" | "github_unreachable"
+
+
+WebhookUrlResult = WebhookUrlSet | WebhookUrlSetFailed
+
+
+def _set_webhook_url(app_id: int, private_key_pem: str, url: str) -> None:
+    """Blocking PyGithub call — run via asyncio.to_thread by the caller.
+    Same App-JWT-only client construction as _fetch_installation above
+    (never app/github_app.py's operator-tied helpers — onboarding/CLAUDE.md's
+    no-shared-credential-path rule). Mirrors app/github_app.py::
+    set_webhook_url's own PATCH /app/hook/config call shape exactly — this
+    is the visitor-credential equivalent of the same operation."""
+    gh = Github(auth=Auth.AppAuth(app_id, private_key_pem))
+    gh.requester.requestJsonAndCheck("PATCH", "/app/hook/config", input={"url": url})
+
+
+async def set_webhook_url(app_id: int, private_key_b64: str, url: str) -> WebhookUrlResult:
+    """Point the visitor's App's webhook at `url` (their just-deployed
+    Render service's own /webhook path). Never logs the private key, in
+    full or truncated — same sensitivity tier as verify_installation's."""
+    try:
+        private_key_pem = base64.b64decode(private_key_b64, validate=True).decode()
+    except (binascii.Error, ValueError):
+        return WebhookUrlSetFailed(reason="invalid_credentials")
+
+    try:
+        await asyncio.to_thread(_set_webhook_url, app_id, private_key_pem, url)
+    except GithubException as exc:
+        if exc.status in (401, 403, 404):
+            return WebhookUrlSetFailed(reason="invalid_credentials")
+        return WebhookUrlSetFailed(reason="github_unreachable")
+    except (ValueError, jwt.exceptions.InvalidKeyError):
+        # Same base64-valid-but-non-PEM case verify_installation's own
+        # docstring explains: PyJWT re-raises cryptography's ValueError as
+        # InvalidKeyError while signing the App JWT.
+        return WebhookUrlSetFailed(reason="invalid_credentials")
+    except requests.exceptions.RequestException:
+        return WebhookUrlSetFailed(reason="github_unreachable")
+
+    return WebhookUrlSet()
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `uv run pytest tests/test_onboarding_github_client.py -v`
+Expected: PASS (all tests, old and new).
+
+- [ ] **Step 5: Write the failing router test**
+
+Append to `tests/test_onboarding_router.py`:
+
+```python
+def test_set_github_webhook_url_endpoint(client, monkeypatch):
+    async def fake_set_webhook_url(app_id, private_key_b64, url):
+        return github_client.WebhookUrlSet()
+
+    monkeypatch.setattr(github_client, "set_webhook_url", fake_set_webhook_url)
+    resp = client.post(
+        "/api/github/set-webhook-url",
+        json={"app_id": 123, "private_key_b64": "cGVt", "url": "https://x.onrender.com/webhook"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+
+
+def test_set_github_webhook_url_endpoint_failure(client, monkeypatch):
+    async def fake_set_webhook_url(app_id, private_key_b64, url):
+        return github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+
+    monkeypatch.setattr(github_client, "set_webhook_url", fake_set_webhook_url)
+    resp = client.post(
+        "/api/github/set-webhook-url",
+        json={"app_id": 123, "private_key_b64": "cGVt", "url": "https://x.onrender.com/webhook"},
+    )
+    assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
+```
+
+`github_client` is already imported at module scope in this test file
+(check the existing imports before adding a duplicate).
+
+- [ ] **Step 6: Implement the router endpoint**
+
+Add to `onboarding/router.py`, a new pydantic model alongside
+`GithubInstallVerifyRequest`:
+
+```python
+class GithubSetWebhookUrlRequest(BaseModel):
+    app_id: int = Field(gt=0)
+    private_key_b64: str = Field(max_length=16384)
+    url: str = Field(min_length=1, max_length=2048)
+```
+
+And a new endpoint, alongside `verify_github_installation`:
+
+```python
+@router.post("/api/github/set-webhook-url")
+async def set_github_webhook_url(payload: GithubSetWebhookUrlRequest) -> dict:
+    result = await github_client.set_webhook_url(payload.app_id, payload.private_key_b64, payload.url)
+    if isinstance(result, github_client.WebhookUrlSet):
+        return {"valid": True}
+    return {"valid": False, "reason": result.reason}
+```
+
+- [ ] **Step 7: Run tests to verify they pass**
+
+Run: `uv run pytest tests/test_onboarding_router.py -v`
+Expected: PASS.
+
+- [ ] **Step 8: Commit the backend**
+
+```bash
+git add onboarding/github_client.py onboarding/router.py tests/test_onboarding_github_client.py tests/test_onboarding_router.py
+git commit -m "feat: add GitHub App webhook-URL-correction relay endpoint"
+```
+
+- [ ] **Step 9: Write the failing frontend tests**
+
+Append to `tests/test_onboarding_page.py`:
+
+```python
+def test_set_webhook_url_fetch_leaves_the_page_exactly_once():
+    assert body.count('fetch("/api/github/set-webhook-url"') == 1
+
+
+def test_webhook_retry_section_markup_present():
+    assert 'id="github-app-webhook-retry-section"' in body
+    assert 'id="github-app-webhook-retry-submit"' in body
+
+
+def test_webhook_set_gates_frame_completion_before_push_and_clear():
+    # setGithubWebhookUrl must be awaited, and its failure path must return
+    # before pushGithubAppToRenderService/completeFrame ever run -- this is
+    # the ordering that keeps the private key available for a retry.
+    assert "await finishGithubAppSetup(stored, body.account_login);" in body
+    assert "if (!webhookResult.ok) {" in body
+
+
+def test_webhook_retry_i18n_strings_present_in_both_languages():
+    keys = [
+        "frame2_webhook_retry_instructions", "retry_button",
+        "err_github_webhook_invalid_credentials", "err_github_webhook_unreachable",
+    ]
+    for key in keys:
+        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
+```
+
+- [ ] **Step 10: Run tests to verify they fail**
+
+Run: `uv run pytest tests/test_onboarding_page.py -v -k webhook`
+Expected: FAIL — none of this exists yet.
+
+- [ ] **Step 11: Implement the frontend**
+
+**11a. Markup** — inside `frame-github-app`'s `frame-body` div, add a third
+sibling section after the existing `github-app-install-section` div and
+before the closing `<p id="github-app-error" ...>`:
+
+```html
+        <div id="github-app-webhook-retry-section" style="display: none;">
+          <p data-i18n="frame2_webhook_retry_instructions"></p>
+          <button id="github-app-webhook-retry-submit" type="button" data-i18n="retry_button"></button>
+        </div>
+```
+
+**11b. `resetGithubAppCreateSection`** — add the new section to the reset
+(currently hides only `github-app-install-section`):
+
+```javascript
+  function resetGithubAppCreateSection() {
+    document.getElementById("github-app-install-section").style.display = "none";
+    document.getElementById("github-app-webhook-retry-section").style.display = "none";
+    document.getElementById("github-app-create-section").style.display = "block";
+    document.getElementById("github-app-error").textContent = "";
+    currentGithubAppErrorKey = null;
+  }
+```
+
+**11c. New JS functions** — add near `pushGithubAppToRenderService` (Task
+4's addition):
+
+```javascript
+  async function setGithubWebhookUrl(stored) {
+    const renderService = readStoredRenderService();
+    if (!renderService || !renderService.service_url) {
+      return {ok: false, reason: "github_unreachable"};
+    }
+    let resp;
+    try {
+      resp = await fetch("/api/github/set-webhook-url", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          app_id: stored.app_id,
+          private_key_b64: stored.private_key_b64,
+          url: `${renderService.service_url}/webhook`,
+        }),
+      });
+    } catch (err) {
+      return {ok: false, reason: "github_unreachable"};
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      return {ok: false, reason: "github_unreachable"};
+    }
+    if (!body.valid) return {ok: false, reason: body.reason};
+    return {ok: true};
+  }
+
+  function showGithubWebhookRetry(reason) {
+    document.getElementById("github-app-install-section").style.display = "none";
+    document.getElementById("github-app-webhook-retry-section").style.display = "block";
+    githubAppError(
+      reason === "invalid_credentials"
+        ? "err_github_webhook_invalid_credentials"
+        : "err_github_webhook_unreachable"
+    );
+  }
+
+  async function finishGithubAppSetup(stored, accountLogin) {
+    const webhookResult = await setGithubWebhookUrl(stored);
+    if (!webhookResult.ok) {
+      showGithubWebhookRetry(webhookResult.reason);
+      return;
+    }
+    await pushGithubAppToRenderService(stored);
+    sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+    completeFrame("github-app", "account_prefix", accountLogin);
+  }
+
+  async function retryGithubWebhookSetup() {
+    const stored = readStoredGithubApp();
+    if (!stored || !stored.account_login) return;
+    document.getElementById("github-app-error").textContent = "";
+    currentGithubAppErrorKey = null;
+    await finishGithubAppSetup(stored, stored.account_login);
+  }
+```
+
+**11d. Rewire `handleGithubInstallCallback`'s success branch** — this is
+Task 4's version (already on this branch); change it from:
+
+```javascript
+    if (body.valid) {
+      stored.installation_id = parseInt(installationId, 10);
+      stored.account_login = body.account_login;
+      await pushGithubAppToRenderService(stored);
+      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+      completeFrame("github-app", "account_prefix", body.account_login);
+    } else if (body.reason === "installation_not_found") {
+```
+
+to:
+
+```javascript
+    if (body.valid) {
+      stored.installation_id = parseInt(installationId, 10);
+      stored.account_login = body.account_login;
+      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+      await finishGithubAppSetup(stored, body.account_login);
+    } else if (body.reason === "installation_not_found") {
+```
+
+(The private key is deliberately still in `stored`/`sessionStorage` at this
+point — `finishGithubAppSetup` needs it for the webhook call, and only
+`pushGithubAppToRenderService`, called from inside `finishGithubAppSetup`
+after a successful webhook-set, clears it.)
+
+**11e. Event listener** — in `DOMContentLoaded`, add:
+
+```javascript
+    document.getElementById("github-app-webhook-retry-submit").addEventListener("click", retryGithubWebhookSetup);
+```
+
+**11f. STRINGS additions** — `en:` block:
+
+```javascript
+      frame2_webhook_retry_instructions: "Your App and installation are set up, but pointing its webhook at your new instance failed. Click Retry to try again.",
+      retry_button: "Retry",
+      err_github_webhook_invalid_credentials: "GitHub rejected the webhook update. Your App's credentials may have changed — try the Change action above.",
+      err_github_webhook_unreachable: "GitHub's API is unreachable right now. Try again in a moment.",
+```
+
+`he:` block:
+
+```javascript
+      frame2_webhook_retry_instructions: "האפליקציה וההתקנה הוגדרו בהצלחה, אך הפניית ה-webhook למופע החדש נכשלה. לחץ על נסה שוב.",
+      retry_button: "נסה שוב",
+      err_github_webhook_invalid_credentials: "GitHub דחה את עדכון ה-webhook. ייתכן שפרטי האפליקציה השתנו — נסה את פעולת השינוי למעלה.",
+      err_github_webhook_unreachable: "ה-API של GitHub אינו זמין כרגע. נסה שוב בעוד רגע.",
+```
+
+- [ ] **Step 12: Run tests to verify they pass**
+
+Run: `uv run pytest tests/test_onboarding_page.py -v`
+Expected: PASS (all tests, old and new).
+
+- [ ] **Step 13: Run the FULL test suite**
+
+Run: `uv run pytest`
+Expected: PASS, 0 failures.
+
+- [ ] **Step 14: Commit the frontend**
+
+```bash
+git add onboarding/static/index.html tests/test_onboarding_page.py
+git commit -m "feat: correct GitHub App webhook URL after Render deploy, with a retry path"
+```
+
+- [ ] **Step 15: Append a short note to `onboarding/CLAUDE.md`**
+
+Add one bullet to the end of the existing "What sub-project 6 ... adds to
+these rules" section (Task 5's addition):
+
+```markdown
+- **The GitHub App's webhook URL is corrected in frame 3 (GitHub), not
+  in the "Render service" or "Finish & Deploy" frames**, even though the
+  correction logically depends on the Render service already existing.
+  This is the one point in the whole flow where the private key (needed to
+  sign the webhook-update's App JWT) and the deployed service URL are both
+  available at once — `pushGithubAppToRenderService`'s later push-and-clear
+  step deletes the private key, so the webhook correction must happen
+  first. A failed webhook-set does NOT push-and-clear or complete the
+  frame; it shows a retry affordance instead, since retrying the whole
+  GitHub install flow is not otherwise reachable from that state.
+```
+
+```bash
+git add onboarding/CLAUDE.md
+git commit -m "docs: note webhook-URL-correction ordering in onboarding/CLAUDE.md"
+```
+
+---
+
 ## Self-Review Notes (for the controller running this plan)
 
 - **Spec coverage:** sections 4-9 of the design spec map to Tasks 1-4;
