@@ -992,7 +992,33 @@
     showLlmProviderModels(body.models, provider, credentialFragment, body.project_id);
   }
 
-  function confirmLlmProviderModel() {
+  async function pushLlmProviderToRenderService(stored) {
+    const renderService = readStoredRenderService();
+    const renderApiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    if (!renderService || !renderService.service_id || !renderApiKey) return;
+    const credentialValue = stored.provider === "vertex"
+      ? stored.gcp_service_account_key_b64
+      : stored.api_key;
+    try {
+      await fetch("/api/llm/push-render-vars", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          render_api_key: renderApiKey,
+          render_service_id: renderService.service_id,
+          provider: stored.provider,
+          credential_value: credentialValue,
+          model: stored.model,
+        }),
+      });
+    } catch (err) {
+      // best-effort -- see pushGithubAppToRenderService's comment above.
+    }
+    delete stored.api_key;
+    delete stored.gcp_service_account_key_b64;
+  }
+
+  async function confirmLlmProviderModel() {
     const select = document.getElementById("llm-provider-model-select");
     const model = select.value;
     if (!model || !pendingLlmProviderCredential) {
@@ -1000,6 +1026,7 @@
       return;
     }
     const stored = {...pendingLlmProviderCredential, model};
+    await pushLlmProviderToRenderService(stored);
     try {
       sessionStorage.setItem(STORAGE_KEYS["llm-provider"], JSON.stringify(stored));
     } catch (err) {
@@ -1336,6 +1363,32 @@
     location.href = `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new?state=${encodeURIComponent(state)}`;
   }
 
+  async function pushGithubAppToRenderService(stored) {
+    const renderService = readStoredRenderService();
+    const renderApiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    if (!renderService || !renderService.service_id || !renderApiKey) return;
+    try {
+      await fetch("/api/github/push-render-vars", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          render_api_key: renderApiKey,
+          render_service_id: renderService.service_id,
+          app_id: stored.app_id,
+          private_key_b64: stored.private_key_b64,
+          webhook_secret: stored.webhook_secret,
+          installation_id: stored.installation_id,
+        }),
+      });
+    } catch (err) {
+      // best-effort -- a network failure still counts as "attempted"
+      // (design spec section 5b step 8); the fields below are cleared
+      // either way, and this frame's completion is never gated on it.
+    }
+    delete stored.private_key_b64;
+    delete stored.webhook_secret;
+  }
+
   async function handleGithubInstallCallback() {
     const params = new URLSearchParams(location.search);
     if (params.get("gh_step") !== "install") return;
@@ -1378,6 +1431,7 @@
     if (body.valid) {
       stored.installation_id = parseInt(installationId, 10);
       stored.account_login = body.account_login;
+      await pushGithubAppToRenderService(stored);
       sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
       completeFrame("github-app", "account_prefix", body.account_login);
     } else if (body.reason === "installation_not_found") {
@@ -1873,6 +1927,26 @@
     pollRenderDeployStatus(stored.service_id, body.deploy_id, Date.now());
   }
 
+  async function pushSupabaseToRenderService(stored) {
+    const renderService = readStoredRenderService();
+    const renderApiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    if (!renderService || !renderService.service_id || !renderApiKey) return;
+    try {
+      await fetch("/api/supabase/push-render-var", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          render_api_key: renderApiKey,
+          render_service_id: renderService.service_id,
+          database_url: stored.connection_string,
+        }),
+      });
+    } catch (err) {
+      // best-effort -- see pushGithubAppToRenderService's comment above.
+    }
+    delete stored.connection_string;
+  }
+
   async function fetchSupabaseConnectionInfo() {
     let stored = readStoredSupabase();
     if (!stored || !stored.ref || !stored.db_pass) {
@@ -1901,6 +1975,8 @@
     stored.connection_string =
       `postgresql://${body.db_user}:${stored.db_pass}@${body.db_host}:${body.db_port}/${body.db_name}`;
     delete stored.db_pass;
+    await pushSupabaseToRenderService(stored);
+    stored.completed = true;
     sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
     completeFrame("supabase", "project_prefix", stored.name);
   }
@@ -1919,7 +1995,7 @@
       showGithubAppReadyToInstall();
     }
     const supabaseState = readStoredSupabase();
-    if (supabaseState && supabaseState.connection_string) {
+    if (supabaseState && supabaseState.completed) {
       completeFrame("supabase", "restored", null);
     } else if (supabaseState && supabaseState.ref) {
       showSupabaseProvisioning();

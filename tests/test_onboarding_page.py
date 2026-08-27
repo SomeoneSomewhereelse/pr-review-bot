@@ -981,3 +981,54 @@ async def test_lock_frame_resets_render_deploy_section():
     client = await _client()
     body = (await client.get("/")).text
     assert 'if (id === "render-deploy") resetRenderDeploySection();' in body
+
+
+async def test_github_push_render_vars_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/github/push-render-vars"') == 1
+
+
+async def test_supabase_push_render_var_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/supabase/push-render-var"') == 1
+
+
+async def test_llm_push_render_vars_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/llm/push-render-vars"') == 1
+
+
+async def test_github_push_helper_clears_secret_fields_not_account_login():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "delete stored.private_key_b64;" in body
+    assert "delete stored.webhook_secret;" in body
+
+
+async def test_supabase_push_helper_clears_connection_string():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "delete stored.connection_string;" in body
+
+
+async def test_supabase_restore_uses_completed_flag_not_connection_string():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "supabaseState.completed" in body
+    assert "supabaseState.connection_string" not in body
+
+
+async def test_llm_push_helper_clears_credential_fields():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "delete stored.api_key;" in body
+    assert "delete stored.gcp_service_account_key_b64;" in body
+
+
+async def test_push_helpers_skip_entirely_without_a_render_service():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "if (!renderService || !renderService.service_id || !renderApiKey) return;" in body
