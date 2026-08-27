@@ -282,6 +282,7 @@ accidentally start exercising the refusal path instead of the real one._
 - **What:** `setFrameStatus("github-app", "app_created")` sets `data-status="app_created"` on the frame's `<details>` element, but the stylesheet only has color rules for `data-status="done"` (green) and `data-status="error"` (red) — the new interim "App created ✓ — install it next" state renders in the default muted color. The badge *text* still correctly conveys the state; only the color is generic.
 - **Why parked:** Arguably correct as-is (the frame genuinely isn't `done` yet), and adding a new color rule wasn't part of the fix wave's scoped item (making the state visible at all, which it now is).
 - **Follow-up:** Add a `[data-status="app_created"] .frame-badge` CSS rule if a distinct color is wanted later — trivial, one line.
+- **Update (2026-08-27, sub-project 3):** the same gap now has a second instance — `setFrameStatus("supabase", "choosing_org")` (frame 3's multi-organization picker) has no `[data-status="choosing_org"] .frame-badge` CSS rule either, same muted-default rendering. Two instances of the same class of gap; a single CSS rule covering both intermediate-status badges (or a shared "in-progress" status color) would close this entry for good rather than fixing one instance at a time.
 
 ### onboarding/static/index.html: password input has no autocomplete="off"; minor accessibility gaps
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
@@ -294,6 +295,29 @@ accidentally start exercising the refusal path instead of the real one._
 - **What:** The design spec (section 5) anticipated a structural log line on validation failure (e.g. `"render key validation: invalid (401)"`, name/outcome only, never the value). The implementation logs nothing at all — safe, but means a production report of "validation keeps failing" is currently undebuggable (can't distinguish a wave of `invalid_key` submissions from a genuine Render outage).
 - **Why parked:** Zero logging is the stricter, safer default, and this project has a documented history of secret-handling incidents (see the entries above this one) — adding logging under the time pressure of a single fix wave felt like the wrong moment to touch this area.
 - **Follow-up:** Add the structural log line the spec already specifies (status code / outcome enum only, never the key) once this service is closer to being actually deployed.
+
+### onboarding/static/index.html: minor UX/robustness gaps from sub-project 3 (Supabase provisioning)
+- **Found during:** Task 6 review, Task 7 review, and the final whole-branch review + its fix-wave re-review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
+- **What:** Five small items, all confirmed low-risk and explicitly scoped out of the final review's fix wave:
+  1. `connectSupabase()`'s catch block (guarding the `crypto.subtle.digest` call added by the fix wave) reuses `err_supabase_unreachable` ("Supabase is unreachable right now...") for what is actually a local Web Crypto failure, not a Supabase connectivity issue — the visitor still gets a visible, actionable error, just slightly inaccurate wording.
+  2. `generateDbPassword()`'s `charset[byte % charset.length]` has a small modulo bias (8 of 62 characters ~1.6x more likely than the other 54) — doesn't threaten the alphanumeric-only requirement, and 32 bytes is far more entropy than a database password needs regardless.
+  3. `generateDbPassword()` itself isn't wrapped in try/catch — much lower risk than the `crypto.subtle` call that was fixed, since `crypto.getRandomValues` essentially never throws for a 32-byte array, and its only caller sits downstream of the now-guarded `crypto.subtle` path.
+  4. Two `sessionStorage.setItem(STORAGE_KEYS["supabase"], ...)` call sites (in `kickOffProjectCreation` and `fetchSupabaseConnectionInfo`) remain unguarded by try/catch — only the OAuth-callback's equivalent call was in the fix wave's scope. Same failure mode (a storage quota/blocked failure becomes an unhandled rejection) at the other two sites, just not yet fixed there.
+  5. The "Check again" button's `style.display = "inline-block"` line is duplicated verbatim across `pollUntilReady` and `checkSupabaseStatusOnce` (present in the plan's own original code, not implementer-introduced), and the button isn't disabled while its own check is in flight — a double-click can issue two concurrent status checks. Frames 1-2 have the same missing-disable shape elsewhere, so this is consistency with existing behavior, not a regression.
+- **Why parked:** All five confirmed low-severity by the final reviewer and independently re-verified by the fix-wave re-review; the fix wave was scoped to the 6 Important findings plus 6 cheap/high-value fold-ins rather than every Minor on the list.
+- **Follow-up:** Each is independently fixable in isolation whenever this file is next touched; none block anything else in the wizard's remaining sub-projects (4-6).
+
+### onboarding/router.py: four Supabase request models repeat access_token's Field constraint verbatim
+- **Found during:** Task 5 review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
+- **What:** `SupabaseListOrgsRequest`, `SupabaseCreateProjectRequest`, `SupabaseProjectStatusRequest`, and `SupabaseConnectionInfoRequest` each declare `access_token: str = Field(max_length=4096)` independently rather than sharing a base model.
+- **Why parked:** Matches this file's existing style — `RenderKeyRequest`/`GithubManifestCodeRequest` don't share a base model either, and four repetitions of one field isn't yet enough duplication to justify introducing one.
+- **Follow-up:** Revisit only if a future sub-project adds enough additional `access_token`-bearing request models that the duplication becomes harder to keep in sync by hand.
+
+### tests/test_onboarding_page.py: one Supabase restore-from-session test only checks substrings, not structural nesting
+- **Found during:** Task 7 review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
+- **What:** `test_restore_from_session_resumes_polling_for_a_ref_without_a_connection_string` only asserts that `showSupabaseProvisioning()`, `pollUntilReady(Date.now())`, and `function restoreFromSession` each appear somewhere in the served page — it doesn't confirm they're inside the same `else if` branch. The implementation itself was independently verified correct by direct code reading during task review; the test is just a weaker regression guard than its name implies.
+- **Why parked:** This test file is a content-substring harness by design (matching this repo's `tests/test_dashboard_page.py` convention), not a JS execution environment — a more structural assertion isn't cheaply available without changing that convention project-wide.
+- **Follow-up:** None planned; revisit only if a real regression here ever slips through undetected, which would be the concrete signal that a substring check is no longer enough for this file.
 
 ---
 
