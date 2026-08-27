@@ -197,6 +197,13 @@ async def test_create_service_owners_5xx_is_unreachable_not_invalid_key():
     assert result == render_client.RenderServiceCreationFailed(reason="render_unreachable")
 
 
+async def test_create_service_owners_malformed_200_body_is_unreachable_not_invalid_key():
+    with respx.mock:
+        respx.get(OWNERS_URL).mock(return_value=httpx.Response(200, text="not json"))
+        result = await render_client.create_service(SENTINEL_KEY, "https://github.com/x/y", "n")
+    assert result == render_client.RenderServiceCreationFailed(reason="render_unreachable")
+
+
 ENV_VAR_URL_A = f"{render_client.RENDER_API_BASE}/services/srv-1/env-vars/A_KEY"
 ENV_VAR_URL_B = f"{render_client.RENDER_API_BASE}/services/srv-1/env-vars/B_KEY"
 
@@ -301,3 +308,17 @@ async def test_poll_deploy_status_401_is_invalid_key():
         respx.get(DEPLOY_STATUS_URL).mock(return_value=httpx.Response(401, json={"message": "nope"}))
         result = await render_client.poll_deploy_status(SENTINEL_KEY, "srv-1", "dep-1")
     assert result == render_client.RenderDeployStatusFailed(reason="invalid_key")
+
+
+async def test_poll_deploy_status_404_is_service_not_found():
+    with respx.mock:
+        respx.get(DEPLOY_STATUS_URL).mock(return_value=httpx.Response(404))
+        result = await render_client.poll_deploy_status(SENTINEL_KEY, "srv-1", "dep-1")
+    assert result == render_client.RenderDeployStatusFailed(reason="service_not_found")
+
+
+async def test_poll_deploy_status_5xx_is_unreachable():
+    with respx.mock:
+        respx.get(DEPLOY_STATUS_URL).mock(return_value=httpx.Response(503))
+        result = await render_client.poll_deploy_status(SENTINEL_KEY, "srv-1", "dep-1")
+    assert result == render_client.RenderDeployStatusFailed(reason="render_unreachable")

@@ -307,7 +307,13 @@ section 3), not an oversight to fix.
   deliberate security property (shrinking a credential's browser-residency
   window), not an optional optimization — do not defer a new frame's push
   to "do it all at the end" without a fresh brainstorm justifying the
-  regression.
+  regression. One path is exempt by design, not by oversight: if the
+  Render-service frame was never completed, the push-and-clear step for
+  frames 2/3/4 is skipped entirely (no attempt, no clear — see the
+  push-failure-handling decision above), which means those credentials
+  sit in `sessionStorage` for the rest of the session in that specific
+  case. This is the documented, accepted tradeoff of "never gate a
+  frame's completion on Render being reachable," not a gap to close.
 - **A push failure never blocks the pushing frame's own completion.**
   Pushing to Render is best-effort persistence; only the final "Finish &
   Deploy" frame is genuinely blocked by a missing service. See design

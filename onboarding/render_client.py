@@ -126,7 +126,7 @@ async def create_service(api_key: str, repo_url: str, name: str) -> RenderServic
                     return RenderServiceCreationFailed(reason="invalid_key")
                 owner_id = owners_body[0]["owner"]["id"]
             except (ValueError, KeyError, IndexError, TypeError):
-                return RenderServiceCreationFailed(reason="invalid_key")
+                return RenderServiceCreationFailed(reason="render_unreachable")
             response = await client.post(
                 "/services",
                 headers=headers,
@@ -301,7 +301,9 @@ async def poll_deploy_status(api_key: str, service_id: str, deploy_id: str) -> R
         return RenderDeployStatus(status="canceled")
     if raw_status in _DEPLOY_FAILED_STATUSES:
         return RenderDeployStatus(status="failed")
-    # Any in-flight status, and any status this project has not catalogued,
-    # is reported as still in progress -- never guess "failed" for an
-    # unrecognized value and stop the visitor's poll loop early.
+    if raw_status in _DEPLOY_IN_FLIGHT_STATUSES:
+        return RenderDeployStatus(status="in_progress")
+    # A status this project has not catalogued at all is reported as still
+    # in progress too -- never guess "failed" for an unrecognized value and
+    # stop the visitor's poll loop early.
     return RenderDeployStatus(status="in_progress")

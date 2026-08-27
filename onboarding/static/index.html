@@ -375,6 +375,7 @@
       err_render_deploy_service_not_found: "Your Render service could not be found. Try step 2 again.",
       err_render_deploy_unreachable: "Render's API is unreachable right now. Try again in a moment.",
       err_render_deploy_failed: "The deploy failed. Check your service on Render's dashboard for details.",
+      err_render_deploy_canceled: "A newer deploy superseded this one. Click Deploy to check the latest status.",
       err_render_deploy_timeout: "Still deploying after 15 minutes. It may still finish — check again.",
       validate_button: "Validate",
       change_button: "Change",
@@ -489,6 +490,7 @@
       err_render_deploy_service_not_found: "לא נמצא שירות Render. נסה שוב את שלב 2.",
       err_render_deploy_unreachable: "ה-API של Render אינו זמין כרגע. נסה שוב בעוד רגע.",
       err_render_deploy_failed: "הפריסה נכשלה. בדוק את השירות בלוח הבקרה של Render לפרטים.",
+      err_render_deploy_canceled: "פריסה חדשה יותר דחתה את זו. לחץ על פרוס כדי לבדוק את הסטטוס העדכני.",
       err_render_deploy_timeout: "עדיין בפריסה אחרי 15 דקות. ייתכן שתסתיים בהמשך — בדוק שוב.",
       validate_button: "אימות",
       change_button: "שינוי",
@@ -762,6 +764,7 @@
     if (id === "llm-provider") resetLlmProviderSection();
     if (id === "uptime-pinger") resetUptimePingerSection();
     if (id === "render-deploy") resetRenderDeploySection();
+    if (id === "render-service") sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
   }
 
   function unlockFrame(id) {
@@ -799,6 +802,8 @@
     if (id === "render-service") {
       sessionStorage.removeItem(STORAGE_KEYS["render-service"]);
       sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
+      document.getElementById("render-service-name-input").value = "";
+      prefillRenderServiceDefaults();
     }
     if (id === "github-app") {
       sessionStorage.removeItem(STORAGE_KEYS["github-app"]);
@@ -1012,7 +1017,7 @@
       ? stored.gcp_service_account_key_b64
       : stored.api_key;
     try {
-      await fetch("/api/llm/push-render-vars", {
+      const resp = await fetch("/api/llm/push-render-vars", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -1023,8 +1028,15 @@
           model: stored.model,
         }),
       });
+      const body = await resp.json();
+      if (!body.valid) {
+        console.warn("Render push failed:", "/api/llm/push-render-vars", "reason:", body.reason, "pushed:", body.pushed);
+      }
     } catch (err) {
-      // best-effort -- see pushGithubAppToRenderService's comment above.
+      // best-effort -- a network failure still counts as "attempted"
+      // (design spec section 5b step 8); the fields below are cleared
+      // either way, and this frame's completion is never gated on it.
+      console.warn("Render push failed:", "/api/llm/push-render-vars", "network error");
     }
     delete stored.api_key;
     delete stored.gcp_service_account_key_b64;
@@ -1381,7 +1393,7 @@
     const renderApiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
     if (!renderService || !renderService.service_id || !renderApiKey) return;
     try {
-      await fetch("/api/github/push-render-vars", {
+      const resp = await fetch("/api/github/push-render-vars", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -1393,10 +1405,15 @@
           installation_id: stored.installation_id,
         }),
       });
+      const body = await resp.json();
+      if (!body.valid) {
+        console.warn("Render push failed:", "/api/github/push-render-vars", "reason:", body.reason, "pushed:", body.pushed);
+      }
     } catch (err) {
       // best-effort -- a network failure still counts as "attempted"
       // (design spec section 5b step 8); the fields below are cleared
       // either way, and this frame's completion is never gated on it.
+      console.warn("Render push failed:", "/api/github/push-render-vars", "network error");
     }
     delete stored.private_key_b64;
     delete stored.webhook_secret;
@@ -1855,6 +1872,7 @@
     document.getElementById("render-deploy-polling-section").style.display = "none";
     document.getElementById("render-deploy-done-section").style.display = "none";
     document.getElementById("render-deploy-check-again-submit").style.display = "none";
+    document.getElementById("render-deploy-trigger-submit").disabled = false;
     document.getElementById("render-deploy-error").textContent = "";
     currentRenderDeployErrorKey = null;
   }
@@ -1909,13 +1927,21 @@
     completeFrame("render-deploy", null, null);
   }
 
+  function showRenderDeployTriggerAgain() {
+    document.getElementById("render-deploy-polling-section").style.display = "none";
+    document.getElementById("render-deploy-trigger-section").style.display = "block";
+    document.getElementById("render-deploy-trigger-submit").disabled = false;
+  }
+
   function handleRenderDeployStatusResult(body) {
     if (body.networkError) {
       renderDeployError("err_network");
+      showRenderDeployTriggerAgain();
       return "error";
     }
     if (!body.valid) {
       renderDeployErrorForReason(body.reason);
+      showRenderDeployTriggerAgain();
       return "error";
     }
     if (body.status === "live") {
@@ -1923,14 +1949,16 @@
       return "live";
     }
     if (body.status === "failed") {
-      document.getElementById("render-deploy-polling-section").style.display = "none";
       renderDeployError("err_render_deploy_failed");
+      showRenderDeployTriggerAgain();
       return "error";
     }
-    // "in_progress" and "canceled" both keep polling: canceled means a
-    // newer deploy superseded this one, not a failure (same distinction
-    // scripts/deploy.py draws), so the right response is to keep
-    // watching, not to stop.
+    if (body.status === "canceled") {
+      renderDeployError("err_render_deploy_canceled");
+      showRenderDeployTriggerAgain();
+      return "error";
+    }
+    // Only "in_progress" keeps polling now.
     return "pending";
   }
 
@@ -1968,6 +1996,8 @@
       renderDeployError("err_render_deploy_no_service");
       return;
     }
+    const triggerBtn = document.getElementById("render-deploy-trigger-submit");
+    triggerBtn.disabled = true;
     let resp;
     try {
       resp = await fetch("/api/render/trigger-deploy", {
@@ -1976,6 +2006,7 @@
         body: JSON.stringify({api_key: apiKey, service_id: stored.service_id}),
       });
     } catch (err) {
+      triggerBtn.disabled = false;
       renderDeployError("err_network");
       return;
     }
@@ -1984,10 +2015,12 @@
       if (!resp.ok) throw new Error("bad status");
       body = await resp.json();
     } catch (err) {
+      triggerBtn.disabled = false;
       renderDeployError("err_render_deploy_unreachable");
       return;
     }
     if (!body.valid) {
+      triggerBtn.disabled = false;
       renderDeployErrorForReason(body.reason);
       return;
     }
@@ -2003,7 +2036,7 @@
     const renderApiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
     if (!renderService || !renderService.service_id || !renderApiKey) return;
     try {
-      await fetch("/api/supabase/push-render-var", {
+      const resp = await fetch("/api/supabase/push-render-var", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -2012,8 +2045,15 @@
           database_url: stored.connection_string,
         }),
       });
+      const body = await resp.json();
+      if (!body.valid) {
+        console.warn("Render push failed:", "/api/supabase/push-render-var", "reason:", body.reason, "pushed:", body.pushed);
+      }
     } catch (err) {
-      // best-effort -- see pushGithubAppToRenderService's comment above.
+      // best-effort -- a network failure still counts as "attempted"
+      // (design spec section 5b step 8); the fields below are cleared
+      // either way, and this frame's completion is never gated on it.
+      console.warn("Render push failed:", "/api/supabase/push-render-var", "network error");
     }
     delete stored.connection_string;
   }

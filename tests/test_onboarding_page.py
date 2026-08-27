@@ -1006,6 +1006,7 @@ async def test_github_push_helper_clears_secret_fields_not_account_login():
     body = (await client.get("/")).text
     assert "delete stored.private_key_b64;" in body
     assert "delete stored.webhook_secret;" in body
+    assert "delete stored.account_login" not in body
 
 
 async def test_supabase_push_helper_clears_connection_string():
@@ -1031,7 +1032,7 @@ async def test_llm_push_helper_clears_credential_fields():
 async def test_push_helpers_skip_entirely_without_a_render_service():
     client = await _client()
     body = (await client.get("/")).text
-    assert "if (!renderService || !renderService.service_id || !renderApiKey) return;" in body
+    assert body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 3
 
 
 async def test_set_webhook_url_fetch_leaves_the_page_exactly_once():
