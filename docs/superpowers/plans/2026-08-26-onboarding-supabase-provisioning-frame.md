@@ -2354,9 +2354,21 @@ Expected: PASS.
 
 - [ ] **Step 5: Update `onboarding/CLAUDE.md`**
 
-Append (after the existing "What sub-project 2 (GitHub App automation)
-adds to these rules" section — do not remove or edit any existing content):
+**Not a plain file-append**: the "What sub-project 2 (GitHub App automation)
+adds to these rules" section is followed by an unrelated "The test suite
+looks hung on a fresh worktree — it isn't" section, so appending to the end
+of the file would wrongly place this new section after that unrelated one.
+Insert it between them instead. Replace:
 ```markdown
+  value still normalizes to `""` rather than erroring, so the lifespan check
+  stays the one thing that reports a missing value.
+
+## The test suite looks hung on a fresh worktree — it isn't
+```
+with (do not remove or edit any other existing content):
+```markdown
+  value still normalizes to `""` rather than erroring, so the lifespan check
+  stays the one thing that reports a missing value.
 
 ## What sub-project 3 (Supabase provisioning) adds to these rules
 
@@ -2403,6 +2415,8 @@ adds to these rules" section — do not remove or edit any existing content):
   every other credential in this service. This is a known, deliberately
   deferred risk; see `ISSUES.md`'s Design Gaps section before changing
   anything about how the OAuth app is used or exposed.
+
+## The test suite looks hung on a fresh worktree — it isn't
 ```
 
 - [ ] **Step 6: Run the full test suite**
