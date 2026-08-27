@@ -74,6 +74,20 @@ async def test_strips_trailing_slash_before_appending_healthz():
     assert b"//healthz" not in sent_body
 
 
+async def test_strips_trailing_whitespace_before_deriving_target_url():
+    with respx.mock:
+        respx.get(MONITORS_URL).mock(return_value=httpx.Response(200, json={"data": []}))
+        create_route = respx.post(MONITORS_URL).mock(
+            return_value=httpx.Response(201, json=_monitor(TARGET_URL))
+        )
+        result = await uptimerobot_client.create_or_reuse_monitor(SENTINEL_KEY, RENDER_URL + " \n")
+    assert result == uptimerobot_client.UptimeRobotMonitorResult(created=True)
+    sent_body = create_route.calls.last.request.content
+    assert TARGET_URL.encode() in sent_body
+    assert b" " not in sent_body  # No stray spaces in the body
+    assert b"\n" not in sent_body  # No stray newlines in the body
+
+
 async def test_unauthorized_key_is_reported():
     with respx.mock:
         respx.get(MONITORS_URL).mock(

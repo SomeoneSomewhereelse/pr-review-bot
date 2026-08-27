@@ -34,7 +34,7 @@ UptimeRobotOutcome = UptimeRobotMonitorResult | UptimeRobotApiFailed
 
 
 def _target_url(render_service_url: str) -> str:
-    return f"{render_service_url.rstrip('/')}/healthz"
+    return f"{render_service_url.strip().rstrip('/')}/healthz"
 
 
 def _failure_for_status(status_code: int) -> UptimeRobotApiFailed | None:
