@@ -364,3 +364,64 @@ async def test_connect_supabase_guards_crypto_failures():
     # The catch must actually surface a visible error, not swallow it.
     catch_body = fn_body[fn_body.index("catch (err) {"):]
     assert "supabaseError(" in catch_body
+
+
+async def test_project_status_leaves_the_page_exactly_once():
+    """Like Task 6's list-organizations/create-project tests: this endpoint
+    goes through the shared callSupabaseRelay helper, not a direct fetch()
+    call, so the audit target is the endpoint string appearing exactly once
+    as a callSupabaseRelay(...) argument."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('callSupabaseRelay("/api/supabase/project-status"') == 1
+
+
+async def test_connection_info_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('callSupabaseRelay("/api/supabase/connection-info"') == 1
+
+
+async def test_frame3_has_a_check_again_button():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="supabase-check-status-submit"' in body
+
+
+async def test_polling_uses_a_five_second_interval_and_five_minute_timeout():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "SUPABASE_POLL_INTERVAL_MS = 5000" in body
+    assert "SUPABASE_POLL_TIMEOUT_MS = 300000" in body
+
+
+async def test_target_status_is_active_healthy_and_init_failed_is_terminal():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert '"ACTIVE_HEALTHY"' in body
+    assert '"INIT_FAILED"' in body
+
+
+async def test_connection_string_assembled_client_side_from_non_secret_shape():
+    """The backend never returns Supabase's own connection_string field
+    (spec section 3 step 9) — the browser builds it from db_user/db_host/
+    db_port/db_name (returned) plus db_pass (already held)."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function fetchSupabaseConnectionInfo" in body
+    assert "postgresql://${body.db_user}:${stored.db_pass}@${body.db_host}:${body.db_port}/${body.db_name}" in body
+
+
+async def test_supabase_credential_never_persists_to_local_storage():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'localStorage.setItem(STORAGE_KEYS["supabase"]' not in body
+    assert 'localStorage.getItem(STORAGE_KEYS["supabase"]' not in body
+
+
+async def test_restore_from_session_resumes_polling_for_a_ref_without_a_connection_string():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "showSupabaseProvisioning()" in body
+    assert "pollUntilReady(Date.now())" in body
+    assert "function restoreFromSession" in body

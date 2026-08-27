@@ -1031,6 +1031,7 @@
     stored.status = body.status;
     sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
     showSupabaseProvisioning();
+    pollUntilReady(Date.now());
   }
 
   function showSupabaseProvisioning() {
@@ -1039,6 +1040,75 @@
     document.getElementById("supabase-provisioning-section").style.display = "block";
     frameEl("supabase").open = true;
     setFrameStatus("supabase", "provisioning");
+  }
+
+  const SUPABASE_POLL_INTERVAL_MS = 5000;
+  const SUPABASE_POLL_TIMEOUT_MS = 300000;
+
+  async function handleProjectStatusResult(body) {
+    if (!body.valid) {
+      supabaseErrorForReason(body.reason, body.message);
+      return "error";
+    }
+    if (body.status === "ACTIVE_HEALTHY") {
+      await fetchSupabaseConnectionInfo();
+      return "ready";
+    }
+    if (body.status === "INIT_FAILED") {
+      supabaseError("err_supabase_provisioning_failed");
+      return "error";
+    }
+    return "pending";
+  }
+
+  async function fetchProjectStatus(ref) {
+    return await callSupabaseRelay("/api/supabase/project-status", {ref: ref});
+  }
+
+  async function pollUntilReady(startedAt) {
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    if (!stored || !stored.ref) return;
+    const body = await fetchProjectStatus(stored.ref);
+    const outcome = await handleProjectStatusResult(body);
+    if (outcome !== "pending") return;
+    if (Date.now() - startedAt >= SUPABASE_POLL_TIMEOUT_MS) {
+      supabaseError("err_supabase_provisioning_timeout");
+      document.getElementById("supabase-check-status-submit").style.display = "inline-block";
+      return;
+    }
+    setTimeout(() => { pollUntilReady(startedAt); }, SUPABASE_POLL_INTERVAL_MS);
+  }
+
+  async function checkSupabaseStatusOnce() {
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    if (!stored || !stored.ref) return;
+    document.getElementById("supabase-error").textContent = "";
+    currentSupabaseErrorKey = null;
+    const body = await fetchProjectStatus(stored.ref);
+    const outcome = await handleProjectStatusResult(body);
+    if (outcome === "pending") {
+      supabaseError("err_supabase_provisioning_timeout");
+      document.getElementById("supabase-check-status-submit").style.display = "inline-block";
+    }
+  }
+
+  async function fetchSupabaseConnectionInfo() {
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    if (!stored || !stored.ref || !stored.db_pass) return;
+    const body = await callSupabaseRelay("/api/supabase/connection-info", {ref: stored.ref});
+    if (!body.valid) {
+      supabaseErrorForReason(body.reason, body.message);
+      return;
+    }
+    // Assembled client-side from db_pass (already held) plus the non-secret
+    // shape connection-info returned (spec section 3 step 9) — never from
+    // Supabase's own connection_string field, whose password-masking
+    // behavior cannot be verified from documentation.
+    stored.connection_string =
+      `postgresql://${body.db_user}:${stored.db_pass}@${body.db_host}:${body.db_port}/${body.db_name}`;
+    delete stored.db_pass;
+    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    completeFrame("supabase", "project_prefix", stored.name);
   }
 
   function restoreFromSession() {
@@ -1050,6 +1120,13 @@
       completeFrame("github-app", "restored", null);
     } else if (githubApp) {
       showGithubAppReadyToInstall();
+    }
+    const supabaseState = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    if (supabaseState && supabaseState.connection_string) {
+      completeFrame("supabase", "restored", null);
+    } else if (supabaseState && supabaseState.ref) {
+      showSupabaseProvisioning();
+      pollUntilReady(Date.now());
     }
   }
 
@@ -1109,6 +1186,7 @@
     document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
+    document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);
     guardLockedFrames();
     attachChangeButtons();
 

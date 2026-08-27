@@ -117,6 +117,52 @@ section 3), not an oversight to fix.
   value still normalizes to `""` rather than erroring, so the lifespan check
   stays the one thing that reports a missing value.
 
+## What sub-project 3 (Supabase provisioning) adds to these rules
+
+- **`SUPABASE_OAUTH_CLIENT_ID`/`SUPABASE_OAUTH_CLIENT_SECRET` are this
+  service's first operator-level secrets** — every credential before this
+  sub-project was either visitor-typed or minted fresh for the visitor who
+  requested it. These two are set once by the operator (a one-time, manual
+  Supabase OAuth-app registration; Supabase has no self-registration
+  mechanism the way GitHub's App Manifest flow does) and never change per
+  visitor. `supabase_oauth_client_id` is also templated into the served
+  page as `window.SUPABASE_OAUTH_CLIENT_ID` — this is **not** a secret
+  exposure: a `client_id` is the public half of OAuth credentials by
+  design, and `client_secret` never leaves the backend.
+- **`exchange-oauth-code` and `refresh-access-token` are mint-and-return
+  exceptions**, same category as GitHub's manifest exchange: they return
+  tokens freshly issued to the visitor who just authorized. `create-project`
+  is a *different* kind of exception — on a business-rule rejection it
+  relays Supabase's own error `message` text verbatim rather than mapping
+  to a fixed reason enum, because guessing which specific rule Supabase
+  applied (e.g. the free-tier project cap) would require assuming exact
+  API wording this project could not verify without a live authenticated
+  call — see the design spec section 4 and `ISSUES.md`'s Design Gaps entry.
+- **`db_pass` is generated client-side by the browser, never minted by the
+  backend** — deliberately different from the GitHub frame's private-key
+  pattern. It's a value *we* choose (Supabase doesn't produce it for us the
+  way it produces a private key), so keeping it browser-originated avoids
+  growing the mint-and-return exception list for a value that doesn't need
+  it.
+- **`connection-info` never returns Supabase's own `connection_string`/
+  `connectionString` fields.** Whether they embed the real password or a
+  masked placeholder could not be verified from documentation during this
+  sub-project's brainstorm. The endpoint returns only the non-secret shape
+  (`db_user`, `db_host`, `db_port`, `db_name`); the browser, which already
+  holds `db_pass`, assembles the final connection string itself. A future
+  change that trusts Supabase's own connection-string field needs to
+  verify its password-masking behavior with a live call first.
+- **Token refresh is reactive, not proactive.** `callSupabaseRelay` in
+  `onboarding/static/index.html` retries exactly once, only after a real
+  `"unauthorized"` response — there is no client-side expiry-timer
+  tracking `expires_in`. Any new Supabase relay call should go through this
+  same helper rather than calling `fetch()` directly, to inherit the retry
+  behavior for free.
+- **The OAuth app is a resource shared across every visitor** — unlike
+  every other credential in this service. This is a known, deliberately
+  deferred risk; see `ISSUES.md`'s Design Gaps section before changing
+  anything about how the OAuth app is used or exposed.
+
 ## The test suite looks hung on a fresh worktree — it isn't
 
 The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly
