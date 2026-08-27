@@ -168,17 +168,20 @@ already submitted.
 `groq/_base_client.py`'s imports directly) — `respx` can mock it the same
 way `render_client.py`/`supabase_client.py`'s tests already do.
 
-**Gemini/Vertex**: `google-genai`'s transport mixes `httpx` and `requests`
-(`google.auth.transport.requests.AuthorizedSession` specifically backs the
-Vertex/ADC-style credential path — verified by reading
-`google/genai/_api_client.py` directly), so a single `respx` mock cannot
-cleanly cover both the Gemini and Vertex code paths the way it covers a
-pure-`httpx` module. Tests mock at the SDK client boundary instead
-(`unittest.mock` patching `genai.Client`/its `.aio.models.list` — or the
-thin `onboarding/llm_client.py` wrapper functions directly), the same
-category of workaround `github_client.py`'s `verify_installation` already
-needed for PyGithub's `requests`-based transport, for the same underlying
-reason (an SDK that isn't pure `httpx` under the hood).
+**Gemini/Vertex**: the async listing call itself is `httpx`-based for both
+providers (verified: this environment has no `aiohttp` installed, so
+`google-genai`'s async path falls back to `httpx` regardless of auth type).
+What a single `respx` mock can't cover is Vertex's separate credential
+step: a service-account refreshes its access token via `google.auth`'s
+synchronous, `requests`-based transport
+(`google.auth.transport.requests.AuthorizedSession`) before the `httpx`
+listing call ever happens, and `respx` only intercepts `httpx`. Tests mock
+at the SDK client boundary instead (`unittest.mock` patching
+`genai.Client`/its `.aio.models.list` — or the thin
+`onboarding/llm_client.py` wrapper functions directly), the same category
+of workaround `github_client.py`'s `verify_installation` already needed
+for PyGithub's `requests`-based transport, for the same underlying reason
+(an SDK that isn't pure `httpx` under the hood).
 
 Per root `CLAUDE.md`'s LLM-API-testing-hygiene section, no test in this
 suite makes a real network call to Gemini, Groq, or Vertex — every provider

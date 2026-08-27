@@ -116,6 +116,22 @@ async def test_dashboard_page_renders_queue_and_backoff_as_chips_not_one_string(
     assert '.join(", ")' not in body
 
 
+async def test_stored_lang_and_theme_are_parsed_defensively():
+    """An unrecognized stored value (not "en"/"he", not "light"/"dark"/
+    "system") must not throw inside applyLanguage (STRINGS[currentLang][key]
+    would throw for an unknown currentLang), which would abort
+    DOMContentLoaded before any event listener attaches. Same defensive
+    shape as onboarding/static/index.html's readStoredLang/readStoredTheme."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function readStoredLang" in body
+    assert "function readStoredTheme" in body
+    assert "KNOWN_LANGS.includes(stored)" in body
+    assert "KNOWN_THEMES.includes(stored)" in body
+    assert 'localStorage.getItem("dashboard_lang") || "en"' not in body
+    assert 'localStorage.getItem("dashboard_theme") || "system"' not in body
+
+
 async def test_dashboard_page_anchors_popups_to_their_button():
     """Popups must be positioned near the button that opened them (an
     absolutely-positioned popup placed via getBoundingClientRect), not

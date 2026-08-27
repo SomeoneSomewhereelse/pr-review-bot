@@ -1,11 +1,13 @@
 """Tests for onboarding/llm_client.py's Gemini and Vertex model listing.
-Both share google-genai's SDK, whose transport mixes httpx and requests
-depending on auth type (google.auth.transport.requests.AuthorizedSession
-specifically backs the Vertex/ADC-style credential path — verified by
-reading google/genai/_api_client.py directly during this sub-project's
-brainstorm), so a single respx mock cannot cleanly cover both code paths.
-Tests mock at the SDK client boundary instead — genai.Client itself is
-monkeypatched with a fake that records constructor kwargs and returns a
+Both share google-genai's SDK. The async listing call itself is httpx-based
+for both providers (verified: this environment has no aiohttp installed,
+so google-genai's async path falls back to httpx regardless of auth type).
+What a single respx mock can't cover is Vertex's separate credential step:
+a service-account refreshes its access token via google.auth's synchronous,
+requests-based transport (google.auth.transport.requests.AuthorizedSession)
+before the httpx listing call ever happens, and respx only intercepts
+httpx. Tests mock at the SDK client boundary instead — genai.Client itself
+is monkeypatched with a fake that records constructor kwargs and returns a
 fake async model pager. See
 docs/superpowers/specs/2026-08-27-onboarding-llm-provider-frame-design.md
 sections 3-4, 6."""
@@ -22,6 +24,10 @@ from google.genai import errors as genai_errors
 
 from onboarding import llm_client
 
+# The private key below is a locally-generated throwaway RSA key used only
+# for local signing in these tests -- every HTTP call is mocked below, so
+# nothing is ever sent anywhere real with it (same shape as
+# test_onboarding_github_client.py's _throwaway_key_material() fixture).
 _SENTINEL_SERVICE_ACCOUNT = {
     "type": "service_account",
     "project_id": "sentinel-project",

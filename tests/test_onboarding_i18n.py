@@ -14,7 +14,7 @@ STRINGS_KEYS = [
     "frame5_title", "frame6_title", "coming_soon", "validate_button",
     "change_button", "badge_locked", "badge_ready", "badge_error", "badge_done",
     "err_empty_key", "err_invalid_key", "err_unreachable", "err_network",
-    "checking", "restored", "owner_prefix",
+    "badge_checking", "restored", "owner_prefix",
 ]
 
 

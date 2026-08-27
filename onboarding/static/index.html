@@ -115,8 +115,12 @@
   details.frame > summary::-webkit-details-marker { display: none; }
   .frame-title { font-weight: 600; }
   .frame-badge { font-size: 0.85rem; color: var(--text-muted); }
-  details.frame[data-status="done"] .frame-badge { color: var(--ok); }
+  details.frame[data-status="done"] .frame-badge,
+  details.frame[data-status="deploy_done"] .frame-badge { color: var(--ok); }
   details.frame[data-status="error"] .frame-badge { color: var(--fail); }
+  details.frame[data-status="app_created"] .frame-badge,
+  details.frame[data-status="choosing_org"] .frame-badge,
+  details.frame[data-status="checking"] .frame-badge { color: var(--accent); }
   details.frame[data-status="provisioning"] .frame-badge { color: var(--accent); }
   .frame-change {
     display: none;
@@ -159,8 +163,8 @@
 </head>
 <body>
   <header class="topbar">
-    <button id="themeToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
-    <button id="langToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
+    <button id="themeToggleBtn" class="control" type="button" aria-haspopup="dialog" aria-label="Theme"></button>
+    <button id="langToggleBtn" class="control" type="button" aria-haspopup="dialog" aria-label="Language"></button>
   </header>
 
   <div id="themePopupBackdrop" class="popup-backdrop">
@@ -196,9 +200,9 @@
       </summary>
       <div class="frame-body">
         <p data-i18n="frame1_instructions"></p>
-        <input id="render-key-input" type="password">
+        <input id="render-key-input" type="password" autocomplete="off">
         <button id="render-key-submit" type="button" data-i18n="validate_button"></button>
-        <p id="render-key-error" class="frame-error"></p>
+        <p id="render-key-error" class="frame-error" aria-live="polite"></p>
       </div>
     </details>
 
@@ -381,12 +385,13 @@
       change_button: "Change",
       badge_locked: "Locked", badge_ready: "Not started",
       badge_error: "Error", badge_done: "✓ Validated",
+      badge_checking: "Checking…",
+      badge_deploy_done: "✓ Live",
       badge_app_created: "✓ App created — install it next",
       err_empty_key: "Paste your Render API key first.",
       err_invalid_key: "That key was rejected by Render. Double-check it and try again.",
       err_unreachable: "Render's API is unreachable right now. Try again in a moment.",
       err_network: "Could not reach the wizard's server. Try again.",
-      checking: "checking…",
       restored: "restored from this session",
       owner_prefix: "owner: ",
       frame2_instructions: "Name your GitHub App (must be unique on GitHub), then click Create App. This will be created under whichever GitHub account you're currently logged into in this browser — check that's the right one before continuing.",
@@ -416,6 +421,7 @@
       badge_choosing_org: "Choose an organization",
       project_prefix: "project: ",
       err_supabase_name_empty: "Name your project first.",
+      err_supabase_crypto_failed: "Your browser couldn't generate the required security value. Try a different browser or updating this one.",
       err_supabase_storage_failed: "Couldn't save your Supabase connection in this browser. Try again.",
       err_supabase_callback_invalid: "That didn't come back from Supabase as expected. Please try again.",
       err_supabase_invalid_code: "Supabase rejected that — the code may have expired. Try connecting again.",
@@ -496,12 +502,13 @@
       change_button: "שינוי",
       badge_locked: "נעול", badge_ready: "טרם התחיל",
       badge_error: "שגיאה", badge_done: "✓ אומת",
+      badge_checking: "בודק…",
+      badge_deploy_done: "✓ פעיל",
       badge_app_created: "✓ האפליקציה נוצרה — כעת התקינו אותה",
       err_empty_key: "הדביקו קודם את מפתח ה-API של Render.",
       err_invalid_key: "המפתח נדחה על ידי Render. בדקו אותו שוב ונסו שנית.",
       err_unreachable: "שירות ה-API של Render אינו זמין כרגע. נסו שוב בעוד רגע.",
       err_network: "לא ניתן להתחבר לשרת האשף. נסו שוב.",
-      checking: "בודק…",
       restored: "שוחזר מהפעלה זו",
       owner_prefix: "בעלים: ",
       frame2_instructions: "תנו שם לאפליקציית ה-GitHub שלכם (חייב להיות ייחודי ב-GitHub), ואז לחצו על יצירת אפליקציה. האפליקציה תיווצר תחת חשבון ה-GitHub שאליו אתם מחוברים כרגע בדפדפן זה — ודאו שזה החשבון הנכון לפני שתמשיכו.",
@@ -531,6 +538,7 @@
       badge_choosing_org: "בחרו ארגון",
       project_prefix: "פרויקט: ",
       err_supabase_name_empty: "תנו שם לפרויקט קודם.",
+      err_supabase_crypto_failed: "הדפדפן שלכם לא הצליח ליצור את ערך האבטחה הנדרש. נסו דפדפן אחר או עדכנו דפדפן זה.",
       err_supabase_storage_failed: "לא ניתן לשמור את חיבור ה-Supabase בדפדפן זה. נסו שוב.",
       err_supabase_callback_invalid: "התגובה מ-Supabase לא הייתה כצפוי. נסו שוב.",
       err_supabase_invalid_code: "Supabase דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו להתחבר שוב.",
@@ -729,7 +737,14 @@
   function renderBadge(id) {
     const {status, detailKey, detailValue} = frameState[id];
     const label = t("badge_" + status);
-    const detail = detailKey ? `${t(detailKey)}${detailValue ?? ""}` : "";
+    // t() falls back to returning its input unchanged when it isn't a known
+    // STRINGS key (see t()'s own `|| key` fallback), so resolving detailValue
+    // through it here is safe for every existing caller that passes raw,
+    // non-translatable text (a URL, an owner/account/project name) -- only a
+    // detailValue that is itself a STRINGS key (e.g. a provider label key)
+    // gets translated, and it re-resolves on every render, including after a
+    // language switch.
+    const detail = detailKey ? `${t(detailKey)}${detailValue ? t(detailValue) : ""}` : "";
     badgeEl(id).textContent = detail ? `${label} — ${detail}` : label;
   }
 
@@ -764,7 +779,10 @@
     if (id === "llm-provider") resetLlmProviderSection();
     if (id === "uptime-pinger") resetUptimePingerSection();
     if (id === "render-deploy") resetRenderDeploySection();
-    if (id === "render-service") sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
+    if (id === "render-service") {
+      sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
+      document.getElementById("render-service-submit").disabled = false;
+    }
   }
 
   function unlockFrame(id) {
@@ -779,11 +797,11 @@
     FRAME_ORDER.slice(FRAME_ORDER.indexOf(id) + 1).forEach(lockFrame);
   }
 
-  function completeFrame(id, detailKey, detailValue) {
+  function completeFrame(id, detailKey, detailValue, status) {
     const el = frameEl(id);
     el.dataset.locked = "true";
     el.open = false;
-    setFrameStatus(id, "done", detailKey, detailValue);
+    setFrameStatus(id, status || "done", detailKey, detailValue);
     const next = nextFrame(id);
     if (next) unlockFrame(next);
   }
@@ -795,14 +813,19 @@
     el.open = true;
     setFrameStatus(id, "ready");
     // relockDownstreamOf only clears *later* frames' storage, so a frame
-    // changing itself keeps its own stale value — which for frame 2 means a
-    // mid-change refresh would silently re-complete it from sessionStorage.
-    // Scoped to frame 2 on purpose; frame 1's equivalent gap is a separate
-    // parked issue (root ISSUES.md).
+    // changing itself must clear its own stale value here too — otherwise a
+    // mid-change refresh would silently re-complete it from stale
+    // sessionStorage. Every frame below clears its own key on self-change
+    // for exactly this reason.
+    if (id === "render-key") {
+      sessionStorage.removeItem(STORAGE_KEYS["render-key"]);
+      document.getElementById("render-key-submit").disabled = false;
+    }
     if (id === "render-service") {
       sessionStorage.removeItem(STORAGE_KEYS["render-service"]);
       sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
       document.getElementById("render-service-name-input").value = "";
+      document.getElementById("render-service-submit").disabled = false;
       prefillRenderServiceDefaults();
     }
     if (id === "github-app") {
@@ -835,6 +858,8 @@
     fileInput.value = "";
     fileInput.style.display = "none";
     document.getElementById("llm-provider-validate-submit").style.display = "none";
+    document.getElementById("llm-provider-validate-submit").disabled = false;
+    document.getElementById("llm-provider-continue-submit").disabled = false;
     document.getElementById("llm-provider-model-section").style.display = "none";
     document.getElementById("llm-provider-model-select").innerHTML = "";
     document.getElementById("llm-provider-error").textContent = "";
@@ -844,6 +869,7 @@
 
   function llmProviderError(key) {
     setFrameStatus("llm-provider", "error");
+    document.getElementById("llm-provider-validate-submit").disabled = false;
     currentLlmProviderErrorKey = key;
     document.getElementById("llm-provider-error").textContent = t(key);
   }
@@ -983,6 +1009,8 @@
       payload = {service_account_key_b64: b64};
       credentialFragment = {gcp_service_account_key_b64: b64};
     }
+    setFrameStatus("llm-provider", "checking");
+    document.getElementById("llm-provider-validate-submit").disabled = true;
     let resp;
     try {
       resp = await fetch(endpoint, {
@@ -1042,6 +1070,12 @@
     delete stored.gcp_service_account_key_b64;
   }
 
+  const LLM_PROVIDER_LABEL_KEY = {
+    gemini: "frame4_provider_gemini",
+    groq: "frame4_provider_groq",
+    vertex: "frame4_provider_vertex",
+  };
+
   async function confirmLlmProviderModel() {
     const select = document.getElementById("llm-provider-model-select");
     const model = select.value;
@@ -1049,15 +1083,23 @@
       llmProviderError("err_llm_no_model_selected");
       return;
     }
+    const continueBtn = document.getElementById("llm-provider-continue-submit");
+    continueBtn.disabled = true;
     const stored = {...pendingLlmProviderCredential, model};
     await pushLlmProviderToRenderService(stored);
     try {
       sessionStorage.setItem(STORAGE_KEYS["llm-provider"], JSON.stringify(stored));
     } catch (err) {
+      continueBtn.disabled = false;
       llmProviderError("err_llm_storage_failed");
       return;
     }
-    completeFrame("llm-provider", "provider_prefix", stored.provider);
+    // Pass the STRINGS key (not pre-resolved text) as the detail value:
+    // renderBadge() resolves it through t() at render time, the same way
+    // detailKey already does, so the label re-translates on a later
+    // language switch instead of freezing in whatever language was active
+    // when the frame completed.
+    completeFrame("llm-provider", "provider_prefix", LLM_PROVIDER_LABEL_KEY[stored.provider] || stored.provider);
   }
 
   let currentUptimePingerErrorKey = null;
@@ -1071,6 +1113,7 @@
   function resetUptimePingerSection() {
     document.getElementById("uptime-pinger-api-key-input").value = "";
     document.getElementById("uptime-pinger-error").textContent = "";
+    document.getElementById("uptime-pinger-submit").disabled = false;
     currentUptimePingerErrorKey = null;
     refreshUptimePingerBlockedState();
   }
@@ -1091,7 +1134,9 @@
       refreshUptimePingerBlockedState();
       return;
     }
-    setFrameStatus("uptime-pinger", "ready", "checking");
+    setFrameStatus("uptime-pinger", "checking");
+    const submitBtn = document.getElementById("uptime-pinger-submit");
+    submitBtn.disabled = true;
     let resp;
     try {
       resp = await fetch("/api/uptimerobot/create-monitor", {
@@ -1100,6 +1145,7 @@
         body: JSON.stringify({api_key: key, render_service_url: renderServiceUrl}),
       });
     } catch (err) {
+      submitBtn.disabled = false;
       setFrameStatus("uptime-pinger", "error");
       currentUptimePingerErrorKey = "err_network";
       errorEl.textContent = t("err_network");
@@ -1110,6 +1156,7 @@
       if (!resp.ok) throw new Error("bad status");
       body = await resp.json();
     } catch (err) {
+      submitBtn.disabled = false;
       setFrameStatus("uptime-pinger", "error");
       currentUptimePingerErrorKey = "err_uptime_unreachable";
       errorEl.textContent = t("err_uptime_unreachable");
@@ -1120,6 +1167,7 @@
       input.value = "";
       completeFrame("uptime-pinger", body.created ? "monitor_created_detail" : "monitor_reused_detail", null);
     } else {
+      submitBtn.disabled = false;
       setFrameStatus("uptime-pinger", "error");
       currentUptimePingerErrorKey = uptimePingerErrorKeyForReason(body.reason);
       errorEl.textContent = t(currentUptimePingerErrorKey);
@@ -1172,7 +1220,9 @@
       errorEl.textContent = t("err_render_service_empty");
       return;
     }
-    setFrameStatus("render-service", "ready", "checking");
+    setFrameStatus("render-service", "checking");
+    const submitBtn = document.getElementById("render-service-submit");
+    submitBtn.disabled = true;
     let resp;
     try {
       resp = await fetch("/api/render/create-service", {
@@ -1181,6 +1231,7 @@
         body: JSON.stringify({api_key: apiKey, repo_url: repoUrl, name: name}),
       });
     } catch (err) {
+      submitBtn.disabled = false;
       setFrameStatus("render-service", "error");
       currentRenderServiceErrorKey = "err_network";
       errorEl.textContent = t("err_network");
@@ -1191,6 +1242,7 @@
       if (!resp.ok) throw new Error("bad status");
       body = await resp.json();
     } catch (err) {
+      submitBtn.disabled = false;
       setFrameStatus("render-service", "error");
       currentRenderServiceErrorKey = "err_render_service_unreachable";
       errorEl.textContent = t("err_render_service_unreachable");
@@ -1203,16 +1255,19 @@
       sessionStorage.setItem(RENDER_SERVICE_URL_KEY, body.service_url);
       completeFrame("render-service", "url_prefix", body.service_url);
     } else if (body.reason === "invalid_key") {
+      submitBtn.disabled = false;
       setFrameStatus("render-service", "error");
       currentRenderServiceErrorKey = "err_render_service_invalid_key";
       errorEl.textContent = t("err_render_service_invalid_key");
     } else if (body.reason === "request_rejected") {
+      submitBtn.disabled = false;
       setFrameStatus("render-service", "error");
       currentRenderServiceErrorKey = "err_render_service_rejected";
       errorEl.textContent = body.message
         ? `${t("err_render_service_rejected")} ${body.message}`
         : t("err_render_service_rejected");
     } else {
+      submitBtn.disabled = false;
       setFrameStatus("render-service", "error");
       currentRenderServiceErrorKey = "err_render_service_unreachable";
       errorEl.textContent = t("err_render_service_unreachable");
@@ -1230,7 +1285,9 @@
       errorEl.textContent = t("err_empty_key");
       return;
     }
-    setFrameStatus("render-key", "ready", "checking");
+    setFrameStatus("render-key", "checking");
+    const submitBtn = document.getElementById("render-key-submit");
+    submitBtn.disabled = true;
     let resp;
     try {
       resp = await fetch("/api/render/validate-key", {
@@ -1239,6 +1296,7 @@
         body: JSON.stringify({api_key: key}),
       });
     } catch (err) {
+      submitBtn.disabled = false;
       setFrameStatus("render-key", "error");
       currentRenderKeyErrorKey = "err_network";
       errorEl.textContent = t("err_network");
@@ -1249,6 +1307,7 @@
       if (!resp.ok) throw new Error("bad status");
       body = await resp.json();
     } catch (err) {
+      submitBtn.disabled = false;
       setFrameStatus("render-key", "error");
       currentRenderKeyErrorKey = "err_unreachable";
       errorEl.textContent = t("err_unreachable");
@@ -1259,10 +1318,12 @@
       input.value = "";
       completeFrame("render-key", "owner_prefix", body.owner_name);
     } else if (body.reason === "invalid_key") {
+      submitBtn.disabled = false;
       setFrameStatus("render-key", "error");
       currentRenderKeyErrorKey = "err_invalid_key";
       errorEl.textContent = t("err_invalid_key");
     } else {
+      submitBtn.disabled = false;
       setFrameStatus("render-key", "error");
       currentRenderKeyErrorKey = "err_unreachable";
       errorEl.textContent = t("err_unreachable");
@@ -1559,6 +1620,7 @@
     document.getElementById("supabase-check-status-submit").style.display = "none";
     document.getElementById("supabase-connect-section").style.display = "block";
     document.getElementById("supabase-error").textContent = "";
+    document.getElementById("supabase-org-submit").disabled = false;
     currentSupabaseErrorKey = null;
   }
 
@@ -1682,7 +1744,11 @@
       });
       location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
     } catch (err) {
-      supabaseError("err_supabase_unreachable");
+      // This block's only genuinely fallible step is crypto.subtle.digest
+      // inside generatePkcePair() -- a local Web Crypto failure, not a
+      // Supabase connectivity problem, so it gets its own accurate message
+      // rather than reusing err_supabase_unreachable.
+      supabaseError("err_supabase_crypto_failed");
     }
   }
 
@@ -1771,14 +1837,17 @@
 
   async function confirmSupabaseOrg() {
     const select = document.getElementById("supabase-org-select");
-    await kickOffProjectCreation(select.value);
+    const submitBtn = document.getElementById("supabase-org-submit");
+    submitBtn.disabled = true;
+    const ok = await kickOffProjectCreation(select.value);
+    if (!ok) submitBtn.disabled = false;
   }
 
   async function kickOffProjectCreation(organizationSlug) {
     let stored = readStoredSupabase();
     if (!stored) {
       supabaseError("err_supabase_callback_invalid");
-      return;
+      return false;
     }
     const dbPass = generateDbPassword();
     const body = await callSupabaseRelay("/api/supabase/create-project", {
@@ -1786,7 +1855,7 @@
     });
     if (!body.valid) {
       supabaseErrorForReason(body.reason, body.message);
-      return;
+      return false;
     }
     // Re-read AFTER the await: callSupabaseRelay may have refreshed and
     // written new tokens mid-call, and merging onto the pre-await snapshot
@@ -1796,9 +1865,15 @@
     stored.db_pass = dbPass;
     stored.ref = body.ref;
     stored.status = body.status;
-    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    try {
+      sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    } catch (err) {
+      supabaseError("err_supabase_storage_failed");
+      return false;
+    }
     showSupabaseProvisioning();
     pollUntilReady(Date.now());
+    return true;
   }
 
   function showSupabaseProvisioning() {
@@ -1924,7 +1999,7 @@
       stored.deployed = true;
       sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(stored));
     }
-    completeFrame("render-deploy", null, null);
+    completeFrame("render-deploy", null, null, "deploy_done");
   }
 
   function showRenderDeployTriggerAgain() {
@@ -2088,7 +2163,12 @@
     delete stored.db_pass;
     await pushSupabaseToRenderService(stored);
     stored.completed = true;
-    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    try {
+      sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    } catch (err) {
+      supabaseError("err_supabase_storage_failed");
+      return;
+    }
     completeFrame("supabase", "project_prefix", stored.name);
   }
 
@@ -2120,7 +2200,7 @@
     }
     const renderServiceState = readStoredRenderService();
     if (renderServiceState && renderServiceState.deployed) {
-      completeFrame("render-deploy", null, null);
+      completeFrame("render-deploy", null, null, "deploy_done");
     } else if (renderServiceState && renderServiceState.pending_deploy_id) {
       document.getElementById("render-deploy-trigger-section").style.display = "none";
       document.getElementById("render-deploy-polling-section").style.display = "block";
