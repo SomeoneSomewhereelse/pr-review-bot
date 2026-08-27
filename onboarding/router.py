@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from onboarding import github_client, llm_client, render_client, supabase_client
+from onboarding import github_client, llm_client, render_client, supabase_client, uptimerobot_client
 from onboarding.config import settings
 
 router = APIRouter()
@@ -77,6 +77,11 @@ class LlmGroqListModelsRequest(BaseModel):
 
 class LlmVertexListModelsRequest(BaseModel):
     service_account_key_b64: str = Field(min_length=1, max_length=16384)
+
+
+class UptimeRobotCreateMonitorRequest(BaseModel):
+    api_key: str = Field(min_length=1, max_length=512)
+    render_service_url: str = Field(min_length=1, max_length=2048)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -220,4 +225,14 @@ async def list_vertex_models(payload: LlmVertexListModelsRequest) -> dict:
     result = await llm_client.list_vertex_models(payload.service_account_key_b64)
     if isinstance(result, llm_client.VertexModelsListed):
         return {"valid": True, "project_id": result.project_id, "models": result.models}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/uptimerobot/create-monitor")
+async def create_uptimerobot_monitor(payload: UptimeRobotCreateMonitorRequest) -> dict:
+    result = await uptimerobot_client.create_or_reuse_monitor(
+        payload.api_key, payload.render_service_url
+    )
+    if isinstance(result, uptimerobot_client.UptimeRobotMonitorResult):
+        return {"valid": True, "created": result.created}
     return {"valid": False, "reason": result.reason}

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from onboarding import github_client, llm_client, render_client, supabase_client
+from onboarding import github_client, llm_client, render_client, supabase_client, uptimerobot_client
 from onboarding.config import Settings, settings
 from onboarding.main import app
 
@@ -559,4 +559,90 @@ async def test_groq_list_models_rejects_empty_key():
 async def test_vertex_list_models_rejects_empty_key():
     client = await _client()
     resp = await client.post("/api/llm/vertex/list-models", json={"service_account_key_b64": ""})
+    assert resp.status_code == 422
+
+
+async def test_uptimerobot_monitor_created_reports_created_true(monkeypatch):
+    async def fake_create(api_key, render_service_url):
+        assert api_key == SENTINEL_KEY
+        assert render_service_url == "https://sentinel-service.onrender.com"
+        return uptimerobot_client.UptimeRobotMonitorResult(created=True)
+
+    monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True, "created": True}
+
+
+async def test_uptimerobot_monitor_reused_reports_created_false(monkeypatch):
+    async def fake_create(api_key, render_service_url):
+        return uptimerobot_client.UptimeRobotMonitorResult(created=False)
+
+    monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True, "created": False}
+
+
+async def test_uptimerobot_failure_reports_the_reason(monkeypatch):
+    async def fake_create(api_key, render_service_url):
+        return uptimerobot_client.UptimeRobotApiFailed(reason="unauthorized")
+
+    monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": False, "reason": "unauthorized"}
+
+
+async def test_uptimerobot_response_never_echoes_the_submitted_key(monkeypatch):
+    async def fake_create(api_key, render_service_url):
+        return uptimerobot_client.UptimeRobotApiFailed(reason="unauthorized")
+
+    monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+    )
+    assert SENTINEL_KEY not in resp.text
+
+
+async def test_uptimerobot_validation_error_never_echoes_the_submitted_key():
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+    )
+    assert resp.status_code == 422
+    assert SENTINEL_KEY not in resp.text
+    assert "input" not in resp.text
+
+
+async def test_uptimerobot_empty_api_key_is_rejected():
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": "", "render_service_url": "https://sentinel-service.onrender.com"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_uptimerobot_empty_render_url_is_rejected():
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": ""},
+    )
     assert resp.status_code == 422
