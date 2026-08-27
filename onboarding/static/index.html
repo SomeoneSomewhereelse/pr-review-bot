@@ -235,6 +235,10 @@
           <p data-i18n="frame2_install_instructions"></p>
           <button id="github-app-install-submit" type="button" data-i18n="install_button"></button>
         </div>
+        <div id="github-app-webhook-retry-section" style="display: none;">
+          <p data-i18n="frame2_webhook_retry_instructions"></p>
+          <button id="github-app-webhook-retry-submit" type="button" data-i18n="retry_button"></button>
+        </div>
         <p id="github-app-error" class="frame-error"></p>
       </div>
     </details>
@@ -395,6 +399,10 @@
       err_github_unreachable: "GitHub is unreachable right now. Try again in a moment.",
       err_github_installation_not_found: "GitHub couldn't find that installation. Try installing again.",
       err_github_invalid_credentials: "GitHub rejected the App's credentials. Try creating the App again.",
+      frame2_webhook_retry_instructions: "Your App and installation are set up, but pointing its webhook at your new instance failed. Click Retry to try again.",
+      retry_button: "Retry",
+      err_github_webhook_invalid_credentials: "GitHub rejected the webhook update. Your App's credentials may have changed — try the Change action above.",
+      err_github_webhook_unreachable: "GitHub's API is unreachable right now. Try again in a moment.",
       account_prefix: "account: ",
       frame3_instructions: "Name your Supabase project, then click Connect Supabase. This authorizes the wizard to create a new project on your own Supabase account.",
       frame3_name_placeholder: "pr-review-bot",
@@ -505,6 +513,10 @@
       err_github_unreachable: "GitHub אינו זמין כרגע. נסו שוב בעוד רגע.",
       err_github_installation_not_found: "GitHub לא מצא את ההתקנה. נסו להתקין שוב.",
       err_github_invalid_credentials: "GitHub דחה את פרטי האפליקציה. נסו ליצור את האפליקציה מחדש.",
+      frame2_webhook_retry_instructions: "האפליקציה וההתקנה הוגדרו בהצלחה, אך הפניית ה-webhook למופע החדש נכשלה. לחץ על נסה שוב.",
+      retry_button: "נסה שוב",
+      err_github_webhook_invalid_credentials: "GitHub דחה את עדכון ה-webhook. ייתכן שפרטי האפליקציה השתנו — נסה את פעולת השינוי למעלה.",
+      err_github_webhook_unreachable: "ה-API של GitHub אינו זמין כרגע. נסה שוב בעוד רגע.",
       account_prefix: "חשבון: ",
       frame3_instructions: "תנו שם לפרויקט ה-Supabase שלכם, ואז לחצו על חיבור Supabase. פעולה זו מאשרת לאשף ליצור פרויקט חדש בחשבון ה-Supabase שלכם.",
       frame3_name_placeholder: "pr-review-bot",
@@ -1284,6 +1296,7 @@
 
   function resetGithubAppCreateSection() {
     document.getElementById("github-app-install-section").style.display = "none";
+    document.getElementById("github-app-webhook-retry-section").style.display = "none";
     document.getElementById("github-app-create-section").style.display = "block";
     document.getElementById("github-app-error").textContent = "";
     currentGithubAppErrorKey = null;
@@ -1389,6 +1402,65 @@
     delete stored.webhook_secret;
   }
 
+  async function setGithubWebhookUrl(stored) {
+    const renderService = readStoredRenderService();
+    if (!renderService || !renderService.service_url) {
+      return {ok: false, reason: "github_unreachable"};
+    }
+    let resp;
+    try {
+      resp = await fetch("/api/github/set-webhook-url", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          app_id: stored.app_id,
+          private_key_b64: stored.private_key_b64,
+          url: `${renderService.service_url}/webhook`,
+        }),
+      });
+    } catch (err) {
+      return {ok: false, reason: "github_unreachable"};
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      return {ok: false, reason: "github_unreachable"};
+    }
+    if (!body.valid) return {ok: false, reason: body.reason};
+    return {ok: true};
+  }
+
+  function showGithubWebhookRetry(reason) {
+    document.getElementById("github-app-install-section").style.display = "none";
+    document.getElementById("github-app-webhook-retry-section").style.display = "block";
+    githubAppError(
+      reason === "invalid_credentials"
+        ? "err_github_webhook_invalid_credentials"
+        : "err_github_webhook_unreachable"
+    );
+  }
+
+  async function finishGithubAppSetup(stored, accountLogin) {
+    const webhookResult = await setGithubWebhookUrl(stored);
+    if (!webhookResult.ok) {
+      showGithubWebhookRetry(webhookResult.reason);
+      return;
+    }
+    await pushGithubAppToRenderService(stored);
+    sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+    completeFrame("github-app", "account_prefix", accountLogin);
+  }
+
+  async function retryGithubWebhookSetup() {
+    const stored = readStoredGithubApp();
+    if (!stored || !stored.account_login) return;
+    document.getElementById("github-app-error").textContent = "";
+    currentGithubAppErrorKey = null;
+    await finishGithubAppSetup(stored, stored.account_login);
+  }
+
   async function handleGithubInstallCallback() {
     const params = new URLSearchParams(location.search);
     if (params.get("gh_step") !== "install") return;
@@ -1431,9 +1503,8 @@
     if (body.valid) {
       stored.installation_id = parseInt(installationId, 10);
       stored.account_login = body.account_login;
-      await pushGithubAppToRenderService(stored);
       sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
-      completeFrame("github-app", "account_prefix", body.account_login);
+      await finishGithubAppSetup(stored, body.account_login);
     } else if (body.reason === "installation_not_found") {
       githubAppError("err_github_installation_not_found");
     } else if (body.reason === "invalid_credentials") {
@@ -2074,6 +2145,7 @@
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
     document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
+    document.getElementById("github-app-webhook-retry-submit").addEventListener("click", retryGithubWebhookSetup);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);

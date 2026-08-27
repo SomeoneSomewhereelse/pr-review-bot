@@ -1032,3 +1032,37 @@ async def test_push_helpers_skip_entirely_without_a_render_service():
     client = await _client()
     body = (await client.get("/")).text
     assert "if (!renderService || !renderService.service_id || !renderApiKey) return;" in body
+
+
+async def test_set_webhook_url_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/github/set-webhook-url"') == 1
+
+
+async def test_webhook_retry_section_markup_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="github-app-webhook-retry-section"' in body
+    assert 'id="github-app-webhook-retry-submit"' in body
+
+
+async def test_webhook_set_gates_frame_completion_before_push_and_clear():
+    # setGithubWebhookUrl must be awaited, and its failure path must return
+    # before pushGithubAppToRenderService/completeFrame ever run -- this is
+    # the ordering that keeps the private key available for a retry.
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "await finishGithubAppSetup(stored, body.account_login);" in body
+    assert "if (!webhookResult.ok) {" in body
+
+
+async def test_webhook_retry_i18n_strings_present_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    keys = [
+        "frame2_webhook_retry_instructions", "retry_button",
+        "err_github_webhook_invalid_credentials", "err_github_webhook_unreachable",
+    ]
+    for key in keys:
+        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
