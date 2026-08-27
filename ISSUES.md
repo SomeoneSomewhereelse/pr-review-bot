@@ -247,42 +247,24 @@ and its siblings) an explicit bypass fixture
 (`tests/test_deploy_script.py::_real_db_target`) rather than have them
 accidentally start exercising the refusal path instead of the real one._
 
-### app/static/dashboard.html has the same unguarded-localStorage bug already fixed in onboarding/static/index.html
-- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md` (during verification of Task 5's fix round, unrelated code noticed alongside it)
-- **What:** `app/static/dashboard.html:290-291` seeds `currentLang`/`currentTheme` via `localStorage.getItem(...) || default` with no validation against the known value sets — the exact same defect found and fixed in `onboarding/static/index.html` during this branch's Task 5 fix round. An unrecognized stored value makes `STRINGS[currentLang][key]` throw inside `applyLanguage`, aborting `DOMContentLoaded` before any event listener attaches and breaking the entire dashboard, not just its translations.
-- **Why parked:** Out of scope for the onboarding-wizard plan/branch — `app/` is a different service with its own module boundary (`app/CLAUDE.md`), and this file was never touched by any task in that plan.
-- **Follow-up:** A small, standalone fix to `app/static/dashboard.html`: clamp `currentLang`/`currentTheme` to their known-good sets at read time, mirroring `onboarding/static/index.html`'s `KNOWN_LANGS`/`KNOWN_THEMES` guard (commit `7728980`); add a regression test in `tests/test_dashboard_page.py` for a corrupted/unrecognized stored value.
-
 ### onboarding/render_client.py constructs a fresh httpx.AsyncClient per validate_key() call
 - **Found during:** Task 2 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** `validate_key()` opens a new `httpx.AsyncClient` context on every call instead of reusing/injecting one.
 - **Why parked:** Correct and cheap at current call volume (one validation per visitor per wizard session); a shared client would need lifespan management that `onboarding/main.py` deliberately doesn't have (this service has no app-level state).
 - **Follow-up:** Revisit only if a future frame in this wizard starts making many calls to the same external API in a hot path.
 
-### onboarding/static/index.html: no double-submit guard on the Render-key Validate button
-- **Found during:** Task 4 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
-- **What:** `validateRenderKey()` doesn't disable the Validate button/input while a request is in flight; a rapid double-click fires two concurrent `fetch` calls with the same key. Idempotent in practice (both responses apply the same result) — no leak or state corruption. Traces to the plan's own provided code (plan-mandated), not an implementer deviation.
-- **Why parked:** Not a correctness or security issue; deferred to keep the final review's fix wave scoped to findings with real user-visible or security impact.
-- **Follow-up:** Disable the button and input for the duration of the in-flight `fetch`; three lines in `validateRenderKey`.
-
 ### onboarding/static/index.html: minor Render-key-frame UX gaps
 - **Found during:** Task 4 review and final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
-- **What:** No dedicated test for the empty-input validation path (the code handles it correctly). No Enter-key submit binding on the password input — only the button's click listener triggers validation, so an on-screen mobile keyboard's "Go" button does nothing. `setFrameStatus("render-key", "ready", t("checking"))` composes into "Not started — checking…", a slightly self-contradictory label during a pending request.
+- **What:** No dedicated test for the empty-input validation path (the code handles it correctly). No Enter-key submit binding on the password input — only the button's click listener triggers validation, so an on-screen mobile keyboard's "Go" button does nothing.
 - **Why parked:** Cosmetic/UX polish, no functional or security impact.
-- **Follow-up:** Add a `badge_checking` STRINGS key (both languages) and a dedicated `checking` frame status instead of reusing `ready`; bind `keydown` → Enter on the password input to call `validateRenderKey()`; add the empty-input test.
+- **Follow-up:** Bind `keydown` → Enter on the password input to call `validateRenderKey()`; add the empty-input test.
+- **Update (2026-08-27, parked-minors fix wave):** the third original sub-item here (the self-contradictory "Not started — checking…" label) is closed — `setFrameStatus(id, "ready", "checking")` was generalized to a dedicated `"checking"` status with its own `badge_checking` STRINGS key, applied to every frame that had the same composed-label shape (render-key, render-service, uptime-pinger), not just this one. The two items above are still open.
 
 ### tests/test_onboarding_i18n.py: one RTL test asserts an exact whole-line literal string
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** `test_language_switch_sets_dir_for_rtl` asserts a full literal source line rather than a more targeted substring, making it more brittle than necessary to a harmless refactor of that one line.
 - **Why parked:** The reviewer's own assessment: the brittleness is doing real work here — it pins that the RTL direction is genuinely derived from the selected language, not just that `dir` is set to *something*. Not worth loosening.
 - **Follow-up:** None planned; revisit only if that line needs a legitimate refactor and the test starts failing on unrelated changes.
-
-### onboarding/static/index.html: beginChange doesn't clear sessionStorage for the frame being re-edited
-- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
-- **What:** `lockFrame` removes a frame's stored value from `sessionStorage`, but `beginChange` (the "Change" button's handler) doesn't. After clicking "Change" on frame 1, the old Render key is still in `sessionStorage`; a reload before resubmitting runs `restoreFromSession()`, which silently re-completes frame 1 with the *old* key and re-unlocks frame 2 — quietly undoing the relock the visitor just triggered.
-- **Why parked:** Benign today (the old key was valid, and `relockDownstreamOf` correctly wiped any downstream frames' values) — but it's an asymmetry in the state machine that will read as a real bug once frames 2-6 (sub-projects 2-6) add their own stored values.
-- **Follow-up:** Add `sessionStorage.removeItem(STORAGE_KEYS[id])` to `beginChange`, mirroring `lockFrame`.
-- **Update (2026-08-26, sub-project 2's final-review fix wave):** frame 2 (`github-app`) now gets this fix — `beginChange` clears its `sessionStorage` key on self-change, scoped via an `id === "github-app"` guard, deliberately not generalized to other frames (see this same plan's fix-wave report for the reasoning: retrofitting frame 1 here would have been unrelated scope creep). Frame 1 (`render-key`) is still open — this entry stays until it is too.
 
 ### onboarding/static/index.html: `code`, base-URL, and error-message minor gaps from sub-project 2 (GitHub App automation)
 - **Found during:** Final whole-branch review and its fix-wave re-review, `docs/superpowers/plans/2026-08-26-onboarding-github-app-frame.md`
@@ -297,19 +279,6 @@ accidentally start exercising the refusal path instead of the real one._
 - **Why parked:** All seven confirmed low-severity by both the final reviewer and its fix-wave re-review; the fix wave was scoped to the 6 Important findings plus 2 cheap/high-value deferred items (config validation, undeclared dependencies) rather than every Minor on the list.
 - **Follow-up:** Each is independently fixable in isolation whenever one of these endpoints gets touched again; none block anything else in the wizard's remaining sub-projects.
 
-### onboarding/static/index.html: frame 2's "App created" badge has no distinct color
-- **Found during:** Sub-project 2's final-review fix-wave re-review, `docs/superpowers/plans/2026-08-26-onboarding-github-app-frame.md`
-- **What:** `setFrameStatus("github-app", "app_created")` sets `data-status="app_created"` on the frame's `<details>` element, but the stylesheet only has color rules for `data-status="done"` (green) and `data-status="error"` (red) — the new interim "App created ✓ — install it next" state renders in the default muted color. The badge *text* still correctly conveys the state; only the color is generic.
-- **Why parked:** Arguably correct as-is (the frame genuinely isn't `done` yet), and adding a new color rule wasn't part of the fix wave's scoped item (making the state visible at all, which it now is).
-- **Follow-up:** Add a `[data-status="app_created"] .frame-badge` CSS rule if a distinct color is wanted later — trivial, one line.
-- **Update (2026-08-27, sub-project 3):** the same gap now has a second instance — `setFrameStatus("supabase", "choosing_org")` (frame 3's multi-organization picker) has no `[data-status="choosing_org"] .frame-badge` CSS rule either, same muted-default rendering. Two instances of the same class of gap; a single CSS rule covering both intermediate-status badges (or a shared "in-progress" status color) would close this entry for good rather than fixing one instance at a time.
-
-### onboarding/static/index.html: password input has no autocomplete="off"; minor accessibility gaps
-- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
-- **What:** The Render-key `<input type="password">` has no `autocomplete="off"` — the page's own copy claims "it stays in your browser for this session only," but a browser password manager offering to save the field would persist it across sessions, contradicting that claim (low practical risk today: no `name` attribute and no `<form>` means most browser heuristics won't offer to save it). Separately: `#render-key-error` has no `aria-live="polite"` (a screen-reader user gets no announcement when validation fails), and the theme/language toggle buttons ship with empty `textContent`/no `aria-label` until `applyLanguage` populates them on load.
-- **Why parked:** No functional or security impact; genuine polish.
-- **Follow-up:** Add `autocomplete="off"` to the password input; `aria-live="polite"` to `#render-key-error`; static `aria-label` fallbacks on the two toggle buttons.
-
 ### onboarding/render_client.py and router.py: no server-side structural logging
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** The design spec (section 5) anticipated a structural log line on validation failure (e.g. `"render key validation: invalid (401)"`, name/outcome only, never the value). The implementation logs nothing at all — safe, but means a production report of "validation keeps failing" is currently undebuggable (can't distinguish a wave of `invalid_key` submissions from a genuine Render outage).
@@ -318,14 +287,12 @@ accidentally start exercising the refusal path instead of the real one._
 
 ### onboarding/static/index.html: minor UX/robustness gaps from sub-project 3 (Supabase provisioning)
 - **Found during:** Task 6 review, Task 7 review, and the final whole-branch review + its fix-wave re-review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
-- **What:** Five small items, all confirmed low-risk and explicitly scoped out of the final review's fix wave:
-  1. `connectSupabase()`'s catch block (guarding the `crypto.subtle.digest` call added by the fix wave) reuses `err_supabase_unreachable` ("Supabase is unreachable right now...") for what is actually a local Web Crypto failure, not a Supabase connectivity issue — the visitor still gets a visible, actionable error, just slightly inaccurate wording.
-  2. `generateDbPassword()`'s `charset[byte % charset.length]` has a small modulo bias (8 of 62 characters ~1.6x more likely than the other 54) — doesn't threaten the alphanumeric-only requirement, and 32 bytes is far more entropy than a database password needs regardless.
-  3. `generateDbPassword()` itself isn't wrapped in try/catch — much lower risk than the `crypto.subtle` call that was fixed, since `crypto.getRandomValues` essentially never throws for a 32-byte array, and its only caller sits downstream of the now-guarded `crypto.subtle` path.
-  4. Two `sessionStorage.setItem(STORAGE_KEYS["supabase"], ...)` call sites (in `kickOffProjectCreation` and `fetchSupabaseConnectionInfo`) remain unguarded by try/catch — only the OAuth-callback's equivalent call was in the fix wave's scope. Same failure mode (a storage quota/blocked failure becomes an unhandled rejection) at the other two sites, just not yet fixed there.
-  5. The "Check again" button's `style.display = "inline-block"` line is duplicated verbatim across `pollUntilReady` and `checkSupabaseStatusOnce` (present in the plan's own original code, not implementer-introduced), and the button isn't disabled while its own check is in flight — a double-click can issue two concurrent status checks. Frames 1-2 have the same missing-disable shape elsewhere, so this is consistency with existing behavior, not a regression.
-- **Why parked:** All five confirmed low-severity by the final reviewer and independently re-verified by the fix-wave re-review; the fix wave was scoped to the 6 Important findings plus 6 cheap/high-value fold-ins rather than every Minor on the list.
-- **Follow-up:** Each is independently fixable in isolation whenever this file is next touched; none block anything else in the wizard's remaining sub-projects (4-6).
+- **What:** Three small items remain, all confirmed low-risk:
+  1. `generateDbPassword()`'s `charset[byte % charset.length]` has a small modulo bias (8 of 62 characters ~1.6x more likely than the other 54) — doesn't threaten the alphanumeric-only requirement, and 32 bytes is far more entropy than a database password needs regardless. Not worth fixing.
+  2. `generateDbPassword()` itself isn't wrapped in try/catch — much lower risk than the `crypto.subtle` call fixed elsewhere in this file, since `crypto.getRandomValues` essentially never throws for a 32-byte array.
+  3. The "Check again" button (`supabase-check-status-submit`) isn't disabled while its own check is in flight — a double-click can issue two concurrent status checks. Lower stakes than the credential-submit buttons already fixed (parked-minors fix wave, 2026-08-27), since this only re-checks status, it doesn't submit a credential or create a resource.
+- **Why parked:** All three low-severity; a separate cleanup fixed everything else in this bundle (the wrong crypto/storage error message in `connectSupabase()`, the two previously-unguarded `sessionStorage.setItem` call sites in `kickOffProjectCreation`/`fetchSupabaseConnectionInfo`, plus a fourth in `callSupabaseRelay`'s token-refresh path) — see the 2026-08-27 parked-minors fix wave commits.
+- **Follow-up:** Wrap `generateDbPassword()`'s body in try/catch for consistency, even though it essentially never throws; disable `supabase-check-status-submit` for the duration of its own in-flight check, matching the pattern every credential-submit button now has.
 
 ### onboarding/router.py: four Supabase request models repeat access_token's Field constraint verbatim
 - **Found during:** Task 5 review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
@@ -339,22 +306,25 @@ accidentally start exercising the refusal path instead of the real one._
 - **Why parked:** This test file is a content-substring harness by design (matching this repo's `tests/test_dashboard_page.py` convention), not a JS execution environment — a more structural assertion isn't cheaply available without changing that convention project-wide.
 - **Follow-up:** None planned; revisit only if a real regression here ever slips through undetected, which would be the concrete signal that a substring check is no longer enough for this file.
 
+### Repo-wide `ruff check .` is already red on `main`, independent of any onboarding-wizard branch
+- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5). Filed under "Design Gaps" by mistake at the time (format/content is a Parked Issue, not a proactive gap) — relocated here 2026-08-27 during a parked-minors cleanup pass.
+- **What:** `uv run ruff check .` reports ~65 pre-existing `E501` (line too long, limit 100 per `pyproject.toml`) violations across files this sub-project never touched (`onboarding/supabase_client.py`, `tests/test_onboarding_supabase_client.py`, `tests/test_onboarding_router.py`'s pre-existing lines, and others) — meaning `.github/workflows/ci.yml`'s lint step is currently red on `main` itself, not just on feature branches.
+- **Why parked:** A repo-wide cleanup is a standalone task, not something to fold into an unrelated feature branch's fix wave (confirmed still true as of the 2026-08-27 parked-minors fix wave: `ruff check .` reported 80 errors both before and after that commit, all pre-existing).
+- **Follow-up:** A dedicated lint-cleanup pass across the whole repo, then confirm CI's lint step actually goes green — a permanently-red gate stops catching new violations.
+
+### Spec section 6 (onboarding-uptimerobot-frame-design.md) described a browser-behavior test this project's suite cannot execute
+- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5). Also filed under "Design Gaps" by mistake — relocated here 2026-08-27.
+- **What:** The spec asked for a test where "mocked `sessionStorage` without [the Render-URL] key renders the blocked message, no form" — this project's onboarding page tests are all static-HTML-source-substring assertions (`tests/test_onboarding_page.py`'s established convention, since there is no JS test runner anywhere in this project — no `package.json`, no jsdom/playwright/selenium). The implementer correctly substituted a static-source check for the blocked-state markup/logic's *presence*, matching every prior frame's convention, but this means the blocked-state *behavior* has zero executable coverage — only its source text does.
+- **Why parked:** Not a defect in any implementation — the gap is in how the spec was written, describing a test shape the project's suite structurally cannot run.
+- **Follow-up:** Either add a lightweight JS test runner to this project (a real architecture decision, its own brainstorm), or have future specs stop describing browser-behavior tests in this style.
+
 ### onboarding/static/index.html: minor UX/robustness gaps from sub-project 4 (LLM provider credential UI)
 - **Found during:** Final whole-branch review and its fix-wave re-review, `docs/superpowers/plans/2026-08-27-onboarding-llm-provider-frame.md`
-- **What:** Five small items, all confirmed low-risk and explicitly scoped out of the final review's fix wave (which instead fixed a Critical bug — Vertex's `supported_actions` filter dropping every model — plus 6 Important findings):
-  1. After an error, the frame's badge shows `"error"` until "Continue" is clicked, even if a *subsequent* validation attempt succeeds and the model dropdown populates — the badge doesn't flip back to `"ready"` until completion. Frames 1-3 have the identical shape, so this is precedent-consistent, not a Task 4/5 regression.
-  2. `completeFrame("llm-provider", "provider_prefix", stored.provider)` renders the raw internal provider id (`"provider: gemini"`) rather than the localized `frame4_provider_*` label — cosmetic; frames 2/3 show visitor-typed names raw, so there's no exact precedent either way.
-  3. `base64ToJsonSanityCheck` is a synchronous function but is called with `await` — harmless (an extra microtask tick), matches the brief's own snippet verbatim.
-  4. The committed test fixture's throwaway RSA private key (`tests/test_onboarding_llm_client.py`) authenticates nothing and the surrounding fields are obviously fabricated, but has no comment stating it's a locally-generated throwaway for a future reader.
-  5. `atob()` on a service-account JSON containing non-ASCII bytes would mis-decode and reject client-side a file the server's `json.loads` would accept fine (UTF-8) — vanishingly rare for GCP-issued keys.
-- **Why parked:** All five confirmed low-severity by the final reviewer; the fix wave was scoped to the Critical bug and the 6 Important findings (plus their own cheap fold-ins) rather than every Minor on the list.
-- **Follow-up:** Each is independently fixable in isolation whenever this file is next touched; none block anything else in the wizard's remaining sub-projects (5-6).
-
-### Documentation drift: the corrected "google-genai mixes httpx and requests" claim still appears verbatim in two untouched places
-- **Found during:** The final review's fix-wave re-review, `docs/superpowers/plans/2026-08-27-onboarding-llm-provider-frame.md`
-- **What:** The fix wave corrected `onboarding/CLAUDE.md`'s and the design spec's section 2/3 claim that "google-genai's transport mixes httpx and requests depending on auth type" — the real (verified) situation is that both providers' async listing call is httpx-based, and only Vertex's separate, synchronous credential-refresh step uses `requests`. The same now-inaccurate claim still appears verbatim, untouched, in `tests/test_onboarding_llm_client.py`'s module docstring and in the design spec's section 6 (testing strategy) — a different passage than the section 2/3 the fix wave was scoped to correct.
-- **Why parked:** Prose-only, no functional effect; the fix wave was scoped to the specific passages the original review flagged, not a full-file sweep for every recurrence of the claim.
-- **Follow-up:** A one-pass find-and-correct across the two remaining locations whenever either file is next touched.
+- **What:** Two small items remain, both confirmed genuinely low-value to fix:
+  1. `base64ToJsonSanityCheck` is a synchronous function but is called with `await` — harmless (an extra microtask tick), matches the brief's own snippet verbatim. Not worth touching.
+  2. `atob()` on a service-account JSON containing non-ASCII bytes would mis-decode and reject client-side a file the server's `json.loads` would accept fine (UTF-8) — vanishingly rare for GCP-issued keys.
+- **Why parked:** Both deliberately not worth fixing (see each item's own reasoning above) — the other three items in this entry's original bundle (the badge not resetting after a later successful retry; the raw internal provider id shown instead of its localized label; the missing throwaway-key comment in `tests/test_onboarding_llm_client.py`) were fixed in the 2026-08-27 parked-minors fix wave.
+- **Follow-up:** None planned for either remaining item; revisit only if either ever causes a real, reported problem.
 
 ---
 
@@ -400,26 +370,3 @@ into the new section 13, "PR lifecycle edge cases." This file's own history
 process itself is ever useful context again. Section left empty and ready
 for the next audit.
 
-### The double-submit gap on a credential-submit button is now confirmed across every onboarding frame, not just render-key
-- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5)
-- **What:** `submitUptimeRobotKey()` doesn't disable its submit button/input while the `fetch` is in flight, so a rapid double-click can send two requests — the same gap already parked above for the render-key frame ("onboarding/static/index.html: no double-submit guard on the Render-key Validate button"), and confirmed present in every other credential-submit frame too (github-app, supabase, llm-provider). Traces to each frame's own plan-provided code, not an implementer deviation in any of them.
-- **Why parked:** Not a correctness or security issue (idempotent in practice — both responses apply the same result); fixing it in one frame only would make the codebase less consistent, not more, since the pattern is now uniform across all five frames.
-- **Follow-up:** A single cross-frame change disabling the relevant button/input for the duration of its in-flight `fetch`, applied uniformly to all five frames at once (render-key, github-app, supabase, llm-provider, uptime-pinger) rather than fixed piecemeal per sub-project.
-
-### Repo-wide `ruff check .` is already red on `main`, independent of any onboarding-wizard branch
-- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5)
-- **What:** `uv run ruff check .` reports ~65 pre-existing `E501` (line too long, limit 100 per `pyproject.toml`) violations across files this sub-project never touched (`onboarding/supabase_client.py`, `tests/test_onboarding_supabase_client.py`, `tests/test_onboarding_router.py`'s pre-existing lines, and others) — meaning `.github/workflows/ci.yml`'s lint step is currently red on `main` itself, not just on feature branches. This sub-project's final-review fix wave fixed only the 2 new violations its own commits introduced, deliberately not touching the pre-existing backlog (out of scope for this branch).
-- **Why parked:** A repo-wide cleanup is a standalone task, not something to fold into an unrelated feature branch's fix wave.
-- **Follow-up:** A dedicated lint-cleanup pass across the whole repo, then confirm CI's lint step actually goes green — a permanently-red gate stops catching new violations, which is how this sub-project's own 2 new ones would have gone unnoticed without this final review's explicit scrutiny.
-
-### Spec section 6 (onboarding-uptimerobot-frame-design.md) described a browser-behavior test this project's suite cannot execute
-- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5)
-- **What:** The spec asked for a test where "mocked `sessionStorage` without [the Render-URL] key renders the blocked message, no form" — this project's onboarding page tests are all static-HTML-source-substring assertions (`tests/test_onboarding_page.py`'s established convention, since there is no JS test runner anywhere in this project — no `package.json`, no jsdom/playwright/selenium). The implementer correctly substituted a static-source check for the blocked-state markup/logic's *presence*, matching every prior frame's convention, but this means the blocked-state *behavior* (does the JS actually branch correctly on a live/absent `sessionStorage` key at runtime) has zero executable coverage — only its source text does.
-- **Why parked:** Not a defect in this sub-project's implementation — the implementer made the right call given the tools available. The gap is in how the spec was written, describing a test shape the project's suite structurally cannot run.
-- **Follow-up:** Either add a lightweight JS test runner to this project (a real architecture decision, its own brainstorm), or have future specs stop describing browser-behavior tests in this style and instead describe the static-source-assertion shape directly, so the plan that follows doesn't ask for something impossible to build as specified.
-
-### The "Finish & Deploy" frame's completion badge reads "✓ Validated" for a deploy that just went live
-- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-render-service-frame.md` (sub-project 6, final)
-- **What:** `completeFrame("render-deploy", null, null)` renders via the shared `badge_done` string ("✓ Validated" / Hebrew equivalent), the same copy every other frame's successful validation uses. For a frame whose action is "deploy," not "validate a credential," this reads slightly oddly, though it's not incorrect or confusing enough to mislead a visitor.
-- **Why parked:** Purely cosmetic; fixing it well means either a new `badge_live`-style status string (touching `setFrameStatus`/`renderBadge`'s status-to-label mapping) or a `detailKey` override, either of which is more machinery than this final review's fix wave was scoped for alongside 3 Important + 5 other Minor findings.
-- **Follow-up:** Add a distinct completion-badge string for the deploy frame specifically (both languages), and pass it through `completeFrame`'s existing `detailKey` parameter rather than `null`.
