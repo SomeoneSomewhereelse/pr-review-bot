@@ -37,6 +37,12 @@ class GithubInstallVerifyRequest(BaseModel):
     installation_id: int = Field(gt=0)
 
 
+class GithubSetWebhookUrlRequest(BaseModel):
+    app_id: int = Field(gt=0)
+    private_key_b64: str = Field(max_length=16384)
+    url: str = Field(min_length=1, max_length=2048)
+
+
 class SupabaseExchangeCodeRequest(BaseModel):
     code: str = Field(max_length=512)
     code_verifier: str = Field(max_length=256)
@@ -203,6 +209,14 @@ async def verify_github_installation(payload: GithubInstallVerifyRequest) -> dic
             "account_login": result.account_login,
             "repo_scope": result.repo_scope,
         }
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/github/set-webhook-url")
+async def set_github_webhook_url(payload: GithubSetWebhookUrlRequest) -> dict:
+    result = await github_client.set_webhook_url(payload.app_id, payload.private_key_b64, payload.url)
+    if isinstance(result, github_client.WebhookUrlSet):
+        return {"valid": True}
     return {"valid": False, "reason": result.reason}
 
 

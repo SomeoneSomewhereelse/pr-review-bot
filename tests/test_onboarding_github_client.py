@@ -221,3 +221,42 @@ async def test_installation_response_missing_expected_fields_is_unreachable(
         app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
     )
     assert result == github_client.InstallationInvalid(reason="github_unreachable")
+
+
+async def test_set_webhook_url_succeeds(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {"url": "https://x.onrender.com/webhook"})
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSet()
+
+
+async def test_set_webhook_url_unauthorized_is_invalid_credentials(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {"message": "Bad credentials"}, 401)
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+
+
+async def test_set_webhook_url_not_found_is_invalid_credentials(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {"message": "Not Found"}, 404)
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+
+
+async def test_set_webhook_url_server_error_is_unreachable(fake_transport, _throwaway_key_material):
+    fake_transport.route("PATCH", "/app/hook/config", {}, 500)
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="github_unreachable")
+
+
+async def test_set_webhook_url_malformed_base64_private_key_is_invalid_credentials():
+    result = await github_client.set_webhook_url(
+        app_id=999, private_key_b64="not-valid-base64!!", url="https://x.onrender.com/webhook"
+    )
+    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")

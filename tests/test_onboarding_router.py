@@ -224,6 +224,33 @@ async def test_verify_installation_response_never_echoes_the_private_key(monkeyp
     assert sentinel_key_b64 not in resp.text
 
 
+async def test_set_github_webhook_url_endpoint(monkeypatch):
+    async def fake_set_webhook_url(app_id, private_key_b64, url):
+        return github_client.WebhookUrlSet()
+
+    monkeypatch.setattr(github_client, "set_webhook_url", fake_set_webhook_url)
+    client = await _client()
+    resp = await client.post(
+        "/api/github/set-webhook-url",
+        json={"app_id": 123, "private_key_b64": "cGVt", "url": "https://x.onrender.com/webhook"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+
+
+async def test_set_github_webhook_url_endpoint_failure(monkeypatch):
+    async def fake_set_webhook_url(app_id, private_key_b64, url):
+        return github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+
+    monkeypatch.setattr(github_client, "set_webhook_url", fake_set_webhook_url)
+    client = await _client()
+    resp = await client.post(
+        "/api/github/set-webhook-url",
+        json={"app_id": 123, "private_key_b64": "cGVt", "url": "https://x.onrender.com/webhook"},
+    )
+    assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
+
+
 async def test_index_serves_configured_supabase_oauth_client_id(monkeypatch):
     monkeypatch.setattr(settings, "supabase_oauth_client_id", "66666666-6666-4666-8666-666666666666")
     client = await _client()

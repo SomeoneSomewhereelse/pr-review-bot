@@ -135,3 +135,53 @@ async def verify_installation(
         return InstallationInvalid(reason="github_unreachable")
 
     return InstallationVerified(account_login=account_login, repo_scope=repo_scope)
+
+
+@dataclasses.dataclass(frozen=True)
+class WebhookUrlSet:
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class WebhookUrlSetFailed:
+    reason: str  # "invalid_credentials" | "github_unreachable"
+
+
+WebhookUrlResult = WebhookUrlSet | WebhookUrlSetFailed
+
+
+def _set_webhook_url(app_id: int, private_key_pem: str, url: str) -> None:
+    """Blocking PyGithub call — run via asyncio.to_thread by the caller.
+    Same App-JWT-only client construction as _fetch_installation above
+    (never app/github_app.py's operator-tied helpers — onboarding/CLAUDE.md's
+    no-shared-credential-path rule). Mirrors app/github_app.py::
+    set_webhook_url's own PATCH /app/hook/config call shape exactly — this
+    is the visitor-credential equivalent of the same operation."""
+    gh = Github(auth=Auth.AppAuth(app_id, private_key_pem))
+    gh.requester.requestJsonAndCheck("PATCH", "/app/hook/config", input={"url": url})
+
+
+async def set_webhook_url(app_id: int, private_key_b64: str, url: str) -> WebhookUrlResult:
+    """Point the visitor's App's webhook at `url` (their just-deployed
+    Render service's own /webhook path). Never logs the private key, in
+    full or truncated — same sensitivity tier as verify_installation's."""
+    try:
+        private_key_pem = base64.b64decode(private_key_b64, validate=True).decode()
+    except (binascii.Error, ValueError):
+        return WebhookUrlSetFailed(reason="invalid_credentials")
+
+    try:
+        await asyncio.to_thread(_set_webhook_url, app_id, private_key_pem, url)
+    except GithubException as exc:
+        if exc.status in (401, 403, 404):
+            return WebhookUrlSetFailed(reason="invalid_credentials")
+        return WebhookUrlSetFailed(reason="github_unreachable")
+    except (ValueError, jwt.exceptions.InvalidKeyError):
+        # Same base64-valid-but-non-PEM case verify_installation's own
+        # docstring explains: PyJWT re-raises cryptography's ValueError as
+        # InvalidKeyError while signing the App JWT.
+        return WebhookUrlSetFailed(reason="invalid_credentials")
+    except requests.exceptions.RequestException:
+        return WebhookUrlSetFailed(reason="github_unreachable")
+
+    return WebhookUrlSet()
