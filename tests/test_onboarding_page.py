@@ -650,3 +650,36 @@ async def test_empty_model_list_shows_dedicated_message():
     body = (await client.get("/")).text
     assert "if (!models.length) {" in body
     assert 'llmProviderError("err_llm_no_models_available");' in body
+
+
+async def test_llm_provider_error_sets_frame_status_to_error():
+    """Structural sibling of githubAppError()/supabaseError() -- both call
+    setFrameStatus(id, "error") before writing the error text. Without the
+    equivalent call here, the frame-llm-provider badge never flips to the
+    error state on a rejected credential or missing pick."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function llmProviderError(key)")
+    fn_body = body[fn_start:body.index("function llmProviderErrorForReason")]
+    assert 'setFrameStatus("llm-provider", "error");' in fn_body
+
+
+async def test_model_select_has_a_disabled_placeholder_forcing_an_explicit_pick():
+    """A <select> with only real <option>s defaults .value to the first one
+    -- satisfying confirmLlmProviderModel()'s "model" half of the unlock
+    gate the instant any model exists, even if the visitor never touches the
+    dropdown. A disabled, pre-selected placeholder option with value=""
+    keeps .value falsy until an explicit pick is made."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function showLlmProviderModels")
+    fn_body = body[fn_start:body.index("async function validateLlmProviderCredential")]
+    assert 'placeholder.value = "";' in fn_body
+    assert 'placeholder.disabled = true;' in fn_body
+    assert 'placeholder.selected = true;' in fn_body
+    assert 'placeholder.textContent = t("frame4_model_placeholder");' in fn_body
+    # Placeholder must be appended before the real models are, not after.
+    placeholder_append_pos = fn_body.index("select.appendChild(placeholder);")
+    models_forEach_pos = fn_body.index("models.forEach((m) => {")
+    assert placeholder_append_pos < models_forEach_pos
+    assert body.count("frame4_model_placeholder:") == 2  # STRINGS.en + STRINGS.he

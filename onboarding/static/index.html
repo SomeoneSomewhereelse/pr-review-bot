@@ -361,6 +361,7 @@
       frame4_provider_groq: "Groq (API key)",
       frame4_provider_vertex: "Vertex AI (GCP service-account file)",
       frame4_model_instructions: "Choose the model your deployed service will use.",
+      frame4_model_placeholder: "Choose a model…",
       err_llm_no_provider: "Pick a provider first.",
       err_llm_empty_key: "Paste your API key first.",
       err_llm_no_file: "Choose your GCP service-account JSON file first.",
@@ -440,6 +441,7 @@
       frame4_provider_groq: "Groq (מפתח API)",
       frame4_provider_vertex: "Vertex AI (קובץ חשבון שירות של GCP)",
       frame4_model_instructions: "בחרו את המודל שהשירות שלכם ישתמש בו.",
+      frame4_model_placeholder: "בחרו מודל…",
       err_llm_no_provider: "בחרו ספק קודם.",
       err_llm_empty_key: "הדביקו קודם את מפתח ה-API שלכם.",
       err_llm_no_file: "בחרו קודם את קובץ חשבון השירות של GCP.",
@@ -681,6 +683,7 @@
   }
 
   function llmProviderError(key) {
+    setFrameStatus("llm-provider", "error");
     currentLlmProviderErrorKey = key;
     document.getElementById("llm-provider-error").textContent = t(key);
   }
@@ -723,6 +726,12 @@
       llmProviderError("err_llm_no_models_available");
       return;
     }
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = t("frame4_model_placeholder");
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.appendChild(placeholder);
     models.forEach((m) => {
       const opt = document.createElement("option");
       opt.value = m;
