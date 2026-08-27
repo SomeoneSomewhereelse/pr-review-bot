@@ -675,3 +675,193 @@ async def test_uptimerobot_render_url_is_stripped_before_the_client_sees_it(monk
     )
     assert resp.status_code == 200
     assert seen["url"] == "https://s.onrender.com"
+
+
+async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
+    async def fake_create_service(api_key, repo_url, name):
+        return render_client.RenderServiceCreated(service_id="srv-1", service_url="https://x.onrender.com")
+
+    monkeypatch.setattr(render_client, "create_service", fake_create_service)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/create-service",
+        json={"api_key": "rnd_x", "repo_url": "https://github.com/a/b", "name": "n"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True, "service_id": "srv-1", "service_url": "https://x.onrender.com"}
+
+
+async def test_create_service_endpoint_relays_rejection_message(monkeypatch):
+    async def fake_create_service(api_key, repo_url, name):
+        return render_client.RenderServiceCreationFailed(reason="request_rejected", message="name taken")
+
+    monkeypatch.setattr(render_client, "create_service", fake_create_service)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/create-service",
+        json={"api_key": "rnd_x", "repo_url": "https://github.com/a/b", "name": "n"},
+    )
+    assert resp.json() == {"valid": False, "reason": "request_rejected", "message": "name taken"}
+
+
+async def test_github_push_render_vars_endpoint(monkeypatch):
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/github/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "app_id": 123,
+            "private_key_b64": "cGVt",
+            "webhook_secret": "whsec",
+            "installation_id": 456,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["valid"] is True
+    assert captured["values"] == {
+        "GITHUB_APP_ID": "123",
+        "GITHUB_APP_PRIVATE_KEY": "cGVt",
+        "GITHUB_WEBHOOK_SECRET": "whsec",
+        "GITHUB_APP_INSTALLATION_ID": "456",
+    }
+
+
+async def test_supabase_push_render_var_endpoint(monkeypatch):
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/supabase/push-render-var",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "database_url": "postgresql://u:p@h:5432/d",
+        },
+    )
+    assert resp.status_code == 200
+    assert captured["values"] == {"DATABASE_URL": "postgresql://u:p@h:5432/d"}
+
+
+async def test_llm_push_render_vars_endpoint_gemini(monkeypatch):
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/llm/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "provider": "gemini",
+            "credential_value": "AIzaSy...",
+            "model": "gemini-flash-latest",
+        },
+    )
+    assert resp.status_code == 200
+    assert captured["values"] == {
+        "LLM_PROVIDER": "gemini",
+        "GEMINI_API_KEY": "AIzaSy...",
+        "LLM_MODEL": "gemini-flash-latest",
+    }
+
+
+async def test_llm_push_render_vars_endpoint_vertex_uses_gcp_key_name(monkeypatch):
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/llm/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "provider": "vertex",
+            "credential_value": "eyJ0eXBlIjoi...",
+            "model": "gemini-2.5-pro",
+        },
+    )
+    assert resp.status_code == 200
+    assert captured["values"] == {
+        "LLM_PROVIDER": "vertex",
+        "GCP_SERVICE_ACCOUNT_KEY": "eyJ0eXBlIjoi...",
+        "VERTEX_MODEL": "gemini-2.5-pro",
+    }
+
+
+async def test_llm_push_render_vars_endpoint_rejects_unknown_provider(monkeypatch):
+    client = await _client()
+    resp = await client.post(
+        "/api/llm/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "provider": "openai",
+            "credential_value": "x",
+            "model": "y",
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_push_render_vars_partial_failure_reports_pushed_keys(monkeypatch):
+    async def fake_push_env_vars(api_key, service_id, values):
+        return render_client.RenderEnvVarsPushFailed(reason="invalid_key", pushed=["GITHUB_APP_ID"])
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/github/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "app_id": 123,
+            "private_key_b64": "cGVt",
+            "webhook_secret": "whsec",
+            "installation_id": 456,
+        },
+    )
+    assert resp.json() == {"valid": False, "reason": "invalid_key", "pushed": ["GITHUB_APP_ID"]}
+
+
+async def test_trigger_deploy_endpoint(monkeypatch):
+    async def fake_trigger_deploy(api_key, service_id):
+        return render_client.RenderDeployTriggered(deploy_id="dep-1")
+
+    monkeypatch.setattr(render_client, "trigger_deploy", fake_trigger_deploy)
+    client = await _client()
+    resp = await client.post("/api/render/trigger-deploy", json={"api_key": "rnd_x", "service_id": "srv-1"})
+    assert resp.json() == {"valid": True, "deploy_id": "dep-1"}
+
+
+async def test_deploy_status_endpoint(monkeypatch):
+    async def fake_poll_deploy_status(api_key, service_id, deploy_id):
+        return render_client.RenderDeployStatus(status="live")
+
+    monkeypatch.setattr(render_client, "poll_deploy_status", fake_poll_deploy_status)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/deploy-status",
+        json={"api_key": "rnd_x", "service_id": "srv-1", "deploy_id": "dep-1"},
+    )
+    assert resp.json() == {"valid": True, "status": "live"}

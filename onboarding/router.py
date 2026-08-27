@@ -105,6 +105,56 @@ class UptimeRobotCreateMonitorRequest(BaseModel):
         return value
 
 
+class RenderServiceCreateRequest(BaseModel):
+    api_key: str = Field(max_length=512)
+    repo_url: str = Field(min_length=1, max_length=512)
+    name: str = Field(min_length=1, max_length=64)
+
+
+class RenderPushEnvVarsRequest(BaseModel):
+    render_api_key: str = Field(max_length=512)
+    render_service_id: str = Field(min_length=1, max_length=64)
+
+
+class GithubPushRenderVarsRequest(RenderPushEnvVarsRequest):
+    app_id: int = Field(gt=0)
+    private_key_b64: str = Field(max_length=16384)
+    webhook_secret: str = Field(max_length=512)
+    installation_id: int = Field(gt=0)
+
+
+class SupabasePushRenderVarRequest(RenderPushEnvVarsRequest):
+    database_url: str = Field(min_length=1, max_length=2048)
+
+
+class LlmPushRenderVarsRequest(RenderPushEnvVarsRequest):
+    provider: str = Field(pattern=r"^(gemini|groq|vertex)$")
+    credential_value: str = Field(min_length=1, max_length=16384)
+    model: str = Field(min_length=1, max_length=256)
+
+
+class RenderTriggerDeployRequest(BaseModel):
+    api_key: str = Field(max_length=512)
+    service_id: str = Field(min_length=1, max_length=64)
+
+
+class RenderDeployStatusRequest(BaseModel):
+    api_key: str = Field(max_length=512)
+    service_id: str = Field(min_length=1, max_length=64)
+    deploy_id: str = Field(min_length=1, max_length=64)
+
+
+# Paired comment with app/providers/registry.py::PROVIDERS -- onboarding/
+# never imports from app/ (onboarding/CLAUDE.md's no-shared-credential-
+# path rule), so this 3-entry mapping is a deliberate copy, not a shared
+# import. Keep in sync if a provider's env var names ever change there.
+_LLM_ENV_VAR_NAMES = {
+    "gemini": ("GEMINI_API_KEY", "LLM_MODEL"),
+    "groq": ("GROQ_API_KEY", "GROQ_MODEL"),
+    "vertex": ("GCP_SERVICE_ACCOUNT_KEY", "VERTEX_MODEL"),
+}
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     html = _INDEX_HTML.replace("__ONBOARDING_BASE_URL__", settings.public_base_url)
@@ -256,4 +306,74 @@ async def create_uptimerobot_monitor(payload: UptimeRobotCreateMonitorRequest) -
     )
     if isinstance(result, uptimerobot_client.UptimeRobotMonitorResult):
         return {"valid": True, "created": result.created}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/render/create-service")
+async def create_render_service(payload: RenderServiceCreateRequest) -> dict:
+    result = await render_client.create_service(payload.api_key, payload.repo_url, payload.name)
+    if isinstance(result, render_client.RenderServiceCreated):
+        return {"valid": True, "service_id": result.service_id, "service_url": result.service_url}
+    if result.message:
+        return {"valid": False, "reason": result.reason, "message": result.message}
+    return {"valid": False, "reason": result.reason}
+
+
+def _push_result(result) -> dict:
+    if isinstance(result, render_client.RenderEnvVarsPushed):
+        return {"valid": True, "pushed": result.pushed}
+    return {"valid": False, "reason": result.reason, "pushed": result.pushed}
+
+
+@router.post("/api/github/push-render-vars")
+async def push_github_render_vars(payload: GithubPushRenderVarsRequest) -> dict:
+    result = await render_client.push_env_vars(
+        payload.render_api_key,
+        payload.render_service_id,
+        {
+            "GITHUB_APP_ID": str(payload.app_id),
+            "GITHUB_APP_PRIVATE_KEY": payload.private_key_b64,
+            "GITHUB_WEBHOOK_SECRET": payload.webhook_secret,
+            "GITHUB_APP_INSTALLATION_ID": str(payload.installation_id),
+        },
+    )
+    return _push_result(result)
+
+
+@router.post("/api/supabase/push-render-var")
+async def push_supabase_render_var(payload: SupabasePushRenderVarRequest) -> dict:
+    result = await render_client.push_env_vars(
+        payload.render_api_key, payload.render_service_id, {"DATABASE_URL": payload.database_url}
+    )
+    return _push_result(result)
+
+
+@router.post("/api/llm/push-render-vars")
+async def push_llm_render_vars(payload: LlmPushRenderVarsRequest) -> dict:
+    credential_var, model_var = _LLM_ENV_VAR_NAMES[payload.provider]
+    result = await render_client.push_env_vars(
+        payload.render_api_key,
+        payload.render_service_id,
+        {
+            "LLM_PROVIDER": payload.provider,
+            credential_var: payload.credential_value,
+            model_var: payload.model,
+        },
+    )
+    return _push_result(result)
+
+
+@router.post("/api/render/trigger-deploy")
+async def trigger_render_deploy(payload: RenderTriggerDeployRequest) -> dict:
+    result = await render_client.trigger_deploy(payload.api_key, payload.service_id)
+    if isinstance(result, render_client.RenderDeployTriggered):
+        return {"valid": True, "deploy_id": result.deploy_id}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/render/deploy-status")
+async def get_render_deploy_status(payload: RenderDeployStatusRequest) -> dict:
+    result = await render_client.poll_deploy_status(payload.api_key, payload.service_id, payload.deploy_id)
+    if isinstance(result, render_client.RenderDeployStatus):
+        return {"valid": True, "status": result.status}
     return {"valid": False, "reason": result.reason}
