@@ -171,6 +171,58 @@ section 3), not an oversight to fix.
   deferred risk; see `ISSUES.md`'s Design Gaps section before changing
   anything about how the OAuth app is used or exposed.
 
+## What sub-project 4 (LLM provider credential UI) adds to these rules
+
+- **The model this deployment runs is always fetched live from the
+  provider's own catalog, never hardcoded.** `onboarding/llm_client.py`
+  makes exactly one models-listing call per credential submission, which
+  doubles as validation. No provider's default/fallback model string may
+  be hardcoded anywhere in this service — that is exactly the drift this
+  sub-project exists to avoid (root `CLAUDE.md`'s substitutions section
+  documents the real incident this generalizes from: `gemini-flash-latest`
+  404s against Vertex's publisher-model catalog).
+- **Gemini and Vertex share one internal helper**
+  (`_list_generative_models`) since both go through the same `google-genai`
+  SDK and differ only in how `genai.Client` is constructed. A change to the
+  filtering/prefix-stripping logic belongs in that shared helper, not
+  duplicated per provider.
+- **Groq's model list is deliberately unfiltered** — its `Model` type
+  carries no capability field to distinguish chat-completion models from
+  Whisper/TTS/moderation ones, and a name-pattern heuristic was
+  deliberately rejected as guessing at API behavior this project's
+  testing-hygiene discipline warns against. Do not add one without a new
+  brainstorm.
+- **The frame's unlock gate requires both a live-validated credential AND
+  an explicit model pick** — there is no fallback to any baked-in default
+  if the visitor skips picking a model. A credential that validates but
+  returns zero eligible models is a genuine dead end under this gate; it
+  gets its own distinct error message (`err_llm_no_models_available`)
+  rather than folding into a generic validation failure.
+- **No operator-level settings were added for this sub-project** — unlike
+  Supabase's OAuth app, every credential here is visitor-supplied per
+  request. `onboarding/config.py` and `onboarding/main.py`'s `lifespan` are
+  untouched by it.
+- **Gemini/Vertex tests mock at the SDK client boundary
+  (`google.genai.Client` itself is monkeypatched), not `respx`** —
+  `google-genai`'s transport mixes `httpx` and `requests` depending on auth
+  type, so a single `respx` mock cannot cleanly cover both paths. Groq's
+  tests use `respx` as normal, since its SDK transport is pure `httpx`.
+- **All three credentials share one `fetch(endpoint, ...)` call site**
+  in `validateLlmProviderCredential()`, with `endpoint` set to a literal
+  per-provider URL string in each branch — a second adaptation of the
+  one-exit-path convention (alongside `callSupabaseRelay`'s): audited by
+  checking each `endpoint = "/api/llm/<provider>/list-models"` assignment
+  appears exactly once, plus the shared call site itself appears exactly
+  once. A new provider added to this frame follows the same shape, not a
+  new dedicated `fetch()` call.
+- **The Vertex credential's storage field name
+  (`gcp_service_account_key_b64`) deliberately differs from its wire field
+  name (`service_account_key_b64`)** — the frame maps between them in
+  `showLlmProviderModels`'s caller. Keep this distinction if either name
+  changes: the wire name matches the relay endpoint's pydantic field, the
+  storage name matches this service's `GCP_SERVICE_ACCOUNT_KEY`-adjacent
+  naming convention for sub-project 6 to read later.
+
 ## The test suite looks hung on a fresh worktree — it isn't
 
 The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly

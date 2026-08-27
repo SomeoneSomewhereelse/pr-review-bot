@@ -683,3 +683,35 @@ async def test_model_select_has_a_disabled_placeholder_forcing_an_explicit_pick(
     models_forEach_pos = fn_body.index("models.forEach((m) => {")
     assert placeholder_append_pos < models_forEach_pos
     assert body.count("frame4_model_placeholder:") == 2  # STRINGS.en + STRINGS.he
+
+
+async def test_vertex_llm_endpoint_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('endpoint = "/api/llm/vertex/list-models"') == 1
+
+
+async def test_vertex_file_is_read_via_filereader_and_base64_encoded():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function readFileAsBase64" in body
+    assert "new FileReader()" in body
+    assert "readAsDataURL(file)" in body
+
+
+async def test_vertex_credential_gets_a_client_side_json_sanity_check():
+    """Catches "wrong file entirely" before any network call — spec
+    section 3 step 2."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function base64ToJsonSanityCheck" in body
+    assert "JSON.parse(decoded)" in body
+
+
+async def test_vertex_credential_stored_under_the_spec_field_name():
+    """Storage field is gcp_service_account_key_b64 (spec section 5),
+    distinct from the wire field service_account_key_b64 (spec section 4)
+    the relay endpoint expects — the frame maps between the two."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "credentialFragment = {gcp_service_account_key_b64: b64}" in body
