@@ -23,6 +23,18 @@ async def lifespan(app: FastAPI):
             "App manifest needs this service's own real public URL to build "
             "redirect_url/setup_url; without it the manifest flow cannot work."
         )
+    if not settings.supabase_oauth_client_id:
+        raise RuntimeError(
+            "SUPABASE_OAUTH_CLIENT_ID is unset — refusing to start. Frame 3's "
+            "Supabase OAuth flow needs this service's registered OAuth app id; "
+            "without it the authorize redirect cannot work."
+        )
+    if not settings.supabase_oauth_client_secret:
+        raise RuntimeError(
+            "SUPABASE_OAUTH_CLIENT_SECRET is unset — refusing to start. Frame "
+            "3's Supabase OAuth token exchange needs this service's registered "
+            "OAuth app secret; without it the exchange cannot work."
+        )
     yield
 
 

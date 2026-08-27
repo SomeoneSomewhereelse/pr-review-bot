@@ -21,6 +21,26 @@ def test_public_base_url_reads_from_environment(monkeypatch):
     assert Settings().public_base_url == "https://onboarding.example.com"
 
 
+def test_supabase_oauth_client_id_defaults_to_empty_string(monkeypatch):
+    monkeypatch.delenv("SUPABASE_OAUTH_CLIENT_ID", raising=False)
+    assert Settings().supabase_oauth_client_id == ""
+
+
+def test_supabase_oauth_client_id_reads_from_environment(monkeypatch):
+    monkeypatch.setenv("SUPABASE_OAUTH_CLIENT_ID", "66666666-6666-4666-8666-666666666666")
+    assert Settings().supabase_oauth_client_id == "66666666-6666-4666-8666-666666666666"
+
+
+def test_supabase_oauth_client_secret_defaults_to_empty_string(monkeypatch):
+    monkeypatch.delenv("SUPABASE_OAUTH_CLIENT_SECRET", raising=False)
+    assert Settings().supabase_oauth_client_secret == ""
+
+
+def test_supabase_oauth_client_secret_reads_from_environment(monkeypatch):
+    monkeypatch.setenv("SUPABASE_OAUTH_CLIENT_SECRET", "sb_secret_sentinel")
+    assert Settings().supabase_oauth_client_secret == "sb_secret_sentinel"
+
+
 def test_whitespace_only_value_normalizes_to_the_unset_sentinel(monkeypatch):
     """onboarding/main.py's lifespan refuses to boot on a falsy value; a
     whitespace-only string would otherwise sail past that check and leave the

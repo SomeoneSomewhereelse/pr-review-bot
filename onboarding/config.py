@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     # so the lifespan stays the thing that refuses to boot on a missing value.
     public_base_url: str = ""
 
+    # This service's first operator-level secrets: set once by the operator
+    # after manually registering an OAuth app in Supabase org settings ->
+    # OAuth Apps (Supabase has no self-registration mechanism, unlike
+    # GitHub's App Manifest flow). Never visitor-supplied. No shape
+    # validator like public_base_url's: a malformed client_id/secret fails
+    # visibly at OAuth-authorize time before any credential is created,
+    # a much lower-stakes failure mode than public_base_url's (an
+    # unrecoverable orphaned GitHub App).
+    supabase_oauth_client_id: str = ""
+    supabase_oauth_client_secret: str = ""
+
     @field_validator("public_base_url")
     @classmethod
     def _normalize_public_base_url(cls, value: str) -> str:
