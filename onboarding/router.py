@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from onboarding import github_client, render_client
+from onboarding import github_client, render_client, supabase_client
 from onboarding.config import settings
 
 router = APIRouter()
@@ -37,9 +37,40 @@ class GithubInstallVerifyRequest(BaseModel):
     installation_id: int = Field(gt=0)
 
 
+class SupabaseExchangeCodeRequest(BaseModel):
+    code: str = Field(max_length=512)
+    code_verifier: str = Field(max_length=256)
+
+
+class SupabaseRefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(max_length=2048)
+
+
+class SupabaseListOrgsRequest(BaseModel):
+    access_token: str = Field(max_length=4096)
+
+
+class SupabaseCreateProjectRequest(BaseModel):
+    access_token: str = Field(max_length=4096)
+    organization_slug: str = Field(max_length=64)
+    name: str = Field(max_length=256)
+    db_pass: str = Field(max_length=256)
+
+
+class SupabaseProjectStatusRequest(BaseModel):
+    access_token: str = Field(max_length=4096)
+    ref: str = Field(max_length=20)
+
+
+class SupabaseConnectionInfoRequest(BaseModel):
+    access_token: str = Field(max_length=4096)
+    ref: str = Field(max_length=20)
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     html = _INDEX_HTML.replace("__ONBOARDING_BASE_URL__", settings.public_base_url)
+    html = html.replace("__SUPABASE_OAUTH_CLIENT_ID__", settings.supabase_oauth_client_id)
     return HTMLResponse(html, headers={
         "Content-Security-Policy": (
             "default-src 'none'; style-src 'unsafe-inline'; "
@@ -83,5 +114,74 @@ async def verify_github_installation(payload: GithubInstallVerifyRequest) -> dic
             "valid": True,
             "account_login": result.account_login,
             "repo_scope": result.repo_scope,
+        }
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/supabase/exchange-oauth-code")
+async def exchange_supabase_oauth_code(payload: SupabaseExchangeCodeRequest) -> dict:
+    redirect_uri = f"{settings.public_base_url}/?supabase_step=oauth_callback"
+    result = await supabase_client.exchange_oauth_code(payload.code, payload.code_verifier, redirect_uri)
+    if isinstance(result, supabase_client.SupabaseTokens):
+        return {
+            "valid": True,
+            "access_token": result.access_token,
+            "refresh_token": result.refresh_token,
+            "expires_in": result.expires_in,
+        }
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/supabase/refresh-access-token")
+async def refresh_supabase_access_token(payload: SupabaseRefreshTokenRequest) -> dict:
+    result = await supabase_client.refresh_access_token(payload.refresh_token)
+    if isinstance(result, supabase_client.SupabaseTokens):
+        return {
+            "valid": True,
+            "access_token": result.access_token,
+            "refresh_token": result.refresh_token,
+            "expires_in": result.expires_in,
+        }
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/supabase/list-organizations")
+async def list_supabase_organizations(payload: SupabaseListOrgsRequest) -> dict:
+    result = await supabase_client.list_organizations(payload.access_token)
+    if isinstance(result, supabase_client.SupabaseOrgsListed):
+        return {"valid": True, "orgs": [{"slug": o.slug, "name": o.name} for o in result.orgs]}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/supabase/create-project")
+async def create_supabase_project(payload: SupabaseCreateProjectRequest) -> dict:
+    result = await supabase_client.create_project(
+        payload.access_token, payload.organization_slug, payload.name, payload.db_pass
+    )
+    if isinstance(result, supabase_client.SupabaseProjectCreated):
+        return {"valid": True, "ref": result.ref, "status": result.status}
+    if isinstance(result, supabase_client.SupabaseProjectRejected):
+        return {"valid": False, "reason": "project_creation_rejected", "message": result.message}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/supabase/project-status")
+async def get_supabase_project_status(payload: SupabaseProjectStatusRequest) -> dict:
+    result = await supabase_client.get_project_status(payload.access_token, payload.ref)
+    if isinstance(result, supabase_client.SupabaseProjectStatus):
+        return {"valid": True, "status": result.status}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/supabase/connection-info")
+async def get_supabase_connection_info(payload: SupabaseConnectionInfoRequest) -> dict:
+    result = await supabase_client.get_connection_info(payload.access_token, payload.ref)
+    if isinstance(result, supabase_client.SupabaseConnectionInfo):
+        return {
+            "valid": True,
+            "db_user": result.db_user,
+            "db_host": result.db_host,
+            "db_port": result.db_port,
+            "db_name": result.db_name,
         }
     return {"valid": False, "reason": result.reason}
