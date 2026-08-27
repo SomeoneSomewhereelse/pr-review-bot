@@ -202,6 +202,23 @@
       </div>
     </details>
 
+    <details id="frame-render-service" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame_render_service_title"></span>
+        <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="render-service" data-i18n="change_button"></button>
+      </summary>
+      <div class="frame-body">
+        <p data-i18n="frame_render_service_instructions"></p>
+        <label data-i18n="frame_render_service_repo_label"></label>
+        <input id="render-service-repo-input" type="text">
+        <label data-i18n="frame_render_service_name_label"></label>
+        <input id="render-service-name-input" type="text">
+        <button id="render-service-submit" type="button" data-i18n="create_service_button"></button>
+        <p id="render-service-error" class="frame-error"></p>
+      </div>
+    </details>
+
     <details id="frame-github-app" class="frame" data-status="locked" data-locked="true">
       <summary>
         <span class="frame-title" data-i18n="frame2_title"></span>
@@ -296,7 +313,21 @@
         <span class="frame-title" data-i18n="frame6_title"></span>
         <span class="frame-badge"></span>
       </summary>
-      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+      <div class="frame-body">
+        <div id="render-deploy-trigger-section">
+          <p data-i18n="frame6_instructions"></p>
+          <button id="render-deploy-trigger-submit" type="button" data-i18n="deploy_button"></button>
+        </div>
+        <div id="render-deploy-polling-section" style="display: none;">
+          <p data-i18n="frame6_polling"></p>
+          <button id="render-deploy-check-again-submit" type="button" data-i18n="check_again_button" style="display: none;"></button>
+        </div>
+        <div id="render-deploy-done-section" style="display: none;">
+          <p data-i18n="frame6_done"></p>
+          <a id="render-deploy-service-link" href="#" target="_blank" rel="noopener"></a>
+        </div>
+        <p id="render-deploy-error" class="frame-error"></p>
+      </div>
     </details>
   </main>
 
@@ -314,12 +345,33 @@
       frame1_title: "1. Render API key",
       frame1_instructions: "Get a key from Render's dashboard: Account Settings → API Keys.",
       frame1_placeholder: "rnd_...",
-      frame2_title: "2. GitHub App",
-      frame3_title: "3. Supabase database",
-      frame4_title: "4. LLM provider",
-      frame5_title: "5. Keep-warm pinger",
-      frame6_title: "6. Deploy to Render",
+      frame2_title: "3. GitHub App",
+      frame3_title: "4. Supabase database",
+      frame4_title: "5. LLM provider",
+      frame5_title: "6. Keep-warm pinger",
+      frame6_title: "7. Finish & Deploy",
       coming_soon: "Coming soon.",
+      frame_render_service_title: "2. Render service",
+      frame_render_service_instructions: "This creates your own Render web service from the project's repository. You can point it at a different repo or change the name below if you want.",
+      frame_render_service_repo_label: "Repository",
+      frame_render_service_name_label: "Service name",
+      create_service_button: "Create service",
+      url_prefix: "live at ",
+      err_render_service_no_key: "Complete step 1 (Render API key) first.",
+      err_render_service_empty: "Fill in a repository URL and a service name.",
+      err_render_service_invalid_key: "That key was rejected by Render. Double-check it and try again.",
+      err_render_service_unreachable: "Render's API is unreachable right now. Try again in a moment.",
+      err_render_service_rejected: "Render rejected this request:",
+      frame6_instructions: "Everything is captured. Click Deploy to push it live.",
+      frame6_polling: "Deploying… this can take a few minutes.",
+      frame6_done: "Your instance is live at:",
+      deploy_button: "Deploy",
+      err_render_deploy_no_service: "Complete step 2 (Render service) first.",
+      err_render_deploy_invalid_key: "That key was rejected by Render. Double-check it and try again.",
+      err_render_deploy_service_not_found: "Your Render service could not be found. Try step 2 again.",
+      err_render_deploy_unreachable: "Render's API is unreachable right now. Try again in a moment.",
+      err_render_deploy_failed: "The deploy failed. Check your service on Render's dashboard for details.",
+      err_render_deploy_timeout: "Still deploying after 15 minutes. It may still finish — check again.",
       validate_button: "Validate",
       change_button: "Change",
       badge_locked: "Locked", badge_ready: "Not started",
@@ -403,12 +455,33 @@
       frame1_title: "1. מפתח API של Render",
       frame1_instructions: "קבלו מפתח מלוח הבקרה של Render: Account Settings ← API Keys.",
       frame1_placeholder: "rnd_...",
-      frame2_title: "2. אפליקציית GitHub",
-      frame3_title: "3. מסד נתונים ב-Supabase",
-      frame4_title: "4. ספק LLM",
-      frame5_title: "5. פינגר לשמירה על פעילות",
-      frame6_title: "6. פריסה ל-Render",
+      frame2_title: "3. אפליקציית GitHub",
+      frame3_title: "4. מסד נתונים ב-Supabase",
+      frame4_title: "5. ספק LLM",
+      frame5_title: "6. פינגר לשמירה על פעילות",
+      frame6_title: "7. סיום ופריסה",
       coming_soon: "בקרוב.",
+      frame_render_service_title: "2. שירות Render",
+      frame_render_service_instructions: "פעולה זו יוצרת שירות Render משלך מתוך מאגר הקוד של הפרויקט. ניתן להצביע על מאגר אחר או לשנות את השם למטה אם רוצים.",
+      frame_render_service_repo_label: "מאגר קוד",
+      frame_render_service_name_label: "שם השירות",
+      create_service_button: "צור שירות",
+      url_prefix: "פעיל בכתובת ",
+      err_render_service_no_key: "השלם קודם את שלב 1 (מפתח API של Render).",
+      err_render_service_empty: "מלא כתובת מאגר קוד ושם שירות.",
+      err_render_service_invalid_key: "המפתח נדחה על ידי Render. בדוק אותו ונסה שוב.",
+      err_render_service_unreachable: "ה-API של Render אינו זמין כרגע. נסה שוב בעוד רגע.",
+      err_render_service_rejected: "Render דחה את הבקשה:",
+      frame6_instructions: "הכול נאסף. לחץ על פרוס כדי להעלות לאוויר.",
+      frame6_polling: "מבצע פריסה… זה עשוי לקחת כמה דקות.",
+      frame6_done: "המערכת שלך פעילה בכתובת:",
+      deploy_button: "פרוס",
+      err_render_deploy_no_service: "השלם קודם את שלב 2 (שירות Render).",
+      err_render_deploy_invalid_key: "המפתח נדחה על ידי Render. בדוק אותו ונסה שוב.",
+      err_render_deploy_service_not_found: "לא נמצא שירות Render. נסה שוב את שלב 2.",
+      err_render_deploy_unreachable: "ה-API של Render אינו זמין כרגע. נסה שוב בעוד רגע.",
+      err_render_deploy_failed: "הפריסה נכשלה. בדוק את השירות בלוח הבקרה של Render לפרטים.",
+      err_render_deploy_timeout: "עדיין בפריסה אחרי 15 דקות. ייתכן שתסתיים בהמשך — בדוק שוב.",
       validate_button: "אימות",
       change_button: "שינוי",
       badge_locked: "נעול", badge_ready: "טרם התחיל",
@@ -536,6 +609,12 @@
     if (currentRenderKeyErrorKey) {
       document.getElementById("render-key-error").textContent = t(currentRenderKeyErrorKey);
     }
+    if (currentRenderServiceErrorKey) {
+      document.getElementById("render-service-error").textContent = t(currentRenderServiceErrorKey);
+    }
+    if (currentRenderDeployErrorKey) {
+      document.getElementById("render-deploy-error").textContent = t(currentRenderDeployErrorKey);
+    }
     if (currentGithubAppErrorKey) {
       document.getElementById("github-app-error").textContent = t(currentGithubAppErrorKey);
     }
@@ -553,6 +632,7 @@
 
   const STORAGE_KEYS = {
     "render-key": "onboarding.renderApiKey",
+    "render-service": "onboarding.renderService",
     "github-app": "onboarding.githubApp",
     "supabase": "onboarding.supabase",
     "llm-provider": "onboarding.llmProvider",
@@ -591,6 +671,15 @@
     }
   }
 
+  // Same defensive shape as readStoredGithubApp()/readStoredSupabase() above.
+  function readStoredRenderService() {
+    try {
+      return JSON.parse(sessionStorage.getItem(STORAGE_KEYS["render-service"]) || "null");
+    } catch (err) {
+      return null;
+    }
+  }
+
   // SOURCE OF TRUTH: scripts/create_github_app.py's MANIFEST_PERMISSIONS /
   // MANIFEST_EVENTS. These two lists must stay identical — the CLI script and
   // this wizard create the same App. Change them there first, then here;
@@ -603,7 +692,7 @@
   const GITHUB_MANIFEST_STATE_KEY = "onboarding.githubManifestState";
 
   const FRAME_ORDER = [
-    "render-key", "github-app", "supabase", "llm-provider",
+    "render-key", "render-service", "github-app", "supabase", "llm-provider",
     "uptime-pinger", "render-deploy",
   ];
 
@@ -660,6 +749,7 @@
     if (id === "supabase") resetSupabaseConnectSection();
     if (id === "llm-provider") resetLlmProviderSection();
     if (id === "uptime-pinger") resetUptimePingerSection();
+    if (id === "render-deploy") resetRenderDeploySection();
   }
 
   function unlockFrame(id) {
@@ -667,6 +757,7 @@
     el.dataset.locked = "false";
     setFrameStatus(id, "ready");
     if (id === "uptime-pinger") refreshUptimePingerBlockedState();
+    if (id === "render-service") prefillRenderServiceDefaults();
   }
 
   function relockDownstreamOf(id) {
@@ -693,6 +784,10 @@
     // mid-change refresh would silently re-complete it from sessionStorage.
     // Scoped to frame 2 on purpose; frame 1's equivalent gap is a separate
     // parked issue (root ISSUES.md).
+    if (id === "render-service") {
+      sessionStorage.removeItem(STORAGE_KEYS["render-service"]);
+      sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
+    }
     if (id === "github-app") {
       sessionStorage.removeItem(STORAGE_KEYS["github-app"]);
       resetGithubAppCreateSection();
@@ -988,6 +1083,89 @@
       request_rejected: "err_uptime_request_rejected",
     };
     return map[reason] || "err_uptime_unreachable";
+  }
+
+  let currentRenderServiceErrorKey = null;
+
+  function generateRenderServiceName() {
+    const bytes = crypto.getRandomValues(new Uint8Array(4));
+    const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    return `pr-review-bot-${hex}`;
+  }
+
+  const RENDER_SERVICE_DEFAULT_REPO = "https://github.com/TovTechOrg/pr-review-bot";
+
+  function prefillRenderServiceDefaults() {
+    const repoInput = document.getElementById("render-service-repo-input");
+    const nameInput = document.getElementById("render-service-name-input");
+    if (!repoInput.value) repoInput.value = RENDER_SERVICE_DEFAULT_REPO;
+    if (!nameInput.value) nameInput.value = generateRenderServiceName();
+  }
+
+  async function createRenderService() {
+    const repoInput = document.getElementById("render-service-repo-input");
+    const nameInput = document.getElementById("render-service-name-input");
+    const errorEl = document.getElementById("render-service-error");
+    errorEl.textContent = "";
+    currentRenderServiceErrorKey = null;
+    const repoUrl = repoInput.value.trim();
+    const name = nameInput.value.trim();
+    const apiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    if (!apiKey) {
+      currentRenderServiceErrorKey = "err_render_service_no_key";
+      errorEl.textContent = t("err_render_service_no_key");
+      return;
+    }
+    if (!repoUrl || !name) {
+      currentRenderServiceErrorKey = "err_render_service_empty";
+      errorEl.textContent = t("err_render_service_empty");
+      return;
+    }
+    setFrameStatus("render-service", "ready", "checking");
+    let resp;
+    try {
+      resp = await fetch("/api/render/create-service", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: apiKey, repo_url: repoUrl, name: name}),
+      });
+    } catch (err) {
+      setFrameStatus("render-service", "error");
+      currentRenderServiceErrorKey = "err_network";
+      errorEl.textContent = t("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      setFrameStatus("render-service", "error");
+      currentRenderServiceErrorKey = "err_render_service_unreachable";
+      errorEl.textContent = t("err_render_service_unreachable");
+      return;
+    }
+    if (body.valid) {
+      sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify({
+        service_id: body.service_id, service_url: body.service_url,
+      }));
+      sessionStorage.setItem(RENDER_SERVICE_URL_KEY, body.service_url);
+      completeFrame("render-service", "url_prefix", body.service_url);
+    } else if (body.reason === "invalid_key") {
+      setFrameStatus("render-service", "error");
+      currentRenderServiceErrorKey = "err_render_service_invalid_key";
+      errorEl.textContent = t("err_render_service_invalid_key");
+    } else if (body.reason === "request_rejected") {
+      setFrameStatus("render-service", "error");
+      currentRenderServiceErrorKey = "err_render_service_rejected";
+      errorEl.textContent = body.message
+        ? `${t("err_render_service_rejected")} ${body.message}`
+        : t("err_render_service_rejected");
+    } else {
+      setFrameStatus("render-service", "error");
+      currentRenderServiceErrorKey = "err_render_service_unreachable";
+      errorEl.textContent = t("err_render_service_unreachable");
+    }
   }
 
   async function validateRenderKey() {
@@ -1543,6 +1721,158 @@
     }
   }
 
+  let currentRenderDeployErrorKey = null;
+  const RENDER_DEPLOY_POLL_INTERVAL_MS = 10000;
+  const RENDER_DEPLOY_POLL_TIMEOUT_MS = 900000;
+
+  function resetRenderDeploySection() {
+    document.getElementById("render-deploy-trigger-section").style.display = "block";
+    document.getElementById("render-deploy-polling-section").style.display = "none";
+    document.getElementById("render-deploy-done-section").style.display = "none";
+    document.getElementById("render-deploy-check-again-submit").style.display = "none";
+    document.getElementById("render-deploy-error").textContent = "";
+    currentRenderDeployErrorKey = null;
+  }
+
+  function renderDeployError(key) {
+    setFrameStatus("render-deploy", "error");
+    currentRenderDeployErrorKey = key;
+    document.getElementById("render-deploy-error").textContent = t(key);
+  }
+
+  function renderDeployErrorForReason(reason) {
+    const map = {
+      invalid_key: "err_render_deploy_invalid_key",
+      service_not_found: "err_render_deploy_service_not_found",
+      render_unreachable: "err_render_deploy_unreachable",
+    };
+    renderDeployError(map[reason] || "err_render_deploy_unreachable");
+  }
+
+  async function fetchRenderDeployStatus(serviceId, deployId) {
+    const apiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    if (!apiKey) return {valid: false, reason: "invalid_key"};
+    let resp;
+    try {
+      resp = await fetch("/api/render/deploy-status", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: apiKey, service_id: serviceId, deploy_id: deployId}),
+      });
+    } catch (err) {
+      return {networkError: true};
+    }
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      return await resp.json();
+    } catch (err) {
+      return {valid: false, reason: "render_unreachable"};
+    }
+  }
+
+  function finishRenderDeploy() {
+    const stored = readStoredRenderService();
+    document.getElementById("render-deploy-polling-section").style.display = "none";
+    document.getElementById("render-deploy-done-section").style.display = "block";
+    const link = document.getElementById("render-deploy-service-link");
+    link.href = stored ? stored.service_url : "";
+    link.textContent = stored ? stored.service_url : "";
+    if (stored) {
+      stored.deployed = true;
+      sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(stored));
+    }
+    completeFrame("render-deploy", null, null);
+  }
+
+  function handleRenderDeployStatusResult(body) {
+    if (body.networkError) {
+      renderDeployError("err_network");
+      return "error";
+    }
+    if (!body.valid) {
+      renderDeployErrorForReason(body.reason);
+      return "error";
+    }
+    if (body.status === "live") {
+      finishRenderDeploy();
+      return "live";
+    }
+    if (body.status === "failed") {
+      document.getElementById("render-deploy-polling-section").style.display = "none";
+      renderDeployError("err_render_deploy_failed");
+      return "error";
+    }
+    // "in_progress" and "canceled" both keep polling: canceled means a
+    // newer deploy superseded this one, not a failure (same distinction
+    // scripts/deploy.py draws), so the right response is to keep
+    // watching, not to stop.
+    return "pending";
+  }
+
+  async function pollRenderDeployStatus(serviceId, deployId, startedAt) {
+    const body = await fetchRenderDeployStatus(serviceId, deployId);
+    const outcome = handleRenderDeployStatusResult(body);
+    if (outcome !== "pending") return;
+    if (Date.now() - startedAt >= RENDER_DEPLOY_POLL_TIMEOUT_MS) {
+      renderDeployError("err_render_deploy_timeout");
+      document.getElementById("render-deploy-check-again-submit").style.display = "inline-block";
+      return;
+    }
+    setTimeout(() => { pollRenderDeployStatus(serviceId, deployId, startedAt); }, RENDER_DEPLOY_POLL_INTERVAL_MS);
+  }
+
+  async function checkRenderDeployStatusOnce() {
+    const stored = readStoredRenderService();
+    if (!stored || !stored.service_id || !stored.pending_deploy_id) return;
+    document.getElementById("render-deploy-error").textContent = "";
+    currentRenderDeployErrorKey = null;
+    const body = await fetchRenderDeployStatus(stored.service_id, stored.pending_deploy_id);
+    const outcome = handleRenderDeployStatusResult(body);
+    if (outcome === "pending") {
+      renderDeployError("err_render_deploy_timeout");
+      document.getElementById("render-deploy-check-again-submit").style.display = "inline-block";
+    }
+  }
+
+  async function triggerRenderDeploy() {
+    document.getElementById("render-deploy-error").textContent = "";
+    currentRenderDeployErrorKey = null;
+    const apiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    const stored = readStoredRenderService();
+    if (!apiKey || !stored || !stored.service_id) {
+      renderDeployError("err_render_deploy_no_service");
+      return;
+    }
+    let resp;
+    try {
+      resp = await fetch("/api/render/trigger-deploy", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: apiKey, service_id: stored.service_id}),
+      });
+    } catch (err) {
+      renderDeployError("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      renderDeployError("err_render_deploy_unreachable");
+      return;
+    }
+    if (!body.valid) {
+      renderDeployErrorForReason(body.reason);
+      return;
+    }
+    stored.pending_deploy_id = body.deploy_id;
+    sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(stored));
+    document.getElementById("render-deploy-trigger-section").style.display = "none";
+    document.getElementById("render-deploy-polling-section").style.display = "block";
+    pollRenderDeployStatus(stored.service_id, body.deploy_id, Date.now());
+  }
+
   async function fetchSupabaseConnectionInfo() {
     let stored = readStoredSupabase();
     if (!stored || !stored.ref || !stored.db_pass) {
@@ -1579,6 +1909,9 @@
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
       completeFrame("render-key", "restored", null);
     }
+    if (sessionStorage.getItem(STORAGE_KEYS["render-service"])) {
+      completeFrame("render-service", "url_prefix", (readStoredRenderService() || {}).service_url);
+    }
     const githubApp = readStoredGithubApp();
     if (githubApp && githubApp.installation_id) {
       completeFrame("github-app", "restored", null);
@@ -1597,6 +1930,14 @@
     }
     if (sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"])) {
       completeFrame("uptime-pinger", "restored", null);
+    }
+    const renderServiceState = readStoredRenderService();
+    if (renderServiceState && renderServiceState.deployed) {
+      completeFrame("render-deploy", null, null);
+    } else if (renderServiceState && renderServiceState.pending_deploy_id) {
+      document.getElementById("render-deploy-trigger-section").style.display = "none";
+      document.getElementById("render-deploy-polling-section").style.display = "block";
+      pollRenderDeployStatus(renderServiceState.service_id, renderServiceState.pending_deploy_id, Date.now());
     }
   }
 
@@ -1652,6 +1993,9 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
+    document.getElementById("render-service-submit").addEventListener("click", createRenderService);
+    document.getElementById("render-deploy-trigger-submit").addEventListener("click", triggerRenderDeploy);
+    document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
     document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);

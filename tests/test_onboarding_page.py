@@ -868,3 +868,116 @@ async def test_frame5_reevaluates_blocked_state_when_reopened():
         'document.getElementById("frame-uptime-pinger").addEventListener("toggle"'
         in body
     )
+
+
+async def test_frame_order_includes_render_service_after_render_key():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert '"render-key", "render-service", "github-app"' in body
+
+
+async def test_frame_order_ends_with_render_deploy():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert '"uptime-pinger", "render-deploy"' in body
+
+
+async def test_render_service_frame_markup_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="frame-render-service"' in body
+    assert 'id="render-service-repo-input"' in body
+    assert 'id="render-service-name-input"' in body
+    assert 'id="render-service-submit"' in body
+
+
+async def test_render_service_storage_key_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert '"render-service": "onboarding.renderService"' in body
+
+
+async def test_create_service_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/render/create-service"') == 1
+
+
+async def test_render_service_url_written_on_success():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "sessionStorage.setItem(RENDER_SERVICE_URL_KEY, body.service_url)" in body
+
+
+async def test_render_deploy_frame_markup_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="render-deploy-trigger-section"' in body
+    assert 'id="render-deploy-polling-section"' in body
+    assert 'id="render-deploy-done-section"' in body
+    assert 'id="render-deploy-trigger-submit"' in body
+    assert 'id="render-deploy-check-again-submit"' in body
+
+
+async def test_trigger_deploy_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/render/trigger-deploy"') == 1
+
+
+async def test_deploy_status_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/render/deploy-status"') == 1
+
+
+async def test_render_service_frame_i18n_strings_present_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    keys = [
+        "frame_render_service_title", "frame_render_service_instructions",
+        "frame_render_service_repo_label", "frame_render_service_name_label",
+        "create_service_button", "url_prefix", "err_render_service_no_key",
+        "err_render_service_empty", "err_render_service_invalid_key",
+        "err_render_service_unreachable", "err_render_service_rejected",
+    ]
+    for key in keys:
+        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
+
+
+async def test_render_deploy_frame_i18n_strings_present_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    keys = [
+        "frame6_instructions", "frame6_polling", "frame6_done", "deploy_button",
+        "err_render_deploy_no_service", "err_render_deploy_invalid_key",
+        "err_render_deploy_service_not_found", "err_render_deploy_unreachable",
+        "err_render_deploy_failed", "err_render_deploy_timeout",
+    ]
+    for key in keys:
+        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
+
+
+async def test_frame_titles_renumbered_after_render_service_insertion():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'frame_render_service_title: "2. Render service"' in body
+    assert 'frame2_title: "3. GitHub App"' in body
+    assert 'frame3_title: "4. Supabase database"' in body
+    assert 'frame4_title: "5. LLM provider"' in body
+    assert 'frame5_title: "6. Keep-warm pinger"' in body
+    assert 'frame6_title: "7. Finish & Deploy"' in body
+
+
+async def test_begin_change_render_service_clears_its_own_stale_state():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'if (id === "render-service")' in body
+    assert 'sessionStorage.removeItem(STORAGE_KEYS["render-service"])' in body
+    assert 'sessionStorage.removeItem(RENDER_SERVICE_URL_KEY)' in body
+
+
+async def test_lock_frame_resets_render_deploy_section():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'if (id === "render-deploy") resetRenderDeploySection();' in body
