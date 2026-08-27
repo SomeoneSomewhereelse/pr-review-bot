@@ -536,3 +536,27 @@ async def test_vertex_list_models_validation_error_never_echoes_the_key():
     assert resp.status_code == 422
     assert sentinel_key not in resp.text
     assert "input" not in resp.text
+
+
+# An empty credential must be a 422, not something that reaches the SDK:
+# genai.Client(api_key="") falls back to reading the *server's* own
+# GOOGLE_API_KEY/GEMINI_API_KEY env vars, so an empty submission could
+# otherwise validate against the operator's credential instead of failing.
+
+
+async def test_gemini_list_models_rejects_empty_key():
+    client = await _client()
+    resp = await client.post("/api/llm/gemini/list-models", json={"api_key": ""})
+    assert resp.status_code == 422
+
+
+async def test_groq_list_models_rejects_empty_key():
+    client = await _client()
+    resp = await client.post("/api/llm/groq/list-models", json={"api_key": ""})
+    assert resp.status_code == 422
+
+
+async def test_vertex_list_models_rejects_empty_key():
+    client = await _client()
+    resp = await client.post("/api/llm/vertex/list-models", json={"service_account_key_b64": ""})
+    assert resp.status_code == 422

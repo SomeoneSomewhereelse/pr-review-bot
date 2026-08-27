@@ -185,7 +185,15 @@ section 3), not an oversight to fix.
   (`_list_generative_models`) since both go through the same `google-genai`
   SDK and differ only in how `genai.Client` is constructed. A change to the
   filtering/prefix-stripping logic belongs in that shared helper, not
-  duplicated per provider.
+  duplicated per provider. **The `generateContent` filter only applies
+  when `supported_actions` is populated** — Vertex's response converter
+  (`google/genai/models.py`'s `_Model_from_vertex`) never sets that field
+  at all, unlike the Gemini Developer API's converter, so a Vertex model
+  is let through rather than dropped when the field is `None`. Filtering
+  Vertex strictly on that field (the original implementation) silently
+  emptied its entire model catalog for every credential — verify against
+  the installed SDK's actual converter functions before changing this
+  again, not just against the `Model` type's field list.
 - **Groq's model list is deliberately unfiltered** — its `Model` type
   carries no capability field to distinguish chat-completion models from
   Whisper/TTS/moderation ones, and a name-pattern heuristic was
@@ -203,10 +211,19 @@ section 3), not an oversight to fix.
   request. `onboarding/config.py` and `onboarding/main.py`'s `lifespan` are
   untouched by it.
 - **Gemini/Vertex tests mock at the SDK client boundary
-  (`google.genai.Client` itself is monkeypatched), not `respx`** —
-  `google-genai`'s transport mixes `httpx` and `requests` depending on auth
-  type, so a single `respx` mock cannot cleanly cover both paths. Groq's
-  tests use `respx` as normal, since its SDK transport is pure `httpx`.
+  (`google.genai.Client` itself is monkeypatched), not `respx`** — the
+  async listing call itself is `httpx`-based for both providers (verified:
+  this environment has no `aiohttp` installed, so `google-genai`'s async
+  path falls back to `httpx` regardless of auth type). What `respx` alone
+  can't cover is Vertex's separate credential step: a service-account
+  refreshes its access token via `google.auth`'s synchronous,
+  `requests`-based transport before the `httpx` listing call ever happens,
+  and `respx` only intercepts `httpx`. SDK-boundary mocking sidesteps
+  needing two different mocking libraries for one code path, and covers
+  Gemini and Vertex with the same test shape despite their different
+  `Client`-construction inputs (`api_key` vs a service-account credential
+  object). Groq's tests use `respx` as normal, since its SDK transport is
+  pure `httpx` end-to-end with no separate credential-refresh step.
 - **All three credentials share one `fetch(endpoint, ...)` call site**
   in `validateLlmProviderCredential()`, with `endpoint` set to a literal
   per-provider URL string in each branch — a second adaptation of the

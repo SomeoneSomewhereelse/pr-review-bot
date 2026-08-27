@@ -68,15 +68,15 @@ class SupabaseConnectionInfoRequest(BaseModel):
 
 
 class LlmGeminiListModelsRequest(BaseModel):
-    api_key: str = Field(max_length=512)
+    api_key: str = Field(min_length=1, max_length=512)
 
 
 class LlmGroqListModelsRequest(BaseModel):
-    api_key: str = Field(max_length=512)
+    api_key: str = Field(min_length=1, max_length=512)
 
 
 class LlmVertexListModelsRequest(BaseModel):
-    service_account_key_b64: str = Field(max_length=16384)
+    service_account_key_b64: str = Field(min_length=1, max_length=16384)
 
 
 @router.get("/", response_class=HTMLResponse)

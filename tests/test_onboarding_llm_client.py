@@ -65,6 +65,13 @@ class _FakeModelsResource:
 class _FakeAio:
     def __init__(self, models=None, exc=None):
         self.models = _FakeModelsResource(models, exc)
+        self.closed = False
+
+    async def aclose(self):
+        # Real counterpart: google.genai.client.AsyncClient.aclose(), which
+        # llm_client calls in a finally block so the SDK's httpx connection
+        # pool isn't leaked once per visitor request.
+        self.closed = True
 
 
 class _FakeClient:
@@ -72,11 +79,13 @@ class _FakeClient:
     built correctly (api_key vs vertexai=True+project+location+credentials)."""
 
     last_kwargs: dict = {}
+    last_instance: "_FakeClient | None" = None
     _next_models: list = []
     _next_exc: Exception | None = None
 
     def __init__(self, **kwargs):
         _FakeClient.last_kwargs = kwargs
+        _FakeClient.last_instance = self
         self.aio = _FakeAio(models=_FakeClient._next_models, exc=_FakeClient._next_exc)
 
 
@@ -98,7 +107,43 @@ async def test_list_gemini_models_returns_stripped_names(monkeypatch):
 async def test_list_gemini_models_constructs_client_with_api_key(monkeypatch):
     _install_fake_client(monkeypatch, models=[])
     await llm_client.list_gemini_models("sentinel-api-key")
-    assert _FakeClient.last_kwargs == {"api_key": "sentinel-api-key"}
+    assert _FakeClient.last_kwargs["api_key"] == "sentinel-api-key"
+    assert "vertexai" not in _FakeClient.last_kwargs
+
+
+async def test_list_gemini_models_sets_a_request_timeout(monkeypatch):
+    """An unset google-genai timeout is unbounded, not merely long (the SDK
+    passes timeout=None straight into httpx), so an unresponsive provider
+    would hang this synchronous, visitor-facing validation call forever."""
+    _install_fake_client(monkeypatch, models=[])
+    await llm_client.list_gemini_models("a")
+    assert _FakeClient.last_kwargs["http_options"].timeout == 10_000
+
+
+async def test_list_vertex_models_sets_a_request_timeout(monkeypatch):
+    _install_fake_client(monkeypatch, models=[])
+    await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert _FakeClient.last_kwargs["http_options"].timeout == 10_000
+
+
+async def test_list_gemini_models_closes_the_client_on_success(monkeypatch):
+    _install_fake_client(monkeypatch, models=[])
+    await llm_client.list_gemini_models("a")
+    assert _FakeClient.last_instance.aio.closed is True
+
+
+async def test_list_gemini_models_closes_the_client_on_failure(monkeypatch):
+    """The close lives in a finally block precisely so an error path can't
+    leak the SDK's connection pool."""
+    _install_fake_client(monkeypatch, exc=genai_errors.ClientError(401, {"message": "bad key"}))
+    await llm_client.list_gemini_models("bad")
+    assert _FakeClient.last_instance.aio.closed is True
+
+
+async def test_list_vertex_models_closes_the_client_on_failure(monkeypatch):
+    _install_fake_client(monkeypatch, exc=genai_errors.ClientError(403, {"message": "no role"}))
+    await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert _FakeClient.last_instance.aio.closed is True
 
 
 async def test_list_gemini_models_filters_out_non_generate_content_models(monkeypatch):
@@ -147,6 +192,40 @@ async def test_list_vertex_models_returns_stripped_names_and_project_id(monkeypa
     assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
 
 
+async def test_list_vertex_models_lets_through_models_with_no_known_capability(monkeypatch):
+    """Vertex's converter (google/genai/models.py's _Model_from_vertex)
+    never populates supported_actions at all -- verified directly against
+    the installed SDK's source, not assumed. A Vertex Model built through
+    the real converter therefore has supported_actions=None, and must
+    still be listed (not silently dropped) or Vertex's model catalog is
+    always empty regardless of the submitted credential -- this is the
+    exact bug a hand-rolled SimpleNamespace fake let through undetected
+    across three prior task reviews and one whole-branch review."""
+    from google.genai import models as genai_models
+    from google.genai import types as genai_types
+
+    converted = genai_models._Model_from_vertex({"name": "publishers/google/models/gemini-2.5-flash"})
+    assert "supported_actions" not in converted
+    real_model = genai_types.Model(**converted)
+    assert real_model.supported_actions is None
+
+    _install_fake_client(monkeypatch, models=[real_model])
+    result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+
+
+async def test_list_vertex_models_still_filters_when_capability_is_known(monkeypatch):
+    """If a future SDK version DOES populate supported_actions for Vertex,
+    the filter must still apply -- the fix isn't "let everything through
+    unconditionally", it's "don't drop what we can't classify"."""
+    _install_fake_client(monkeypatch, models=[
+        _model("publishers/google/models/gemini-2.5-flash", supported_actions=["generateContent"]),
+        _model("publishers/google/models/embedding-001", supported_actions=["embedContent"]),
+    ])
+    result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+
+
 async def test_list_vertex_models_constructs_client_with_project_and_fixed_location(monkeypatch):
     _install_fake_client(monkeypatch, models=[])
     await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
@@ -190,10 +269,17 @@ async def test_list_vertex_models_server_error_is_unreachable(monkeypatch):
     assert result == llm_client.LlmApiFailed(reason="provider_unreachable")
 
 
-async def test_list_vertex_models_never_logs_the_decoded_key(caplog):
+async def test_list_vertex_models_never_logs_the_decoded_key(monkeypatch, caplog):
+    """Drives a real sentinel key all the way through decode -> parse ->
+    from_service_account_info -> a failing live call, so the assertion has
+    something to actually catch. The earlier version passed malformed
+    base64, which returns before any key material exists in the process --
+    it could never have failed for the reason its name claims."""
+    _install_fake_client(monkeypatch, exc=genai_errors.ClientError(401, {"message": "bad key"}))
     with caplog.at_level("DEBUG"):
-        await llm_client.list_vertex_models("not-valid-base64!!!")
+        await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
     assert "sentinel" not in caplog.text.lower()
+    assert "BEGIN PRIVATE KEY" not in caplog.text
 
 
 MODELS_URL = "https://api.groq.com/openai/v1/models"
@@ -259,3 +345,28 @@ async def test_list_groq_models_network_error_is_unreachable():
         respx.get(MODELS_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
         result = await llm_client.list_groq_models("a")
     assert result == llm_client.LlmApiFailed(reason="provider_unreachable")
+
+
+async def test_list_groq_models_never_logs_the_api_key(caplog):
+    """Groq's counterpart to the Vertex logging guard above. DEBUG is where
+    the groq SDK dumps its request options, so that is the level worth
+    pinning."""
+    with respx.mock:
+        respx.get(MODELS_URL).mock(return_value=httpx.Response(401, json={"error": {"message": "bad key"}}))
+        with caplog.at_level("DEBUG"):
+            await llm_client.list_groq_models("sentinel-super-secret-groq-key")
+    assert "sentinel-super-secret-groq-key" not in caplog.text
+
+
+async def test_list_groq_models_does_not_retry_behind_our_back():
+    """The groq SDK defaults to max_retries=2 and retries 429/5xx, which
+    would turn one visitor-facing validation into three live calls --
+    counter to app/providers/groq.py's documented max_retries=0 decision
+    and to root CLAUDE.md's "stop calling on a 403/429" discipline."""
+    with respx.mock:
+        route = respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(429, json={"error": {"message": "slow down"}})
+        )
+        result = await llm_client.list_groq_models("a")
+    assert result == llm_client.LlmApiFailed(reason="rate_limited")
+    assert route.call_count == 1

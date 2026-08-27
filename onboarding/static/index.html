@@ -513,6 +513,9 @@
     if (currentSupabaseErrorKey) {
       document.getElementById("supabase-error").textContent = t(currentSupabaseErrorKey);
     }
+    if (currentLlmProviderErrorKey) {
+      document.getElementById("llm-provider-error").textContent = t(currentLlmProviderErrorKey);
+    }
     applyTheme(currentTheme);
   }
 
@@ -714,6 +717,8 @@
     const apiKeyInput = document.getElementById("llm-provider-api-key-input");
     const fileInput = document.getElementById("llm-provider-file-input");
     const submitBtn = document.getElementById("llm-provider-validate-submit");
+    apiKeyInput.value = "";
+    fileInput.value = "";
     apiKeyInput.style.display = (provider === "gemini" || provider === "groq") ? "block" : "none";
     fileInput.style.display = (provider === "vertex") ? "block" : "none";
     submitBtn.style.display = provider ? "block" : "none";

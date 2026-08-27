@@ -715,3 +715,24 @@ async def test_vertex_credential_stored_under_the_spec_field_name():
     client = await _client()
     body = (await client.get("/")).text
     assert "credentialFragment = {gcp_service_account_key_b64: b64}" in body
+
+
+async def test_language_switch_retranslates_llm_provider_error():
+    """Every other frame re-renders its held error key in applyLanguage();
+    without this, currentLlmProviderErrorKey is written in four places and
+    read nowhere, and frame 4's error text keeps the old language."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'document.getElementById("llm-provider-error").textContent = t(currentLlmProviderErrorKey);' in body
+
+
+async def test_switching_llm_provider_clears_stale_credential_input():
+    """The api-key field is one shared DOM element across Gemini and Groq,
+    so without this a key typed for one provider is still sitting there
+    (hidden) to be submitted to the other."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function handleLlmProviderChoice")
+    fn_body = body[fn_start:body.index("\n  }\n", fn_start)]
+    assert 'apiKeyInput.value = "";' in fn_body
+    assert 'fileInput.value = "";' in fn_body

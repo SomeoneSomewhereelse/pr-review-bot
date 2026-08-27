@@ -44,7 +44,7 @@ separately from `llm_model`).
 | Model source | **Fetched live from the provider's own catalog**, not a hardcoded default. Rejected hardcoding the three current `app/config.py` defaults (`gemini-flash-latest` / `llama-3.3-70b-versatile` / `gemini-2.5-flash`) as onboarding-local constants specifically because that list can silently drift from `app/config.py`'s real defaults, and because a hardcoded single target model can't detect the actual documented failure mode (right key, wrong model for *this* project/region). |
 | Frame unlock gate | **Both required**: a live-validated credential AND an explicit model pick from the fetched dropdown. Rejected "credential valid is enough, model optional, fall back to `app/config.py`'s baked-in default" — baked-in defaults are exactly the fragile assumption this sub-project exists to stop relying on. |
 | Empty-catalog handling | A credential that validates but returns zero eligible models is a genuine dead end under the "both required" gate (no fallback exists). Surfaced as its own distinct message ("this credential is valid, but no usable models are available") rather than folded into a generic validation-failure error, so the visitor knows the credential itself is fine and the problem is elsewhere (wrong region, wrong GCP project, no models enabled). |
-| Gemini/Vertex model filtering | Filtered to models whose `supported_actions` includes `generateContent` (the SDK call `app/providers/google_genai.py` actually makes) — a structural filter, not a guess, since `google-genai`'s `Model` type carries this field. |
+| Gemini/Vertex model filtering | Filtered to models whose `supported_actions` includes `generateContent` (the SDK call `app/providers/google_genai.py` actually makes) *when that field is populated*. **Correction, found at final review (2026-08-27):** `google-genai`'s `Model` type carries the field, but only the Gemini Developer API's response converter (`_Model_from_mldev`) populates it — Vertex's converter (`_Model_from_vertex`) never does, verified directly against the installed SDK's source. A Vertex model with `supported_actions=None` is let through rather than dropped; the original implementation filtered strictly on the field and silently emptied Vertex's entire catalog for every credential. |
 | Groq model filtering | **Unfiltered** — shows every model Groq's `/v1/models` returns, including non-chat models (Whisper, TTS, guard/moderation) that would break `app/providers/groq.py`'s `chat.completions.create()` call if picked. Groq's `Model` type (`id`, `created`, `object`, `owned_by`) carries no capability field to filter by; a name-pattern heuristic (excluding ids containing "whisper"/"tts"/"guard") was considered and rejected as exactly the kind of hardcoded assumption about a live API's exact behavior this project's testing-hygiene discipline warns against. A wrong pick is a fast fix later via `scripts/set_override.py`, no redeploy. |
 | Vertex GCP project | Auto-derived from the uploaded service-account JSON's own `project_id` field — no visitor typing. |
 | Vertex GCP location | Fixed to `us-central1`, matching `app/config.py`'s `gcp_location` default — no visitor choice, same fixed-region posture as Supabase's frame. |
@@ -79,8 +79,10 @@ is constructed:
   already uses), then `genai.Client(vertexai=True, project=project_id, location="us-central1", credentials=creds)`.
 
 Both then call `await client.aio.models.list()`, filter the returned
-`Model` objects to `supported_actions` containing `"generateContent"`, and
-strip the resource-name prefix (`"models/"` for Gemini,
+`Model` objects to those whose `supported_actions` either contains
+`"generateContent"` or is unset (Vertex's converter never populates that
+field — a strict filter there emptied the whole catalog; see section 2's
+correction), and strip the resource-name prefix (`"models/"` for Gemini,
 `"publishers/google/models/"` for Vertex) down to the plain model-id string
 that `app/config.py`'s `llm_model`/`vertex_model` fields expect.
 

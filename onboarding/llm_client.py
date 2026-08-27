@@ -18,10 +18,12 @@ import httpx
 from google import genai
 from google.auth import exceptions as google_auth_exceptions
 from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from google.oauth2 import service_account
 
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 _VERTEX_LOCATION = "us-central1"
+_REQUEST_TIMEOUT_MS = 10_000
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,12 +53,22 @@ def _strip_model_prefix(name: str) -> str:
 
 
 async def _list_generative_models(client: genai.Client) -> list[str]:
-    """Filtered to generateContent-capable models only — the SDK call
-    app/providers/google_genai.py actually makes (spec section 2)."""
+    """Filtered to generateContent-capable models where that capability is
+    actually known. Gemini Developer API responses populate
+    Model.supported_actions (google/genai/models.py's _Model_from_mldev);
+    Vertex responses never do -- _Model_from_vertex has no
+    supported_actions mapping at all, verified directly against the
+    installed SDK's source, not assumed. A Vertex model therefore always
+    has supported_actions=None and is let through rather than dropped --
+    dropping it silently empties the entire Vertex catalog regardless of
+    credential, which is exactly the bug this check exists to avoid."""
     names = []
     async for model in await client.aio.models.list():
-        if model.name and model.supported_actions and "generateContent" in model.supported_actions:
-            names.append(_strip_model_prefix(model.name))
+        if not model.name:
+            continue
+        if model.supported_actions is not None and "generateContent" not in model.supported_actions:
+            continue
+        names.append(_strip_model_prefix(model.name))
     return names
 
 
@@ -73,15 +85,18 @@ def _reason_for_client_error_code(code: int) -> str:
 async def list_gemini_models(api_key: str) -> LlmModelsListed | LlmApiFailed:
     """Live models-listing call against the Gemini Developer API (AI
     Studio) — doubles as credential validation. Never logs api_key."""
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+        api_key=api_key,
+        http_options=genai_types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
+    )
     try:
         models = await _list_generative_models(client)
-    except genai_errors.ClientError as exc:
+    except genai_errors.APIError as exc:
         return LlmApiFailed(reason=_reason_for_client_error_code(exc.code))
-    except genai_errors.ServerError:
-        return LlmApiFailed(reason="provider_unreachable")
     except httpx.HTTPError:
         return LlmApiFailed(reason="provider_unreachable")
+    finally:
+        await client.aio.aclose()
     return LlmModelsListed(models=models)
 
 
@@ -99,20 +114,33 @@ async def list_vertex_models(service_account_key_b64: str) -> VertexModelsListed
 
     try:
         creds = service_account.Credentials.from_service_account_info(info, scopes=_VERTEX_SCOPES)
-    except (google_auth_exceptions.MalformedError, ValueError):
+    except ValueError:
+        # google.auth.exceptions.MalformedError subclasses ValueError, so
+        # this one clause already covers it.
         return LlmApiFailed(reason="invalid_service_account_json")
 
-    client = genai.Client(vertexai=True, project=project_id, location=_VERTEX_LOCATION, credentials=creds)
+    client = genai.Client(
+        vertexai=True,
+        project=project_id,
+        location=_VERTEX_LOCATION,
+        credentials=creds,
+        http_options=genai_types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
+    )
     try:
         models = await _list_generative_models(client)
-    except genai_errors.ClientError as exc:
+    except genai_errors.APIError as exc:
         return LlmApiFailed(reason=_reason_for_client_error_code(exc.code))
-    except genai_errors.ServerError:
-        return LlmApiFailed(reason="provider_unreachable")
-    except google_auth_exceptions.GoogleAuthError:
+    except google_auth_exceptions.RefreshError:
+        # A bad/unauthorized credential fails to refresh its token.
         return LlmApiFailed(reason="unauthorized")
+    except google_auth_exceptions.GoogleAuthError:
+        # Any other google-auth failure (e.g. a transport error during
+        # token refresh) is a connectivity problem, not a bad credential.
+        return LlmApiFailed(reason="provider_unreachable")
     except httpx.HTTPError:
         return LlmApiFailed(reason="provider_unreachable")
+    finally:
+        await client.aio.aclose()
     return VertexModelsListed(project_id=project_id, models=models)
 
 
@@ -121,10 +149,14 @@ async def list_groq_models(api_key: str) -> LlmModelsListed | LlmApiFailed:
     doubles as credential validation. Deliberately unfiltered (spec
     section 2): Groq's Model type carries no capability field to
     distinguish chat-completion models from Whisper/TTS/moderation ones.
-    Never logs api_key."""
-    client = groq.AsyncGroq(api_key=api_key)
+    max_retries=0 matches app/providers/groq.py's documented "no hidden
+    retry layer" convention — root CLAUDE.md counsels stopping on a
+    403/429 rather than silently retrying, which the SDK's default
+    max_retries=2 would otherwise do behind this function's back. Never
+    logs api_key."""
     try:
-        response = await client.models.list()
+        async with groq.AsyncGroq(api_key=api_key, max_retries=0, timeout=10.0) as client:
+            response = await client.models.list()
     except groq.AuthenticationError:
         return LlmApiFailed(reason="unauthorized")
     except groq.PermissionDeniedError:
