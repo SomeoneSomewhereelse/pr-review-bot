@@ -190,6 +190,13 @@ async def test_create_service_timeout_is_unreachable():
     assert result == render_client.RenderServiceCreationFailed(reason="render_unreachable")
 
 
+async def test_create_service_owners_5xx_is_unreachable_not_invalid_key():
+    with respx.mock:
+        respx.get(OWNERS_URL).mock(return_value=httpx.Response(500))
+        result = await render_client.create_service(SENTINEL_KEY, "https://github.com/x/y", "n")
+    assert result == render_client.RenderServiceCreationFailed(reason="render_unreachable")
+
+
 ENV_VAR_URL_A = f"{render_client.RENDER_API_BASE}/services/srv-1/env-vars/A_KEY"
 ENV_VAR_URL_B = f"{render_client.RENDER_API_BASE}/services/srv-1/env-vars/B_KEY"
 

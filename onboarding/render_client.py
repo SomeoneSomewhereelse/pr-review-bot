@@ -88,23 +88,14 @@ class RenderServiceCreationFailed:
 RenderServiceCreation = RenderServiceCreated | RenderServiceCreationFailed
 
 
-async def _resolve_owner_id(client: httpx.AsyncClient, api_key: str) -> str | None:
-    """GET /owners, the same call validate_key() already makes -- returns
-    the first owner's id, or None if the response is empty/malformed/
-    unauthorized (any of which the caller maps to invalid_key)."""
-    response = await client.get(
+async def _resolve_owner_id(client: httpx.AsyncClient, api_key: str) -> httpx.Response:
+    """GET /owners, the same call validate_key() already makes. Returns the
+    raw response -- create_service() is responsible for checking its status
+    code before parsing the body, same split as validate_key()'s own."""
+    return await client.get(
         "/owners",
         headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
     )
-    if response.status_code != 200:
-        return None
-    try:
-        body = response.json()
-        if not body:
-            return None
-        return body[0]["owner"]["id"]
-    except (ValueError, KeyError, IndexError, TypeError):
-        return None
 
 
 async def create_service(api_key: str, repo_url: str, name: str) -> RenderServiceCreation:
@@ -124,8 +115,17 @@ async def create_service(api_key: str, repo_url: str, name: str) -> RenderServic
     }
     try:
         async with httpx.AsyncClient(base_url=RENDER_API_BASE, timeout=30.0) as client:
-            owner_id = await _resolve_owner_id(client, api_key)
-            if owner_id is None:
+            owners_response = await _resolve_owner_id(client, api_key)
+            if owners_response.status_code in (401, 403):
+                return RenderServiceCreationFailed(reason="invalid_key")
+            if owners_response.status_code != 200:
+                return RenderServiceCreationFailed(reason="render_unreachable")
+            try:
+                owners_body = owners_response.json()
+                if not owners_body:
+                    return RenderServiceCreationFailed(reason="invalid_key")
+                owner_id = owners_body[0]["owner"]["id"]
+            except (ValueError, KeyError, IndexError, TypeError):
                 return RenderServiceCreationFailed(reason="invalid_key")
             response = await client.post(
                 "/services",
