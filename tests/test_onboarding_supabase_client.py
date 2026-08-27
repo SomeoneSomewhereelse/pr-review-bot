@@ -413,3 +413,22 @@ async def test_get_connection_info_unreachable_on_5xx():
         respx.get(POOLER_URL).mock(return_value=httpx.Response(500))
         result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
     assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+
+
+async def test_get_connection_info_malformed_entries_with_scalars_is_pooler_config_unavailable():
+    """If response.json() returns an array with non-dict elements (e.g. scalars
+    or null), iterating and calling .get() on them raises AttributeError, which
+    must be caught and degrade gracefully to pooler_config_unavailable."""
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[1, 2, 3]))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")
+
+
+async def test_get_connection_info_malformed_entries_with_null_is_pooler_config_unavailable():
+    """If response.json() returns an array containing null, calling .get() on
+    null raises AttributeError, which must be caught and degrade gracefully."""
+    with respx.mock:
+        respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[None]))
+        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+    assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")

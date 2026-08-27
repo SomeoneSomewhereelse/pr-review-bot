@@ -285,6 +285,6 @@ async def get_connection_info(access_token: str, ref: str) -> SupabaseConnection
         db_host = str(matched["db_host"])
         db_port = int(matched["db_port"])
         db_name = str(matched["db_name"])
-    except (ValueError, KeyError, TypeError, StopIteration):
+    except (ValueError, KeyError, TypeError, StopIteration, AttributeError):
         return SupabaseApiFailed(reason="pooler_config_unavailable")
     return SupabaseConnectionInfo(db_user=db_user, db_host=db_host, db_port=db_port, db_name=db_name)
