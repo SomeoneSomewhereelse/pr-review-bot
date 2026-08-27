@@ -4,12 +4,17 @@ Thumbs.db
 
 # Secrets
 .env
+# Explicit per-subfolder form too (e.g. onboarding/.env) -- the bare
+# pattern above already matches at any depth per gitignore semantics,
+# this just makes it unambiguous for every service's own .env file.
+**/.env
 *.pem
 # GCP service-account key files (default name + any numbered local siblings)
 gcp-service-account-key*.json
 
 # Operational config (no secrets, but machine-specific)
 .env.config
+**/.env.config
 
 .venv/
 __pycache__/
