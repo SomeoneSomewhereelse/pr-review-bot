@@ -254,3 +254,90 @@ async def test_stored_github_app_credentials_are_parsed_defensively():
     helper_body = helper_body[:helper_body.index("\n  }")]
     assert "try {" in helper_body
     assert "catch" in helper_body
+
+
+async def test_oauth_code_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/supabase/exchange-oauth-code"') == 1
+
+
+async def test_list_organizations_leaves_the_page_exactly_once():
+    """This endpoint (and create-project, project-status, connection-info)
+    goes through the shared callSupabaseRelay helper rather than a direct
+    fetch() call, so the audit target is "the endpoint string appears
+    exactly once as a callSupabaseRelay(...) argument" — the same
+    one-exit-path property the fetch()-based version of this test checks
+    for exchange-oauth-code and refresh-access-token, adapted for the
+    indirection this shared helper introduces."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('callSupabaseRelay("/api/supabase/list-organizations"') == 1
+
+
+async def test_create_project_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('callSupabaseRelay("/api/supabase/create-project"') == 1
+
+
+async def test_refresh_access_token_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/supabase/refresh-access-token"') == 1
+
+
+async def test_frame3_has_a_name_input_and_connect_button():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="supabase-project-name-input"' in body
+    assert 'id="supabase-connect-submit"' in body
+
+
+async def test_frame3_has_an_org_picker():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="supabase-org-select"' in body
+    assert 'id="supabase-org-submit"' in body
+
+
+async def test_frame3_strings_present_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    for key in (
+        "frame3_instructions", "frame3_name_placeholder", "connect_supabase_button",
+        "frame3_org_instructions", "create_project_button",
+        "err_supabase_name_empty", "err_supabase_callback_invalid",
+    ):
+        assert f"{key}:" in body
+    assert body.count("connect_supabase_button:") == 2  # STRINGS.en + STRINGS.he
+
+
+async def test_oauth_callback_handler_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "async function handleSupabaseOauthCallback" in body
+    assert "supabase_step" in body
+
+
+async def test_pkce_challenge_uses_sha256():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "crypto.subtle.digest(\"SHA-256\"" in body
+    assert "code_challenge_method" in body
+
+
+async def test_generated_db_password_is_alphanumeric_only():
+    """The generated password must never need percent-encoding, sidestepping
+    the manual guide's existing footgun entirely."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function generateDbPassword" in body
+    assert "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" in body
+
+
+async def test_reactive_refresh_helper_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "async function callSupabaseRelay" in body
+    assert '"unauthorized"' in body

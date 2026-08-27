@@ -117,6 +117,7 @@
   .frame-badge { font-size: 0.85rem; color: var(--text-muted); }
   details.frame[data-status="done"] .frame-badge { color: var(--ok); }
   details.frame[data-status="error"] .frame-badge { color: var(--fail); }
+  details.frame[data-status="provisioning"] .frame-badge { color: var(--accent); }
   .frame-change {
     display: none;
     background: var(--surface-2);
@@ -129,7 +130,7 @@
   }
   details.frame[data-status="done"] .frame-change { display: inline-block; }
   .frame-body { padding: 0 1.1rem 1.1rem; border-top: 1px solid var(--border); }
-  .frame-body input[type="password"] {
+  .frame-body input[type="password"], .frame-body input[type="text"], .frame-body select {
     width: 100%;
     padding: 0.5rem;
     margin: 0.5rem 0;
@@ -225,8 +226,25 @@
       <summary>
         <span class="frame-title" data-i18n="frame3_title"></span>
         <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="supabase" data-i18n="change_button"></button>
       </summary>
-      <div class="frame-body"><p data-i18n="coming_soon"></p></div>
+      <div class="frame-body">
+        <div id="supabase-connect-section">
+          <p data-i18n="frame3_instructions"></p>
+          <input id="supabase-project-name-input" type="text">
+          <button id="supabase-connect-submit" type="button" data-i18n="connect_supabase_button"></button>
+        </div>
+        <div id="supabase-org-section" style="display: none;">
+          <p data-i18n="frame3_org_instructions"></p>
+          <select id="supabase-org-select"></select>
+          <button id="supabase-org-submit" type="button" data-i18n="create_project_button"></button>
+        </div>
+        <div id="supabase-provisioning-section" style="display: none;">
+          <p data-i18n="frame3_provisioning"></p>
+          <button id="supabase-check-status-submit" type="button" data-i18n="check_again_button" style="display: none;"></button>
+        </div>
+        <p id="supabase-error" class="frame-error"></p>
+      </div>
     </details>
 
     <details id="frame-llm-provider" class="frame" data-status="locked" data-locked="true">
@@ -298,6 +316,25 @@
       err_github_installation_not_found: "GitHub couldn't find that installation. Try installing again.",
       err_github_invalid_credentials: "GitHub rejected the App's credentials. Try creating the App again.",
       account_prefix: "account: ",
+      frame3_instructions: "Name your Supabase project, then click Connect Supabase. This authorizes the wizard to create a new project on your own Supabase account.",
+      frame3_name_placeholder: "pr-review-bot",
+      connect_supabase_button: "Connect Supabase",
+      frame3_org_instructions: "Choose which Supabase organization to create the project in.",
+      create_project_button: "Create Project",
+      frame3_provisioning: "Provisioning your Supabase project… this takes about 2 minutes.",
+      check_again_button: "Check again",
+      badge_provisioning: "Provisioning…",
+      project_prefix: "project: ",
+      err_supabase_name_empty: "Name your project first.",
+      err_supabase_callback_invalid: "That didn't come back from Supabase as expected. Please try again.",
+      err_supabase_invalid_code: "Supabase rejected that — the code may have expired. Try connecting again.",
+      err_supabase_reauthorize: "Your Supabase session expired. Please connect again.",
+      err_supabase_forbidden: "Supabase rejected that action for your account.",
+      err_supabase_rate_limited: "Too many requests to Supabase right now. Try again in a moment.",
+      err_supabase_unreachable: "Supabase is unreachable right now. Try again in a moment.",
+      err_supabase_pooler_config_unavailable: "Your project's database connection isn't ready yet. Try again in a moment.",
+      err_supabase_provisioning_failed: "Supabase couldn't finish setting up your project. Try creating it again.",
+      err_supabase_provisioning_timeout: "Still provisioning — this is taking longer than usual. You can check again, or come back later.",
     },
     he: {
       page_title: "הקמת בודק ה-PR שלך",
@@ -338,6 +375,25 @@
       err_github_installation_not_found: "GitHub לא מצא את ההתקנה. נסו להתקין שוב.",
       err_github_invalid_credentials: "GitHub דחה את פרטי האפליקציה. נסו ליצור את האפליקציה מחדש.",
       account_prefix: "חשבון: ",
+      frame3_instructions: "תנו שם לפרויקט ה-Supabase שלכם, ואז לחצו על חיבור Supabase. פעולה זו מאשרת לאשף ליצור פרויקט חדש בחשבון ה-Supabase שלכם.",
+      frame3_name_placeholder: "pr-review-bot",
+      connect_supabase_button: "חיבור Supabase",
+      frame3_org_instructions: "בחרו לאיזה ארגון ב-Supabase ליצור את הפרויקט.",
+      create_project_button: "יצירת פרויקט",
+      frame3_provisioning: "הפרויקט שלכם ב-Supabase בהקמה… זה לוקח כשתי דקות.",
+      check_again_button: "בדיקה מחדש",
+      badge_provisioning: "בהקמה…",
+      project_prefix: "פרויקט: ",
+      err_supabase_name_empty: "תנו שם לפרויקט קודם.",
+      err_supabase_callback_invalid: "התגובה מ-Supabase לא הייתה כצפוי. נסו שוב.",
+      err_supabase_invalid_code: "Supabase דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו להתחבר שוב.",
+      err_supabase_reauthorize: "ההתחברות ל-Supabase פגה. אנא התחברו שוב.",
+      err_supabase_forbidden: "Supabase דחה את הפעולה עבור החשבון שלכם.",
+      err_supabase_rate_limited: "יותר מדי בקשות ל-Supabase כרגע. נסו שוב בעוד רגע.",
+      err_supabase_unreachable: "Supabase אינו זמין כרגע. נסו שוב בעוד רגע.",
+      err_supabase_pooler_config_unavailable: "חיבור מסד הנתונים של הפרויקט עדיין לא מוכן. נסו שוב בעוד רגע.",
+      err_supabase_provisioning_failed: "Supabase לא הצליח לסיים את הקמת הפרויקט. נסו ליצור אותו מחדש.",
+      err_supabase_provisioning_timeout: "עדיין בהקמה — זה לוקח יותר זמן מהרגיל. אפשר לבדוק שוב, או לחזור מאוחר יותר.",
     },
   };
 
@@ -384,6 +440,7 @@
     });
     document.getElementById("render-key-input").placeholder = t("frame1_placeholder");
     document.getElementById("github-app-name-input").placeholder = t("frame2_name_placeholder");
+    document.getElementById("supabase-project-name-input").placeholder = t("frame3_name_placeholder");
     document.getElementById("themePopupTitle").textContent = t("theme_popup_title");
     document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
     document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
@@ -394,13 +451,19 @@
     if (currentGithubAppErrorKey) {
       document.getElementById("github-app-error").textContent = t(currentGithubAppErrorKey);
     }
+    if (currentSupabaseErrorKey) {
+      document.getElementById("supabase-error").textContent = t(currentSupabaseErrorKey);
+    }
     applyTheme(currentTheme);
   }
 
   const STORAGE_KEYS = {
     "render-key": "onboarding.renderApiKey",
     "github-app": "onboarding.githubApp",
+    "supabase": "onboarding.supabase",
   };
+
+  const SUPABASE_PENDING_KEY = "onboarding.supabasePending";
 
   // Never JSON.parse this key's value directly: a corrupted/foreign-shaped
   // stored value would throw out of whatever handler read it (including
@@ -436,6 +499,7 @@
 
   let currentRenderKeyErrorKey = null;
   let currentGithubAppErrorKey = null;
+  let currentSupabaseErrorKey = null;
 
   function frameEl(id) {
     return document.getElementById(`frame-${id}`);
@@ -476,7 +540,10 @@
     // Frame 2's create/install sections are a one-way toggle otherwise: the
     // storage clear above would leave "Install App" on screen with nothing
     // behind it, and clicking it would report a misleading GitHub error.
+    // Frame 3's connect/org-picker/provisioning sections are the same
+    // shape, one step longer.
     if (id === "github-app") resetGithubAppCreateSection();
+    if (id === "supabase") resetSupabaseConnectSection();
   }
 
   function unlockFrame(id) {
@@ -512,6 +579,10 @@
     if (id === "github-app") {
       sessionStorage.removeItem(STORAGE_KEYS["github-app"]);
       resetGithubAppCreateSection();
+    }
+    if (id === "supabase") {
+      sessionStorage.removeItem(STORAGE_KEYS["supabase"]);
+      resetSupabaseConnectSection();
     }
   }
 
@@ -736,6 +807,236 @@
     }
   }
 
+  function base64UrlEncode(bytes) {
+    let binary = "";
+    bytes.forEach((b) => { binary += String.fromCharCode(b); });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  async function generatePkcePair() {
+    const verifierBytes = crypto.getRandomValues(new Uint8Array(32));
+    const verifier = base64UrlEncode(verifierBytes);
+    const challengeBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    const challenge = base64UrlEncode(new Uint8Array(challengeBuffer));
+    return {verifier, challenge};
+  }
+
+  function generateDbPassword() {
+    const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    let password = "";
+    bytes.forEach((b) => { password += charset[b % charset.length]; });
+    return password;
+  }
+
+  function resetSupabaseConnectSection() {
+    document.getElementById("supabase-org-section").style.display = "none";
+    document.getElementById("supabase-provisioning-section").style.display = "none";
+    document.getElementById("supabase-check-status-submit").style.display = "none";
+    document.getElementById("supabase-connect-section").style.display = "block";
+    document.getElementById("supabase-error").textContent = "";
+    currentSupabaseErrorKey = null;
+  }
+
+  function supabaseError(key) {
+    setFrameStatus("supabase", "error");
+    currentSupabaseErrorKey = key;
+    document.getElementById("supabase-error").textContent = t(key);
+  }
+
+  function supabaseErrorForReason(reason, message) {
+    if (reason === "project_creation_rejected" && message) {
+      // Supabase's own error text, relayed verbatim (spec section 4) —
+      // not a translated string, since it isn't one of ours.
+      setFrameStatus("supabase", "error");
+      currentSupabaseErrorKey = null;
+      document.getElementById("supabase-error").textContent = message;
+      return;
+    }
+    const key = {
+      unauthorized: "err_supabase_reauthorize",
+      invalid_code: "err_supabase_invalid_code",
+      forbidden: "err_supabase_forbidden",
+      rate_limited: "err_supabase_rate_limited",
+      pooler_config_unavailable: "err_supabase_pooler_config_unavailable",
+    }[reason] || "err_supabase_unreachable";
+    supabaseError(key);
+  }
+
+  // Every Supabase relay call after the initial token exchange goes
+  // through here: reads the held access_token from sessionStorage, and on
+  // a "reason": "unauthorized" response, attempts exactly one
+  // refresh-then-retry (spec section 3's "Token refresh" note) rather than
+  // tracking a client-side expiry timer.
+  async function callSupabaseRelay(endpoint, payload) {
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    if (!stored || !stored.access_token) {
+      return {valid: false, reason: "unauthorized"};
+    }
+    const attempt = async (accessToken) => {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({...payload, access_token: accessToken}),
+      });
+      if (!resp.ok) throw new Error("bad status");
+      return resp.json();
+    };
+    let body;
+    try {
+      body = await attempt(stored.access_token);
+    } catch (err) {
+      return {valid: false, reason: "supabase_unreachable"};
+    }
+    if (body.valid || body.reason !== "unauthorized" || !stored.refresh_token) {
+      return body;
+    }
+    let refreshBody;
+    try {
+      const refreshResp = await fetch("/api/supabase/refresh-access-token", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({refresh_token: stored.refresh_token}),
+      });
+      if (!refreshResp.ok) throw new Error("bad status");
+      refreshBody = await refreshResp.json();
+    } catch (err) {
+      return body;
+    }
+    if (!refreshBody.valid) return body;
+    stored.access_token = refreshBody.access_token;
+    stored.refresh_token = refreshBody.refresh_token;
+    stored.expires_in = refreshBody.expires_in;
+    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    try {
+      return await attempt(stored.access_token);
+    } catch (err) {
+      return {valid: false, reason: "supabase_unreachable"};
+    }
+  }
+
+  async function connectSupabase() {
+    const input = document.getElementById("supabase-project-name-input");
+    const name = input.value.trim();
+    document.getElementById("supabase-error").textContent = "";
+    currentSupabaseErrorKey = null;
+    if (!name) {
+      supabaseError("err_supabase_name_empty");
+      return;
+    }
+    const state = crypto.randomUUID();
+    const {verifier, challenge} = await generatePkcePair();
+    sessionStorage.setItem(SUPABASE_PENDING_KEY, JSON.stringify({state, verifier, name}));
+    const redirectUri = `${window.ONBOARDING_BASE_URL}/?supabase_step=oauth_callback`;
+    const params = new URLSearchParams({
+      client_id: window.SUPABASE_OAUTH_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      state: state,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+    });
+    location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
+  }
+
+  async function handleSupabaseOauthCallback() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("supabase_step") !== "oauth_callback") return;
+    history.replaceState(null, "", location.pathname);
+    const pending = JSON.parse(sessionStorage.getItem(SUPABASE_PENDING_KEY) || "null");
+    sessionStorage.removeItem(SUPABASE_PENDING_KEY);
+    const code = params.get("code");
+    if (!pending || params.get("state") !== pending.state || !code) {
+      supabaseError("err_supabase_callback_invalid");
+      return;
+    }
+    let resp;
+    try {
+      resp = await fetch("/api/supabase/exchange-oauth-code", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({code: code, code_verifier: pending.verifier}),
+      });
+    } catch (err) {
+      supabaseError("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      supabaseError("err_supabase_unreachable");
+      return;
+    }
+    if (!body.valid) {
+      supabaseErrorForReason(body.reason, body.message);
+      return;
+    }
+    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify({
+      access_token: body.access_token, refresh_token: body.refresh_token,
+      expires_in: body.expires_in, name: pending.name,
+    }));
+    await fetchSupabaseOrganizations();
+  }
+
+  async function fetchSupabaseOrganizations() {
+    const body = await callSupabaseRelay("/api/supabase/list-organizations", {});
+    if (!body.valid) {
+      supabaseErrorForReason(body.reason, body.message);
+      return;
+    }
+    if (body.orgs.length === 1) {
+      await kickOffProjectCreation(body.orgs[0].slug);
+      return;
+    }
+    const select = document.getElementById("supabase-org-select");
+    select.innerHTML = "";
+    body.orgs.forEach((org) => {
+      const option = document.createElement("option");
+      option.value = org.slug;
+      option.textContent = org.name;
+      select.appendChild(option);
+    });
+    document.getElementById("supabase-connect-section").style.display = "none";
+    document.getElementById("supabase-org-section").style.display = "block";
+  }
+
+  async function confirmSupabaseOrg() {
+    const select = document.getElementById("supabase-org-select");
+    await kickOffProjectCreation(select.value);
+  }
+
+  async function kickOffProjectCreation(organizationSlug) {
+    const stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["supabase"]) || "null");
+    if (!stored) {
+      supabaseError("err_supabase_callback_invalid");
+      return;
+    }
+    const dbPass = generateDbPassword();
+    const body = await callSupabaseRelay("/api/supabase/create-project", {
+      organization_slug: organizationSlug, name: stored.name, db_pass: dbPass,
+    });
+    if (!body.valid) {
+      supabaseErrorForReason(body.reason, body.message);
+      return;
+    }
+    stored.organization_slug = organizationSlug;
+    stored.db_pass = dbPass;
+    stored.ref = body.ref;
+    stored.status = body.status;
+    sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));
+    showSupabaseProvisioning();
+  }
+
+  function showSupabaseProvisioning() {
+    document.getElementById("supabase-connect-section").style.display = "none";
+    document.getElementById("supabase-org-section").style.display = "none";
+    document.getElementById("supabase-provisioning-section").style.display = "block";
+    frameEl("supabase").open = true;
+    setFrameStatus("supabase", "provisioning");
+  }
+
   function restoreFromSession() {
     if (sessionStorage.getItem(STORAGE_KEYS["render-key"])) {
       completeFrame("render-key", "restored", null);
@@ -802,6 +1103,8 @@
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
     document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
+    document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
+    document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     guardLockedFrames();
     attachChangeButtons();
 
@@ -823,6 +1126,7 @@
     restoreFromSession();
     handleGithubManifestCallback();
     handleGithubInstallCallback();
+    handleSupabaseOauthCallback();
   });
 </script>
 </body>
