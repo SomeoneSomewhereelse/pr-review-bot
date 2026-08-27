@@ -289,6 +289,63 @@ section 3), not an oversight to fix.
   three modules, not the SDK-boundary mocking `llm_client.py`'s tests
   needed for `google-genai`.
 
+## What sub-project 6 (Render service creation + deploy, final) adds to these rules
+
+- **What was originally decomposed as one "sub-project 6" frame is
+  actually two frames**: "Render service" (position 2, right after the
+  Render-key frame) creates the service; the pre-existing placeholder
+  `frame-render-deploy` (reserved since sub-project 1's shell, always
+  last in `FRAME_ORDER`) is "Finish & Deploy" — triggers the real deploy
+  once frames 2-5 have run. Do not conflate them or try to merge them
+  back into one frame; the accordion's sequential-lock model is why
+  they're split (see
+  `docs/superpowers/specs/2026-08-27-onboarding-render-service-frame-design.md`
+  section 3).
+- **Frames 2, 3, and 4 each push their own credential into the
+  already-created Render service the moment they validate, then clear the
+  raw value from their own `sessionStorage` record.** This is a
+  deliberate security property (shrinking a credential's browser-residency
+  window), not an optional optimization — do not defer a new frame's push
+  to "do it all at the end" without a fresh brainstorm justifying the
+  regression.
+- **A push failure never blocks the pushing frame's own completion.**
+  Pushing to Render is best-effort persistence; only the final "Finish &
+  Deploy" frame is genuinely blocked by a missing service. See design
+  spec section 2's push-failure-handling decision before changing this.
+- **Six new relay endpoints, one frame each** — never route two different
+  frames' pushes through one shared endpoint URL, even though the
+  underlying `render_client.push_env_vars` call is shared. A shared
+  endpoint would break the per-endpoint
+  `..._leaves_the_page_exactly_once` audit's page-wide `== 1` count
+  across multiple frames.
+- **The created service's public URL is always derived from Render's
+  returned `service.slug`, never the submitted `name`.** Render may
+  normalize the name server-side; a create-service response was verified
+  live to have no `service.url` field at all — trusting the requested
+  name instead of the response's slug would silently point
+  `onboarding.renderServiceUrl` (frame 5's forward contract) at a URL
+  that doesn't exist.
+- **`GITHUB_TARGET_REPO`, `GCP_PROJECT`, and `GCP_LOCATION` are
+  deliberately never pushed** — track-all mode and this project's own
+  matching defaults (`app/config.py`'s `gcp_location` default already
+  equals `onboarding/llm_client.py`'s fixed `_VERTEX_LOCATION` constant,
+  verified) make an explicit push redundant. Do not add them without a
+  concrete reason a default has drifted.
+- **Deploy status polling reuses `scripts/deploy.py`'s own
+  `_DEPLOY_IN_FLIGHT_STATUSES`/`_DEPLOY_FAILED_STATUSES` status-bucket
+  sets as a verbatim, paired-comment copy in `render_client.py`** — never
+  an import (`onboarding/` never imports from `scripts/` or `app/`, per
+  this file's own no-shared-credential-path rule). Keep the two in sync
+  by hand if either changes; `router.py`'s `_LLM_ENV_VAR_NAMES` mapping
+  is the same pattern, paired with `app/providers/registry.py::PROVIDERS`.
+- **Frame 5 (UptimeRobot)'s "blocked, no Render URL" state is no longer
+  reachable in normal sequential flow** — the "Render service" frame now
+  writes `onboarding.renderServiceUrl` two frames before UptimeRobot
+  unlocks. The blocked-state markup and its check function are
+  unchanged and NOT dead code: they remain a correctness safeguard for a
+  corrupted or manually-manipulated `sessionStorage` state, not something
+  this sub-project needed or was asked to remove.
+
 ## The test suite looks hung on a fresh worktree — it isn't
 
 The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly
