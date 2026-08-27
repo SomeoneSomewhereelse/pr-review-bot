@@ -1699,15 +1699,15 @@ with:
     },
 ```
 
-Replace:
-```js
-  window.ONBOARDING_BASE_URL = "__ONBOARDING_BASE_URL__";
-```
-with:
-```js
-  window.ONBOARDING_BASE_URL = "__ONBOARDING_BASE_URL__";
-  window.SUPABASE_OAUTH_CLIENT_ID = "__SUPABASE_OAUTH_CLIENT_ID__";
-```
+**Already present — no edit needed here.** Task 5's implementer added
+`window.SUPABASE_OAUTH_CLIENT_ID = "__SUPABASE_OAUTH_CLIENT_ID__";` (right
+after the existing `window.ONBOARDING_BASE_URL` line) as a necessary
+one-line deviation from its stated file list, because Task 5's own test
+(`test_index_serves_configured_supabase_oauth_client_id`) needed something
+for the `__SUPABASE_OAUTH_CLIENT_ID__` templating to substitute against —
+this plan originally (incorrectly) deferred that line to this task. Confirm
+it's there (`grep 'window.SUPABASE_OAUTH_CLIENT_ID' onboarding/static/index.html`)
+and do not re-add it — doing so would duplicate the line.
 
 Replace:
 ```js
