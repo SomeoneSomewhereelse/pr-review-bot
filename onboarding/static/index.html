@@ -111,7 +111,8 @@
     padding: 0.9rem 1.1rem;
   }
   details.frame[data-locked="true"] > summary { cursor: not-allowed; color: var(--text-muted); }
-  details.frame[data-status="done"] > summary { cursor: default; color: var(--text); }
+  details.frame[data-status="done"] > summary,
+  details.frame[data-status="deploy_done"] > summary { cursor: default; color: var(--text); }
   details.frame > summary::-webkit-details-marker { display: none; }
   .frame-title { font-weight: 600; }
   .frame-badge { font-size: 0.85rem; color: var(--text-muted); }
@@ -120,7 +121,7 @@
   details.frame[data-status="error"] .frame-badge { color: var(--fail); }
   details.frame[data-status="app_created"] .frame-badge,
   details.frame[data-status="choosing_org"] .frame-badge,
-  details.frame[data-status="checking"] .frame-badge { color: var(--accent); }
+  details.frame[data-status="checking"] .frame-badge,
   details.frame[data-status="provisioning"] .frame-badge { color: var(--accent); }
   .frame-change {
     display: none;
@@ -1729,27 +1730,36 @@
       supabaseError("err_supabase_name_empty");
       return;
     }
+    let state, verifier, challenge;
     try {
-      const state = crypto.randomUUID();
-      const {verifier, challenge} = await generatePkcePair();
-      sessionStorage.setItem(SUPABASE_PENDING_KEY, JSON.stringify({state, verifier, name}));
-      const redirectUri = `${window.ONBOARDING_BASE_URL}/?supabase_step=oauth_callback`;
-      const params = new URLSearchParams({
-        client_id: window.SUPABASE_OAUTH_CLIENT_ID,
-        redirect_uri: redirectUri,
-        response_type: "code",
-        state: state,
-        code_challenge: challenge,
-        code_challenge_method: "S256",
-      });
-      location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
+      state = crypto.randomUUID();
+      ({verifier, challenge} = await generatePkcePair());
     } catch (err) {
-      // This block's only genuinely fallible step is crypto.subtle.digest
-      // inside generatePkcePair() -- a local Web Crypto failure, not a
-      // Supabase connectivity problem, so it gets its own accurate message
-      // rather than reusing err_supabase_unreachable.
+      // This block's only fallible step is crypto.subtle.digest inside
+      // generatePkcePair() -- a local Web Crypto failure, not a Supabase
+      // connectivity problem, so it gets its own accurate message rather
+      // than reusing err_supabase_unreachable. Kept in its own try/catch,
+      // separate from the sessionStorage.setItem below, so a storage
+      // failure is never misreported as a crypto failure.
       supabaseError("err_supabase_crypto_failed");
+      return;
     }
+    try {
+      sessionStorage.setItem(SUPABASE_PENDING_KEY, JSON.stringify({state, verifier, name}));
+    } catch (err) {
+      supabaseError("err_supabase_storage_failed");
+      return;
+    }
+    const redirectUri = `${window.ONBOARDING_BASE_URL}/?supabase_step=oauth_callback`;
+    const params = new URLSearchParams({
+      client_id: window.SUPABASE_OAUTH_CLIENT_ID,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      state: state,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+    });
+    location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
   }
 
   async function handleSupabaseOauthCallback() {
