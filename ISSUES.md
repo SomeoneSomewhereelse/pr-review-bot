@@ -341,6 +341,18 @@ accidentally start exercising the refusal path instead of the real one._
 - **Why parked:** Both deliberately not worth fixing (see each item's own reasoning above) — the other three items in this entry's original bundle (the badge not resetting after a later successful retry; the raw internal provider id shown instead of its localized label; the missing throwaway-key comment in `tests/test_onboarding_llm_client.py`) were fixed in the 2026-08-27 parked-minors fix wave.
 - **Follow-up:** None planned for either remaining item; revisit only if either ever causes a real, reported problem.
 
+### tests/test_auth.py's `_no_login_delay` autouse fixture applies file-wide, not just to the route tests
+- **Found during:** Task 3 review, `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`
+- **What:** The autouse fixture that patches out the fixed post-login-failure delay applies to every test in `tests/test_auth.py`, including the earlier Task 2 tests that only exercise credential/token/cookie logic and never touch the route layer or the delay function at all.
+- **Why parked:** Harmless in practice — the Task 2 tests never reference `_delay_after_login_failure`, so the patch is simply inert for them — but it's a wider blast radius than necessary as the file keeps growing (each new test added to this file silently inherits a patched-out internal function it may not know about). Confirmed still accurate, not worsened, by the branch's final whole-branch review.
+- **Follow-up:** Scope the fixture to just the route tests (a separate test class, a marker, or an explicit non-autouse fixture requested by name) if this file grows enough that the blast radius starts mattering in practice.
+
+### tests/test_login_page.py asserts on raw JS source text rather than behavior
+- **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`, deliberately excluded from that review's own fix wave.
+- **What:** `test_login_page_posts_json_to_api_login` asserts `'method: "POST"' in body` — a literal match against the login page's inline `<script>` source text, not against actual request behavior. Any reformatting of that JS (e.g. rewording the `fetch()` call, a future prettifier pass) would break the test without indicating a real regression.
+- **Why parked:** Low value relative to the risk of touching a currently-passing test's assertions this late in an already-large fix wave that closed every other final-review finding.
+- **Follow-up:** Rewrite the assertion to check actual behavior (e.g. a DOM/JS-execution check that the form's submit handler issues a POST) rather than matching JS source text, or drop it if the file's other two tests (page reachability, form fields present) already cover what matters.
+
 ---
 
 ## Design Gaps

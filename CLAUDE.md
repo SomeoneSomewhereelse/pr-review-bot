@@ -309,3 +309,12 @@ generalize from):
   specifically — manual edits since the last confirmed-green run, a resumed
   session after a long gap, or a worktree/branch switch — not as a default
   precaution on every task.
+- **Every parked/deferred Minor finding from a task-scoped or final
+  whole-branch review must be logged in `ISSUES.md`'s Parked Issues section
+  before the branch is considered done** — not left only in the SDD
+  ledger (deleted once the branch merges) or in a session's own memory,
+  either of which loses the finding the moment the workspace is cleaned up
+  or the conversation ends. Log it there even when a review explicitly
+  judges a finding "no action needed" / harmless-as-is — that judgment call
+  belongs in the entry's **Why parked** line, not as a reason to skip
+  logging it at all.
