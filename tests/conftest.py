@@ -175,7 +175,9 @@ def _dashboard_credentials(monkeypatch):
     credential-check behavior have a known value to check against."""
     monkeypatch.setattr(settings, "dashboard_username", "test-operator")
     monkeypatch.setattr(settings, "dashboard_password", "test-password")
-    monkeypatch.setattr(settings, "dashboard_session_secret", "test-session-secret")
+    monkeypatch.setattr(
+        settings, "dashboard_session_secret", "test-session-secret-value-for-testing-only"
+    )
 
 
 @pytest.fixture(autouse=True)

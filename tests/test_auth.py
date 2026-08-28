@@ -114,7 +114,7 @@ async def test_require_session_rejects_an_expired_token():
 async def test_require_session_rejects_a_token_signed_with_a_different_secret():
     token = jwt.encode(
         {"exp": datetime.now(timezone.utc) + timedelta(hours=1)},
-        "a-completely-different-secret",
+        "a-completely-different-secret-value-for-testing-only",
         algorithm="HS256",
     )
     request = _request_with_cookie(f"{auth.SESSION_COOKIE_NAME}={token}")
