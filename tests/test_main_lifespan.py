@@ -237,3 +237,33 @@ async def test_lifespan_fails_loudly_when_postgres_is_unreachable(monkeypatch, d
         repo_full_name="owner/repo", pr_number=999, head_sha="sha-recovery-check",
         provider="groq", now="2026-01-01T12:00:00+00:00",
     )
+
+
+async def test_lifespan_fails_loudly_when_dashboard_username_is_empty(monkeypatch):
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(settings, "dashboard_username", "")
+
+    with pytest.raises(RuntimeError, match="DASHBOARD_USERNAME"):
+        async with main.lifespan(main.app):
+            pass
+
+
+async def test_lifespan_fails_loudly_when_dashboard_password_is_empty(monkeypatch):
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(settings, "dashboard_password", "")
+
+    with pytest.raises(RuntimeError, match="DASHBOARD_PASSWORD"):
+        async with main.lifespan(main.app):
+            pass
+
+
+async def test_lifespan_fails_loudly_when_dashboard_session_secret_is_empty(monkeypatch):
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(settings, "dashboard_session_secret", "")
+
+    with pytest.raises(RuntimeError, match="DASHBOARD_SESSION_SECRET"):
+        async with main.lifespan(main.app):
+            pass

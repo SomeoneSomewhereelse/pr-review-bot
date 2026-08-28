@@ -3,9 +3,11 @@ import contextlib
 import logging
 from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from app import github_app
+from app.auth import SessionRequired, require_session
 from app.auth import router as auth_router
 from app.config import settings
 from app.dashboard import router as dashboard_router
@@ -54,6 +56,16 @@ async def lifespan(app: FastAPI):
             "github-app check (or check the GitHub UI) to find the App's current "
             "installation id."
         )
+    if (
+        not settings.dashboard_username
+        or not settings.dashboard_password
+        or not settings.dashboard_session_secret
+    ):
+        raise RuntimeError(
+            "DASHBOARD_USERNAME, DASHBOARD_PASSWORD, and DASHBOARD_SESSION_SECRET must "
+            "all be set -- refusing to start (an empty credential would let any "
+            "username/password pair, or any forged session token, through)."
+        )
     # Verified on every boot, not just when unset: a pinned value is exactly
     # as broken as a missing one if the App was uninstalled and reinstalled
     # since it was last set (GitHub assigns a new id), and app-level (not
@@ -79,9 +91,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="pr-review-engine", lifespan=lifespan)
+
+
+@app.exception_handler(SessionRequired)
+async def _handle_session_required(request: Request, exc: SessionRequired) -> Response:
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"valid": False, "reason": "unauthenticated"}, status_code=401)
+    return RedirectResponse("/login", status_code=303)
+
+
 app.include_router(webhook_router)
 app.include_router(auth_router)
-app.include_router(dashboard_router)
+app.include_router(dashboard_router, dependencies=[Depends(require_session)])
 
 
 @app.get("/healthz")

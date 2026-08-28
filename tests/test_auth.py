@@ -199,3 +199,18 @@ async def test_logout_clears_the_session_cookie():
     assert resp.status_code == 200
     assert resp.json() == {"valid": True}
     assert "Max-Age=0" in resp.headers["set-cookie"]
+
+
+async def test_unauthenticated_api_dashboard_request_gets_401_json():
+    client = await _client()
+    resp = await client.get("/api/dashboard")
+    assert resp.status_code == 401
+    assert resp.json() == {"valid": False, "reason": "unauthenticated"}
+
+
+async def test_unauthenticated_dashboard_page_request_redirects_to_login():
+    transport = ASGITransport(app=app)
+    client = AsyncClient(transport=transport, base_url="http://test", follow_redirects=False)
+    resp = await client.get("/")
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/login"

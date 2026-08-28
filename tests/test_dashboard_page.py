@@ -3,12 +3,17 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
+from app import auth
 from app.main import app
 
 
 async def _client() -> AsyncClient:
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    return AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: auth.create_session_token(remember=False)},
+    )
 
 
 async def test_dashboard_page_serves_html_with_theme_and_language_controls():
