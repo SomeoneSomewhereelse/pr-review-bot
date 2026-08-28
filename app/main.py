@@ -66,6 +66,13 @@ async def lifespan(app: FastAPI):
             "all be set -- refusing to start (an empty credential would let any "
             "username/password pair, or any forged session token, through)."
         )
+    if len(settings.dashboard_session_secret) < 32:
+        raise RuntimeError(
+            "DASHBOARD_SESSION_SECRET is too short to safely sign session tokens "
+            "(must be at least 32 characters) -- a short HS256 key is brute-forceable "
+            "offline by anyone who captures one session cookie. Generate one with: "
+            'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+        )
     # Verified on every boot, not just when unset: a pinned value is exactly
     # as broken as a missing one if the App was uninstalled and reinstalled
     # since it was last set (GitHub assigns a new id), and app-level (not

@@ -239,6 +239,13 @@ def check_config() -> CheckResult:
         missing.append("DASHBOARD_PASSWORD")
     if not settings.dashboard_session_secret:
         missing.append("DASHBOARD_SESSION_SECRET")
+    elif len(settings.dashboard_session_secret) < 32:
+        problems.append(
+            "DASHBOARD_SESSION_SECRET is too short to safely sign session tokens "
+            "(must be at least 32 characters) -- a short HS256 key is brute-forceable "
+            'offline by anyone who captures one session cookie. Generate one with: '
+            'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+        )
     if not resolve_base_url():
         missing.append("PUBLIC_BASE_URL or RENDER_EXTERNAL_URL")
     if not settings.llm_provider:
@@ -320,8 +327,10 @@ def check_pricing() -> CheckResult:
 # of this list, GITHUB_APP_INSTALLATION_ID's discovery is never skipped
 # because it's "already set" -- app/main.py refuses to start at all if it's
 # unset (ISSUES.md 2026-08-21), so it's just as boot-critical as the other
-# five. A rename/drop of any of these six that never reached Render crashes
-# the whole ASGI app at startup, not just one feature.
+# eight (the three DASHBOARD_* vars included -- app/main.py's lifespan
+# refuses to start with any of them empty or too short too). A rename/drop
+# of any of these nine that never reached Render crashes the whole ASGI app
+# at startup, not just one feature.
 _BOOT_CREDENTIAL_NAMES = (
     "GITHUB_APP_ID",
     "GITHUB_APP_INSTALLATION_ID",
@@ -973,11 +982,11 @@ def report_as_json(results: list[CheckResult]) -> dict:
 def _wanted_env() -> dict[str, str]:
     """Local values for every var --sync-env will push.
 
-    Keys depend on the selected provider: the five always-synced vars, plus
-    LLM_PROVIDER, plus every provider's credential (the selected one always,
-    the others only when they have a local value -- an opt-in .env lists the
-    others empty, and must never be asked to fill them), plus every
-    provider's model var.
+    Keys depend on the selected provider: the nine always-synced vars (see
+    _ALWAYS_SYNCED), plus LLM_PROVIDER, plus every provider's credential
+    (the selected one always, the others only when they have a local value
+    -- an opt-in .env lists the others empty, and must never be asked to
+    fill them), plus every provider's model var.
     """
     wanted = {
         "DATABASE_URL": settings.database_url,

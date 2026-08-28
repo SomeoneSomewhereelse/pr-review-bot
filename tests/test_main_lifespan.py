@@ -267,3 +267,16 @@ async def test_lifespan_fails_loudly_when_dashboard_session_secret_is_empty(monk
     with pytest.raises(RuntimeError, match="DASHBOARD_SESSION_SECRET"):
         async with main.lifespan(main.app):
             pass
+
+
+async def test_lifespan_fails_loudly_when_dashboard_session_secret_is_too_short(monkeypatch):
+    """A non-empty but short secret (e.g. a 5-character value) boots fine
+    under the empty-check alone, but HS256 with a short key is
+    brute-forceable offline by anyone who captures one session cookie."""
+    monkeypatch.setattr(dispatcher, "run_forever", _hang_forever)
+    monkeypatch.setattr(settings, "github_app_installation_id", 12345)
+    monkeypatch.setattr(settings, "dashboard_session_secret", "short")
+
+    with pytest.raises(RuntimeError, match="DASHBOARD_SESSION_SECRET"):
+        async with main.lifespan(main.app):
+            pass

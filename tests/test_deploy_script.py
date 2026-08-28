@@ -184,7 +184,9 @@ def complete_config(monkeypatch):
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
     monkeypatch.setattr(settings, "dashboard_username", "dash-user")
     monkeypatch.setattr(settings, "dashboard_password", "dash-pass")
-    monkeypatch.setattr(settings, "dashboard_session_secret", "dash-session-secret")
+    monkeypatch.setattr(
+        settings, "dashboard_session_secret", "dash-session-secret-value-padded-to-32-chars"
+    )
 
 
 def test_check_config_passes_when_everything_is_present(complete_config):
@@ -213,6 +215,20 @@ def test_check_config_requires_dashboard_credentials(complete_config, monkeypatc
     assert result.status == "FAIL"
     assert "DASHBOARD_USERNAME" in result.detail
     assert "DASHBOARD_PASSWORD" in result.detail
+    assert "DASHBOARD_SESSION_SECRET" in result.detail
+
+
+def test_check_config_rejects_a_dashboard_session_secret_shorter_than_32_chars(
+    complete_config, monkeypatch
+):
+    """A short-but-non-empty secret passes the plain "is it set" check but is
+    brute-forceable offline once a session cookie is captured -- app/main.py's
+    lifespan enforces the same 32-char floor, and this doctor check must
+    report it too, or an operator would see a clean preflight report right
+    before a deploy that boots fine but signs weak session tokens."""
+    monkeypatch.setattr(settings, "dashboard_session_secret", "short")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
     assert "DASHBOARD_SESSION_SECRET" in result.detail
 
 
