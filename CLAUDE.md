@@ -175,6 +175,10 @@ when working under `app/`.
   committing them for tidiness is still an unrequested commit.
 - **Partial failure is always visible** in the PR comment (a failed specialist
   renders a real row) — never silently dropped.
+- **Before pushing, always run the full test suite (`uv run pytest -v`) and
+  ruff (`uv run ruff check .`), and fix whatever either finds.** Never push
+  with a red suite or an unresolved lint error, and never skip either check
+  because a change "looks" too small to affect them.
 
 ## Substitutions from the brief (and why)
 
