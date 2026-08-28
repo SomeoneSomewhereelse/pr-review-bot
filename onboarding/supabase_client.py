@@ -3,6 +3,7 @@ authorizes as a visitor and provisions their own Supabase project, without
 persisting any credential server-side. See
 docs/superpowers/specs/2026-08-26-onboarding-supabase-provisioning-frame-design.md
 sections 3-5."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -54,7 +55,9 @@ def _parse_token_response(response: httpx.Response, invalid_reason: str) -> Supa
     )
 
 
-async def exchange_oauth_code(code: str, code_verifier: str, redirect_uri: str) -> SupabaseTokenResult:
+async def exchange_oauth_code(
+    code: str, code_verifier: str, redirect_uri: str
+) -> SupabaseTokenResult:
     """Trade the OAuth authorization code for tokens (POST /v1/oauth/token,
     grant_type=authorization_code). Form-encoded per Supabase's own schema
     — NOT JSON — and client_id/client_secret are body fields, not an
@@ -216,7 +219,9 @@ class SupabaseProjectStatus:
     status: str
 
 
-async def get_project_status(access_token: str, ref: str) -> SupabaseProjectStatus | SupabaseApiFailed:
+async def get_project_status(
+    access_token: str, ref: str
+) -> SupabaseProjectStatus | SupabaseApiFailed:
     """GET /v1/projects/{ref} — polled by the browser during provisioning.
     Target status is ACTIVE_HEALTHY; the caller treats INIT_FAILED as a
     terminal failure and every other status as still-provisioning."""
@@ -253,7 +258,9 @@ class SupabaseConnectionInfo:
     db_name: str
 
 
-async def get_connection_info(access_token: str, ref: str) -> SupabaseConnectionInfo | SupabaseApiFailed:
+async def get_connection_info(
+    access_token: str, ref: str
+) -> SupabaseConnectionInfo | SupabaseApiFailed:
     """GET /v1/projects/{ref}/config/database/pooler — selects the
     session-mode (port 5432) PRIMARY entry, matching the manual guide's
     existing "Session-mode pooler, not transaction mode" requirement.
@@ -282,7 +289,8 @@ async def get_connection_info(access_token: str, ref: str) -> SupabaseConnection
     try:
         entries = response.json()
         matched = next(
-            e for e in entries
+            e
+            for e in entries
             if e.get("pool_mode") == "session" and e.get("database_type") == "PRIMARY"
         )
         db_user = str(matched["db_user"])
@@ -291,4 +299,6 @@ async def get_connection_info(access_token: str, ref: str) -> SupabaseConnection
         db_name = str(matched["db_name"])
     except (ValueError, KeyError, TypeError, StopIteration, AttributeError):
         return SupabaseApiFailed(reason="pooler_config_unavailable")
-    return SupabaseConnectionInfo(db_user=db_user, db_host=db_host, db_port=db_port, db_name=db_name)
+    return SupabaseConnectionInfo(
+        db_user=db_user, db_host=db_host, db_port=db_port, db_name=db_name
+    )

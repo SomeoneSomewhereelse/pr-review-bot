@@ -3,6 +3,7 @@ process environment only (no .env/.env.config file: onboarding/ is a
 separate deployed service, not sharing the review engine's config files).
 See docs/superpowers/specs/2026-08-26-onboarding-github-app-frame-design.md
 section 5."""
+
 from __future__ import annotations
 
 import pytest
@@ -68,17 +69,17 @@ def test_trailing_slash_is_stripped(monkeypatch):
 @pytest.mark.parametrize(
     "value",
     [
-        'https://onboarding.example.com"',          # breaks out of the JS string
-        'https://onboarding.example.com/</script>',  # breaks out of the <script> tag
+        'https://onboarding.example.com"',  # breaks out of the JS string
+        "https://onboarding.example.com/</script>",  # breaks out of the <script> tag
         "https://onboarding.example.com<",
         "https://onboarding.example.com>",
-        "https://onboarding.example.com/x y",        # embedded whitespace
-        "https://onboarding.example.com?a=b",        # query string
-        "https://onboarding.example.com#frag",       # fragment
-        "onboarding.example.com",                    # no scheme
-        "ftp://onboarding.example.com",              # wrong scheme
+        "https://onboarding.example.com/x y",  # embedded whitespace
+        "https://onboarding.example.com?a=b",  # query string
+        "https://onboarding.example.com#frag",  # fragment
+        "onboarding.example.com",  # no scheme
+        "ftp://onboarding.example.com",  # wrong scheme
         "javascript:alert(1)",
-        "https://",                                  # no host
+        "https://",  # no host
         "///evil.example.com",
     ],
 )
@@ -98,7 +99,9 @@ def test_rejection_message_is_actionable(monkeypatch):
         Settings()
 
 
-def test_supabase_oauth_client_id_whitespace_only_value_normalizes_to_the_unset_sentinel(monkeypatch):
+def test_supabase_oauth_client_id_whitespace_only_value_normalizes_to_the_unset_sentinel(
+    monkeypatch,
+):
     """Same footgun as public_base_url: a pasted value with only whitespace
     would otherwise sail past the lifespan's falsy-value presence check."""
     monkeypatch.setenv("SUPABASE_OAUTH_CLIENT_ID", "   ")
@@ -115,7 +118,7 @@ def test_supabase_oauth_client_id_surrounding_whitespace_is_stripped(monkeypatch
 @pytest.mark.parametrize(
     "value",
     [
-        '66666666-6666-4666-8666-666666666666"',      # breaks out of the JS string
+        '66666666-6666-4666-8666-666666666666"',  # breaks out of the JS string
         "66666666-6666-4666-8666-666666666666</script>",  # breaks out of the <script> tag
         "66666666-6666-4666-8666-666666666666<",
         "66666666-6666-4666-8666-666666666666>",
@@ -132,7 +135,9 @@ def test_malformed_supabase_oauth_client_id_is_rejected(monkeypatch, value):
         Settings()
 
 
-def test_supabase_oauth_client_secret_whitespace_only_value_normalizes_to_the_unset_sentinel(monkeypatch):
+def test_supabase_oauth_client_secret_whitespace_only_value_normalizes_to_the_unset_sentinel(
+    monkeypatch,
+):
     monkeypatch.setenv("SUPABASE_OAUTH_CLIENT_SECRET", "   ")
     assert Settings().supabase_oauth_client_secret == ""
 

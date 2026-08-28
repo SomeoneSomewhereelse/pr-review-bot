@@ -6,6 +6,7 @@ docs/superpowers/specs/2026-08-26-onboarding-github-app-frame-design.md
 section 4: it mints and returns credentials belonging to the caller who
 just created them).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -170,15 +171,18 @@ _LLM_ENV_VAR_NAMES = {
 async def index() -> HTMLResponse:
     html = _INDEX_HTML.replace("__ONBOARDING_BASE_URL__", settings.public_base_url)
     html = html.replace("__SUPABASE_OAUTH_CLIENT_ID__", settings.supabase_oauth_client_id)
-    return HTMLResponse(html, headers={
-        "Content-Security-Policy": (
-            "default-src 'none'; style-src 'unsafe-inline'; "
-            "script-src 'unsafe-inline'; connect-src 'self'; "
-            "form-action 'self' https://github.com; frame-ancestors 'none'"
-        ),
-        "X-Frame-Options": "DENY",
-        "Referrer-Policy": "no-referrer",
-    })
+    return HTMLResponse(
+        html,
+        headers={
+            "Content-Security-Policy": (
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "script-src 'unsafe-inline'; connect-src 'self'; "
+                "form-action 'self' https://github.com; frame-ancestors 'none'"
+            ),
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @router.post("/api/render/validate-key")
@@ -219,7 +223,9 @@ async def verify_github_installation(payload: GithubInstallVerifyRequest) -> dic
 
 @router.post("/api/github/set-webhook-url")
 async def set_github_webhook_url(payload: GithubSetWebhookUrlRequest) -> dict:
-    result = await github_client.set_webhook_url(payload.app_id, payload.private_key_b64, payload.url)
+    result = await github_client.set_webhook_url(
+        payload.app_id, payload.private_key_b64, payload.url
+    )
     if isinstance(result, github_client.WebhookUrlSet):
         return {"valid": True}
     return {"valid": False, "reason": result.reason}
@@ -228,7 +234,9 @@ async def set_github_webhook_url(payload: GithubSetWebhookUrlRequest) -> dict:
 @router.post("/api/supabase/exchange-oauth-code")
 async def exchange_supabase_oauth_code(payload: SupabaseExchangeCodeRequest) -> dict:
     redirect_uri = f"{settings.public_base_url}/?supabase_step=oauth_callback"
-    result = await supabase_client.exchange_oauth_code(payload.code, payload.code_verifier, redirect_uri)
+    result = await supabase_client.exchange_oauth_code(
+        payload.code, payload.code_verifier, redirect_uri
+    )
     if isinstance(result, supabase_client.SupabaseTokens):
         return {
             "valid": True,
@@ -404,7 +412,9 @@ async def trigger_render_deploy(payload: RenderTriggerDeployRequest) -> dict:
 
 @router.post("/api/render/deploy-status")
 async def get_render_deploy_status(payload: RenderDeployStatusRequest) -> dict:
-    result = await render_client.poll_deploy_status(payload.api_key, payload.service_id, payload.deploy_id)
+    result = await render_client.poll_deploy_status(
+        payload.api_key, payload.service_id, payload.deploy_id
+    )
     if isinstance(result, render_client.RenderDeployStatus):
         return {"valid": True, "status": result.status}
     return {"valid": False, "reason": result.reason}

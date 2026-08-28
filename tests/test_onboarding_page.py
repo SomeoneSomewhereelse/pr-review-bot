@@ -3,6 +3,7 @@ state machine, locking, and the "Change" re-edit path. Content-substring
 checks against the served HTML/JS (this repo's existing convention for
 single-file static pages — see tests/test_dashboard_page.py), not a JS
 execution harness."""
+
 from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
@@ -11,8 +12,12 @@ from onboarding.main import app
 from scripts.create_github_app import MANIFEST_EVENTS, MANIFEST_PERMISSIONS
 
 FRAME_IDS = [
-    "render-key", "github-app", "supabase", "llm-provider",
-    "uptime-pinger", "render-deploy",
+    "render-key",
+    "github-app",
+    "supabase",
+    "llm-provider",
+    "uptime-pinger",
+    "render-deploy",
 ]
 
 
@@ -33,13 +38,10 @@ async def test_only_the_render_key_frame_starts_unlocked():
     client = await _client()
     body = (await client.get("/")).text
     assert (
-        'id="frame-render-key" class="frame" data-status="ready" '
-        'data-locked="false" open'
+        'id="frame-render-key" class="frame" data-status="ready" data-locked="false" open'
     ) in body
     for fid in FRAME_IDS[1:]:
-        assert (
-            f'id="frame-{fid}" class="frame" data-status="locked" data-locked="true"'
-        ) in body
+        assert (f'id="frame-{fid}" class="frame" data-status="locked" data-locked="true"') in body
 
 
 async def test_locked_frames_cannot_be_toggled_open():
@@ -122,11 +124,14 @@ async def test_frame2_strings_present_in_both_languages():
     client = await _client()
     body = (await client.get("/")).text
     for key in (
-        "frame2_instructions", "frame2_name_placeholder", "create_app_button",
-        "err_github_name_empty", "err_github_callback_invalid",
+        "frame2_instructions",
+        "frame2_name_placeholder",
+        "create_app_button",
+        "err_github_name_empty",
+        "err_github_callback_invalid",
         "err_github_exchange_failed",
     ):
-        assert f'{key}:' in body
+        assert f"{key}:" in body
     assert body.count("create_app_button:") == 2  # STRINGS.en + STRINGS.he
 
 
@@ -154,11 +159,11 @@ async def test_manifest_permissions_match_the_cli_script():
     for event in MANIFEST_EVENTS:
         assert f'"{event}"' in body, f"page is missing default event {event}"
     # The page must not silently grant MORE than the CLI script does either.
-    js_perms = body[body.index("const MANIFEST_PERMISSIONS = {"):]
-    js_perms = js_perms[:js_perms.index("};")]
+    js_perms = body[body.index("const MANIFEST_PERMISSIONS = {") :]
+    js_perms = js_perms[: js_perms.index("};")]
     assert js_perms.count(":") == len(MANIFEST_PERMISSIONS)
-    js_events = body[body.index("const MANIFEST_EVENTS = ["):]
-    js_events = js_events[:js_events.index("];")]
+    js_events = body[body.index("const MANIFEST_EVENTS = [") :]
+    js_events = js_events[: js_events.index("];")]
     assert js_events.count('"') == 2 * len(MANIFEST_EVENTS)
     assert "public: false" in body
 
@@ -208,12 +213,12 @@ async def test_frame2_has_a_reset_path_wired_into_lock_and_change():
     body = (await client.get("/")).text
     assert "function resetGithubAppCreateSection" in body
 
-    lock_body = body[body.index("function lockFrame"):body.index("function unlockFrame")]
+    lock_body = body[body.index("function lockFrame") : body.index("function unlockFrame")]
     assert "resetGithubAppCreateSection()" in lock_body
     assert 'id === "github-app"' in lock_body
 
     change_body = body[
-        body.index("function beginChange"):body.index("async function validateRenderKey")
+        body.index("function beginChange") : body.index("async function validateRenderKey")
     ]
     assert "resetGithubAppCreateSection()" in change_body
     # beginChange must clear this frame's own stored credentials too — only
@@ -232,7 +237,7 @@ async def test_created_but_not_installed_state_is_visible_to_the_visitor():
     client = await _client()
     body = (await client.get("/")).text
     show_body = body[
-        body.index("function showGithubAppReadyToInstall"):body.index("function githubAppError")
+        body.index("function showGithubAppReadyToInstall") : body.index("function githubAppError")
     ]
     assert 'frameEl("github-app").open = true' in show_body
     assert 'setFrameStatus("github-app", "app_created")' in show_body
@@ -250,8 +255,8 @@ async def test_stored_github_app_credentials_are_parsed_defensively():
     # Exactly one parse of this key on the whole page — the guarded one
     # inside the helper. Any other call site must go through the helper.
     assert body.count('JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"])') == 1
-    helper_body = body[body.index("function readStoredGithubApp"):]
-    helper_body = helper_body[:helper_body.index("\n  }")]
+    helper_body = body[body.index("function readStoredGithubApp") :]
+    helper_body = helper_body[: helper_body.index("\n  }")]
     assert "try {" in helper_body
     assert "catch" in helper_body
 
@@ -305,9 +310,13 @@ async def test_frame3_strings_present_in_both_languages():
     client = await _client()
     body = (await client.get("/")).text
     for key in (
-        "frame3_instructions", "frame3_name_placeholder", "connect_supabase_button",
-        "frame3_org_instructions", "create_project_button",
-        "err_supabase_name_empty", "err_supabase_callback_invalid",
+        "frame3_instructions",
+        "frame3_name_placeholder",
+        "connect_supabase_button",
+        "frame3_org_instructions",
+        "create_project_button",
+        "err_supabase_name_empty",
+        "err_supabase_callback_invalid",
     ):
         assert f"{key}:" in body
     assert body.count("connect_supabase_button:") == 2  # STRINGS.en + STRINGS.he
@@ -323,7 +332,7 @@ async def test_oauth_callback_handler_present():
 async def test_pkce_challenge_uses_sha256():
     client = await _client()
     body = (await client.get("/")).text
-    assert "crypto.subtle.digest(\"SHA-256\"" in body
+    assert 'crypto.subtle.digest("SHA-256"' in body
     assert "code_challenge_method" in body
 
 
@@ -356,13 +365,15 @@ async def test_connect_supabase_guards_crypto_failures():
     client = await _client()
     body = (await client.get("/")).text
     fn_body = body[
-        body.index("async function connectSupabase"):body.index("async function handleSupabaseOauthCallback")
+        body.index("async function connectSupabase") : body.index(
+            "async function handleSupabaseOauthCallback"
+        )
     ]
     assert "try {" in fn_body
     assert "catch (err) {" in fn_body
     assert "generatePkcePair()" in fn_body
     # The catch must actually surface a visible error, not swallow it.
-    catch_body = fn_body[fn_body.index("catch (err) {"):]
+    catch_body = fn_body[fn_body.index("catch (err) {") :]
     assert "supabaseError(" in catch_body
 
 
@@ -409,7 +420,10 @@ async def test_connection_string_assembled_client_side_from_non_secret_shape():
     client = await _client()
     body = (await client.get("/")).text
     assert "function fetchSupabaseConnectionInfo" in body
-    assert "postgresql://${body.db_user}:${stored.db_pass}@${body.db_host}:${body.db_port}/${body.db_name}" in body
+    assert (
+        "postgresql://${body.db_user}:${stored.db_pass}@${body.db_host}:${body.db_port}/${body.db_name}"
+        in body
+    )
 
 
 async def test_supabase_credential_never_persists_to_local_storage():
@@ -434,8 +448,8 @@ async def test_stored_supabase_credentials_are_parsed_defensively():
     client = await _client()
     body = (await client.get("/")).text
     assert "function readStoredSupabase" in body
-    helper_body = body[body.index("function readStoredSupabase"):]
-    helper_body = helper_body[:helper_body.index("\n  }")]
+    helper_body = body[body.index("function readStoredSupabase") :]
+    helper_body = helper_body[: helper_body.index("\n  }")]
     assert "try {" in helper_body
     assert "catch" in helper_body
     # Every other call site must go through the helper -- the only direct
@@ -454,21 +468,21 @@ async def test_terminal_supabase_errors_reset_the_connect_section():
     body = (await client.get("/")).text
 
     init_failed_start = body.index('body.status === "INIT_FAILED"')
-    init_failed_body = body[init_failed_start:body.index("return \"pending\";")]
+    init_failed_body = body[init_failed_start : body.index('return "pending";')]
     reset_pos = init_failed_body.index("resetSupabaseConnectSection()")
     error_pos = init_failed_body.index('supabaseError("err_supabase_provisioning_failed")')
     assert reset_pos < error_pos
 
     reason_fn_start = body.index("function supabaseErrorForReason")
-    reason_fn_body = body[reason_fn_start:body.index("async function callSupabaseRelay")]
+    reason_fn_body = body[reason_fn_start : body.index("async function callSupabaseRelay")]
 
-    rejected_branch = reason_fn_body[:reason_fn_body.index('if (reason === "unauthorized")')]
+    rejected_branch = reason_fn_body[: reason_fn_body.index('if (reason === "unauthorized")')]
     assert "resetSupabaseConnectSection()" in rejected_branch
     assert rejected_branch.index("resetSupabaseConnectSection()") < rejected_branch.index(
         'document.getElementById("supabase-error").textContent = message;'
     )
 
-    unauthorized_branch = reason_fn_body[reason_fn_body.index('if (reason === "unauthorized")'):]
+    unauthorized_branch = reason_fn_body[reason_fn_body.index('if (reason === "unauthorized")') :]
     assert "resetSupabaseConnectSection();" in unauthorized_branch.split("const key = {")[0]
 
 
@@ -481,14 +495,18 @@ async def test_org_picker_opens_the_frame_and_updates_its_badge():
     body = (await client.get("/")).text
     assert "function showSupabaseOrgPicker" in body
     show_body = body[
-        body.index("function showSupabaseOrgPicker"):body.index("async function confirmSupabaseOrg")
+        body.index("function showSupabaseOrgPicker") : body.index(
+            "async function confirmSupabaseOrg"
+        )
     ]
     assert 'frameEl("supabase").open = true' in show_body
     assert 'setFrameStatus("supabase", "choosing_org")' in show_body
     assert body.count("badge_choosing_org:") == 2  # STRINGS.en + STRINGS.he
 
     fetch_orgs_body = body[
-        body.index("async function fetchSupabaseOrganizations"):body.index("function showSupabaseOrgPicker")
+        body.index("async function fetchSupabaseOrganizations") : body.index(
+            "function showSupabaseOrgPicker"
+        )
     ]
     assert "showSupabaseOrgPicker();" in fetch_orgs_body
 
@@ -501,19 +519,27 @@ async def test_relay_callers_re_read_storage_after_the_await_before_writing_back
     body = (await client.get("/")).text
 
     kickoff_body = body[
-        body.index("async function kickOffProjectCreation"):body.index("function showSupabaseProvisioning")
+        body.index("async function kickOffProjectCreation") : body.index(
+            "function showSupabaseProvisioning"
+        )
     ]
     await_pos = kickoff_body.index("await callSupabaseRelay(")
     reread_pos = kickoff_body.index("stored = readStoredSupabase() || stored;")
-    write_pos = kickoff_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));')
+    write_pos = kickoff_body.index(
+        'sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));'
+    )
     assert await_pos < reread_pos < write_pos
 
     conn_info_body = body[
-        body.index("async function fetchSupabaseConnectionInfo"):body.index("function restoreFromSession")
+        body.index("async function fetchSupabaseConnectionInfo") : body.index(
+            "function restoreFromSession"
+        )
     ]
     await_pos = conn_info_body.index("await callSupabaseRelay(")
     reread_pos = conn_info_body.index("stored = readStoredSupabase() || stored;")
-    write_pos = conn_info_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));')
+    write_pos = conn_info_body.index(
+        'sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));'
+    )
     assert await_pos < reread_pos < write_pos
 
 
@@ -524,8 +550,8 @@ async def test_connection_info_missing_local_state_shows_an_error_not_a_silent_s
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("async function fetchSupabaseConnectionInfo")
-    fn_body = body[fn_start:body.index("function restoreFromSession")]
-    guard_body = fn_body[:fn_body.index("const body = await callSupabaseRelay(")]
+    fn_body = body[fn_start : body.index("function restoreFromSession")]
+    guard_body = fn_body[: fn_body.index("const body = await callSupabaseRelay(")]
     assert "return;" in guard_body
     assert 'supabaseError("err_supabase_callback_invalid");' in guard_body
 
@@ -538,7 +564,7 @@ async def test_refresh_does_not_overwrite_a_valid_refresh_token_with_a_missing_o
     client = await _client()
     body = (await client.get("/")).text
     relay_start = body.index("async function callSupabaseRelay")
-    relay_body = body[relay_start:body.index("async function connectSupabase")]
+    relay_body = body[relay_start : body.index("async function connectSupabase")]
     assert "stored.access_token = refreshBody.access_token;" in relay_body
     assert "if (refreshBody.refresh_token) {" in relay_body
     assert "stored.refresh_token = refreshBody.refresh_token;" in relay_body
@@ -557,12 +583,12 @@ async def test_supabase_oauth_callback_storage_write_is_guarded():
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("async function handleSupabaseOauthCallback")
-    fn_body = body[fn_start:body.index("async function fetchSupabaseOrganizations")]
+    fn_body = body[fn_start : body.index("async function fetchSupabaseOrganizations")]
     setitem_pos = fn_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"]')
     try_pos = fn_body.rindex("try {", 0, setitem_pos)
     catch_pos = fn_body.index("} catch (err) {", setitem_pos)
     assert try_pos < setitem_pos < catch_pos
-    catch_body = fn_body[catch_pos:fn_body.index("await fetchSupabaseOrganizations();")]
+    catch_body = fn_body[catch_pos : fn_body.index("await fetchSupabaseOrganizations();")]
     assert "supabaseError(" in catch_body
     assert body.count("err_supabase_storage_failed:") == 2  # STRINGS.en + STRINGS.he
 
@@ -613,7 +639,7 @@ async def test_llm_provider_credential_has_exactly_one_fetch_call_site():
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("async function validateLlmProviderCredential")
-    fn_body = body[fn_start:body.index("function confirmLlmProviderModel")]
+    fn_body = body[fn_start : body.index("function confirmLlmProviderModel")]
     assert fn_body.count("await fetch(endpoint, {") == 1
 
 
@@ -636,10 +662,7 @@ async def test_model_confirm_requires_both_credential_and_model():
 async def test_frame4_locked_by_default():
     client = await _client()
     body = (await client.get("/")).text
-    assert (
-        'id="frame-llm-provider" class="frame" data-status="locked" '
-        'data-locked="true"'
-    ) in body
+    assert ('id="frame-llm-provider" class="frame" data-status="locked" data-locked="true"') in body
 
 
 async def test_empty_model_list_shows_dedicated_message():
@@ -660,7 +683,7 @@ async def test_llm_provider_error_sets_frame_status_to_error():
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("function llmProviderError(key)")
-    fn_body = body[fn_start:body.index("function llmProviderErrorForReason")]
+    fn_body = body[fn_start : body.index("function llmProviderErrorForReason")]
     assert 'setFrameStatus("llm-provider", "error");' in fn_body
 
 
@@ -673,10 +696,10 @@ async def test_model_select_has_a_disabled_placeholder_forcing_an_explicit_pick(
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("function showLlmProviderModels")
-    fn_body = body[fn_start:body.index("async function validateLlmProviderCredential")]
+    fn_body = body[fn_start : body.index("async function validateLlmProviderCredential")]
     assert 'placeholder.value = "";' in fn_body
-    assert 'placeholder.disabled = true;' in fn_body
-    assert 'placeholder.selected = true;' in fn_body
+    assert "placeholder.disabled = true;" in fn_body
+    assert "placeholder.selected = true;" in fn_body
     assert 'placeholder.textContent = t("frame4_model_placeholder");' in fn_body
     # Placeholder must be appended before the real models are, not after.
     placeholder_append_pos = fn_body.index("select.appendChild(placeholder);")
@@ -723,7 +746,10 @@ async def test_language_switch_retranslates_llm_provider_error():
     read nowhere, and frame 4's error text keeps the old language."""
     client = await _client()
     body = (await client.get("/")).text
-    assert 'document.getElementById("llm-provider-error").textContent = t(currentLlmProviderErrorKey);' in body
+    assert (
+        'document.getElementById("llm-provider-error").textContent = t(currentLlmProviderErrorKey);'
+        in body
+    )
 
 
 async def test_switching_llm_provider_clears_stale_credential_input():
@@ -733,7 +759,7 @@ async def test_switching_llm_provider_clears_stale_credential_input():
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("function handleLlmProviderChoice")
-    fn_body = body[fn_start:body.index("\n  }\n", fn_start)]
+    fn_body = body[fn_start : body.index("\n  }\n", fn_start)]
     assert 'apiKeyInput.value = "";' in fn_body
     assert 'fileInput.value = "";' in fn_body
 
@@ -756,8 +782,7 @@ async def test_frame5_locked_by_default():
     client = await _client()
     body = (await client.get("/")).text
     assert (
-        'id="frame-uptime-pinger" class="frame" data-status="locked" '
-        'data-locked="true"'
+        'id="frame-uptime-pinger" class="frame" data-status="locked" data-locked="true"'
     ) in body
 
 
@@ -797,7 +822,7 @@ async def test_uptimerobot_error_sets_frame_status_to_error():
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("async function submitUptimeRobotKey")
-    fn_body = body[fn_start:body.index("function uptimePingerErrorKeyForReason")]
+    fn_body = body[fn_start : body.index("function uptimePingerErrorKeyForReason")]
     assert fn_body.count('setFrameStatus("uptime-pinger", "error")') >= 1
 
 
@@ -827,9 +852,12 @@ async def test_frame5_strings_present_in_both_languages():
     client = await _client()
     body = (await client.get("/")).text
     for key in (
-        "frame5_instructions", "frame5_blocked_no_render_url",
-        "err_uptime_empty_key", "err_uptime_unauthorized",
-        "err_uptime_rate_limited", "err_uptime_unreachable",
+        "frame5_instructions",
+        "frame5_blocked_no_render_url",
+        "err_uptime_empty_key",
+        "err_uptime_unauthorized",
+        "err_uptime_rate_limited",
+        "err_uptime_unreachable",
         "err_uptime_request_rejected",
     ):
         # == 2 (STRINGS.en + STRINGS.he), not merely `in body`: a presence
@@ -859,7 +887,7 @@ async def test_restore_from_session_completes_uptime_pinger_frame():
     client = await _client()
     body = (await client.get("/")).text
     fn_start = body.index("function restoreFromSession")
-    fn_body = body[fn_start:body.index("function guardLockedFrames")]
+    fn_body = body[fn_start : body.index("function guardLockedFrames")]
     assert 'sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"])' in fn_body
     assert 'completeFrame("uptime-pinger"' in fn_body
 
@@ -870,10 +898,7 @@ async def test_frame5_reevaluates_blocked_state_when_reopened():
     the first time frame 5 unlocks, but could have by a later reopen."""
     client = await _client()
     body = (await client.get("/")).text
-    assert (
-        'document.getElementById("frame-uptime-pinger").addEventListener("toggle"'
-        in body
-    )
+    assert 'document.getElementById("frame-uptime-pinger").addEventListener("toggle"' in body
 
 
 async def test_frame_order_includes_render_service_after_render_key():
@@ -941,27 +966,39 @@ async def test_render_service_frame_i18n_strings_present_in_both_languages():
     client = await _client()
     body = (await client.get("/")).text
     keys = [
-        "frame_render_service_title", "frame_render_service_instructions",
-        "frame_render_service_repo_label", "frame_render_service_name_label",
-        "create_service_button", "url_prefix", "err_render_service_no_key",
-        "err_render_service_empty", "err_render_service_invalid_key",
-        "err_render_service_unreachable", "err_render_service_rejected",
+        "frame_render_service_title",
+        "frame_render_service_instructions",
+        "frame_render_service_repo_label",
+        "frame_render_service_name_label",
+        "create_service_button",
+        "url_prefix",
+        "err_render_service_no_key",
+        "err_render_service_empty",
+        "err_render_service_invalid_key",
+        "err_render_service_unreachable",
+        "err_render_service_rejected",
     ]
     for key in keys:
-        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
+        assert body.count(f"{key}:") == 2, f"{key} should appear once in en and once in he"
 
 
 async def test_render_deploy_frame_i18n_strings_present_in_both_languages():
     client = await _client()
     body = (await client.get("/")).text
     keys = [
-        "frame6_instructions", "frame6_polling", "frame6_done", "deploy_button",
-        "err_render_deploy_no_service", "err_render_deploy_invalid_key",
-        "err_render_deploy_service_not_found", "err_render_deploy_unreachable",
-        "err_render_deploy_failed", "err_render_deploy_timeout",
+        "frame6_instructions",
+        "frame6_polling",
+        "frame6_done",
+        "deploy_button",
+        "err_render_deploy_no_service",
+        "err_render_deploy_invalid_key",
+        "err_render_deploy_service_not_found",
+        "err_render_deploy_unreachable",
+        "err_render_deploy_failed",
+        "err_render_deploy_timeout",
     ]
     for key in keys:
-        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
+        assert body.count(f"{key}:") == 2, f"{key} should appear once in en and once in he"
 
 
 async def test_frame_titles_renumbered_after_render_service_insertion():
@@ -980,7 +1017,7 @@ async def test_begin_change_render_service_clears_its_own_stale_state():
     body = (await client.get("/")).text
     assert 'if (id === "render-service")' in body
     assert 'sessionStorage.removeItem(STORAGE_KEYS["render-service"])' in body
-    assert 'sessionStorage.removeItem(RENDER_SERVICE_URL_KEY)' in body
+    assert "sessionStorage.removeItem(RENDER_SERVICE_URL_KEY)" in body
 
 
 async def test_lock_frame_resets_render_deploy_section():
@@ -1038,7 +1075,9 @@ async def test_llm_push_helper_clears_credential_fields():
 async def test_push_helpers_skip_entirely_without_a_render_service():
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 3
+    assert (
+        body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 3
+    )
 
 
 async def test_set_webhook_url_fetch_leaves_the_page_exactly_once():
@@ -1068,8 +1107,10 @@ async def test_webhook_retry_i18n_strings_present_in_both_languages():
     client = await _client()
     body = (await client.get("/")).text
     keys = [
-        "frame2_webhook_retry_instructions", "retry_button",
-        "err_github_webhook_invalid_credentials", "err_github_webhook_unreachable",
+        "frame2_webhook_retry_instructions",
+        "retry_button",
+        "err_github_webhook_invalid_credentials",
+        "err_github_webhook_unreachable",
     ]
     for key in keys:
-        assert body.count(f'{key}:') == 2, f"{key} should appear once in en and once in he"
+        assert body.count(f"{key}:") == 2, f"{key} should appear once in en and once in he"

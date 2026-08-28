@@ -3,6 +3,7 @@ visitor-supplied API key is live, without persisting it anywhere. See
 docs/superpowers/specs/2026-08-26-onboarding-wizard-render-frame-design.md
 sections 5-6.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -271,7 +272,9 @@ class RenderDeployStatusFailed:
 RenderDeployStatusResult = RenderDeployStatus | RenderDeployStatusFailed
 
 
-async def poll_deploy_status(api_key: str, service_id: str, deploy_id: str) -> RenderDeployStatusResult:
+async def poll_deploy_status(
+    api_key: str, service_id: str, deploy_id: str
+) -> RenderDeployStatusResult:
     """One status check -- never loops or blocks itself. The browser's own
     polling loop (onboarding/static/index.html) calls the router endpoint
     wrapping this repeatedly; see design spec section 5c step 11."""

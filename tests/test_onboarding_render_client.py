@@ -1,6 +1,7 @@
 """Tests for onboarding/render_client.py — Render key validation never logs
 or returns the raw key, and distinguishes an invalid key from Render being
 unreachable (design doc sections 6 and 8)."""
+
 from __future__ import annotations
 
 import httpx
@@ -122,7 +123,9 @@ async def test_create_service_returns_id_and_slug_derived_url():
             return_value=httpx.Response(200, json=[{"owner": {"id": "usr-1", "name": "Ada"}}])
         )
         respx.post(CREATE_URL).mock(return_value=_service_created_response())
-        result = await render_client.create_service(SENTINEL_KEY, "https://github.com/x/y", "my-name")
+        result = await render_client.create_service(
+            SENTINEL_KEY, "https://github.com/x/y", "my-name"
+        )
     assert result == render_client.RenderServiceCreated(
         service_id="srv-abc123", service_url="https://pr-review-bot-a1b2c3d4.onrender.com"
     )
@@ -138,7 +141,9 @@ async def test_create_service_ignores_submitted_name_uses_response_slug():
         respx.post(CREATE_URL).mock(
             return_value=_service_created_response(slug="my-name-normalized")
         )
-        result = await render_client.create_service(SENTINEL_KEY, "https://github.com/x/y", "My Name!")
+        result = await render_client.create_service(
+            SENTINEL_KEY, "https://github.com/x/y", "My Name!"
+        )
     assert result.service_url == "https://my-name-normalized.onrender.com"
 
 
@@ -175,7 +180,9 @@ async def test_create_service_name_collision_is_request_rejected_with_message():
             return_value=httpx.Response(200, json=[{"owner": {"id": "usr-1", "name": "Ada"}}])
         )
         respx.post(CREATE_URL).mock(
-            return_value=httpx.Response(422, json={"message": "a service with that name already exists"})
+            return_value=httpx.Response(
+                422, json={"message": "a service with that name already exists"}
+            )
         )
         result = await render_client.create_service(SENTINEL_KEY, "https://github.com/x/y", "taken")
     assert result == render_client.RenderServiceCreationFailed(
@@ -248,7 +255,9 @@ DEPLOY_STATUS_URL = f"{render_client.RENDER_API_BASE}/services/srv-1/deploys/dep
 
 async def test_trigger_deploy_returns_deploy_id():
     with respx.mock:
-        respx.post(DEPLOYS_URL).mock(return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}}))
+        respx.post(DEPLOYS_URL).mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1"}})
+        )
         result = await render_client.trigger_deploy(SENTINEL_KEY, "srv-1")
     assert result == render_client.RenderDeployTriggered(deploy_id="dep-1")
 
@@ -279,7 +288,9 @@ async def test_poll_deploy_status_live():
 async def test_poll_deploy_status_in_flight_bucket():
     with respx.mock:
         respx.get(DEPLOY_STATUS_URL).mock(
-            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "build_in_progress"}})
+            return_value=httpx.Response(
+                200, json={"deploy": {"id": "dep-1", "status": "build_in_progress"}}
+            )
         )
         result = await render_client.poll_deploy_status(SENTINEL_KEY, "srv-1", "dep-1")
     assert result == render_client.RenderDeployStatus(status="in_progress")
@@ -288,7 +299,9 @@ async def test_poll_deploy_status_in_flight_bucket():
 async def test_poll_deploy_status_failed_bucket():
     with respx.mock:
         respx.get(DEPLOY_STATUS_URL).mock(
-            return_value=httpx.Response(200, json={"deploy": {"id": "dep-1", "status": "build_failed"}})
+            return_value=httpx.Response(
+                200, json={"deploy": {"id": "dep-1", "status": "build_failed"}}
+            )
         )
         result = await render_client.poll_deploy_status(SENTINEL_KEY, "srv-1", "dep-1")
     assert result == render_client.RenderDeployStatus(status="failed")
@@ -305,7 +318,9 @@ async def test_poll_deploy_status_canceled_is_not_failed():
 
 async def test_poll_deploy_status_401_is_invalid_key():
     with respx.mock:
-        respx.get(DEPLOY_STATUS_URL).mock(return_value=httpx.Response(401, json={"message": "nope"}))
+        respx.get(DEPLOY_STATUS_URL).mock(
+            return_value=httpx.Response(401, json={"message": "nope"})
+        )
         result = await render_client.poll_deploy_status(SENTINEL_KEY, "srv-1", "dep-1")
     assert result == render_client.RenderDeployStatusFailed(reason="invalid_key")
 

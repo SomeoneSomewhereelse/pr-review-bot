@@ -5,8 +5,10 @@ the raw OpenAPI schema (not prose docs, which incorrectly describe HTTP
 Basic Auth) during this sub-project's brainstorm. See
 docs/superpowers/specs/2026-08-26-onboarding-supabase-provisioning-frame-design.md
 sections 3-5."""
+
 from __future__ import annotations
 
+import json as json_module
 import logging
 
 import httpx
@@ -39,7 +41,8 @@ async def test_valid_code_returns_tokens():
             )
         )
         result = await supabase_client.exchange_oauth_code(
-            "sentinel-code", "sentinel-verifier",
+            "sentinel-code",
+            "sentinel-verifier",
             "https://onboarding.example.com/?supabase_step=oauth_callback",
         )
     assert result == supabase_client.SupabaseTokens(
@@ -71,10 +74,17 @@ async def test_response_missing_refresh_token_is_tolerated():
     with respx.mock:
         respx.post(TOKEN_URL).mock(
             return_value=httpx.Response(
-                200, json={"access_token": "sentinel-access", "expires_in": 3600, "token_type": "Bearer"}
+                200,
+                json={
+                    "access_token": "sentinel-access",
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                },
             )
         )
-        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+        result = await supabase_client.exchange_oauth_code(
+            "c", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseTokens(
         access_token="sentinel-access", refresh_token=None, expires_in=3600
     )
@@ -82,29 +92,39 @@ async def test_response_missing_refresh_token_is_tolerated():
 
 async def test_rejected_code_is_invalid_code():
     with respx.mock:
-        respx.post(TOKEN_URL).mock(return_value=httpx.Response(400, json={"error": "invalid_grant"}))
-        result = await supabase_client.exchange_oauth_code("bad", "v", "https://onboarding.example.com/cb")
+        respx.post(TOKEN_URL).mock(
+            return_value=httpx.Response(400, json={"error": "invalid_grant"})
+        )
+        result = await supabase_client.exchange_oauth_code(
+            "bad", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseOAuthFailed(reason="invalid_code")
 
 
 async def test_exchange_5xx_is_unreachable():
     with respx.mock:
         respx.post(TOKEN_URL).mock(return_value=httpx.Response(500))
-        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+        result = await supabase_client.exchange_oauth_code(
+            "c", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
 
 
 async def test_exchange_timeout_is_unreachable():
     with respx.mock:
         respx.post(TOKEN_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
-        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+        result = await supabase_client.exchange_oauth_code(
+            "c", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
 
 
 async def test_exchange_malformed_200_body_is_unreachable_not_a_crash():
     with respx.mock:
         respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, text="not json"))
-        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+        result = await supabase_client.exchange_oauth_code(
+            "c", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
 
 
@@ -113,7 +133,9 @@ async def test_exchange_response_missing_access_token_is_unreachable():
         respx.post(TOKEN_URL).mock(
             return_value=httpx.Response(200, json={"expires_in": 1, "token_type": "Bearer"})
         )
-        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+        result = await supabase_client.exchange_oauth_code(
+            "c", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
 
 
@@ -128,7 +150,9 @@ async def test_response_missing_expires_in_is_tolerated():
                 200, json={"access_token": "sentinel-access", "token_type": "Bearer"}
             )
         )
-        result = await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
+        result = await supabase_client.exchange_oauth_code(
+            "c", "v", "https://onboarding.example.com/cb"
+        )
     assert result == supabase_client.SupabaseTokens(
         access_token="sentinel-access", refresh_token=None, expires_in=0
     )
@@ -156,7 +180,9 @@ async def test_refresh_valid_token_returns_new_tokens():
 async def test_refresh_sends_refresh_token_grant():
     with respx.mock:
         route = respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(200, json={"access_token": "a", "expires_in": 1, "token_type": "Bearer"})
+            return_value=httpx.Response(
+                200, json={"access_token": "a", "expires_in": 1, "token_type": "Bearer"}
+            )
         )
         await supabase_client.refresh_access_token("sentinel-refresh")
     body = route.calls.last.request.content.decode()
@@ -169,7 +195,9 @@ async def test_refresh_rejected_is_unauthorized():
     (the reactive-refresh-then-retry vocabulary), not 'invalid_code' — no
     'code' is involved in a refresh grant."""
     with respx.mock:
-        respx.post(TOKEN_URL).mock(return_value=httpx.Response(400, json={"error": "invalid_grant"}))
+        respx.post(TOKEN_URL).mock(
+            return_value=httpx.Response(400, json={"error": "invalid_grant"})
+        )
         result = await supabase_client.refresh_access_token("stale-refresh")
     assert result == supabase_client.SupabaseOAuthFailed(reason="unauthorized")
 
@@ -180,8 +208,6 @@ async def test_refresh_5xx_is_unreachable():
         result = await supabase_client.refresh_access_token("sentinel-refresh")
     assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
 
-
-import json as json_module
 
 ORGS_URL = "https://api.supabase.com/v1/organizations"
 PROJECTS_URL = "https://api.supabase.com/v1/projects"
@@ -245,12 +271,16 @@ async def test_list_organizations_malformed_body_is_unreachable():
 async def test_create_project_returns_ref_and_status():
     with respx.mock:
         respx.post(PROJECTS_URL).mock(
-            return_value=httpx.Response(201, json={"ref": "abcdefghijklmnopqrst", "status": "INACTIVE"})
+            return_value=httpx.Response(
+                201, json={"ref": "abcdefghijklmnopqrst", "status": "INACTIVE"}
+            )
         )
         result = await supabase_client.create_project(
             "sentinel-access", "org-one", "pr-review-bot", "sentinelpass123"
         )
-    assert result == supabase_client.SupabaseProjectCreated(ref="abcdefghijklmnopqrst", status="INACTIVE")
+    assert result == supabase_client.SupabaseProjectCreated(
+        ref="abcdefghijklmnopqrst", status="INACTIVE"
+    )
 
 
 async def test_create_project_sends_region_selection_not_deprecated_fields():
@@ -302,7 +332,10 @@ async def test_create_project_business_rule_rejection_relays_the_message():
     with respx.mock:
         respx.post(PROJECTS_URL).mock(
             return_value=httpx.Response(
-                403, json={"message": "This organization already has the maximum number of free projects."}
+                403,
+                json={
+                    "message": "This organization already has the maximum number of free projects."
+                },
             )
         )
         result = await supabase_client.create_project("a", "org-one", "name", "pw")
@@ -340,17 +373,31 @@ POOLER_URL = "https://api.supabase.com/v1/projects/abcdefghijklmnopqrst/config/d
 
 _POOLER_ENTRIES = [
     {
-        "identifier": "abcdefghijklmnopqrst", "database_type": "PRIMARY", "is_using_scram_auth": True,
-        "db_user": "postgres.abcdefghijklmnopqrst", "db_host": "aws-0-us-east-1.pooler.supabase.com",
-        "db_port": 6543, "db_name": "postgres", "connection_string": "postgresql://masked",
-        "connectionString": "postgresql://masked", "default_pool_size": None, "max_client_conn": None,
+        "identifier": "abcdefghijklmnopqrst",
+        "database_type": "PRIMARY",
+        "is_using_scram_auth": True,
+        "db_user": "postgres.abcdefghijklmnopqrst",
+        "db_host": "aws-0-us-east-1.pooler.supabase.com",
+        "db_port": 6543,
+        "db_name": "postgres",
+        "connection_string": "postgresql://masked",
+        "connectionString": "postgresql://masked",
+        "default_pool_size": None,
+        "max_client_conn": None,
         "pool_mode": "transaction",
     },
     {
-        "identifier": "abcdefghijklmnopqrst", "database_type": "PRIMARY", "is_using_scram_auth": True,
-        "db_user": "postgres.abcdefghijklmnopqrst", "db_host": "aws-0-us-east-1.pooler.supabase.com",
-        "db_port": 5432, "db_name": "postgres", "connection_string": "postgresql://masked",
-        "connectionString": "postgresql://masked", "default_pool_size": None, "max_client_conn": None,
+        "identifier": "abcdefghijklmnopqrst",
+        "database_type": "PRIMARY",
+        "is_using_scram_auth": True,
+        "db_user": "postgres.abcdefghijklmnopqrst",
+        "db_host": "aws-0-us-east-1.pooler.supabase.com",
+        "db_port": 5432,
+        "db_name": "postgres",
+        "connection_string": "postgresql://masked",
+        "connectionString": "postgresql://masked",
+        "default_pool_size": None,
+        "max_client_conn": None,
         "pool_mode": "session",
     },
 ]

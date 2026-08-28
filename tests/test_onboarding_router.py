@@ -1,6 +1,7 @@
 """Tests for onboarding/router.py — the JSON contract for
 POST /api/render/validate-key never echoes the submitted key, and GET /
 serves the wizard page. See design doc section 5."""
+
 from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
@@ -252,7 +253,9 @@ async def test_set_github_webhook_url_endpoint_failure(monkeypatch):
 
 
 async def test_index_serves_configured_supabase_oauth_client_id(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_oauth_client_id", "66666666-6666-4666-8666-666666666666")
+    monkeypatch.setattr(
+        settings, "supabase_oauth_client_id", "66666666-6666-4666-8666-666666666666"
+    )
     client = await _client()
     resp = await client.get("/")
     assert 'window.SUPABASE_OAUTH_CLIENT_ID = "66666666-6666-4666-8666-666666666666";' in resp.text
@@ -263,7 +266,9 @@ async def test_exchange_oauth_code_returns_tokens(monkeypatch):
     async def fake_exchange(code, code_verifier, redirect_uri):
         assert (code, code_verifier) == ("SENTINEL_CODE", "SENTINEL_VERIFIER")
         assert redirect_uri.endswith("/?supabase_step=oauth_callback")
-        return supabase_client.SupabaseTokens(access_token="at", refresh_token="rt", expires_in=3600)
+        return supabase_client.SupabaseTokens(
+            access_token="at", refresh_token="rt", expires_in=3600
+        )
 
     monkeypatch.setattr(supabase_client, "exchange_oauth_code", fake_exchange)
     client = await _client()
@@ -272,7 +277,12 @@ async def test_exchange_oauth_code_returns_tokens(monkeypatch):
         json={"code": "SENTINEL_CODE", "code_verifier": "SENTINEL_VERIFIER"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"valid": True, "access_token": "at", "refresh_token": "rt", "expires_in": 3600}
+    assert resp.json() == {
+        "valid": True,
+        "access_token": "at",
+        "refresh_token": "rt",
+        "expires_in": 3600,
+    }
 
 
 async def test_exchange_oauth_code_reports_failure_reason(monkeypatch):
@@ -302,12 +312,21 @@ async def test_exchange_oauth_code_validation_error_never_echoes_the_verifier():
 async def test_refresh_access_token_returns_new_tokens(monkeypatch):
     async def fake_refresh(refresh_token):
         assert refresh_token == "SENTINEL_REFRESH"
-        return supabase_client.SupabaseTokens(access_token="at2", refresh_token="rt2", expires_in=3600)
+        return supabase_client.SupabaseTokens(
+            access_token="at2", refresh_token="rt2", expires_in=3600
+        )
 
     monkeypatch.setattr(supabase_client, "refresh_access_token", fake_refresh)
     client = await _client()
-    resp = await client.post("/api/supabase/refresh-access-token", json={"refresh_token": "SENTINEL_REFRESH"})
-    assert resp.json() == {"valid": True, "access_token": "at2", "refresh_token": "rt2", "expires_in": 3600}
+    resp = await client.post(
+        "/api/supabase/refresh-access-token", json={"refresh_token": "SENTINEL_REFRESH"}
+    )
+    assert resp.json() == {
+        "valid": True,
+        "access_token": "at2",
+        "refresh_token": "rt2",
+        "expires_in": 3600,
+    }
 
 
 async def test_refresh_access_token_reports_failure_reason(monkeypatch):
@@ -329,7 +348,9 @@ async def test_list_organizations_returns_orgs(monkeypatch):
 
     monkeypatch.setattr(supabase_client, "list_organizations", fake_list)
     client = await _client()
-    resp = await client.post("/api/supabase/list-organizations", json={"access_token": "SENTINEL_ACCESS"})
+    resp = await client.post(
+        "/api/supabase/list-organizations", json={"access_token": "SENTINEL_ACCESS"}
+    )
     assert resp.json() == {"valid": True, "orgs": [{"slug": "org-one", "name": "Org One"}]}
 
 
@@ -345,21 +366,33 @@ async def test_list_organizations_reports_failure_reason(monkeypatch):
 
 async def test_create_project_returns_ref_and_status(monkeypatch):
     async def fake_create(access_token, organization_slug, name, db_pass):
-        assert (access_token, organization_slug, name, db_pass) == ("a", "org-one", "pr-review-bot", "pw123")
+        assert (access_token, organization_slug, name, db_pass) == (
+            "a",
+            "org-one",
+            "pr-review-bot",
+            "pw123",
+        )
         return supabase_client.SupabaseProjectCreated(ref="x" * 20, status="INACTIVE")
 
     monkeypatch.setattr(supabase_client, "create_project", fake_create)
     client = await _client()
     resp = await client.post(
         "/api/supabase/create-project",
-        json={"access_token": "a", "organization_slug": "org-one", "name": "pr-review-bot", "db_pass": "pw123"},
+        json={
+            "access_token": "a",
+            "organization_slug": "org-one",
+            "name": "pr-review-bot",
+            "db_pass": "pw123",
+        },
     )
     assert resp.json() == {"valid": True, "ref": "x" * 20, "status": "INACTIVE"}
 
 
 async def test_create_project_relays_the_rejection_message(monkeypatch):
     async def fake_create(access_token, organization_slug, name, db_pass):
-        return supabase_client.SupabaseProjectRejected(message="This organization already has the maximum number of free projects.")
+        return supabase_client.SupabaseProjectRejected(
+            message="This organization already has the maximum number of free projects."
+        )
 
     monkeypatch.setattr(supabase_client, "create_project", fake_create)
     client = await _client()
@@ -379,7 +412,12 @@ async def test_create_project_validation_error_never_echoes_the_password():
     client = await _client()
     resp = await client.post(
         "/api/supabase/create-project",
-        json={"access_token": "a", "organization_slug": "org", "name": "n", "db_pass_typo": sentinel_pass},
+        json={
+            "access_token": "a",
+            "organization_slug": "org",
+            "name": "n",
+            "db_pass_typo": sentinel_pass,
+        },
     )
     assert resp.status_code == 422
     assert sentinel_pass not in resp.text
@@ -393,7 +431,9 @@ async def test_project_status_returns_status(monkeypatch):
 
     monkeypatch.setattr(supabase_client, "get_project_status", fake_status)
     client = await _client()
-    resp = await client.post("/api/supabase/project-status", json={"access_token": "a", "ref": "x" * 20})
+    resp = await client.post(
+        "/api/supabase/project-status", json={"access_token": "a", "ref": "x" * 20}
+    )
     assert resp.json() == {"valid": True, "status": "ACTIVE_HEALTHY"}
 
 
@@ -403,19 +443,26 @@ async def test_project_status_reports_failure_reason(monkeypatch):
 
     monkeypatch.setattr(supabase_client, "get_project_status", fake_status)
     client = await _client()
-    resp = await client.post("/api/supabase/project-status", json={"access_token": "a", "ref": "x" * 20})
+    resp = await client.post(
+        "/api/supabase/project-status", json={"access_token": "a", "ref": "x" * 20}
+    )
     assert resp.json() == {"valid": False, "reason": "unauthorized"}
 
 
 async def test_connection_info_returns_shape(monkeypatch):
     async def fake_info(access_token, ref):
         return supabase_client.SupabaseConnectionInfo(
-            db_user="postgres.x", db_host="aws-0-us-east-1.pooler.supabase.com", db_port=5432, db_name="postgres"
+            db_user="postgres.x",
+            db_host="aws-0-us-east-1.pooler.supabase.com",
+            db_port=5432,
+            db_name="postgres",
         )
 
     monkeypatch.setattr(supabase_client, "get_connection_info", fake_info)
     client = await _client()
-    resp = await client.post("/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20})
+    resp = await client.post(
+        "/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20}
+    )
     assert resp.json() == {
         "valid": True,
         "db_user": "postgres.x",
@@ -433,7 +480,9 @@ async def test_connection_info_never_carries_a_password_field(monkeypatch):
 
     monkeypatch.setattr(supabase_client, "get_connection_info", fake_info)
     client = await _client()
-    resp = await client.post("/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20})
+    resp = await client.post(
+        "/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20}
+    )
     assert "db_pass" not in resp.text
     assert "password" not in resp.text.lower()
 
@@ -444,7 +493,9 @@ async def test_connection_info_reports_failure_reason(monkeypatch):
 
     monkeypatch.setattr(supabase_client, "get_connection_info", fake_info)
     client = await _client()
-    resp = await client.post("/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20})
+    resp = await client.post(
+        "/api/supabase/connection-info", json={"access_token": "a", "ref": "x" * 20}
+    )
     assert resp.json() == {"valid": False, "reason": "pooler_config_unavailable"}
 
 
@@ -538,12 +589,20 @@ async def test_groq_list_models_validation_error_never_echoes_the_key():
 async def test_vertex_list_models_returns_models_and_project_id(monkeypatch):
     async def fake_list(service_account_key_b64):
         assert service_account_key_b64 == "SENTINEL_B64"
-        return llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+        return llm_client.VertexModelsListed(
+            project_id="sentinel-project", models=["gemini-2.5-flash"]
+        )
 
     monkeypatch.setattr(llm_client, "list_vertex_models", fake_list)
     client = await _client()
-    resp = await client.post("/api/llm/vertex/list-models", json={"service_account_key_b64": "SENTINEL_B64"})
-    assert resp.json() == {"valid": True, "project_id": "sentinel-project", "models": ["gemini-2.5-flash"]}
+    resp = await client.post(
+        "/api/llm/vertex/list-models", json={"service_account_key_b64": "SENTINEL_B64"}
+    )
+    assert resp.json() == {
+        "valid": True,
+        "project_id": "sentinel-project",
+        "models": ["gemini-2.5-flash"],
+    }
 
 
 async def test_vertex_list_models_reports_failure_reason(monkeypatch):
@@ -552,7 +611,9 @@ async def test_vertex_list_models_reports_failure_reason(monkeypatch):
 
     monkeypatch.setattr(llm_client, "list_vertex_models", fake_list)
     client = await _client()
-    resp = await client.post("/api/llm/vertex/list-models", json={"service_account_key_b64": "not-json"})
+    resp = await client.post(
+        "/api/llm/vertex/list-models", json={"service_account_key_b64": "not-json"}
+    )
     assert resp.json() == {"valid": False, "reason": "invalid_service_account_json"}
 
 
@@ -599,7 +660,10 @@ async def test_uptimerobot_monitor_created_reports_created_true(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/uptimerobot/create-monitor",
-        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+        json={
+            "api_key": SENTINEL_KEY,
+            "render_service_url": "https://sentinel-service.onrender.com",
+        },
     )
     assert resp.status_code == 200
     assert resp.json() == {"valid": True, "created": True, "monitor_id": 42}
@@ -613,7 +677,10 @@ async def test_uptimerobot_monitor_reused_reports_created_false(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/uptimerobot/create-monitor",
-        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+        json={
+            "api_key": SENTINEL_KEY,
+            "render_service_url": "https://sentinel-service.onrender.com",
+        },
     )
     assert resp.status_code == 200
     assert resp.json() == {"valid": True, "created": False, "monitor_id": 42}
@@ -627,7 +694,10 @@ async def test_uptimerobot_failure_reports_the_reason(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/uptimerobot/create-monitor",
-        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+        json={
+            "api_key": SENTINEL_KEY,
+            "render_service_url": "https://sentinel-service.onrender.com",
+        },
     )
     assert resp.status_code == 200
     assert resp.json() == {"valid": False, "reason": "unauthorized"}
@@ -641,7 +711,10 @@ async def test_uptimerobot_response_never_echoes_the_submitted_key(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/uptimerobot/create-monitor",
-        json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
+        json={
+            "api_key": SENTINEL_KEY,
+            "render_service_url": "https://sentinel-service.onrender.com",
+        },
     )
     assert SENTINEL_KEY not in resp.text
 
@@ -767,7 +840,9 @@ async def test_uptimerobot_delete_monitor_rejects_empty_key():
 
 async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
     async def fake_create_service(api_key, repo_url, name):
-        return render_client.RenderServiceCreated(service_id="srv-1", service_url="https://x.onrender.com")
+        return render_client.RenderServiceCreated(
+            service_id="srv-1", service_url="https://x.onrender.com"
+        )
 
     monkeypatch.setattr(render_client, "create_service", fake_create_service)
     client = await _client()
@@ -776,12 +851,18 @@ async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
         json={"api_key": "rnd_x", "repo_url": "https://github.com/a/b", "name": "n"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"valid": True, "service_id": "srv-1", "service_url": "https://x.onrender.com"}
+    assert resp.json() == {
+        "valid": True,
+        "service_id": "srv-1",
+        "service_url": "https://x.onrender.com",
+    }
 
 
 async def test_create_service_endpoint_relays_rejection_message(monkeypatch):
     async def fake_create_service(api_key, repo_url, name):
-        return render_client.RenderServiceCreationFailed(reason="request_rejected", message="name taken")
+        return render_client.RenderServiceCreationFailed(
+            reason="request_rejected", message="name taken"
+        )
 
     monkeypatch.setattr(render_client, "create_service", fake_create_service)
     client = await _client()
@@ -938,7 +1019,9 @@ async def test_trigger_deploy_endpoint(monkeypatch):
 
     monkeypatch.setattr(render_client, "trigger_deploy", fake_trigger_deploy)
     client = await _client()
-    resp = await client.post("/api/render/trigger-deploy", json={"api_key": "rnd_x", "service_id": "srv-1"})
+    resp = await client.post(
+        "/api/render/trigger-deploy", json={"api_key": "rnd_x", "service_id": "srv-1"}
+    )
     assert resp.json() == {"valid": True, "deploy_id": "dep-1"}
 
 

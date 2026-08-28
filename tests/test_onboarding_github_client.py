@@ -3,6 +3,7 @@ exchange never logs or returns anything but the documented fields, and
 distinguishes a rejected/expired code from GitHub being unreachable. See
 docs/superpowers/specs/2026-08-26-onboarding-github-app-frame-design.md
 sections 3-4."""
+
 from __future__ import annotations
 
 import base64
@@ -231,7 +232,9 @@ async def test_set_webhook_url_succeeds(fake_transport, _throwaway_key_material)
     assert result == github_client.WebhookUrlSet()
 
 
-async def test_set_webhook_url_unauthorized_is_invalid_credentials(fake_transport, _throwaway_key_material):
+async def test_set_webhook_url_unauthorized_is_invalid_credentials(
+    fake_transport, _throwaway_key_material
+):
     fake_transport.route("PATCH", "/app/hook/config", {"message": "Bad credentials"}, 401)
     result = await github_client.set_webhook_url(
         app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
@@ -239,7 +242,9 @@ async def test_set_webhook_url_unauthorized_is_invalid_credentials(fake_transpor
     assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
 
 
-async def test_set_webhook_url_not_found_is_invalid_credentials(fake_transport, _throwaway_key_material):
+async def test_set_webhook_url_not_found_is_invalid_credentials(
+    fake_transport, _throwaway_key_material
+):
     fake_transport.route("PATCH", "/app/hook/config", {"message": "Not Found"}, 404)
     result = await github_client.set_webhook_url(
         app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"

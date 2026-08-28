@@ -11,6 +11,7 @@ is monkeypatched with a fake that records constructor kwargs and returns a
 fake async model pager. See
 docs/superpowers/specs/2026-08-27-onboarding-llm-provider-frame-design.md
 sections 3-4, 6."""
+
 from __future__ import annotations
 
 import base64
@@ -31,7 +32,36 @@ from onboarding import llm_client
 _SENTINEL_SERVICE_ACCOUNT = {
     "type": "service_account",
     "project_id": "sentinel-project",
-    "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDiQlbTqoKFep6U\n5C6UsJ1B5U/Q8PNBimMiHQCoBqRIspSve5A0MmRmYsnn4UPEivDelDEqBIFpPwUK\nLxnliVnCKbKpV3RJE/HAxVNGYRj6MfGaPw2rZhe9/W8sBMHIaldkrYj7AOgtkqcw\nKingtiXdofYQqWNEEeqFIpuL2APoXYotJAGNoDQuNW/86eNHvMapZ3FU6XCPIc40\n3Y2tPuaYAckm9pQ5wt4MV5/suvfBh3ftEzaITue1Kix5F+qChDQYKLfL5JoQTie9\nSvvRXDMIYsl+IRKiInG8XzX1TQPmvNs+u2bjBKWW4OwdAACZ9iUCgsG7CkQQzs5R\nnr3m2ZF9AgMBAAECggEADXWJybSSaBNHvK6oMLMi36ke6txyc/sh84ULJXOjsSli\nW9/7T4eR3l9RCGinidkEBBGHrSqwcgzMJXNw1G0ruDeXx6gKpFA56NA0KHMdM8Dl\n0NmgXApKLkSVqOYtitj8kuIZzGic5x0asexIKnRbY0g/pXUWERYJv9qzqwlyDg/p\nxL2hc/VayovI74NAk4hTr7h++uc0QeIHHuxch1xCh9VywmS9pplF7cDNxWuVuiVr\nysaQP7cOIR0E+Iwn3+tx1YqlaKrZykDJ5kd2FOY0MEFLKyDJ7yzuspar4I3CTLYO\n8/Bzm7D24KtfDCh4vADK0dNE3a/L0hA6/Ai9gr3QxwKBgQD2SvXT41DgYazFgxj3\nrT/PuDvnZcniUmKzOrJT2YecNECLlSPqXJ8Z7AGKE61kixmOFxE16pZFES3Ntb82\nSpXap22eKx8X4h86pEwn3DAuIC+I2cPI4o4VzgwMudlMBnfOqVKUUrIV85eE7kzz\nVJhWntvC/sEY9ED47rJ9P37nFwKBgQDrLT5aNshd4qAkkBCLjD6y18+Xw3FuUVjU\ndHDNbiTlD3k7N01K2vHkCdSOl+vpUZr/VCmIKnT59zVDtESMrrNMeN/xMJixruJR\nASKG14E/jLpue3UFuG4/h2bMKxeZHQU19BtEfEG2kbRkW1nqu27CfvazjO4F67pR\nvbEVk+2oiwKBgEHK5n5y0/EMxp2AltPa+RfhLEd1Pofx4CHmxSp3Cq3km3VuIskB\ncxL2o7ah6QjZy7rUWKmhgAD1RNoV+f1j0UI2xaah+E1l/1en+hwPyuMXf/s7yPxJ\n4RDcGQXxQ6X2eFzBiKjMqnwItWoySmYaLBO/ng8qBKVI4m5dPVsN8jWDAoGAA+o9\n5nyQ+1cheVpYnCoahRmooAsl4UNDak4B7rmNra6DQyQZikx4yGYNfs4ypDCyltuM\n0XJ7fgnKfjULCxiBbZ15hOddM2AI7nZJX9tIkIlENUCi4xR96VrUsENrYiYkhxBo\nP8ydv29PhHgs2AaEwoIgkz6eW8Tf1iqFPym2RB8CgYAeQg8vQ8Ao3nG+k83gobGn\nqebO0zbGjgNtVDnQuK6bbG/duJx5jTZa8DX8s5EDkUdUEY18504qbMjgOHb2oE5f\nRrIR0HeDeneKiRy/ssLXT5JZnTZs/t3hrUiCGk540z2KgfUPOIqyhEEaYefHFNfS\n16Pbqd20zlzDHeCuO/Fr+w==\n-----END PRIVATE KEY-----\n",
+    "private_key": (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDiQlbTqoKFep6U\n"
+        "5C6UsJ1B5U/Q8PNBimMiHQCoBqRIspSve5A0MmRmYsnn4UPEivDelDEqBIFpPwUK\n"
+        "LxnliVnCKbKpV3RJE/HAxVNGYRj6MfGaPw2rZhe9/W8sBMHIaldkrYj7AOgtkqcw\n"
+        "KingtiXdofYQqWNEEeqFIpuL2APoXYotJAGNoDQuNW/86eNHvMapZ3FU6XCPIc40\n"
+        "3Y2tPuaYAckm9pQ5wt4MV5/suvfBh3ftEzaITue1Kix5F+qChDQYKLfL5JoQTie9\n"
+        "SvvRXDMIYsl+IRKiInG8XzX1TQPmvNs+u2bjBKWW4OwdAACZ9iUCgsG7CkQQzs5R\n"
+        "nr3m2ZF9AgMBAAECggEADXWJybSSaBNHvK6oMLMi36ke6txyc/sh84ULJXOjsSli\n"
+        "W9/7T4eR3l9RCGinidkEBBGHrSqwcgzMJXNw1G0ruDeXx6gKpFA56NA0KHMdM8Dl\n"
+        "0NmgXApKLkSVqOYtitj8kuIZzGic5x0asexIKnRbY0g/pXUWERYJv9qzqwlyDg/p\n"
+        "xL2hc/VayovI74NAk4hTr7h++uc0QeIHHuxch1xCh9VywmS9pplF7cDNxWuVuiVr\n"
+        "ysaQP7cOIR0E+Iwn3+tx1YqlaKrZykDJ5kd2FOY0MEFLKyDJ7yzuspar4I3CTLYO\n"
+        "8/Bzm7D24KtfDCh4vADK0dNE3a/L0hA6/Ai9gr3QxwKBgQD2SvXT41DgYazFgxj3\n"
+        "rT/PuDvnZcniUmKzOrJT2YecNECLlSPqXJ8Z7AGKE61kixmOFxE16pZFES3Ntb82\n"
+        "SpXap22eKx8X4h86pEwn3DAuIC+I2cPI4o4VzgwMudlMBnfOqVKUUrIV85eE7kzz\n"
+        "VJhWntvC/sEY9ED47rJ9P37nFwKBgQDrLT5aNshd4qAkkBCLjD6y18+Xw3FuUVjU\n"
+        "dHDNbiTlD3k7N01K2vHkCdSOl+vpUZr/VCmIKnT59zVDtESMrrNMeN/xMJixruJR\n"
+        "ASKG14E/jLpue3UFuG4/h2bMKxeZHQU19BtEfEG2kbRkW1nqu27CfvazjO4F67pR\n"
+        "vbEVk+2oiwKBgEHK5n5y0/EMxp2AltPa+RfhLEd1Pofx4CHmxSp3Cq3km3VuIskB\n"
+        "cxL2o7ah6QjZy7rUWKmhgAD1RNoV+f1j0UI2xaah+E1l/1en+hwPyuMXf/s7yPxJ\n"
+        "4RDcGQXxQ6X2eFzBiKjMqnwItWoySmYaLBO/ng8qBKVI4m5dPVsN8jWDAoGAA+o9\n"
+        "5nyQ+1cheVpYnCoahRmooAsl4UNDak4B7rmNra6DQyQZikx4yGYNfs4ypDCyltuM\n"
+        "0XJ7fgnKfjULCxiBbZ15hOddM2AI7nZJX9tIkIlENUCi4xR96VrUsENrYiYkhxBo\n"
+        "P8ydv29PhHgs2AaEwoIgkz6eW8Tf1iqFPym2RB8CgYAeQg8vQ8Ao3nG+k83gobGn\n"
+        "qebO0zbGjgNtVDnQuK6bbG/duJx5jTZa8DX8s5EDkUdUEY18504qbMjgOHb2oE5f\n"
+        "RrIR0HeDeneKiRy/ssLXT5JZnTZs/t3hrUiCGk540z2KgfUPOIqyhEEaYefHFNfS\n"
+        "16Pbqd20zlzDHeCuO/Fr+w==\n"
+        "-----END PRIVATE KEY-----\n"
+    ),
     "client_email": "sentinel@sentinel-project.iam.gserviceaccount.com",
     "token_uri": "https://oauth2.googleapis.com/token",
 }
@@ -106,14 +136,19 @@ def _install_fake_client(monkeypatch, models=None, exc=None):
     # throwaway sentinel key, defeating the SDK-boundary mocking this file's
     # module docstring documents. A no-op default here; individual tests
     # override it when they need to assert on/simulate the refresh itself.
-    monkeypatch.setattr(llm_client.service_account.Credentials, "refresh", lambda self, request: None)
+    monkeypatch.setattr(
+        llm_client.service_account.Credentials, "refresh", lambda self, request: None
+    )
 
 
 async def test_list_gemini_models_returns_stripped_names(monkeypatch):
-    _install_fake_client(monkeypatch, models=[
-        _model("models/gemini-flash-latest"),
-        _model("models/gemini-2.5-pro"),
-    ])
+    _install_fake_client(
+        monkeypatch,
+        models=[
+            _model("models/gemini-flash-latest"),
+            _model("models/gemini-2.5-pro"),
+        ],
+    )
     result = await llm_client.list_gemini_models("sentinel-api-key")
     assert result == llm_client.LlmModelsListed(models=["gemini-flash-latest", "gemini-2.5-pro"])
 
@@ -161,11 +196,14 @@ async def test_list_vertex_models_closes_the_client_on_failure(monkeypatch):
 
 
 async def test_list_gemini_models_filters_out_non_generate_content_models(monkeypatch):
-    _install_fake_client(monkeypatch, models=[
-        _model("models/gemini-flash-latest", supported_actions=["generateContent"]),
-        _model("models/embedding-001", supported_actions=["embedContent"]),
-        _model("models/no-actions", supported_actions=[]),
-    ])
+    _install_fake_client(
+        monkeypatch,
+        models=[
+            _model("models/gemini-flash-latest", supported_actions=["generateContent"]),
+            _model("models/embedding-001", supported_actions=["embedContent"]),
+            _model("models/no-actions", supported_actions=[]),
+        ],
+    )
     result = await llm_client.list_gemini_models("a")
     assert result == llm_client.LlmModelsListed(models=["gemini-flash-latest"])
 
@@ -203,7 +241,9 @@ async def test_list_gemini_models_server_error_is_unreachable(monkeypatch):
 async def test_list_vertex_models_returns_stripped_names_and_project_id(monkeypatch):
     _install_fake_client(monkeypatch, models=[_model("publishers/google/models/gemini-2.5-flash")])
     result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
-    assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+    assert result == llm_client.VertexModelsListed(
+        project_id="sentinel-project", models=["gemini-2.5-flash"]
+    )
 
 
 async def test_list_vertex_models_lets_through_models_with_no_known_capability(monkeypatch):
@@ -218,26 +258,37 @@ async def test_list_vertex_models_lets_through_models_with_no_known_capability(m
     from google.genai import models as genai_models
     from google.genai import types as genai_types
 
-    converted = genai_models._Model_from_vertex({"name": "publishers/google/models/gemini-2.5-flash"})
+    converted = genai_models._Model_from_vertex(
+        {"name": "publishers/google/models/gemini-2.5-flash"}
+    )
     assert "supported_actions" not in converted
     real_model = genai_types.Model(**converted)
     assert real_model.supported_actions is None
 
     _install_fake_client(monkeypatch, models=[real_model])
     result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
-    assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+    assert result == llm_client.VertexModelsListed(
+        project_id="sentinel-project", models=["gemini-2.5-flash"]
+    )
 
 
 async def test_list_vertex_models_still_filters_when_capability_is_known(monkeypatch):
     """If a future SDK version DOES populate supported_actions for Vertex,
     the filter must still apply -- the fix isn't "let everything through
     unconditionally", it's "don't drop what we can't classify"."""
-    _install_fake_client(monkeypatch, models=[
-        _model("publishers/google/models/gemini-2.5-flash", supported_actions=["generateContent"]),
-        _model("publishers/google/models/embedding-001", supported_actions=["embedContent"]),
-    ])
+    _install_fake_client(
+        monkeypatch,
+        models=[
+            _model(
+                "publishers/google/models/gemini-2.5-flash", supported_actions=["generateContent"]
+            ),
+            _model("publishers/google/models/embedding-001", supported_actions=["embedContent"]),
+        ],
+    )
     result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
-    assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=["gemini-2.5-flash"])
+    assert result == llm_client.VertexModelsListed(
+        project_id="sentinel-project", models=["gemini-2.5-flash"]
+    )
 
 
 async def test_list_vertex_models_constructs_client_with_project_and_fixed_location(monkeypatch):
@@ -277,8 +328,12 @@ async def test_list_vertex_models_rejects_non_google_token_uri(monkeypatch):
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("credentials must never be built from an unpinned token_uri")
 
-    monkeypatch.setattr(llm_client.service_account.Credentials, "from_service_account_info", _fail_if_called)
-    malicious = dict(_SENTINEL_SERVICE_ACCOUNT, token_uri="http://169.254.169.254/latest/meta-data/")
+    monkeypatch.setattr(
+        llm_client.service_account.Credentials, "from_service_account_info", _fail_if_called
+    )
+    malicious = dict(
+        _SENTINEL_SERVICE_ACCOUNT, token_uri="http://169.254.169.254/latest/meta-data/"
+    )
     result = await llm_client.list_vertex_models(_b64(malicious))
     assert result == llm_client.LlmApiFailed(reason="invalid_service_account_json")
 
@@ -291,7 +346,9 @@ async def test_list_vertex_models_rejects_non_google_universe_domain(monkeypatch
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("credentials must never be built from an unpinned universe_domain")
 
-    monkeypatch.setattr(llm_client.service_account.Credentials, "from_service_account_info", _fail_if_called)
+    monkeypatch.setattr(
+        llm_client.service_account.Credentials, "from_service_account_info", _fail_if_called
+    )
     malicious = dict(_SENTINEL_SERVICE_ACCOUNT, universe_domain="attacker-controlled.example")
     result = await llm_client.list_vertex_models(_b64(malicious))
     assert result == llm_client.LlmApiFailed(reason="invalid_service_account_json")
@@ -314,7 +371,10 @@ async def test_list_vertex_models_allows_missing_universe_domain(monkeypatch):
     assert "universe_domain" not in _SENTINEL_SERVICE_ACCOUNT
     _install_fake_client(monkeypatch, models=[])
     result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
-    assert not (isinstance(result, llm_client.LlmApiFailed) and result.reason == "invalid_service_account_json")
+    assert not (
+        isinstance(result, llm_client.LlmApiFailed)
+        and result.reason == "invalid_service_account_json"
+    )
 
 
 async def test_list_vertex_models_refreshes_credentials_off_the_event_loop(monkeypatch):
@@ -326,7 +386,8 @@ async def test_list_vertex_models_refreshes_credentials_off_the_event_loop(monke
     _install_fake_client(monkeypatch, models=[])
     calls = []
     monkeypatch.setattr(
-        llm_client.service_account.Credentials, "refresh",
+        llm_client.service_account.Credentials,
+        "refresh",
         lambda self, request: calls.append(request),
     )
     await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
@@ -353,7 +414,9 @@ async def test_list_vertex_models_auth_error_is_unauthorized(monkeypatch):
 
 
 async def test_list_vertex_models_forbidden(monkeypatch):
-    _install_fake_client(monkeypatch, exc=genai_errors.ClientError(403, {"message": "no vertex ai role"}))
+    _install_fake_client(
+        monkeypatch, exc=genai_errors.ClientError(403, {"message": "no vertex ai role"})
+    )
     result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
     assert result == llm_client.LlmApiFailed(reason="forbidden")
 
@@ -390,47 +453,69 @@ async def test_list_groq_models_returns_ids_unfiltered():
                 json={
                     "object": "list",
                     "data": [
-                        {"id": "llama-3.3-70b-versatile", "created": 1, "object": "model", "owned_by": "Meta"},
-                        {"id": "whisper-large-v3", "created": 1, "object": "model", "owned_by": "OpenAI"},
+                        {
+                            "id": "llama-3.3-70b-versatile",
+                            "created": 1,
+                            "object": "model",
+                            "owned_by": "Meta",
+                        },
+                        {
+                            "id": "whisper-large-v3",
+                            "created": 1,
+                            "object": "model",
+                            "owned_by": "OpenAI",
+                        },
                     ],
                 },
             )
         )
         result = await llm_client.list_groq_models("sentinel-key")
-    assert result == llm_client.LlmModelsListed(models=["llama-3.3-70b-versatile", "whisper-large-v3"])
+    assert result == llm_client.LlmModelsListed(
+        models=["llama-3.3-70b-versatile", "whisper-large-v3"]
+    )
 
 
 async def test_list_groq_models_sends_bearer_token():
     with respx.mock:
-        route = respx.get(MODELS_URL).mock(return_value=httpx.Response(200, json={"object": "list", "data": []}))
+        route = respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(200, json={"object": "list", "data": []})
+        )
         await llm_client.list_groq_models("sentinel-key")
     assert route.calls.last.request.headers["authorization"] == "Bearer sentinel-key"
 
 
 async def test_list_groq_models_unauthorized():
     with respx.mock:
-        respx.get(MODELS_URL).mock(return_value=httpx.Response(401, json={"error": {"message": "invalid key"}}))
+        respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(401, json={"error": {"message": "invalid key"}})
+        )
         result = await llm_client.list_groq_models("bad")
     assert result == llm_client.LlmApiFailed(reason="unauthorized")
 
 
 async def test_list_groq_models_forbidden():
     with respx.mock:
-        respx.get(MODELS_URL).mock(return_value=httpx.Response(403, json={"error": {"message": "forbidden"}}))
+        respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(403, json={"error": {"message": "forbidden"}})
+        )
         result = await llm_client.list_groq_models("a")
     assert result == llm_client.LlmApiFailed(reason="forbidden")
 
 
 async def test_list_groq_models_rate_limited():
     with respx.mock:
-        respx.get(MODELS_URL).mock(return_value=httpx.Response(429, json={"error": {"message": "slow down"}}))
+        respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(429, json={"error": {"message": "slow down"}})
+        )
         result = await llm_client.list_groq_models("a")
     assert result == llm_client.LlmApiFailed(reason="rate_limited")
 
 
 async def test_list_groq_models_unreachable_on_5xx():
     with respx.mock:
-        respx.get(MODELS_URL).mock(return_value=httpx.Response(500, json={"error": {"message": "oops"}}))
+        respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(500, json={"error": {"message": "oops"}})
+        )
         result = await llm_client.list_groq_models("a")
     assert result == llm_client.LlmApiFailed(reason="provider_unreachable")
 
@@ -447,7 +532,9 @@ async def test_list_groq_models_never_logs_the_api_key(caplog):
     the groq SDK dumps its request options, so that is the level worth
     pinning."""
     with respx.mock:
-        respx.get(MODELS_URL).mock(return_value=httpx.Response(401, json={"error": {"message": "bad key"}}))
+        respx.get(MODELS_URL).mock(
+            return_value=httpx.Response(401, json={"error": {"message": "bad key"}})
+        )
         with caplog.at_level("DEBUG"):
             await llm_client.list_groq_models("sentinel-super-secret-groq-key")
     assert "sentinel-super-secret-groq-key" not in caplog.text
