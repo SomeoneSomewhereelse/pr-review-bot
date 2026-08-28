@@ -239,6 +239,20 @@ section 3), not an oversight to fix.
   changes: the wire name matches the relay endpoint's pydantic field, the
   storage name matches this service's `GCP_SERVICE_ACCOUNT_KEY`-adjacent
   naming convention for sub-project 6 to read later.
+- **`list_vertex_models` validates the submitted service-account JSON's
+  `token_uri`/`universe_domain` against Google's real values before ever
+  constructing credentials from it — this is a load-bearing SSRF guard, not
+  a style nit.** `google.oauth2.service_account.Credentials` reads both
+  fields verbatim out of the caller-supplied dict and uses them as the
+  destination of the token-refresh request it issues later; since the
+  visitor also supplies the matching private key, an unpinned value lets
+  them redirect this server's own outbound request to an arbitrary host
+  (found by a dedicated security review, 2026-08-28 — see `ISSUES.md`).
+  Never relax this to "just check the JSON parses" again. The same fix
+  proactively refreshes the credential off the event loop via
+  `asyncio.to_thread` before the async listing call, since google-auth's
+  refresh is synchronous under the hood — remove this and every other
+  visitor's concurrent request stalls for the refresh round-trip.
 
 ## What sub-project 5 (UptimeRobot keep-warm frame) adds to these rules
 
@@ -288,6 +302,22 @@ section 3), not an oversight to fix.
   UptimeRobot has no official SDK. Tests mock via `respx`, same as those
   three modules, not the SDK-boundary mocking `llm_client.py`'s tests
   needed for `google-genai`.
+- **Dedupe-before-create pages through every result via v3's cursor-based
+  `nextLink`, not just the first `GET /monitors` response (2026-08-28 fix,
+  see `ISSUES.md`)** — a single-page scan silently misses a match on any
+  account with more monitors than fit in one page, defeating the
+  dedupe-is-load-bearing guarantee above. The page cap
+  (`_MAX_LIST_PAGES`) is a defensive bound against a malformed/looping
+  `nextLink`, not an expected real-account limit.
+- **`delete_monitor` (backed by `DELETE /v3/monitors/{id}`) exists so a
+  changed render-key or render-service frame can clean up the monitor it
+  orphans** — `onboarding/static/index.html`'s `cleanupOrphanedUptimeMonitor()`
+  calls it best-effort from `beginChange`, before `relockDownstreamOf`
+  clears the uptime-pinger frame's own `sessionStorage` record (which is
+  where the monitor id it needs comes from). Only `render-key` and
+  `render-service` changes trigger it — every other frame's "Change"
+  leaves the deployed service's URL, and therefore the existing monitor,
+  valid.
 
 ## What sub-project 6 (Render service creation + deploy, final) adds to these rules
 
@@ -361,6 +391,16 @@ section 3), not an oversight to fix.
   first. A failed webhook-set does NOT push-and-clear or complete the
   frame; it shows a retry affordance instead, since retrying the whole
   GitHub install flow is not otherwise reachable from that state.
+  **The stored record's `completed` flag (not `installation_id`'s mere
+  presence) is what `restoreFromSession()` gates the frame's "done" state
+  on** (2026-08-28 fix, see `ISSUES.md`) — `installation_id` is written
+  before the webhook-set/push-and-clear step runs, so gating on it let a
+  reload right after a webhook-set failure falsely mark the frame done
+  with the webhook still pointed at the manifest's placeholder URL. On a
+  reload with `installation_id` set but `completed` still false,
+  `restoreFromSession()` re-invokes `finishGithubAppSetup` itself rather
+  than showing a dead end — same auto-resume shape as the Supabase branch
+  beside it.
 
 ## The test suite looks hung on a fresh worktree — it isn't
 

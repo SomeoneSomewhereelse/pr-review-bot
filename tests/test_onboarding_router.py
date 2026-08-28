@@ -593,7 +593,7 @@ async def test_uptimerobot_monitor_created_reports_created_true(monkeypatch):
     async def fake_create(api_key, render_service_url):
         assert api_key == SENTINEL_KEY
         assert render_service_url == "https://sentinel-service.onrender.com"
-        return uptimerobot_client.UptimeRobotMonitorResult(created=True)
+        return uptimerobot_client.UptimeRobotMonitorResult(created=True, monitor_id=42)
 
     monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
     client = await _client()
@@ -602,12 +602,12 @@ async def test_uptimerobot_monitor_created_reports_created_true(monkeypatch):
         json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"valid": True, "created": True}
+    assert resp.json() == {"valid": True, "created": True, "monitor_id": 42}
 
 
 async def test_uptimerobot_monitor_reused_reports_created_false(monkeypatch):
     async def fake_create(api_key, render_service_url):
-        return uptimerobot_client.UptimeRobotMonitorResult(created=False)
+        return uptimerobot_client.UptimeRobotMonitorResult(created=False, monitor_id=42)
 
     monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
     client = await _client()
@@ -616,7 +616,7 @@ async def test_uptimerobot_monitor_reused_reports_created_false(monkeypatch):
         json={"api_key": SENTINEL_KEY, "render_service_url": "https://sentinel-service.onrender.com"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"valid": True, "created": False}
+    assert resp.json() == {"valid": True, "created": False, "monitor_id": 42}
 
 
 async def test_uptimerobot_failure_reports_the_reason(monkeypatch):
@@ -692,7 +692,7 @@ async def test_uptimerobot_render_url_is_stripped_before_the_client_sees_it(monk
 
     async def fake_create(api_key, render_service_url):
         seen["url"] = render_service_url
-        return uptimerobot_client.UptimeRobotMonitorResult(created=True)
+        return uptimerobot_client.UptimeRobotMonitorResult(created=True, monitor_id=42)
 
     monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
     client = await _client()
@@ -702,6 +702,67 @@ async def test_uptimerobot_render_url_is_stripped_before_the_client_sees_it(monk
     )
     assert resp.status_code == 200
     assert seen["url"] == "https://s.onrender.com"
+
+
+async def test_uptimerobot_delete_monitor_reports_valid_true(monkeypatch):
+    async def fake_delete(api_key, monitor_id):
+        assert api_key == SENTINEL_KEY
+        assert monitor_id == 42
+        return uptimerobot_client.UptimeRobotMonitorDeleted()
+
+    monkeypatch.setattr(uptimerobot_client, "delete_monitor", fake_delete)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/delete-monitor",
+        json={"api_key": SENTINEL_KEY, "monitor_id": 42},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+
+
+async def test_uptimerobot_delete_monitor_failure_reports_the_reason(monkeypatch):
+    async def fake_delete(api_key, monitor_id):
+        return uptimerobot_client.UptimeRobotApiFailed(reason="unauthorized")
+
+    monkeypatch.setattr(uptimerobot_client, "delete_monitor", fake_delete)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/delete-monitor",
+        json={"api_key": SENTINEL_KEY, "monitor_id": 42},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": False, "reason": "unauthorized"}
+
+
+async def test_uptimerobot_delete_monitor_never_echoes_the_submitted_key(monkeypatch):
+    async def fake_delete(api_key, monitor_id):
+        return uptimerobot_client.UptimeRobotApiFailed(reason="unauthorized")
+
+    monkeypatch.setattr(uptimerobot_client, "delete_monitor", fake_delete)
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/delete-monitor",
+        json={"api_key": SENTINEL_KEY, "monitor_id": 42},
+    )
+    assert SENTINEL_KEY not in resp.text
+
+
+async def test_uptimerobot_delete_monitor_rejects_non_positive_id():
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/delete-monitor",
+        json={"api_key": SENTINEL_KEY, "monitor_id": 0},
+    )
+    assert resp.status_code == 422
+
+
+async def test_uptimerobot_delete_monitor_rejects_empty_key():
+    client = await _client()
+    resp = await client.post(
+        "/api/uptimerobot/delete-monitor",
+        json={"api_key": "", "monitor_id": 42},
+    )
+    assert resp.status_code == 422
 
 
 async def test_create_service_endpoint_returns_id_and_url(monkeypatch):

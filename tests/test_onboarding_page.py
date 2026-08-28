@@ -423,7 +423,7 @@ async def test_restore_from_session_resumes_polling_for_a_ref_without_a_connecti
     client = await _client()
     body = (await client.get("/")).text
     assert "showSupabaseProvisioning()" in body
-    assert "pollUntilReady(Date.now())" in body
+    assert "pollUntilReady(Date.now(), supabasePollGeneration)" in body
     assert "function restoreFromSession" in body
 
 
@@ -765,6 +765,12 @@ async def test_uptimerobot_endpoint_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
     assert body.count('fetch("/api/uptimerobot/create-monitor"') == 1
+
+
+async def test_uptimerobot_delete_monitor_endpoint_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/uptimerobot/delete-monitor"') == 1
 
 
 async def test_frame5_blocked_state_reads_the_forward_contract_key():

@@ -8,6 +8,7 @@ docs/superpowers/specs/2026-08-27-onboarding-llm-provider-frame-design.md
 sections 3-4."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import dataclasses
@@ -17,6 +18,7 @@ import groq
 import httpx
 from google import genai
 from google.auth import exceptions as google_auth_exceptions
+from google.auth.transport import requests as google_auth_requests
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 from google.oauth2 import service_account
@@ -24,6 +26,17 @@ from google.oauth2 import service_account
 _VERTEX_SCOPES = ["https://www.googleapis.com/auth/cloud-platform"]
 _VERTEX_LOCATION = "us-central1"
 _REQUEST_TIMEOUT_MS = 10_000
+
+# The only values from a visitor-supplied service-account JSON that
+# google.oauth2.service_account.Credentials uses to pick the destination of
+# its own outbound token-refresh request -- token_uri is required by
+# from_service_account_info, universe_domain is optional. Left unpinned, a
+# visitor who supplies a matching self-generated private key (they always
+# can, since they built the JSON themselves) can fully control where this
+# server issues that request: an SSRF via a "paste your service-account key"
+# feature. Anything other than Google's real values is rejected outright.
+_VERTEX_TOKEN_URI = "https://oauth2.googleapis.com/token"
+_VERTEX_UNIVERSE_DOMAIN = "googleapis.com"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -112,6 +125,16 @@ async def list_vertex_models(service_account_key_b64: str) -> VertexModelsListed
     except (binascii.Error, ValueError, KeyError, TypeError):
         return LlmApiFailed(reason="invalid_service_account_json")
 
+    # SSRF guard -- see the module-level comment on _VERTEX_TOKEN_URI. Must
+    # run before from_service_account_info() below, which is what actually
+    # reads these fields off info and wires them into the credential object.
+    submitted_token_uri = info.get("token_uri")
+    if submitted_token_uri is not None and submitted_token_uri != _VERTEX_TOKEN_URI:
+        return LlmApiFailed(reason="invalid_service_account_json")
+    submitted_universe_domain = info.get("universe_domain")
+    if submitted_universe_domain not in (None, _VERTEX_UNIVERSE_DOMAIN):
+        return LlmApiFailed(reason="invalid_service_account_json")
+
     try:
         creds = service_account.Credentials.from_service_account_info(info, scopes=_VERTEX_SCOPES)
     except ValueError:
@@ -127,6 +150,16 @@ async def list_vertex_models(service_account_key_b64: str) -> VertexModelsListed
         http_options=genai_types.HttpOptions(timeout=_REQUEST_TIMEOUT_MS),
     )
     try:
+        # google-auth's Credentials.refresh() is synchronous (requests-based
+        # transport, per this module's own docs/superpowers spec section 6)
+        # -- refreshing it here, off the event loop via asyncio.to_thread,
+        # means client.aio.models.list() below finds an already-valid token
+        # and skips its own internal, un-thread-wrapped synchronous refresh,
+        # which would otherwise block this single-process server's event
+        # loop for every other concurrent visitor's request for the
+        # round-trip's duration. Same reasoning as github_client.py already
+        # wrapping its own blocking PyGithub calls in asyncio.to_thread.
+        await asyncio.to_thread(creds.refresh, google_auth_requests.Request())
         models = await _list_generative_models(client)
     except genai_errors.APIError as exc:
         return LlmApiFailed(reason=_reason_for_client_error_code(exc.code))

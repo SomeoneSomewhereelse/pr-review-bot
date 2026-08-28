@@ -430,6 +430,7 @@
       err_supabase_forbidden: "Supabase rejected that action for your account.",
       err_supabase_rate_limited: "Too many requests to Supabase right now. Try again in a moment.",
       err_supabase_unreachable: "Supabase is unreachable right now. Try again in a moment.",
+      err_supabase_no_organizations: "Your Supabase account has no organizations yet. Create one at supabase.com, then connect again.",
       err_supabase_pooler_config_unavailable: "Your project's database connection isn't ready yet. Try again in a moment.",
       err_supabase_provisioning_failed: "Supabase couldn't finish setting up your project. Try creating it again.",
       err_supabase_provisioning_timeout: "Still provisioning — this is taking longer than usual. You can check again, or come back later.",
@@ -547,6 +548,7 @@
       err_supabase_forbidden: "Supabase דחה את הפעולה עבור החשבון שלכם.",
       err_supabase_rate_limited: "יותר מדי בקשות ל-Supabase כרגע. נסו שוב בעוד רגע.",
       err_supabase_unreachable: "Supabase אינו זמין כרגע. נסו שוב בעוד רגע.",
+      err_supabase_no_organizations: "לחשבון ה-Supabase שלכם אין עדיין ארגונים. צרו ארגון באתר supabase.com ואז התחברו שוב.",
       err_supabase_pooler_config_unavailable: "חיבור מסד הנתונים של הפרויקט עדיין לא מוכן. נסו שוב בעוד רגע.",
       err_supabase_provisioning_failed: "Supabase לא הצליח לסיים את הקמת הפרויקט. נסו ליצור אותו מחדש.",
       err_supabase_provisioning_timeout: "עדיין בהקמה — זה לוקח יותר זמן מהרגיל. אפשר לבדוק שוב, או לחזור מאוחר יותר.",
@@ -727,6 +729,17 @@
   let currentGithubAppErrorKey = null;
   let currentSupabaseErrorKey = null;
 
+  // Bumped every time the Supabase frame is reset (lockFrame, beginChange,
+  // or a terminal error) -- a poll started before the bump checks its
+  // captured value against the current one and stops applying results if
+  // they've diverged, instead of a stale setTimeout callback overwriting a
+  // freshly reset frame's state after the visitor changed an upstream
+  // frame mid-poll.
+  let supabasePollGeneration = 0;
+  // Same pattern as supabasePollGeneration above, for the render-deploy
+  // frame's own poll loop.
+  let renderDeployPollGeneration = 0;
+
   function frameEl(id) {
     return document.getElementById(`frame-${id}`);
   }
@@ -807,7 +820,44 @@
     if (next) unlockFrame(next);
   }
 
+  // Best-effort cleanup for an UptimeRobot monitor left watching a Render
+  // service URL that's about to stop existing. Only render-key and
+  // render-service changes can invalidate render-service's URL (every
+  // other frame's "Change" leaves it alone) -- called from beginChange
+  // BEFORE relockDownstreamOf runs, since that clears the uptime-pinger
+  // frame's own sessionStorage record (including this monitor_id) as part
+  // of locking it. Reads synchronously before its first await, so the call
+  // site doesn't need to await this itself for the read to be safe.
+  async function cleanupOrphanedUptimeMonitor() {
+    let stored;
+    try {
+      stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"]) || "null");
+    } catch (err) {
+      return;
+    }
+    if (!stored || !stored.api_key || !stored.monitor_id) return;
+    try {
+      const resp = await fetch("/api/uptimerobot/delete-monitor", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({api_key: stored.api_key, monitor_id: stored.monitor_id}),
+      });
+      const body = await resp.json();
+      if (!body.valid) {
+        console.warn("UptimeRobot monitor cleanup failed:", "/api/uptimerobot/delete-monitor", "reason:", body.reason);
+      }
+    } catch (err) {
+      // best-effort -- same failure handling as the push-and-clear helpers
+      // above (e.g. pushGithubAppToRenderService): a network failure here
+      // never blocks the frame change it was triggered by.
+      console.warn("UptimeRobot monitor cleanup failed:", "/api/uptimerobot/delete-monitor", "network error");
+    }
+  }
+
   function beginChange(id) {
+    if (id === "render-key" || id === "render-service") {
+      cleanupOrphanedUptimeMonitor();
+    }
     relockDownstreamOf(id);
     const el = frameEl(id);
     el.dataset.locked = "false";
@@ -1164,7 +1214,7 @@
       return;
     }
     if (body.valid) {
-      sessionStorage.setItem(STORAGE_KEYS["uptime-pinger"], JSON.stringify({api_key: key}));
+      sessionStorage.setItem(STORAGE_KEYS["uptime-pinger"], JSON.stringify({api_key: key, monitor_id: body.monitor_id}));
       input.value = "";
       completeFrame("uptime-pinger", body.created ? "monitor_created_detail" : "monitor_reused_detail", null);
     } else {
@@ -1373,6 +1423,7 @@
     document.getElementById("github-app-webhook-retry-section").style.display = "none";
     document.getElementById("github-app-create-section").style.display = "block";
     document.getElementById("github-app-error").textContent = "";
+    document.getElementById("github-app-webhook-retry-submit").disabled = false;
     currentGithubAppErrorKey = null;
   }
 
@@ -1528,6 +1579,12 @@
       return;
     }
     await pushGithubAppToRenderService(stored);
+    // Explicit flag, not inferred from installation_id's mere presence --
+    // that field is written earlier (handleGithubInstallCallback, before
+    // this function even runs) and would otherwise make restoreFromSession()
+    // treat a webhook-set failure as a completed frame on reload. Same
+    // pattern as the Supabase frame's own `completed` flag.
+    stored.completed = true;
     sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
     completeFrame("github-app", "account_prefix", accountLogin);
   }
@@ -1537,7 +1594,10 @@
     if (!stored || !stored.account_login) return;
     document.getElementById("github-app-error").textContent = "";
     currentGithubAppErrorKey = null;
+    const retryBtn = document.getElementById("github-app-webhook-retry-submit");
+    if (retryBtn) retryBtn.disabled = true;
     await finishGithubAppSetup(stored, stored.account_login);
+    if (retryBtn) retryBtn.disabled = false;
   }
 
   async function handleGithubInstallCallback() {
@@ -1547,7 +1607,9 @@
     const expectedState = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
     sessionStorage.removeItem(GITHUB_MANIFEST_STATE_KEY);
     const installationId = params.get("installation_id");
-    if (!expectedState || params.get("state") !== expectedState || !installationId) {
+    const parsedInstallationId = parseInt(installationId, 10);
+    if (!expectedState || params.get("state") !== expectedState || !installationId
+        || !Number.isInteger(parsedInstallationId) || parsedInstallationId <= 0) {
       githubAppError("err_github_callback_invalid");
       return;
     }
@@ -1564,7 +1626,7 @@
         body: JSON.stringify({
           app_id: stored.app_id,
           private_key_b64: stored.private_key_b64,
-          installation_id: parseInt(installationId, 10),
+          installation_id: parsedInstallationId,
         }),
       });
     } catch (err) {
@@ -1580,7 +1642,7 @@
       return;
     }
     if (body.valid) {
-      stored.installation_id = parseInt(installationId, 10);
+      stored.installation_id = parsedInstallationId;
       stored.account_login = body.account_login;
       sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
       await finishGithubAppSetup(stored, body.account_login);
@@ -1616,6 +1678,7 @@
   }
 
   function resetSupabaseConnectSection() {
+    supabasePollGeneration++;
     document.getElementById("supabase-org-section").style.display = "none";
     document.getElementById("supabase-provisioning-section").style.display = "none";
     document.getElementById("supabase-check-status-submit").style.display = "none";
@@ -1770,7 +1833,16 @@
     const params = new URLSearchParams(location.search);
     if (params.get("supabase_step") !== "oauth_callback") return;
     history.replaceState(null, "", location.pathname);
-    const pending = JSON.parse(sessionStorage.getItem(SUPABASE_PENDING_KEY) || "null");
+    // Same defensive shape as readStoredGithubApp()/readStoredSupabase()
+    // above -- a corrupted/foreign-shaped stored value must never throw out
+    // of this handler, which would otherwise leave the visitor back from
+    // Supabase's consent screen with no visible error at all.
+    let pending;
+    try {
+      pending = JSON.parse(sessionStorage.getItem(SUPABASE_PENDING_KEY) || "null");
+    } catch (err) {
+      pending = null;
+    }
     sessionStorage.removeItem(SUPABASE_PENDING_KEY);
     const code = params.get("code");
     if (!pending || params.get("state") !== pending.state || !code) {
@@ -1819,6 +1891,15 @@
     const body = await callSupabaseRelay("/api/supabase/list-organizations", {});
     if (!body.valid) {
       supabaseErrorForReason(body.reason, body.message);
+      return;
+    }
+    if (body.orgs.length === 0) {
+      // Terminal, same as supabaseErrorForReason's own terminal branches:
+      // an empty org list can't be fixed by resubmitting the same request,
+      // and leaving the org picker up with zero options is worse than
+      // putting "Connect Supabase" back with a clear reason.
+      resetSupabaseConnectSection();
+      supabaseError("err_supabase_no_organizations");
       return;
     }
     if (body.orgs.length === 1) {
@@ -1886,7 +1967,7 @@
       return false;
     }
     showSupabaseProvisioning();
-    pollUntilReady(Date.now());
+    pollUntilReady(Date.now(), supabasePollGeneration);
     return true;
   }
 
@@ -1925,10 +2006,12 @@
     return await callSupabaseRelay("/api/supabase/project-status", {ref: ref});
   }
 
-  async function pollUntilReady(startedAt) {
+  async function pollUntilReady(startedAt, generation) {
+    if (generation !== supabasePollGeneration) return;
     const stored = readStoredSupabase();
     if (!stored || !stored.ref) return;
     const body = await fetchProjectStatus(stored.ref);
+    if (generation !== supabasePollGeneration) return;
     const outcome = await handleProjectStatusResult(body);
     if (outcome !== "pending") return;
     if (Date.now() - startedAt >= SUPABASE_POLL_TIMEOUT_MS) {
@@ -1936,7 +2019,7 @@
       document.getElementById("supabase-check-status-submit").style.display = "inline-block";
       return;
     }
-    setTimeout(() => { pollUntilReady(startedAt); }, SUPABASE_POLL_INTERVAL_MS);
+    setTimeout(() => { pollUntilReady(startedAt, generation); }, SUPABASE_POLL_INTERVAL_MS);
   }
 
   async function checkSupabaseStatusOnce() {
@@ -1944,7 +2027,9 @@
     if (!stored || !stored.ref) return;
     document.getElementById("supabase-error").textContent = "";
     currentSupabaseErrorKey = null;
+    const generation = supabasePollGeneration;
     const body = await fetchProjectStatus(stored.ref);
+    if (generation !== supabasePollGeneration) return;
     const outcome = await handleProjectStatusResult(body);
     if (outcome === "pending") {
       supabaseError("err_supabase_provisioning_timeout");
@@ -1957,6 +2042,7 @@
   const RENDER_DEPLOY_POLL_TIMEOUT_MS = 900000;
 
   function resetRenderDeploySection() {
+    renderDeployPollGeneration++;
     document.getElementById("render-deploy-trigger-section").style.display = "block";
     document.getElementById("render-deploy-polling-section").style.display = "none";
     document.getElementById("render-deploy-done-section").style.display = "none";
@@ -2051,8 +2137,10 @@
     return "pending";
   }
 
-  async function pollRenderDeployStatus(serviceId, deployId, startedAt) {
+  async function pollRenderDeployStatus(serviceId, deployId, startedAt, generation) {
+    if (generation !== renderDeployPollGeneration) return;
     const body = await fetchRenderDeployStatus(serviceId, deployId);
+    if (generation !== renderDeployPollGeneration) return;
     const outcome = handleRenderDeployStatusResult(body);
     if (outcome !== "pending") return;
     if (Date.now() - startedAt >= RENDER_DEPLOY_POLL_TIMEOUT_MS) {
@@ -2060,7 +2148,7 @@
       document.getElementById("render-deploy-check-again-submit").style.display = "inline-block";
       return;
     }
-    setTimeout(() => { pollRenderDeployStatus(serviceId, deployId, startedAt); }, RENDER_DEPLOY_POLL_INTERVAL_MS);
+    setTimeout(() => { pollRenderDeployStatus(serviceId, deployId, startedAt, generation); }, RENDER_DEPLOY_POLL_INTERVAL_MS);
   }
 
   async function checkRenderDeployStatusOnce() {
@@ -2068,7 +2156,9 @@
     if (!stored || !stored.service_id || !stored.pending_deploy_id) return;
     document.getElementById("render-deploy-error").textContent = "";
     currentRenderDeployErrorKey = null;
+    const generation = renderDeployPollGeneration;
     const body = await fetchRenderDeployStatus(stored.service_id, stored.pending_deploy_id);
+    if (generation !== renderDeployPollGeneration) return;
     const outcome = handleRenderDeployStatusResult(body);
     if (outcome === "pending") {
       renderDeployError("err_render_deploy_timeout");
@@ -2117,7 +2207,7 @@
     sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(stored));
     document.getElementById("render-deploy-trigger-section").style.display = "none";
     document.getElementById("render-deploy-polling-section").style.display = "block";
-    pollRenderDeployStatus(stored.service_id, body.deploy_id, Date.now());
+    pollRenderDeployStatus(stored.service_id, body.deploy_id, Date.now(), renderDeployPollGeneration);
   }
 
   async function pushSupabaseToRenderService(stored) {
@@ -2194,8 +2284,16 @@
       completeFrame("render-service", "url_prefix", (readStoredRenderService() || {}).service_url);
     }
     const githubApp = readStoredGithubApp();
-    if (githubApp && githubApp.installation_id) {
+    if (githubApp && githubApp.completed) {
       completeFrame("github-app", "restored", null);
+    } else if (githubApp && githubApp.installation_id) {
+      // Installed, but the webhook-correction/push-and-clear step never
+      // finished (e.g. a reload right after a webhook-set failure) --
+      // resume it rather than falsely marking the frame done, the same way
+      // the Supabase branch below resumes an interrupted poll instead of
+      // completing on partial data.
+      frameEl("github-app").open = true;
+      finishGithubAppSetup(githubApp, githubApp.account_login);
     } else if (githubApp) {
       showGithubAppReadyToInstall();
     }
@@ -2204,7 +2302,7 @@
       completeFrame("supabase", "restored", null);
     } else if (supabaseState && supabaseState.ref) {
       showSupabaseProvisioning();
-      pollUntilReady(Date.now());
+      pollUntilReady(Date.now(), supabasePollGeneration);
     }
     if (sessionStorage.getItem(STORAGE_KEYS["llm-provider"])) {
       completeFrame("llm-provider", "restored", null);
@@ -2218,7 +2316,9 @@
     } else if (renderServiceState && renderServiceState.pending_deploy_id) {
       document.getElementById("render-deploy-trigger-section").style.display = "none";
       document.getElementById("render-deploy-polling-section").style.display = "block";
-      pollRenderDeployStatus(renderServiceState.service_id, renderServiceState.pending_deploy_id, Date.now());
+      pollRenderDeployStatus(
+        renderServiceState.service_id, renderServiceState.pending_deploy_id, Date.now(), renderDeployPollGeneration
+      );
     }
   }
 

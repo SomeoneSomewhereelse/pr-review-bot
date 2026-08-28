@@ -99,6 +99,14 @@ def _install_fake_client(monkeypatch, models=None, exc=None):
     _FakeClient._next_models = models or []
     _FakeClient._next_exc = exc
     monkeypatch.setattr(llm_client.genai, "Client", _FakeClient)
+    # list_vertex_models proactively calls the REAL (unmocked)
+    # service_account.Credentials.refresh() off-thread before touching the
+    # fake genai.Client -- without this, every Vertex test below would
+    # attempt an actual network call to Google's token endpoint using the
+    # throwaway sentinel key, defeating the SDK-boundary mocking this file's
+    # module docstring documents. A no-op default here; individual tests
+    # override it when they need to assert on/simulate the refresh itself.
+    monkeypatch.setattr(llm_client.service_account.Credentials, "refresh", lambda self, request: None)
 
 
 async def test_list_gemini_models_returns_stripped_names(monkeypatch):
@@ -255,6 +263,87 @@ async def test_list_vertex_models_missing_project_id_is_invalid_service_account_
     del bad["project_id"]
     result = await llm_client.list_vertex_models(_b64(bad))
     assert result == llm_client.LlmApiFailed(reason="invalid_service_account_json")
+
+
+async def test_list_vertex_models_rejects_non_google_token_uri(monkeypatch):
+    """SSRF guard: from_service_account_info() reads token_uri straight out
+    of the visitor-supplied dict and google-auth uses it as the destination
+    of the token-refresh request it later issues -- an unpinned value lets a
+    visitor (who also controls the matching private key) redirect that
+    server-side outbound request to an arbitrary host. Credentials must
+    never even be constructed from a mismatched value, so the test fails
+    loudly if from_service_account_info is reached at all."""
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("credentials must never be built from an unpinned token_uri")
+
+    monkeypatch.setattr(llm_client.service_account.Credentials, "from_service_account_info", _fail_if_called)
+    malicious = dict(_SENTINEL_SERVICE_ACCOUNT, token_uri="http://169.254.169.254/latest/meta-data/")
+    result = await llm_client.list_vertex_models(_b64(malicious))
+    assert result == llm_client.LlmApiFailed(reason="invalid_service_account_json")
+
+
+async def test_list_vertex_models_rejects_non_google_universe_domain(monkeypatch):
+    """Same SSRF class as the token_uri guard above -- universe_domain is
+    the other field google-auth reads off the submitted dict that can steer
+    where an outbound request lands."""
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("credentials must never be built from an unpinned universe_domain")
+
+    monkeypatch.setattr(llm_client.service_account.Credentials, "from_service_account_info", _fail_if_called)
+    malicious = dict(_SENTINEL_SERVICE_ACCOUNT, universe_domain="attacker-controlled.example")
+    result = await llm_client.list_vertex_models(_b64(malicious))
+    assert result == llm_client.LlmApiFailed(reason="invalid_service_account_json")
+
+
+async def test_list_vertex_models_allows_the_real_google_token_uri(monkeypatch):
+    """The guard must not reject a legitimate credential using Google's own
+    token endpoint -- every other Vertex test already exercises this
+    implicitly via _SENTINEL_SERVICE_ACCOUNT; this test makes the allow-path
+    explicit rather than relying on that as an accident of other tests."""
+    _install_fake_client(monkeypatch, models=[])
+    result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert result == llm_client.VertexModelsListed(project_id="sentinel-project", models=[])
+
+
+async def test_list_vertex_models_allows_missing_universe_domain(monkeypatch):
+    """universe_domain is optional in a real service-account JSON (absent
+    from _SENTINEL_SERVICE_ACCOUNT); absence must not be treated as a
+    rejection."""
+    assert "universe_domain" not in _SENTINEL_SERVICE_ACCOUNT
+    _install_fake_client(monkeypatch, models=[])
+    result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert not (isinstance(result, llm_client.LlmApiFailed) and result.reason == "invalid_service_account_json")
+
+
+async def test_list_vertex_models_refreshes_credentials_off_the_event_loop(monkeypatch):
+    """Confirms the proactive refresh actually happens (via
+    asyncio.to_thread, off the event loop) rather than trusting the SDK to
+    have refreshed internally -- which would still block the loop. See the
+    module-level comment above the await asyncio.to_thread(creds.refresh,
+    ...) call in list_vertex_models."""
+    _install_fake_client(monkeypatch, models=[])
+    calls = []
+    monkeypatch.setattr(
+        llm_client.service_account.Credentials, "refresh",
+        lambda self, request: calls.append(request),
+    )
+    await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert len(calls) == 1
+
+
+async def test_list_vertex_models_refresh_error_is_unauthorized(monkeypatch):
+    """A RefreshError raised by the proactive refresh step itself (not just
+    by the later models.list() call) must map the same way."""
+    _install_fake_client(monkeypatch, models=[])
+
+    def _raise(self, request):
+        raise google_auth_exceptions.RefreshError("bad credentials")
+
+    monkeypatch.setattr(llm_client.service_account.Credentials, "refresh", _raise)
+    result = await llm_client.list_vertex_models(_b64(_SENTINEL_SERVICE_ACCOUNT))
+    assert result == llm_client.LlmApiFailed(reason="unauthorized")
 
 
 async def test_list_vertex_models_auth_error_is_unauthorized(monkeypatch):

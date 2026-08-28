@@ -58,7 +58,7 @@ class SupabaseListOrgsRequest(BaseModel):
 
 class SupabaseCreateProjectRequest(BaseModel):
     access_token: str = Field(max_length=4096)
-    organization_slug: str = Field(max_length=64)
+    organization_slug: str = Field(min_length=1, max_length=64)
     name: str = Field(max_length=256)
     db_pass: str = Field(max_length=256)
 
@@ -83,6 +83,11 @@ class LlmGroqListModelsRequest(BaseModel):
 
 class LlmVertexListModelsRequest(BaseModel):
     service_account_key_b64: str = Field(min_length=1, max_length=16384)
+
+
+class UptimeRobotDeleteMonitorRequest(BaseModel):
+    api_key: str = Field(min_length=1, max_length=512)
+    monitor_id: int = Field(gt=0)
 
 
 class UptimeRobotCreateMonitorRequest(BaseModel):
@@ -319,7 +324,19 @@ async def create_uptimerobot_monitor(payload: UptimeRobotCreateMonitorRequest) -
         payload.api_key, payload.render_service_url
     )
     if isinstance(result, uptimerobot_client.UptimeRobotMonitorResult):
-        return {"valid": True, "created": result.created}
+        return {"valid": True, "created": result.created, "monitor_id": result.monitor_id}
+    return {"valid": False, "reason": result.reason}
+
+
+@router.post("/api/uptimerobot/delete-monitor")
+async def delete_uptimerobot_monitor(payload: UptimeRobotDeleteMonitorRequest) -> dict:
+    """Best-effort cleanup, called when an earlier frame change (render-key
+    or render-service) invalidates a monitor a visitor already created for
+    the old service URL -- see onboarding/static/index.html's
+    cleanupOrphanedUptimeMonitor()."""
+    result = await uptimerobot_client.delete_monitor(payload.api_key, payload.monitor_id)
+    if isinstance(result, uptimerobot_client.UptimeRobotMonitorDeleted):
+        return {"valid": True}
     return {"valid": False, "reason": result.reason}
 
 
