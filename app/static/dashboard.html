@@ -188,6 +188,7 @@
   <header class="topbar">
     <button id="themeToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
     <button id="langToggleBtn" class="control" type="button" aria-haspopup="dialog"></button>
+    <button id="logoutBtn" class="control" type="button" data-i18n="logout_label"></button>
   </header>
 
   <div id="themePopupBackdrop" class="popup-backdrop">
@@ -247,6 +248,7 @@
         sp_name_quality: "Code Quality",
         sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
         backoff_none: "none",
+        logout_label: "Log out",
       },
       he: {
         dashboard_title: "מנוע בדיקת קוד — לוח בקרה",
@@ -275,6 +277,7 @@
         sp_name_quality: "איכות קוד",
         sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
         backoff_none: "אין",
+        logout_label: "התנתק",
       },
     };
 
@@ -460,6 +463,14 @@
       const banner = document.getElementById("errorBanner");
       try {
         const response = await fetch("/api/dashboard");
+        if (response.status === 401) {
+          // Session expired (or was never valid) -- the error banner would
+          // otherwise show a permanent, misleading "data unavailable" state
+          // while polling a 401 every 4 seconds forever. Redirect straight
+          // to /login instead of touching the banner at all.
+          window.location.href = "/login";
+          return;
+        }
         const data = await response.json();
         const hasError = data.stats.error || data.queue.by_status.error || data.reviews.error;
         banner.hidden = !hasError;
@@ -504,6 +515,13 @@
 
     document.getElementById("themeToggleBtn").addEventListener("click", (event) => openPopup("themePopupBackdrop", event.currentTarget));
     document.getElementById("langToggleBtn").addEventListener("click", (event) => openPopup("langPopupBackdrop", event.currentTarget));
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      try {
+        await fetch("/api/logout", { method: "POST" });
+      } finally {
+        window.location.href = "/login";
+      }
+    });
 
     document.querySelectorAll(".popup-backdrop").forEach((backdrop) => {
       backdrop.addEventListener("click", (event) => {

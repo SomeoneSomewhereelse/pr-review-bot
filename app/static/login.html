@@ -199,6 +199,7 @@
         remember_label: "Remember me",
         submit_label: "Sign in",
         error_invalid_credentials: "Incorrect username or password.",
+        error_network: "Could not reach the server. Check your connection and try again.",
         theme_light: "Light",
         theme_dark: "Dark",
         theme_system: "System",
@@ -212,6 +213,7 @@
         remember_label: "זכור אותי",
         submit_label: "התחבר",
         error_invalid_credentials: "שם משתמש או סיסמה שגויים.",
+        error_network: "לא ניתן היה להתחבר לשרת. בדקו את החיבור ונסו שוב.",
         theme_light: "בהיר",
         theme_dark: "כהה",
         theme_system: "מערכת",
@@ -340,7 +342,7 @@
           errorEl.textContent = t("error_invalid_credentials");
         }
       } catch (err) {
-        errorEl.textContent = t("error_invalid_credentials");
+        errorEl.textContent = t("error_network");
       }
     });
 
