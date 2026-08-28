@@ -107,7 +107,9 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 - `POST /webhook` → `401` (bad/missing signature), `200` (replayed delivery),
   or `202` (accepted, review runs in the background)
 - `GET /` → the live ops/demo dashboard — light/dark/system theme,
-  English/Hebrew with RTL, auto-refreshing review history and queue stats
+  English/Hebrew with RTL, auto-refreshing review history and queue stats.
+  Requires signing in at `/login` first with the configured `DASHBOARD_*`
+  credential (see `.env.example`).
 - `GET /api/dashboard` → JSON backing endpoint for the dashboard above
 
 ### Docker
