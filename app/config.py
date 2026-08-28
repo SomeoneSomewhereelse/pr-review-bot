@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     github_target_repo: str = ""
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
+    # --- Dashboard authentication. A single shared operator credential (no
+    # per-user accounts) gates app/dashboard.py's router -- see
+    # docs/superpowers/specs/2026-08-28-dashboard-authentication-design.md.
+    # dashboard_session_secret signs the session-cookie JWT and is
+    # independent of the password: rotating it invalidates every active
+    # session at once, the deliberate "revoke everything" lever if a session
+    # is ever suspected compromised.
+    dashboard_username: str = ""
+    dashboard_password: str = ""
+    dashboard_session_secret: str = ""
+
     # No implicit default: guessing a provider means silently running (and
     # billing) against one the operator never chose. Validated in
     # app/main.py's lifespan rather than as a pydantic required field -- a

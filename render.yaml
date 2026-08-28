@@ -23,6 +23,12 @@ services:
         sync: false
       - key: GITHUB_WEBHOOK_SECRET
         sync: false
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: DASHBOARD_SESSION_SECRET
+        sync: false
       - key: GITHUB_TARGET_REPO
         sync: false
       - key: GITHUB_APP_INSTALLATION_ID

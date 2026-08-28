@@ -167,6 +167,20 @@ def live_operator_apis_allowed():
 
 
 @pytest.fixture(autouse=True)
+def _dashboard_credentials(monkeypatch):
+    """A fixed, known-good operator credential for every test. app/main.py's
+    lifespan refuses to boot with any of these empty, and app/auth.py's
+    session-token functions need a real value to sign against -- fixed
+    literal strings (not e.g. a random token) so tests that assert exact
+    credential-check behavior have a known value to check against."""
+    monkeypatch.setattr(settings, "dashboard_username", "test-operator")
+    monkeypatch.setattr(settings, "dashboard_password", "test-password")
+    monkeypatch.setattr(
+        settings, "dashboard_session_secret", "test-session-secret-value-for-testing-only"
+    )
+
+
+@pytest.fixture(autouse=True)
 def _quarantine_local_slot_discovery(request, monkeypatch):
     """scripts/deploy.py's _wanted_env() reads local .env directly via
     scripts._override.local_slot_values(), bypassing Settings entirely --

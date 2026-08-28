@@ -40,8 +40,8 @@ fill in the form:
   random by hand). Keep this value visible for a moment; you'll paste it
   into `.env` in the next section. It's easy to miss since nothing about
   the App's settings *page* prompts for it afterward, but the service
-  refuses to start without it — it's one of the four required boot
-  credentials.
+  refuses to start without it — it's one of seven required boot
+  credentials (see below).
 - **Repository permissions** — set exactly:
 
     | Permission | Access |
@@ -89,8 +89,9 @@ doesn't go unnoticed. Run it once you've collected the credentials below.
 
 ## Collect the credentials into `.env`
 
-Three of this project's four required boot credentials come from this step
-(the fourth, `DATABASE_URL`, comes later):
+Three of this project's seven required boot credentials come from this step
+(`DATABASE_URL` comes later, in the Postgres step; the three `DASHBOARD_*`
+vars are yours to generate any time — see below):
 
 - **Webhook secret** — the value you just typed into the form → paste it
   into `GITHUB_WEBHOOK_SECRET` in `.env`.
@@ -114,6 +115,25 @@ One more ID exists — **Installation ID** → `GITHUB_APP_INSTALLATION_ID` —
 but it only exists once the App is installed on an account, which is the
 next step. **Required** no matter how the App was created — never
 auto-discovered or guessed on your behalf.
+
+## Set the dashboard credentials
+
+Unlike the vars above, the three `DASHBOARD_*` vars don't come from GitHub
+at all — they're a single shared operator credential you make up yourself,
+gating this project's own ops/demo dashboard (`GET /`). All three are
+required; the service refuses to boot if any is empty. Set them in `.env`
+now, while you're already there:
+
+- `DASHBOARD_USERNAME` / `DASHBOARD_PASSWORD` — pick any values. See
+  `.env.example`'s comment for why a generated, high-entropy
+  `DASHBOARD_PASSWORD` is worth using rather than something memorable.
+- `DASHBOARD_SESSION_SECRET` — signs the session cookie; not meant to be
+  memorable, and must be at least 32 characters (the service refuses to
+  boot with a shorter one). Generate one with:
+
+    ```bash
+    python -c "import secrets; print(secrets.token_urlsafe(32))"
+    ```
 
 ## An automated alternative exists, but isn't the documented path here
 

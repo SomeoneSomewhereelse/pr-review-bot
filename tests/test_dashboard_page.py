@@ -3,12 +3,17 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
+from app import auth
 from app.main import app
 
 
 async def _client() -> AsyncClient:
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    return AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: auth.create_session_token(remember=False)},
+    )
 
 
 async def test_dashboard_page_serves_html_with_theme_and_language_controls():
@@ -130,6 +135,30 @@ async def test_stored_lang_and_theme_are_parsed_defensively():
     assert "KNOWN_THEMES.includes(stored)" in body
     assert 'localStorage.getItem("dashboard_lang") || "en"' not in body
     assert 'localStorage.getItem("dashboard_theme") || "system"' not in body
+
+
+async def test_dashboard_page_has_a_logout_control_that_posts_to_api_logout():
+    """The dashboard must expose a reachable way to log out -- POST /api/logout
+    exists and is tested at the API level, but was unreachable from any page
+    before this: no button anywhere called it."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert 'id="logoutBtn"' in body
+    assert '"/api/logout"' in body
+    assert 'method: "POST"' in body
+
+
+async def test_dashboard_page_refresh_redirects_to_login_on_401():
+    """An expired/invalid session must not render as a permanent generic
+    error banner -- refreshDashboard must check response.status for 401 and
+    redirect to /login, rather than trying (and failing) to parse the body
+    as the normal payload shape."""
+    client = await _client()
+    resp = await client.get("/")
+    body = resp.text
+    assert "response.status === 401" in body
+    assert 'window.location.href = "/login"' in body
 
 
 async def test_dashboard_page_anchors_popups_to_their_button():

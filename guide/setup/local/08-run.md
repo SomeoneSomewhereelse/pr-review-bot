@@ -10,6 +10,15 @@ This process itself is what "keeps the service warm" locally — there is no
 Render free-tier sleep to work around, so nothing extra is needed here
 (unlike the hosted track's UptimeRobot pinger).
 
+The dashboard (`GET /`) requires signing in at `/login` first with the
+`DASHBOARD_*` credential you set in `.env` — no need for HTTPS to test this
+locally: every major browser exempts loopback addresses from the `Secure`
+cookie flag, so a `Secure` session cookie works fine over plain
+`http://localhost`. If login seems to succeed but keeps bouncing back to
+`/login`, that's a sign the cookie isn't being set/sent at all (e.g. a
+mismatched host/port between the browser and the running server), not an
+HTTPS requirement.
+
 ## Open a real PR to review
 
 This uses the repo you picked, installed the App on, and set as

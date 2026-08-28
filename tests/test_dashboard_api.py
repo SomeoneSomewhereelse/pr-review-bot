@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app import dashboard
+from app import auth, dashboard
 from app.main import app
 from app.queue import dispatcher, store
 from app.specialists.schemas import ReviewResult, SpecialistResult
@@ -19,7 +19,11 @@ def _isolate(db):
 
 async def _client() -> AsyncClient:
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    return AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        cookies={auth.SESSION_COOKIE_NAME: auth.create_session_token(remember=False)},
+    )
 
 
 async def test_empty_state_shape():
