@@ -363,6 +363,13 @@ Proactive findings, not incidents — nothing here actually happened. Format:
 - **Status:** needs-verification
 - **Follow-up:** the operator confirms this directly when manually registering the OAuth app — a one-time, deliberate dashboard action sub-project 3's design already requires. No purchase happens automatically or by surprise, since that registration step is manual and operator-initiated, not something the wizard or any automation triggers.
 
+### Dashboard "Environment" feature (fetch/modify Render env vars + config DB) parked pending dashboard authentication
+- **Found during:** brainstorming session, 2026-08-28
+- **What:** sketch so far, captured before the brainstorm paused to redirect at authentication — a new expandable side menu on the dashboard page (`app/static/dashboard.html`) with two items: **Status** (today's existing content — stats, queue, reviews — moved under this item unchanged) and **Environment** (new). Environment holds two sections, same layout, visually distinct: one for Render's live environment variables (mostly secrets — API keys, `DATABASE_URL`, `GITHUB_WEBHOOK_SECRET`, `GCP_SERVICE_ACCOUNT_KEY` — fetched via `scripts/_render.py`'s existing paginated single-key Render API access, values never rendered raw per root `CLAUDE.md`'s secret-handling section, same "reduce to boolean/length/equality immediately" contract `env_vars()`'s own docstring already documents), and one for the `runtime_config` DB table's operational settings (provider/model overrides, key indices, cooldown tuning, usage caps, `review_draft_prs` — none of which are secrets; every one already has a `get_*`/`set_*` pair in `app/queue/store.py`, so this section is a thin UI over existing functions, not new data-access code). Section names not yet decided.
+- **Why it matters:** discovered mid-brainstorm that `app/dashboard.py`'s router (and all of `app/main.py`) has zero authentication — anyone who can reach the Render URL can already read today's dashboard stats, and would, with this feature shipped as-is, gain the ability to read and write live production secrets and reconfigure the running service (provider/model, active API-key slot) with no login of any kind. Building the feature before auth exists would ship a severe vulnerability, not a demo convenience.
+- **Status:** open — deliberately paused
+- **Follow-up:** design and ship dashboard authentication first, as its own brainstorm/spec. Resume this feature's brainstorm on top of it once auth exists — naming the two Environment sections and working out the fetch/edit/write flow (especially for the Render-env-vars section) were not yet reached.
+
 ---
 
 **2026-08-21 pre-flight audit — cleared.** Nine gaps were traced ahead of
