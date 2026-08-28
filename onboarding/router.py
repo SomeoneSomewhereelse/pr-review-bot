@@ -145,6 +145,12 @@ class LlmPushRenderVarsRequest(RenderPushEnvVarsRequest):
     model: str = Field(min_length=1, max_length=256)
 
 
+class DashboardAuthPushRenderVarsRequest(RenderPushEnvVarsRequest):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=8, max_length=256)
+    session_secret: str = Field(min_length=32, max_length=256)
+
+
 class RenderTriggerDeployRequest(BaseModel):
     api_key: str = Field(max_length=512)
     service_id: str = Field(min_length=1, max_length=64)
@@ -397,6 +403,20 @@ async def push_llm_render_vars(payload: LlmPushRenderVarsRequest) -> dict:
             "LLM_PROVIDER": payload.provider,
             credential_var: payload.credential_value,
             model_var: payload.model,
+        },
+    )
+    return _push_result(result)
+
+
+@router.post("/api/dashboard-auth/push-render-vars")
+async def push_dashboard_auth_render_vars(payload: DashboardAuthPushRenderVarsRequest) -> dict:
+    result = await render_client.push_env_vars(
+        payload.render_api_key,
+        payload.render_service_id,
+        {
+            "DASHBOARD_USERNAME": payload.username,
+            "DASHBOARD_PASSWORD": payload.password,
+            "DASHBOARD_SESSION_SECRET": payload.session_secret,
         },
     )
     return _push_result(result)

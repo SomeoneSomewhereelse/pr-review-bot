@@ -993,6 +993,64 @@ async def test_llm_push_render_vars_endpoint_rejects_unknown_provider(monkeypatc
     assert resp.status_code == 422
 
 
+async def test_dashboard_auth_push_render_vars_endpoint(monkeypatch):
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/dashboard-auth/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "username": "operator",
+            "password": "correct-horse-battery",
+            "session_secret": "s" * 43,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["valid"] is True
+    assert captured["values"] == {
+        "DASHBOARD_USERNAME": "operator",
+        "DASHBOARD_PASSWORD": "correct-horse-battery",
+        "DASHBOARD_SESSION_SECRET": "s" * 43,
+    }
+
+
+async def test_dashboard_auth_push_render_vars_endpoint_rejects_short_password():
+    client = await _client()
+    resp = await client.post(
+        "/api/dashboard-auth/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "username": "operator",
+            "password": "short1",
+            "session_secret": "s" * 43,
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_dashboard_auth_push_render_vars_endpoint_rejects_short_session_secret():
+    client = await _client()
+    resp = await client.post(
+        "/api/dashboard-auth/push-render-vars",
+        json={
+            "render_api_key": "rnd_x",
+            "render_service_id": "srv-1",
+            "username": "operator",
+            "password": "correct-horse-battery",
+            "session_secret": "tooshort",
+        },
+    )
+    assert resp.status_code == 422
+
+
 async def test_push_render_vars_partial_failure_reports_pushed_keys(monkeypatch):
     async def fake_push_env_vars(api_key, service_id, values):
         return render_client.RenderEnvVarsPushFailed(reason="invalid_key", pushed=["GITHUB_APP_ID"])

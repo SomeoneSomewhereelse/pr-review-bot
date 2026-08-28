@@ -224,6 +224,29 @@
       </div>
     </details>
 
+    <details id="frame-dashboard-auth" class="frame" data-status="locked" data-locked="true">
+      <summary>
+        <span class="frame-title" data-i18n="frame_dashboard_auth_title"></span>
+        <span class="frame-badge"></span>
+        <button class="frame-change" type="button" data-frame="dashboard-auth" data-i18n="change_button"></button>
+      </summary>
+      <div class="frame-body">
+        <p data-i18n="frame_dashboard_auth_instructions"></p>
+        <label data-i18n="frame_dashboard_auth_username_label"></label>
+        <input id="dashboard-auth-username-input" type="text" autocomplete="off">
+        <label data-i18n="frame_dashboard_auth_password_label"></label>
+        <input id="dashboard-auth-password-input" type="password" autocomplete="off">
+        <button id="dashboard-auth-password-toggle" type="button"></button>
+        <button id="dashboard-auth-generate-submit" type="button" data-i18n="generate_password_button"></button>
+        <label>
+          <input id="dashboard-auth-ack-checkbox" type="checkbox">
+          <span data-i18n="dashboard_auth_ack_label"></span>
+        </label>
+        <button id="dashboard-auth-submit" type="button" data-i18n="save_continue_button"></button>
+        <p id="dashboard-auth-error" class="frame-error" aria-live="polite"></p>
+      </div>
+    </details>
+
     <details id="frame-github-app" class="frame" data-status="locked" data-locked="true">
       <summary>
         <span class="frame-title" data-i18n="frame2_title"></span>
@@ -354,11 +377,11 @@
       frame1_title: "1. Render API key",
       frame1_instructions: "Get a key from Render's dashboard: Account Settings → API Keys.",
       frame1_placeholder: "rnd_...",
-      frame2_title: "3. GitHub App",
-      frame3_title: "4. Supabase database",
-      frame4_title: "5. LLM provider",
-      frame5_title: "6. Keep-warm pinger",
-      frame6_title: "7. Finish & Deploy",
+      frame2_title: "4. GitHub App",
+      frame3_title: "5. Supabase database",
+      frame4_title: "6. LLM provider",
+      frame5_title: "7. Keep-warm pinger",
+      frame6_title: "8. Finish & Deploy",
       coming_soon: "Coming soon.",
       frame_render_service_title: "2. Render service",
       frame_render_service_instructions: "This creates your own Render web service from the project's repository. You can point it at a different repo or change the name below if you want.",
@@ -366,6 +389,19 @@
       frame_render_service_name_label: "Service name",
       create_service_button: "Create service",
       url_prefix: "live at ",
+      frame_dashboard_auth_title: "3. Dashboard login",
+      frame_dashboard_auth_instructions: "Choose the username and password you'll use to log into your deployed instance's operator dashboard. There is no password-recovery flow — make sure you save these somewhere safe before continuing.",
+      frame_dashboard_auth_username_label: "Username",
+      frame_dashboard_auth_password_label: "Password",
+      generate_password_button: "Generate strong password",
+      show_password_button: "Show",
+      hide_password_button: "Hide",
+      dashboard_auth_ack_label: "I've saved these credentials somewhere safe — they can't be recovered later.",
+      save_continue_button: "Save & Continue",
+      err_dashboard_auth_empty: "Fill in a username and password first.",
+      err_dashboard_auth_password_short: "Password must be at least 8 characters.",
+      err_dashboard_auth_ack_required: "Confirm you've saved these credentials before continuing.",
+      err_dashboard_auth_storage_failed: "Couldn't save this in your browser. Try again.",
       err_render_service_no_key: "Complete step 1 (Render API key) first.",
       err_render_service_empty: "Fill in a repository URL and a service name.",
       err_render_service_invalid_key: "That key was rejected by Render. Double-check it and try again.",
@@ -472,11 +508,11 @@
       frame1_title: "1. מפתח API של Render",
       frame1_instructions: "קבלו מפתח מלוח הבקרה של Render: Account Settings ← API Keys.",
       frame1_placeholder: "rnd_...",
-      frame2_title: "3. אפליקציית GitHub",
-      frame3_title: "4. מסד נתונים ב-Supabase",
-      frame4_title: "5. ספק LLM",
-      frame5_title: "6. פינגר לשמירה על פעילות",
-      frame6_title: "7. סיום ופריסה",
+      frame2_title: "4. אפליקציית GitHub",
+      frame3_title: "5. מסד נתונים ב-Supabase",
+      frame4_title: "6. ספק LLM",
+      frame5_title: "7. פינגר לשמירה על פעילות",
+      frame6_title: "8. סיום ופריסה",
       coming_soon: "בקרוב.",
       frame_render_service_title: "2. שירות Render",
       frame_render_service_instructions: "פעולה זו יוצרת שירות Render משלך מתוך מאגר הקוד של הפרויקט. ניתן להצביע על מאגר אחר או לשנות את השם למטה אם רוצים.",
@@ -484,6 +520,19 @@
       frame_render_service_name_label: "שם השירות",
       create_service_button: "צור שירות",
       url_prefix: "פעיל בכתובת ",
+      frame_dashboard_auth_title: "3. כניסה ללוח הבקרה",
+      frame_dashboard_auth_instructions: "בחרו שם משתמש וסיסמה שבהם תתחברו ללוח הבקרה של המפעיל במופע שפרסתם. אין מנגנון לשחזור סיסמה — ודאו ששמרתם אותם במקום בטוח לפני שתמשיכו.",
+      frame_dashboard_auth_username_label: "שם משתמש",
+      frame_dashboard_auth_password_label: "סיסמה",
+      generate_password_button: "צור סיסמה חזקה",
+      show_password_button: "הצג",
+      hide_password_button: "הסתר",
+      dashboard_auth_ack_label: "שמרתי את פרטי ההתחברות האלה במקום בטוח — לא ניתן לשחזר אותם.",
+      save_continue_button: "שמור והמשך",
+      err_dashboard_auth_empty: "מלאו שם משתמש וסיסמה קודם.",
+      err_dashboard_auth_password_short: "הסיסמה חייבת להכיל לפחות 8 תווים.",
+      err_dashboard_auth_ack_required: "אשרו ששמרתם את פרטי ההתחברות לפני שתמשיכו.",
+      err_dashboard_auth_storage_failed: "לא ניתן היה לשמור זאת בדפדפן זה. נסו שוב.",
       err_render_service_no_key: "השלם קודם את שלב 1 (מפתח API של Render).",
       err_render_service_empty: "מלא כתובת מאגר קוד ושם שירות.",
       err_render_service_invalid_key: "המפתח נדחה על ידי Render. בדוק אותו ונסה שוב.",
@@ -637,6 +686,11 @@
     if (currentRenderServiceErrorKey) {
       document.getElementById("render-service-error").textContent = t(currentRenderServiceErrorKey);
     }
+    if (currentDashboardAuthErrorKey) {
+      document.getElementById("dashboard-auth-error").textContent = t(currentDashboardAuthErrorKey);
+    }
+    document.getElementById("dashboard-auth-password-toggle").textContent =
+      t(dashboardAuthPasswordVisible ? "hide_password_button" : "show_password_button");
     if (currentRenderDeployErrorKey) {
       document.getElementById("render-deploy-error").textContent = t(currentRenderDeployErrorKey);
     }
@@ -658,6 +712,7 @@
   const STORAGE_KEYS = {
     "render-key": "onboarding.renderApiKey",
     "render-service": "onboarding.renderService",
+    "dashboard-auth": "onboarding.dashboardAuth",
     "github-app": "onboarding.githubApp",
     "supabase": "onboarding.supabase",
     "llm-provider": "onboarding.llmProvider",
@@ -717,8 +772,8 @@
   const GITHUB_MANIFEST_STATE_KEY = "onboarding.githubManifestState";
 
   const FRAME_ORDER = [
-    "render-key", "render-service", "github-app", "supabase", "llm-provider",
-    "uptime-pinger", "render-deploy",
+    "render-key", "render-service", "dashboard-auth", "github-app", "supabase",
+    "llm-provider", "uptime-pinger", "render-deploy",
   ];
 
   const frameState = {};
@@ -728,6 +783,8 @@
   let currentRenderKeyErrorKey = null;
   let currentGithubAppErrorKey = null;
   let currentSupabaseErrorKey = null;
+  let currentDashboardAuthErrorKey = null;
+  let dashboardAuthPasswordVisible = false;
 
   // Bumped every time the Supabase frame is reset (lockFrame, beginChange,
   // or a terminal error) -- a poll started before the bump checks its
@@ -788,6 +845,7 @@
     // behind it, and clicking it would report a misleading GitHub error.
     // Frame 3's connect/org-picker/provisioning sections are the same
     // shape, one step longer.
+    if (id === "dashboard-auth") resetDashboardAuthSection();
     if (id === "github-app") resetGithubAppCreateSection();
     if (id === "supabase") resetSupabaseConnectSection();
     if (id === "llm-provider") resetLlmProviderSection();
@@ -878,6 +936,10 @@
       document.getElementById("render-service-name-input").value = "";
       document.getElementById("render-service-submit").disabled = false;
       prefillRenderServiceDefaults();
+    }
+    if (id === "dashboard-auth") {
+      sessionStorage.removeItem(STORAGE_KEYS["dashboard-auth"]);
+      resetDashboardAuthSection();
     }
     if (id === "github-app") {
       sessionStorage.removeItem(STORAGE_KEYS["github-app"]);
@@ -1323,6 +1385,115 @@
       currentRenderServiceErrorKey = "err_render_service_unreachable";
       errorEl.textContent = t("err_render_service_unreachable");
     }
+  }
+
+  function generateDashboardAuthPassword() {
+    const bytes = crypto.getRandomValues(new Uint8Array(15));
+    return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // 32 random bytes, base64url-encoded -- comfortably over app/main.py's own
+  // `len(dashboard_session_secret) >= 32` boot guard. Never shown to the
+  // visitor (unlike username/password): nothing downstream ever asks them
+  // to type it again.
+  function generateDashboardAuthSessionSecret() {
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    let binary = "";
+    bytes.forEach((b) => { binary += String.fromCharCode(b); });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function setDashboardAuthPasswordVisibility(visible) {
+    dashboardAuthPasswordVisible = visible;
+    document.getElementById("dashboard-auth-password-input").type = visible ? "text" : "password";
+    document.getElementById("dashboard-auth-password-toggle").textContent =
+      t(visible ? "hide_password_button" : "show_password_button");
+  }
+
+  function toggleDashboardAuthPasswordVisibility() {
+    setDashboardAuthPasswordVisibility(!dashboardAuthPasswordVisible);
+  }
+
+  function fillGeneratedDashboardAuthPassword() {
+    document.getElementById("dashboard-auth-password-input").value = generateDashboardAuthPassword();
+    setDashboardAuthPasswordVisibility(true);
+  }
+
+  function resetDashboardAuthSection() {
+    document.getElementById("dashboard-auth-username-input").value = "";
+    document.getElementById("dashboard-auth-password-input").value = "";
+    document.getElementById("dashboard-auth-ack-checkbox").checked = false;
+    document.getElementById("dashboard-auth-submit").disabled = false;
+    setDashboardAuthPasswordVisibility(false);
+  }
+
+  // Best-effort push, same shape as pushLlmProviderToRenderService: a
+  // failure (network or otherwise) is logged, never blocks this frame's own
+  // completion (root CLAUDE.md / onboarding/CLAUDE.md's push-and-clear
+  // convention). Unlike every other frame, the raw values here are never
+  // written to sessionStorage at all -- they live only in this function's
+  // and submitDashboardAuth's local variables, so there is nothing to
+  // "clear" afterward.
+  async function pushDashboardAuthToRenderService(username, password, sessionSecret) {
+    const renderService = readStoredRenderService();
+    const renderApiKey = sessionStorage.getItem(STORAGE_KEYS["render-key"]);
+    if (!renderService || !renderService.service_id || !renderApiKey) return;
+    try {
+      const resp = await fetch("/api/dashboard-auth/push-render-vars", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          render_api_key: renderApiKey,
+          render_service_id: renderService.service_id,
+          username, password, session_secret: sessionSecret,
+        }),
+      });
+      const body = await resp.json();
+      if (!body.valid) {
+        console.warn("Render push failed:", "/api/dashboard-auth/push-render-vars", "reason:", body.reason, "pushed:", body.pushed);
+      }
+    } catch (err) {
+      console.warn("Render push failed:", "/api/dashboard-auth/push-render-vars", "network error");
+    }
+  }
+
+  async function submitDashboardAuth() {
+    const usernameInput = document.getElementById("dashboard-auth-username-input");
+    const passwordInput = document.getElementById("dashboard-auth-password-input");
+    const ackCheckbox = document.getElementById("dashboard-auth-ack-checkbox");
+    const errorEl = document.getElementById("dashboard-auth-error");
+    errorEl.textContent = "";
+    currentDashboardAuthErrorKey = null;
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (!username || !password) {
+      currentDashboardAuthErrorKey = "err_dashboard_auth_empty";
+      errorEl.textContent = t("err_dashboard_auth_empty");
+      return;
+    }
+    if (password.length < 8) {
+      currentDashboardAuthErrorKey = "err_dashboard_auth_password_short";
+      errorEl.textContent = t("err_dashboard_auth_password_short");
+      return;
+    }
+    if (!ackCheckbox.checked) {
+      currentDashboardAuthErrorKey = "err_dashboard_auth_ack_required";
+      errorEl.textContent = t("err_dashboard_auth_ack_required");
+      return;
+    }
+    const submitBtn = document.getElementById("dashboard-auth-submit");
+    submitBtn.disabled = true;
+    const sessionSecret = generateDashboardAuthSessionSecret();
+    await pushDashboardAuthToRenderService(username, password, sessionSecret);
+    try {
+      sessionStorage.setItem(STORAGE_KEYS["dashboard-auth"], JSON.stringify({completed: true}));
+    } catch (err) {
+      submitBtn.disabled = false;
+      currentDashboardAuthErrorKey = "err_dashboard_auth_storage_failed";
+      errorEl.textContent = t("err_dashboard_auth_storage_failed");
+      return;
+    }
+    completeFrame("dashboard-auth", null, null);
   }
 
   async function validateRenderKey() {
@@ -2283,6 +2454,9 @@
     if (sessionStorage.getItem(STORAGE_KEYS["render-service"])) {
       completeFrame("render-service", "url_prefix", (readStoredRenderService() || {}).service_url);
     }
+    if (sessionStorage.getItem(STORAGE_KEYS["dashboard-auth"])) {
+      completeFrame("dashboard-auth", "restored", null);
+    }
     const githubApp = readStoredGithubApp();
     if (githubApp && githubApp.completed) {
       completeFrame("github-app", "restored", null);
@@ -2375,6 +2549,9 @@
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
     document.getElementById("render-service-submit").addEventListener("click", createRenderService);
+    document.getElementById("dashboard-auth-submit").addEventListener("click", submitDashboardAuth);
+    document.getElementById("dashboard-auth-generate-submit").addEventListener("click", fillGeneratedDashboardAuthPassword);
+    document.getElementById("dashboard-auth-password-toggle").addEventListener("click", toggleDashboardAuthPasswordVisibility);
     document.getElementById("render-deploy-trigger-submit").addEventListener("click", triggerRenderDeploy);
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);

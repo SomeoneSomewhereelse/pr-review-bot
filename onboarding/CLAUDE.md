@@ -402,6 +402,29 @@ section 3), not an oversight to fix.
   than showing a dead end — same auto-resume shape as the Supabase branch
   beside it.
 
+## What the "Dashboard login" frame (bounded addition, 2026-08-28) adds to these rules
+
+- **This frame never writes a raw credential to `sessionStorage` at all** —
+  a deliberate departure from every other frame's push-and-clear pattern
+  (store the raw value, push it, then delete the field). The visitor must
+  remember this username/password themselves (unlike a GitHub private key
+  or Supabase's `db_pass`), so there is nothing useful left to persist once
+  the push has been attempted; `onboarding.dashboardAuth` holds only
+  `{completed: true}`.
+- **`DASHBOARD_SESSION_SECRET` is generated entirely client-side**
+  (`crypto.getRandomValues`, 32 random bytes, base64url) and never shown to
+  the visitor — unlike the username/password, nothing downstream ever asks
+  them to type it again.
+- **A failed push here still follows the best-effort, non-gating
+  convention** every other push-and-clear frame uses (see the "Render
+  service" section above), even though the real consequence is worse: a
+  missing `DASHBOARD_PASSWORD`/`DASHBOARD_SESSION_SECRET` fails
+  `app/main.py`'s own boot guard, not just a feature. This was a deliberate
+  choice for consistency over a one-off retry-until-verified gate on this
+  single frame — "Finish & Deploy"'s own status poll surfaces a
+  crash-looping deploy immediately, and "Change" lets the visitor redo this
+  frame and re-push.
+
 ## The test suite looks hung on a fresh worktree — it isn't
 
 The **first** `uv run pytest` (or any `uv run ...`) invocation in a newly

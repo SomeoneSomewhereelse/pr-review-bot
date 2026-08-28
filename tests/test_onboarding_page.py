@@ -904,7 +904,7 @@ async def test_frame5_reevaluates_blocked_state_when_reopened():
 async def test_frame_order_includes_render_service_after_render_key():
     client = await _client()
     body = (await client.get("/")).text
-    assert '"render-key", "render-service", "github-app"' in body
+    assert '"render-key", "render-service", "dashboard-auth", "github-app"' in body
 
 
 async def test_frame_order_ends_with_render_deploy():
@@ -1005,11 +1005,82 @@ async def test_frame_titles_renumbered_after_render_service_insertion():
     client = await _client()
     body = (await client.get("/")).text
     assert 'frame_render_service_title: "2. Render service"' in body
-    assert 'frame2_title: "3. GitHub App"' in body
-    assert 'frame3_title: "4. Supabase database"' in body
-    assert 'frame4_title: "5. LLM provider"' in body
-    assert 'frame5_title: "6. Keep-warm pinger"' in body
-    assert 'frame6_title: "7. Finish & Deploy"' in body
+    assert 'frame_dashboard_auth_title: "3. Dashboard login"' in body
+    assert 'frame2_title: "4. GitHub App"' in body
+    assert 'frame3_title: "5. Supabase database"' in body
+    assert 'frame4_title: "6. LLM provider"' in body
+    assert 'frame5_title: "7. Keep-warm pinger"' in body
+    assert 'frame6_title: "8. Finish & Deploy"' in body
+
+
+async def test_dashboard_auth_frame_markup_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="frame-dashboard-auth"' in body
+    assert 'id="dashboard-auth-username-input"' in body
+    assert 'id="dashboard-auth-password-input"' in body
+    assert 'id="dashboard-auth-password-toggle"' in body
+    assert 'id="dashboard-auth-generate-submit"' in body
+    assert 'id="dashboard-auth-ack-checkbox"' in body
+    assert 'id="dashboard-auth-submit"' in body
+
+
+async def test_dashboard_auth_frame_positioned_right_after_render_service():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.index('id="frame-render-service"') < body.index('id="frame-dashboard-auth"')
+    assert body.index('id="frame-dashboard-auth"') < body.index('id="frame-github-app"')
+    assert '"render-key", "render-service", "dashboard-auth", "github-app", "supabase",' in body
+
+
+async def test_dashboard_auth_storage_key_present():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert '"dashboard-auth": "onboarding.dashboardAuth"' in body
+
+
+async def test_dashboard_auth_push_render_vars_fetch_leaves_the_page_exactly_once():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('fetch("/api/dashboard-auth/push-render-vars"') == 1
+
+
+async def test_dashboard_auth_never_persists_raw_credentials():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert (
+        'sessionStorage.setItem(STORAGE_KEYS["dashboard-auth"], JSON.stringify({completed: true}))'
+        in body
+    )
+
+
+async def test_dashboard_auth_begin_change_clears_its_own_stale_state():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'if (id === "dashboard-auth") {' in body
+    assert 'sessionStorage.removeItem(STORAGE_KEYS["dashboard-auth"]);' in body
+
+
+async def test_dashboard_auth_frame_i18n_strings_present_in_both_languages():
+    client = await _client()
+    body = (await client.get("/")).text
+    keys = [
+        "frame_dashboard_auth_title",
+        "frame_dashboard_auth_instructions",
+        "frame_dashboard_auth_username_label",
+        "frame_dashboard_auth_password_label",
+        "generate_password_button",
+        "show_password_button",
+        "hide_password_button",
+        "dashboard_auth_ack_label",
+        "save_continue_button",
+        "err_dashboard_auth_empty",
+        "err_dashboard_auth_password_short",
+        "err_dashboard_auth_ack_required",
+        "err_dashboard_auth_storage_failed",
+    ]
+    for key in keys:
+        assert body.count(f"{key}:") == 2, f"{key} should appear once in en and once in he"
 
 
 async def test_begin_change_render_service_clears_its_own_stale_state():
@@ -1076,7 +1147,7 @@ async def test_push_helpers_skip_entirely_without_a_render_service():
     client = await _client()
     body = (await client.get("/")).text
     assert (
-        body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 3
+        body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 4
     )
 
 
