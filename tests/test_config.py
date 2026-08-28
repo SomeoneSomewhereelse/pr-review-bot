@@ -74,6 +74,21 @@ def test_vertex_settings_default_to_derive_everything_from_the_key(monkeypatch):
     assert settings.gcp_service_account_key == ""
 
 
+def test_dashboard_credential_fields_default_to_empty_and_are_not_operational(monkeypatch):
+    """_env_file=None plus delenv because these defaults must be asserted
+    against the code, not against whatever this working copy's .env happens
+    to say."""
+    for name in ("DASHBOARD_USERNAME", "DASHBOARD_PASSWORD", "DASHBOARD_SESSION_SECRET"):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.dashboard_username == ""
+    assert settings.dashboard_password == ""
+    assert settings.dashboard_session_secret == ""
+    assert "DASHBOARD_USERNAME" not in OPERATIONAL_KEYS
+    assert "DASHBOARD_PASSWORD" not in OPERATIONAL_KEYS
+    assert "DASHBOARD_SESSION_SECRET" not in OPERATIONAL_KEYS
+
+
 def test_key_usage_caps_default_to_off(monkeypatch):
     """The cap defaults to None so an existing deployment that sets no env var
     sees no behavior change (design doc §2.1). _env_file=None plus delenv

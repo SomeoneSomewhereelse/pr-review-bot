@@ -13,6 +13,9 @@ Every setting this service reads. `.env.config` holds operational settings and i
 | `GITHUB_WEBHOOK_SECRET` | `str` | *(empty)* | `.env` |
 | `GITHUB_TARGET_REPO` | `str` | *(empty)* | `.env.config` |
 | `PUBLIC_BASE_URL` | `str` | *(empty)* | `.env.config` |
+| `DASHBOARD_USERNAME` | `str` | *(empty)* | `.env` |
+| `DASHBOARD_PASSWORD` | `str` | *(empty)* | `.env` |
+| `DASHBOARD_SESSION_SECRET` | `str` | *(empty)* | `.env` |
 | `LLM_PROVIDER` | `str` | *(empty)* | `.env.config` |
 | `LLM_MODEL` | `str` | `gemini-flash-latest` | `.env.config` |
 | `GEMINI_API_KEY` | `str` | *(empty)* | `.env` |

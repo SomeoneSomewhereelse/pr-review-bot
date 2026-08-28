@@ -59,6 +59,9 @@ _ALWAYS_SYNCED = (
     "GITHUB_APP_PRIVATE_KEY",
     "GITHUB_TARGET_REPO",
     "GITHUB_WEBHOOK_SECRET",
+    "DASHBOARD_USERNAME",
+    "DASHBOARD_PASSWORD",
+    "DASHBOARD_SESSION_SECRET",
 )
 # GITHUB_TARGET_REPO empty is a valid, deliberate "track all repos" config
 # (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md), not a
@@ -230,6 +233,12 @@ def check_config() -> CheckResult:
         missing.append("GITHUB_APP_INSTALLATION_ID")
     if not settings.github_webhook_secret:
         missing.append("GITHUB_WEBHOOK_SECRET")
+    if not settings.dashboard_username:
+        missing.append("DASHBOARD_USERNAME")
+    if not settings.dashboard_password:
+        missing.append("DASHBOARD_PASSWORD")
+    if not settings.dashboard_session_secret:
+        missing.append("DASHBOARD_SESSION_SECRET")
     if not resolve_base_url():
         missing.append("PUBLIC_BASE_URL or RENDER_EXTERNAL_URL")
     if not settings.llm_provider:
@@ -320,6 +329,9 @@ _BOOT_CREDENTIAL_NAMES = (
     "GITHUB_WEBHOOK_SECRET",
     "LLM_PROVIDER",
     "DATABASE_URL",
+    "DASHBOARD_USERNAME",
+    "DASHBOARD_PASSWORD",
+    "DASHBOARD_SESSION_SECRET",
 )
 
 
@@ -974,6 +986,9 @@ def _wanted_env() -> dict[str, str]:
         "GITHUB_APP_PRIVATE_KEY": settings.github_app_private_key,
         "GITHUB_TARGET_REPO": settings.github_target_repo,
         "GITHUB_WEBHOOK_SECRET": settings.github_webhook_secret,
+        "DASHBOARD_USERNAME": settings.dashboard_username,
+        "DASHBOARD_PASSWORD": settings.dashboard_password,
+        "DASHBOARD_SESSION_SECRET": settings.dashboard_session_secret,
         "LLM_PROVIDER": settings.llm_provider,
     }
     entry = _PROVIDERS.get(settings.llm_provider)

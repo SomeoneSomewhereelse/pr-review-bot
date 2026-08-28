@@ -182,6 +182,9 @@ def complete_config(monkeypatch):
     monkeypatch.setattr(settings, "public_base_url", "https://x.onrender.com")
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    monkeypatch.setattr(settings, "dashboard_username", "dash-user")
+    monkeypatch.setattr(settings, "dashboard_password", "dash-pass")
+    monkeypatch.setattr(settings, "dashboard_session_secret", "dash-session-secret")
 
 
 def test_check_config_passes_when_everything_is_present(complete_config):
@@ -196,6 +199,21 @@ def test_check_config_names_every_missing_key_at_once(complete_config, monkeypat
     assert result.status == "FAIL"
     assert "GITHUB_WEBHOOK_SECRET" in result.detail
     assert "GITHUB_APP_PRIVATE_KEY" in result.detail
+
+
+def test_check_config_requires_dashboard_credentials(complete_config, monkeypatch):
+    """check_config()'s own purpose is 'every setting the service needs is
+    resolvable locally' -- app/main.py's lifespan now refuses to boot without
+    these three, so this doctor check must name them too, or an operator
+    would see a clean preflight report right before a crash-on-boot deploy."""
+    monkeypatch.setattr(settings, "dashboard_username", "")
+    monkeypatch.setattr(settings, "dashboard_password", "")
+    monkeypatch.setattr(settings, "dashboard_session_secret", "")
+    result = deploy.check_config()
+    assert result.status == "FAIL"
+    assert "DASHBOARD_USERNAME" in result.detail
+    assert "DASHBOARD_PASSWORD" in result.detail
+    assert "DASHBOARD_SESSION_SECRET" in result.detail
 
 
 def test_check_config_requires_the_installation_id(complete_config, monkeypatch):
@@ -461,6 +479,9 @@ def test_boot_credentials_live_passes_when_all_present(monkeypatch):
                         "GITHUB_WEBHOOK_SECRET": "s3cret",
                         "LLM_PROVIDER": "groq",
                         "DATABASE_URL": "postgresql://u:p@h/db",
+                        "DASHBOARD_USERNAME": "dash-user",
+                        "DASHBOARD_PASSWORD": "dash-pass",
+                        "DASHBOARD_SESSION_SECRET": "dash-session-secret",
                     }
                 ),
             )
@@ -525,6 +546,37 @@ def test_boot_credentials_live_also_requires_installation_id_and_llm_provider(mo
     assert result.status == "FAIL"
     assert "GITHUB_APP_INSTALLATION_ID" in result.detail
     assert "LLM_PROVIDER" in result.detail
+
+
+def test_boot_credentials_live_also_requires_dashboard_credentials(monkeypatch):
+    """Same regression shape as the installation-id/llm-provider case above:
+    app/main.py's lifespan also refuses to boot without the three DASHBOARD_*
+    vars now, so a live Render service missing any of them would crash-loop
+    while this check still reported PASS if it didn't know about them."""
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(return_value=httpx.Response(200, json=_service_list()))
+        respx.get(f"{RENDER_SERVICES}/srv-1/env-vars").mock(
+            return_value=httpx.Response(
+                200,
+                json=_env_var_list(
+                    {
+                        "GITHUB_APP_ID": "999999",
+                        "GITHUB_APP_INSTALLATION_ID": "155887152",
+                        "GITHUB_APP_PRIVATE_KEY": "aGVsbG8=",
+                        "GITHUB_WEBHOOK_SECRET": "s3cret",
+                        "LLM_PROVIDER": "groq",
+                        "DATABASE_URL": "postgresql://u:p@h/db",
+                    }
+                ),
+            )
+        )
+        result = deploy.check_boot_credentials_live()
+    assert result.status == "FAIL"
+    assert "DASHBOARD_USERNAME" in result.detail
+    assert "DASHBOARD_PASSWORD" in result.detail
+    assert "DASHBOARD_SESSION_SECRET" in result.detail
 
 
 def test_boot_credentials_live_never_leaks_a_fetched_value(monkeypatch):
@@ -1558,6 +1610,9 @@ def sync_ready(monkeypatch):
     monkeypatch.setattr(settings, "github_webhook_secret", "s3cret")
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_x")
+    monkeypatch.setattr(settings, "dashboard_username", "dash-user")
+    monkeypatch.setattr(settings, "dashboard_password", "dash-pass")
+    monkeypatch.setattr(settings, "dashboard_session_secret", "dash-session-secret")
     monkeypatch.setattr(deploy.time, "sleep", lambda _seconds: None)
     # database_url is a dummy, unreachable host -- stub psycopg.connect so the
     # masking guard's "no override" outcome is deterministic rather than an
