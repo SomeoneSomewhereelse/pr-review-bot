@@ -169,7 +169,7 @@ def live_operator_apis_allowed():
 @pytest.fixture(autouse=True)
 def _dashboard_credentials(monkeypatch):
     """A fixed, known-good operator credential for every test. app/main.py's
-    lifespan (Task 4) refuses to boot with any of these empty, and app/auth.py's
+    lifespan refuses to boot with any of these empty, and app/auth.py's
     session-token functions need a real value to sign against -- fixed
     literal strings (not e.g. a random token) so tests that assert exact
     credential-check behavior have a known value to check against."""

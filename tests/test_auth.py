@@ -1,6 +1,7 @@
 """Tests for app/auth.py: credential check, session-token issue/verify, and
-cookie helpers. Route-level (login/logout HTTP) tests are added in Task 3;
-require_session's HTTP-gate behavior is added in Task 4.
+cookie helpers -- plus route-level (login/logout HTTP) behavior and
+require_session's HTTP-gate behavior (the /healthz and /webhook routes stay
+reachable with no cookie at all; every /api/* and page route is gated).
 """
 from __future__ import annotations
 
@@ -170,6 +171,40 @@ async def test_login_with_wrong_username_returns_the_identical_generic_reason():
     assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
 
 
+async def test_login_with_non_ascii_password_returns_invalid_credentials_not_500():
+    """hmac.compare_digest raises TypeError on non-ASCII str input -- before
+    the fix, this would 500 instead of degrading to a normal wrong-password
+    response. A hostile (or simply non-English-keyboard) visitor submitting a
+    non-ASCII password must get the same generic rejection as any other wrong
+    password, never a crash."""
+    client = await _client()
+    resp = await client.post(
+        "/api/login",
+        json={"username": "test-operator", "password": "пароль", "remember": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
+
+
+async def test_login_succeeds_when_the_configured_credential_itself_is_non_ascii(
+    monkeypatch,
+):
+    """A Hebrew or accented DASHBOARD_USERNAME/DASHBOARD_PASSWORD is a
+    realistic operator choice, given this app's own Hebrew-language login
+    page -- the comparison must not merely avoid crashing on a non-ASCII
+    *attempt*, it must actually accept a non-ASCII *configured* credential
+    submitted correctly."""
+    monkeypatch.setattr(settings, "dashboard_username", "מפעיל")
+    monkeypatch.setattr(settings, "dashboard_password", "סיסמה")
+    client = await _client()
+    resp = await client.post(
+        "/api/login",
+        json={"username": "מפעיל", "password": "סיסמה", "remember": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+
+
 async def test_login_failure_triggers_the_fixed_delay(monkeypatch):
     calls = []
 
@@ -214,3 +249,32 @@ async def test_unauthenticated_dashboard_page_request_redirects_to_login():
     resp = await client.get("/")
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login"
+
+
+async def test_healthz_is_reachable_with_no_cookie_at_all():
+    """Spec section 6: /healthz must stay reachable unauthenticated -- it is
+    outside dashboard_router (no require_session dependency) and this pins
+    that directly, rather than relying on it being true only incidentally
+    (every existing /healthz test happens to never attach a cookie)."""
+    client = await _client()
+    resp = await client.get("/healthz")
+    assert resp.status_code == 200
+
+
+async def test_webhook_401_with_no_cookie_is_its_own_hmac_failure_not_the_auth_gate():
+    """/webhook must also stay reachable with no cookie. It legitimately 401s
+    on a missing/bad HMAC signature -- that's expected -- but the point of
+    this test is confirming that 401 is webhook's own, not a future refactor
+    (e.g. to global auth middleware) accidentally routing it through the
+    dashboard's SessionRequired gate instead."""
+    client = await _client()
+    resp = await client.post("/webhook", content=b'{"action": "opened"}')
+    assert resp.status_code == 401
+    # webhook's own 401 is a bare Response with no body (unlike the auth
+    # gate's JSONResponse) -- resp.json() would raise on the empty body, so
+    # parse defensively rather than assume either shape.
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    assert body != {"valid": False, "reason": "unauthenticated"}
