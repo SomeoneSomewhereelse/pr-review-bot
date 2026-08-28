@@ -5,11 +5,15 @@ docs/superpowers/specs/2026-08-28-dashboard-authentication-design.md.
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import jwt
-from fastapi import Request, Response
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from app.config import settings
 
@@ -74,3 +78,49 @@ async def require_session(request: Request) -> None:
         jwt.decode(token, settings.dashboard_session_secret, algorithms=[_JWT_ALGORITHM])
     except jwt.exceptions.InvalidTokenError as exc:
         raise SessionRequired() from exc
+
+
+_LOGIN_FAILURE_DELAY_SECONDS = 1.0
+_STATIC_DIR = Path(__file__).parent / "static"
+_LOGIN_HTML = (_STATIC_DIR / "login.html").read_text(encoding="utf-8")
+
+router = APIRouter()
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+    remember: bool = False
+
+
+async def _delay_after_login_failure() -> None:
+    """Isolated so tests can patch out the real wait without touching every
+    other asyncio.sleep call in the process. Deliberately asyncio.sleep, not
+    time.sleep: app/queue/dispatcher.py's serial loop runs in this same
+    process's single event loop, and a blocking time.sleep(1) here would
+    stall it (and every other in-flight request) for the duration of every
+    single failed login attempt."""
+    await asyncio.sleep(_LOGIN_FAILURE_DELAY_SECONDS)
+
+
+@router.get("/login")
+async def login_page() -> HTMLResponse:
+    return HTMLResponse(_LOGIN_HTML)
+
+
+@router.post("/api/login")
+async def login(payload: LoginRequest) -> JSONResponse:
+    if not verify_credentials(payload.username, payload.password):
+        await _delay_after_login_failure()
+        return JSONResponse({"valid": False, "reason": "invalid_credentials"})
+    token = create_session_token(remember=payload.remember)
+    response = JSONResponse({"valid": True})
+    set_session_cookie(response, token, remember=payload.remember)
+    return response
+
+
+@router.post("/api/logout")
+async def logout() -> JSONResponse:
+    response = JSONResponse({"valid": True})
+    clear_session_cookie(response)
+    return response

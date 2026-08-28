@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI
 
 from app import github_app
+from app.auth import router as auth_router
 from app.config import settings
 from app.dashboard import router as dashboard_router
 from app.providers import registry
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="pr-review-engine", lifespan=lifespan)
 app.include_router(webhook_router)
+app.include_router(auth_router)
 app.include_router(dashboard_router)
 
 

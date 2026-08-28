@@ -9,10 +9,12 @@ from datetime import datetime, timedelta, timezone
 import jwt
 import pytest
 from fastapi.responses import JSONResponse
+from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 from app import auth
 from app.config import settings
+from app.main import app
 
 
 def _request_with_cookie(cookie_header: str | None) -> Request:
@@ -120,3 +122,80 @@ async def test_require_session_rejects_a_token_signed_with_a_different_secret():
     request = _request_with_cookie(f"{auth.SESSION_COOKIE_NAME}={token}")
     with pytest.raises(auth.SessionRequired):
         await auth.require_session(request)
+
+
+async def _client() -> AsyncClient:
+    transport = ASGITransport(app=app)
+    return AsyncClient(transport=transport, base_url="http://test")
+
+
+@pytest.fixture(autouse=True)
+def _no_login_delay(monkeypatch):
+    """Every test in this file gets a no-op delay by default; the one test
+    that verifies the delay actually fires overrides this itself."""
+    async def _noop() -> None:
+        return None
+
+    monkeypatch.setattr(auth, "_delay_after_login_failure", _noop)
+
+
+async def test_login_with_correct_credentials_sets_a_session_cookie():
+    client = await _client()
+    resp = await client.post(
+        "/api/login",
+        json={"username": "test-operator", "password": "test-password", "remember": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+    assert auth.SESSION_COOKIE_NAME in resp.cookies
+
+
+async def test_login_with_wrong_password_returns_the_generic_reason_and_no_cookie():
+    client = await _client()
+    resp = await client.post(
+        "/api/login",
+        json={"username": "test-operator", "password": "wrong", "remember": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
+    assert auth.SESSION_COOKIE_NAME not in resp.cookies
+
+
+async def test_login_with_wrong_username_returns_the_identical_generic_reason():
+    client = await _client()
+    resp = await client.post(
+        "/api/login",
+        json={"username": "wrong", "password": "test-password", "remember": False},
+    )
+    assert resp.json() == {"valid": False, "reason": "invalid_credentials"}
+
+
+async def test_login_failure_triggers_the_fixed_delay(monkeypatch):
+    calls = []
+
+    async def _record() -> None:
+        calls.append(1)
+
+    monkeypatch.setattr(auth, "_delay_after_login_failure", _record)
+    client = await _client()
+    await client.post(
+        "/api/login", json={"username": "wrong", "password": "wrong", "remember": False}
+    )
+    assert calls == [1]
+
+
+async def test_login_remember_true_sets_the_30_day_max_age():
+    client = await _client()
+    resp = await client.post(
+        "/api/login",
+        json={"username": "test-operator", "password": "test-password", "remember": True},
+    )
+    assert f"Max-Age={30 * 24 * 60 * 60}" in resp.headers["set-cookie"]
+
+
+async def test_logout_clears_the_session_cookie():
+    client = await _client()
+    resp = await client.post("/api/logout")
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+    assert "Max-Age=0" in resp.headers["set-cookie"]
