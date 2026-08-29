@@ -17,13 +17,12 @@ dependencies = [
     "psycopg-pool>=3.2",
     "python-dotenv>=1.0",
     "google-auth>=2.35",
-    # Direct imports in onboarding/github_client.py (App-JWT error handling and
-    # PyGithub's transport exceptions). They arrive transitively via pygithub
-    # today, but a pygithub major that dropped either would break this service's
-    # imports with no lockfile signal — declare what we actually import.
     "pyjwt>=2.13",
     "requests>=2.32",
 ]
+
+[tool.uv.workspace]
+members = ["onboarding"]
 
 [dependency-groups]
 dev = [
