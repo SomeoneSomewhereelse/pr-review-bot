@@ -833,20 +833,27 @@ Expected: only `conftest.py`, `test_check_env_access_hook.py`,
 `test_xdist_group_ordering.py` remain (the root-meta set — these stay,
 Step 5 explains why).
 
-- [ ] **Step 5: Leave root-meta tests where they are**
+- [ ] **Step 5: Leave the 7 root-meta `test_*.py` files where they are; move `conftest.py` to the true repo root**
 
-`conftest.py`, `test_conftest_db_marker_hook.py`, `test_conftest_guards.py`,
+`test_conftest_db_marker_hook.py`, `test_conftest_guards.py`,
 `test_check_env_access_hook.py`, `test_ci_workflow.py`, `test_guide_site.py`,
 `test_setup_command.py`, `test_xdist_group_ordering.py` all stay in root
 `tests/` — none of them is "about" one specific sub-project's code (they
-test the workspace/CI/tooling itself), and `conftest.py` in particular must
-stay at an ancestor directory of *all four* test directories (root
-`tests/`, `bot/tests/`, `dashboard/tests/`, `onboarding/tests/`) for its
-`db_url`/`db` fixtures to be visible to `bot/tests/` and `dashboard/tests/`
-both — pytest's conftest discovery is directory-hierarchy-based, not
-sibling-based, so moving `conftest.py` into `bot/tests/` would silently
-break fixture visibility for `dashboard/tests/`. No file changes needed
-here beyond what Task 2's sweep already did to `conftest.py`'s own imports.
+test the workspace/CI/tooling itself).
+
+`conftest.py` is different: it must move from `tests/conftest.py` to
+`<repo-root>/conftest.py` (i.e. `git mv tests/conftest.py conftest.py`) —
+**this corrects an error in an earlier version of this plan**, which
+claimed `tests/` itself is an ancestor of `bot/tests/`/`dashboard/tests/`/
+`onboarding/tests/`. It is not — `tests/`, `bot/`, `dashboard/`, and
+`onboarding/` are all *siblings* under the repo root, so `tests/conftest.py`
+is not on the ancestor path of `bot/tests/test_*.py` at all, and its
+`db_url`/`db` fixtures would be invisible there. The true common ancestor
+of all four test directories is the repo root itself. Update
+`tests/test_xdist_group_ordering.py`'s conftest-path check
+(`"tests/conftest.py"` → `"conftest.py"`) to match. No other content
+changes needed beyond what Task 2's sweep already did to `conftest.py`'s
+own imports.
 
 - [ ] **Step 6: Update `pyproject.toml`'s `testpaths`**
 
