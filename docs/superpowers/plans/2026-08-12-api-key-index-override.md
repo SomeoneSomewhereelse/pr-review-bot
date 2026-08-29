@@ -158,7 +158,7 @@ Two edits to `scripts/deploy.py`:
 `scripts/set_provider.py:30` currently reads:
 
 ```python
-from scripts.deploy import _PROVIDERS
+from bot.scripts.deploy import _PROVIDERS
 ```
 
 Leave this unchanged — it still works because `deploy._PROVIDERS` still exists (as an alias to `registry.PROVIDERS`). No edit needed here; this step is a verification checkpoint, not a code change.
@@ -1036,7 +1036,7 @@ def test_entry_point_runs_as_a_documented_module_invocation():
     """Mirrors test_set_provider_script.py's identically-motivated test: a
     subprocess run of the documented invocation form must actually work."""
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.set_api_key", "--help"],
+        [sys.executable, "-m", "bot.scripts.set_api_key", "--help"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -1166,7 +1166,7 @@ def test_rejects_an_abbreviated_flag(capsys):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_set_api_key_script.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.set_api_key'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts.set_api_key'`
 
 - [ ] **Step 3: Implement**
 
@@ -1174,8 +1174,8 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.set_api_key'`
 # scripts/set_api_key.py
 """Set or clear the DB-backed API-key-slot index override for a provider.
 
-    uv run python -m scripts.set_api_key groq 2
-    uv run python -m scripts.set_api_key groq --clear
+    uv run python -m bot.scripts.set_api_key groq 2
+    uv run python -m bot.scripts.set_api_key groq --clear
 
 The override takes effect on the next claimed ticket -- no restart, no
 redeploy. It writes to whatever DATABASE_URL points at, so against a local
@@ -1533,7 +1533,7 @@ def test_run_checks_includes_the_provider_row(monkeypatch):
 - [ ] **Step 2: Run tests to verify the new ones fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k "key_index or api_key_live" -v`
-Expected: FAIL with `AttributeError: module 'scripts.deploy' has no attribute '_resolved_key_index_or_env'`
+Expected: FAIL with `AttributeError: module 'bot.scripts.deploy' has no attribute '_resolved_key_index_or_env'`
 
 - [ ] **Step 3: Implement `_resolved_key_index`/`_resolved_key_index_or_env`**
 
@@ -1698,8 +1698,8 @@ Insert a new subsection in `README.md` immediately after the "Tuning the re-revi
 #### Swapping API keys without a redeploy
 
 ```bash
-uv run python -m scripts.set_api_key groq 2       # activate GROQ_API_KEY_2
-uv run python -m scripts.set_api_key groq --clear  # back to GROQ_API_KEY (index 0)
+uv run python -m bot.scripts.set_api_key groq 2       # activate GROQ_API_KEY_2
+uv run python -m bot.scripts.set_api_key groq --clear  # back to GROQ_API_KEY (index 0)
 ```
 
 Each provider's credential env var can have numbered siblings —
@@ -1747,7 +1747,7 @@ uv run pytest -q
 Expected: both commands exit 0. This is also the point to (optionally, manually, outside this plan) try the CLI against a local `.env`-pointed database:
 
 ```bash
-uv run python -m scripts.set_api_key groq 1
-uv run python -m scripts.deploy   # api-key-live should now report against index 1 (or SKIPPED without RENDER_API_KEY)
-uv run python -m scripts.set_api_key groq --clear
+uv run python -m bot.scripts.set_api_key groq 1
+uv run python -m bot.scripts.deploy   # api-key-live should now report against index 1 (or SKIPPED without RENDER_API_KEY)
+uv run python -m bot.scripts.set_api_key groq --clear
 ```

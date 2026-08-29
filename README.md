@@ -16,8 +16,8 @@ covering both a local run and a hosted Render + Supabase deployment. The same
 pages live in [`guide/`](guide/setup/index.md) if you would rather read them
 in the repo.
 
-Full design: [`SPEC.md`](SPEC.md). Stack/conventions: [`CLAUDE.md`](CLAUDE.md).
-Cost model: [`cost.md`](cost.md).
+Full design: [`bot/SPEC.md`](bot/SPEC.md). Stack/conventions: [`CLAUDE.md`](CLAUDE.md).
+Cost model: [`bot/cost.md`](bot/cost.md).
 
 ## Architecture
 
@@ -55,7 +55,7 @@ flowchart TD
 - Results (successes *and* failures) are merged with timing and cost data
   into one Markdown comment, edited in place on every later push.
 
-See [`SPEC.md` §12](SPEC.md#12-review-queue-rpm--daily-quota-handling) for
+See [`SPEC.md` §12](bot/SPEC.md#12-review-queue-rpm--daily-quota-handling) for
 the full queue design.
 </details>
 
@@ -129,7 +129,7 @@ uv run pytest -v
 856 deterministic tests, no real network calls — every GitHub, LLM-provider,
 and webhook interaction is mocked. CI runs the same checks on every push.
 
-A handful of scripts under `scripts/manual_verify_*.py` make real calls
+A handful of scripts under `bot/scripts/manual_verify_*.py` make real calls
 against real accounts instead, each proving one specific integration (GitHub
 App auth, or one LLM provider's structured-output path) — see the guide's
 [Live rehearsal history](guide/background/rehearsals.md) for a real,
@@ -148,5 +148,5 @@ each deviation, including what was tried and why.
 ## Cost
 
 Demo runs at **$0** (Groq + Render + Supabase free tiers). Documented production
-cost model (~$8-10/mo at brief scale) is in [`cost.md`](cost.md) — cost is
+cost model (~$8-10/mo at brief scale) is in [`cost.md`](bot/cost.md) — cost is
 graded as that documented calculation, not actual spend.

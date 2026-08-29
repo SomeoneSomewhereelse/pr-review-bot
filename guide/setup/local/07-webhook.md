@@ -1,7 +1,7 @@
 # Step 7: Register the webhook
 
 ```bash
-uv run python -m scripts.deploy
+uv run python -m bot.scripts.deploy
 ```
 
 This points the GitHub App's webhook at your current `PUBLIC_BASE_URL` (only
@@ -45,7 +45,7 @@ To check just that the service is reachable, without needing any App
 credential:
 
 ```bash
-uv run python -m scripts.deploy --health-only
+uv run python -m bot.scripts.deploy --health-only
 ```
 
 This is the portable way to check `/healthz` — a literal `curl` command

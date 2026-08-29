@@ -16,7 +16,7 @@ import respx
 
 from bot.config import settings
 from bot.queue import store
-from scripts import _override, set_override
+from bot.scripts import _override, set_override
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -130,7 +130,7 @@ def test_entry_point_runs_as_a_documented_module_invocation():
     """Mirrors the identically-motivated tests in test_set_provider_script.py
     and test_set_api_key_script.py."""
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.set_override", "--help"],
+        [sys.executable, "-m", "bot.scripts.set_override", "--help"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -369,7 +369,7 @@ def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
 
 def test_list_reports_slots_and_active_state(capsys, monkeypatch):
     from bot.config import settings
-    from scripts import _override
+    from bot.scripts import _override
 
     monkeypatch.setattr(settings, "groq_api_key", "sentinel-groq")
     monkeypatch.setattr(settings, "groq_model", "llama-3.3-70b-versatile")
@@ -388,7 +388,7 @@ def test_list_never_prints_a_credential_value(capsys, monkeypatch):
     """The whole point of --list: an agent can answer "is --index 2 valid?"
     without opening .env, and nothing it prints can be a secret."""
     from bot.config import settings
-    from scripts import _override
+    from bot.scripts import _override
 
     monkeypatch.setattr(settings, "groq_api_key", "SENTINEL-SECRET-VALUE")
     monkeypatch.setattr(

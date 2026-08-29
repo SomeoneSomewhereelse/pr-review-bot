@@ -47,7 +47,7 @@ unmoved.
 - **Modify:** `scripts/deploy.py` — remove the four moved functions and
   `_RENDER_API`; import and call through `_render`.
 - **Modify:** `scripts/set_provider.py` — import `_render` instead of
-  reaching into `scripts.deploy`'s internals for the Render-fetch functions.
+  reaching into `bot.scripts.deploy`'s internals for the Render-fetch functions.
 - **Modify:** `tests/test_deploy_script.py` — retarget 10 monkeypatches from
   `deploy` to `deploy._render`; remove the one test that moves to
   `test_render_client.py`.
@@ -63,12 +63,12 @@ unmoved.
 - Create: `tests/test_render_client.py`
 
 **Interfaces:**
-- Produces: `scripts._render.RENDER_API: str`,
-  `scripts._render.HTTP_TIMEOUT: float`,
-  `scripts._render.headers() -> dict[str, str]`,
-  `scripts._render.unwrap(item: dict, key: str) -> dict`,
-  `scripts._render.find_service_id() -> str | None`,
-  `scripts._render.env_vars(service_id: str) -> dict[str, str]`.
+- Produces: `bot.scripts._render.RENDER_API: str`,
+  `bot.scripts._render.HTTP_TIMEOUT: float`,
+  `bot.scripts._render.headers() -> dict[str, str]`,
+  `bot.scripts._render.unwrap(item: dict, key: str) -> dict`,
+  `bot.scripts._render.find_service_id() -> str | None`,
+  `bot.scripts._render.env_vars(service_id: str) -> dict[str, str]`.
   Tasks 2 and 3 consume all six.
 
 - [ ] **Step 1: Write the failing tests**
@@ -141,7 +141,7 @@ def test_env_vars_unwraps_the_service_env_list(monkeypatch):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_render_client.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'scripts._render'` (or
+Expected: FAIL — `ModuleNotFoundError: No module named 'bot.scripts._render'` (or
 `ImportError`) for every test, since the module doesn't exist yet.
 
 - [ ] **Step 3: Create `scripts/_render.py`**
@@ -233,7 +233,7 @@ git commit -m "feat: extract shared scripts/_render.py Render API access module"
 - Modify: `tests/test_deploy_script.py`
 
 **Interfaces:**
-- Consumes: `scripts._render.RENDER_API`, `.headers()`, `.unwrap()`,
+- Consumes: `bot.scripts._render.RENDER_API`, `.headers()`, `.unwrap()`,
   `.find_service_id()`, `.env_vars()` (produced in Task 1).
 
 - [ ] **Step 1: Remove the four moved functions and `_RENDER_API` from `scripts/deploy.py`**
@@ -332,7 +332,7 @@ git commit -m "refactor: point scripts/deploy.py at scripts/_render.py"
 - Modify: `scripts/set_provider.py`
 
 **Interfaces:**
-- Consumes: `scripts._render.find_service_id()`, `scripts._render.env_vars()`
+- Consumes: `bot.scripts._render.find_service_id()`, `bot.scripts._render.env_vars()`
   (produced in Task 1). No test file changes in this task (spec §6 confirms
   `tests/test_set_provider_script.py` needs none).
 
@@ -341,14 +341,14 @@ git commit -m "refactor: point scripts/deploy.py at scripts/_render.py"
 Change:
 
 ```python
-from scripts.deploy import _PROVIDERS, _find_render_service_id, _render_env_vars
+from bot.scripts.deploy import _PROVIDERS, _find_render_service_id, _render_env_vars
 ```
 
 to:
 
 ```python
 from scripts import _render
-from scripts.deploy import _PROVIDERS
+from bot.scripts.deploy import _PROVIDERS
 ```
 
 In `_verify_render_credential()`, change:

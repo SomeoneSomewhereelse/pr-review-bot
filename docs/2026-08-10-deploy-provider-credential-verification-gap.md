@@ -20,7 +20,7 @@ live review. Every specialist failed with `"No API key was provided."` —
 prior deploy had ever used Gemini live, so nobody had had a reason to push
 it before).
 
-**The part worth a fresh look:** `uv run python -m scripts.deploy` was run
+**The part worth a fresh look:** `uv run python -m bot.scripts.deploy` was run
 *before* this failure was discovered, specifically to check things were in
 order, and it reported everything green:
 

@@ -8,7 +8,7 @@ import pytest
 
 from bot import github_app
 from bot.config import settings
-from scripts import deploy, doctor
+from bot.scripts import deploy, doctor
 
 SENTINEL = "SENTINEL-2b6d40af91ce7385-DO-NOT-LEAK"
 

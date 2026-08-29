@@ -1590,7 +1590,7 @@ then not consulted at all, not used as a tiebreak.
 Three things worth knowing:
 
 - **The cap is per key slot, not global.** Swapping slots with
-  `uv run python -m scripts.set_override groq --index 1` immediately grants
+  `uv run python -m bot.scripts.set_override groq --index 1` immediately grants
   a fresh budget, exactly as key rotation already works — nothing auto-swaps
   on a breach; a human decides.
 - **Usage survives restarts.** It's summed from the persisted `reviews`

@@ -32,7 +32,7 @@ templates:
    command does that.
 
 ```bash
-uv run python -m scripts.doctor
+uv run python -m bot.scripts.doctor
 ```
 
 `doctor`'s `llm-provider` row confirms the provider you set has a matching

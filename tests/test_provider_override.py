@@ -20,7 +20,7 @@ import pytest
 from bot.config import settings
 from bot.providers import active
 from bot.queue import store
-from scripts.deploy import _resolved_provider
+from bot.scripts.deploy import _resolved_provider
 
 T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"

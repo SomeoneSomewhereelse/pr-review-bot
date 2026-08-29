@@ -154,7 +154,7 @@ def _verify_render_credential(provider: str) -> tuple[bool, str]:
     if not live_value:
         return False, (f"{credential} is missing on the Render service; the "
                         "override would fail every review immediately. Push it "
-                        "first (uv run python -m scripts.deploy --sync-env) or "
+                        "first (uv run python -m bot.scripts.deploy --sync-env) or "
                         "pass --force")
     if not local_value:
         return True, f"{credential} present on Render (no local value to compare)"
@@ -194,10 +194,10 @@ is where the friction lives, so that's where the fix goes.
 ### 4.2 `main()` changes
 
 ```
-uv run python -m scripts.set_provider gemini
+uv run python -m bot.scripts.set_provider gemini
   # refuses, exit 2, if _verify_render_credential returns (False, ...)
 
-uv run python -m scripts.set_provider gemini --force
+uv run python -m bot.scripts.set_provider gemini --force
   # prints the same message, then "proceeding anyway (--force)", writes the override
 ```
 

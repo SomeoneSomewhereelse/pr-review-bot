@@ -2,8 +2,8 @@
 manual/live test runs (e.g. before a multi-repo test pass) so the dashboard
 and queue start empty instead of carrying over old test data.
 
-    uv run python -m scripts.reset_queue           # dry run: reports counts only
-    uv run python -m scripts.reset_queue --yes      # actually truncates
+    uv run python -m bot.scripts.reset_queue           # dry run: reports counts only
+    uv run python -m bot.scripts.reset_queue --yes      # actually truncates
 
 Writes to whatever DATABASE_URL points at -- against a local .env this resets
 a LOCAL database and nothing reaches production. Never touches `runtime_config`
@@ -22,7 +22,7 @@ import sys
 
 from bot.config import settings
 from bot.queue import store
-from scripts import _render
+from bot.scripts import _render
 
 
 def _verify_render_reachability() -> str:

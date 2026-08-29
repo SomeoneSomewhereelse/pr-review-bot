@@ -1,16 +1,17 @@
-"""Manual live verification for the Groq provider (app/providers/groq.py).
+"""Manual live verification for Step 4 (app/providers/*).
 
 Not part of the pytest suite (CI never runs this) — it depends on a real,
-live call to the Groq API using the real GROQ_API_KEY from `.env`. Groq is
-the actually-live cross-vendor provider in this environment (Gemini's API
-key is blocked at the account level — unrelated issue — so Groq was pulled
-forward from the original build order to have a working live LLM path).
+live call to the Gemini AI-Studio API using the real GEMINI_API_KEY from
+`.env`. This is the ACTUALLY LIVE provider in this environment — Vertex was
+evaluated and removed (it requires an attached payment card, which this
+project's no-card constraint rules out; see CLAUDE.md's "Substitutions from
+the brief").
 
 Run it directly:
 
-    uv run python -m scripts.manual_verify_groq
+    uv run python -m bot.scripts.manual_verify_step4
 
-It proves, against the real Groq API, through the real validate-repair
+It proves, against the real Gemini API, through the real validate-repair
 layer:
   1. A structured-output call succeeds and returns a validated instance of
      a tiny test schema (not a bare string).
@@ -21,12 +22,10 @@ Never prints the API key or any other secret.
 
 from __future__ import annotations
 
-import asyncio
-
 from pydantic import BaseModel
 
 from bot.config import settings
-from bot.providers.groq import GroqProvider
+from bot.providers.google_genai import GeminiProvider
 from bot.providers.pricing import estimate_cost_usd
 from bot.providers.validate import validate_and_repair
 
@@ -36,15 +35,17 @@ class Greeting(BaseModel):
 
 
 def main() -> None:
-    print(f"Provider: groq   Model: {settings.groq_model}")
+    print(f"Provider: gemini   Model: {settings.llm_model}")
     print("(never printing the API key)")
 
-    provider = GroqProvider(api_key=settings.groq_api_key, model=settings.groq_model)
+    provider = GeminiProvider(api_key=settings.gemini_api_key, model=settings.llm_model)
 
     system = "Respond in the given JSON schema."
     user = "Say hello in one short sentence."
 
     print("\nMaking a real, live call through validate_and_repair() ...")
+    import asyncio
+
     result = asyncio.run(validate_and_repair(provider, system, user, Greeting))
 
     print(f"\nok: {result.ok}")
@@ -59,11 +60,11 @@ def main() -> None:
     assert result.tokens_in > 0, "expected non-zero real prompt token usage"
     assert result.tokens_out > 0, "expected non-zero real completion token usage"
 
-    cost = estimate_cost_usd("groq", settings.groq_model, result.tokens_in, result.tokens_out)
+    cost = estimate_cost_usd("gemini", settings.llm_model, result.tokens_in, result.tokens_out)
     print(f"est. cost: ${cost:.6f}" if cost is not None else "est. cost: n/a (unpriced model)")
 
     print(
-        "\nSUCCESS: live Groq structured-output call verified "
+        "\nSUCCESS: live Gemini structured-output call verified "
         "end-to-end through validate_and_repair()."
     )
 

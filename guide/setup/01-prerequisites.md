@@ -158,7 +158,7 @@ already logged into GitHub in your default browser.
     here, approving the App in Steps 2–3, and owning the repo you'll later
     set `GITHUB_TARGET_REPO` to. If you're ever unsure which account is
     currently active, `gh auth status` names it. `uv run python -m
-    scripts.doctor`'s `gh-auth` and `target-repo` rows also catch a mismatch
+    bot.scripts.doctor`'s `gh-auth` and `target-repo` rows also catch a mismatch
     directly, once `GITHUB_TARGET_REPO` is set in Step 8 — but it's simpler
     to just not create one.
 
@@ -190,7 +190,7 @@ correctly in place.
 ## Next
 
 ```bash
-uv run python -m scripts.doctor
+uv run python -m bot.scripts.doctor
 ```
 
 Run it now — it checks every prerequisite above (and everything in the

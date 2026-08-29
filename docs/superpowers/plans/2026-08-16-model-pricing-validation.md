@@ -404,7 +404,7 @@ Replace line 143's cell text:
 - [ ] **Step 3: Add the deploy-section paragraph**
 
 Insert immediately after the DB-override refusal paragraph that ends
-`uv run python -m scripts.set_override --clear.` (line 214), as its own
+`uv run python -m bot.scripts.set_override --clear.` (line 214), as its own
 paragraph:
 
 ```markdown

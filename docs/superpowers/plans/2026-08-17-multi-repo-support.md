@@ -975,7 +975,7 @@ with:
 Line 163, replace:
 ```
 For a narrower, credential-free check — "is the service up?" and nothing
-else — `uv run python -m scripts.deploy --health-only` runs only the
+else — `uv run python -m bot.scripts.deploy --health-only` runs only the
 `health` check, needing just `PUBLIC_BASE_URL`/`RENDER_EXTERNAL_URL` and no
 `GITHUB_TARGET_REPO` or any credential. Combining it with `--sync-env` is
 refused (exit 2) — they're separate modes, not composable.
@@ -983,7 +983,7 @@ refused (exit 2) — they're separate modes, not composable.
 with:
 ```
 For a narrower, credential-free check — "is the service up?" and nothing
-else — `uv run python -m scripts.deploy --health-only` runs only the
+else — `uv run python -m bot.scripts.deploy --health-only` runs only the
 `health` check, needing just `PUBLIC_BASE_URL`/`RENDER_EXTERNAL_URL` and no
 credential. Combining it with `--sync-env` is refused (exit 2) — they're
 separate modes, not composable.

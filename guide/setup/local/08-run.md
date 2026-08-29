@@ -23,12 +23,12 @@ HTTPS requirement.
 
 This uses the repo you picked, installed the App on, and set as
 `GITHUB_TARGET_REPO` back in [Step 3](../03-install-app.md). If you skipped
-that, do it now — `uv run python -m scripts.doctor`'s `gh-auth` and
+that, do it now — `uv run python -m bot.scripts.doctor`'s `gh-auth` and
 `target-repo` rows will FAIL with the specific account/repo mismatch if
 there is one, rather than you finding out from `seed_demo_pr` failing below.
 
 ```bash
-uv run python -m scripts.seed_demo_pr
+uv run python -m bot.scripts.seed_demo_pr
 ```
 
 This clones the configured test repo, plants known-bad code from

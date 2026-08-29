@@ -100,7 +100,7 @@ propagates correctly to `credentials.resolve()`, `scripts/_override.py`, and
 ### 2d. `scripts/encode_credential.py` (new)
 
 ```
-uv run python -m scripts.encode_credential path/to/file.pem
+uv run python -m bot.scripts.encode_credential path/to/file.pem
 ```
 
 Reads the file, prints its base64 form to stdout, nothing else — no flags, no file

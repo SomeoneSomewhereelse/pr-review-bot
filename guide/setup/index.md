@@ -15,7 +15,7 @@ These are covered by the next four pages, in order:
    let an App install itself.
 4. **Configure an LLM provider** — pick a provider, get a key, set it.
 
-Run `uv run python -m scripts.doctor` at any point — it tells you which of
+Run `uv run python -m bot.scripts.doctor` at any point — it tells you which of
 these (and the four that follow) are still outstanding.
 
 ## Steps 5–8: choose a track

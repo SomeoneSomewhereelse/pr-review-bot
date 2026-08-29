@@ -59,9 +59,9 @@
 - Consumes: nothing from earlier tasks.
 - Produces, and every later task depends on these exact names:
   - `settings.uptimerobot_api_key: str`, `settings.render_api_key: str`, `settings.render_service_name: str`
-  - `scripts.deploy.CheckResult` — frozen dataclass, fields `name: str`, `status: Literal["PASS","FAIL","SKIPPED"]`, `detail: str = ""`
-  - `scripts.deploy.render_report(results: list[CheckResult]) -> str`
-  - `scripts.deploy.resolve_base_url() -> str` (returns the base URL already `rstrip("/")`-normalized, or `""`)
+  - `bot.scripts.deploy.CheckResult` — frozen dataclass, fields `name: str`, `status: Literal["PASS","FAIL","SKIPPED"]`, `detail: str = ""`
+  - `bot.scripts.deploy.render_report(results: list[CheckResult]) -> str`
+  - `bot.scripts.deploy.resolve_base_url() -> str` (returns the base URL already `rstrip("/")`-normalized, or `""`)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -138,7 +138,7 @@ def test_render_report_summary_when_everything_passes():
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'resolve_base_url'` (and the same for `CheckResult`/`render_report`).
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'resolve_base_url'` (and the same for `CheckResult`/`render_report`).
 
 - [ ] **Step 3: Add the three config fields**
 
@@ -354,7 +354,7 @@ def test_check_config_never_prints_a_secret_value(complete_config, monkeypatch):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k check_config -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'check_config'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'check_config'`.
 
 - [ ] **Step 3: Implement `check_config`**
 
@@ -439,7 +439,7 @@ selected."
 - Produces:
   - `github_app.AppNotInstalledError(RuntimeError)` — raised by `discover_installation_id` on a 404 only.
   - `github_app.get_webhook_url() -> str` — the App's configured webhook URL, `""` when never configured. Raises `GithubException` on API failure.
-  - `scripts.deploy.check_installation_and_webhook(repo: str, base: str) -> CheckResult` (name `"github-app"`).
+  - `bot.scripts.deploy.check_installation_and_webhook(repo: str, base: str) -> CheckResult` (name `"github-app"`).
 
 **Background:** `discover_installation_id` already distinguishes a 404 ("not
 installed") from any other status; only the *exception type* changes here so the
@@ -604,7 +604,7 @@ def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
 - [ ] **Step 6: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k webhook -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'check_installation_and_webhook'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'check_installation_and_webhook'`.
 
 - [ ] **Step 7: Implement the check**
 
@@ -728,7 +728,7 @@ def test_health_fails_on_a_transport_error():
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k health -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'check_health_endpoint'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'check_health_endpoint'`.
 
 - [ ] **Step 3: Implement the check**
 
@@ -848,7 +848,7 @@ def test_database_distinguishes_reachable_but_unprovisioned(db, db_url, db_exec,
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k database -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'check_database'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'check_database'`.
 
 - [ ] **Step 3: Implement the check**
 
@@ -1065,7 +1065,7 @@ def test_render_service_never_echoes_the_api_key(monkeypatch):
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k render_service -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'check_render_service'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'check_render_service'`.
 
 - [ ] **Step 3: Implement the check and its helpers**
 
@@ -1240,7 +1240,7 @@ def test_uptime_pinger_never_echoes_the_api_key(monkeypatch):
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k uptime -v`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute 'check_uptime_pinger'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute 'check_uptime_pinger'`.
 
 - [ ] **Step 3: Implement the check**
 
@@ -1840,7 +1840,7 @@ description: Verify the hosted Render + Supabase deployment and register the web
 Run the deploy verification CLI and report its results:
 
 ```bash
-uv run python -m scripts.deploy
+uv run python -m bot.scripts.deploy
 ```
 
 Show the printed table to the user verbatim — it is already terse by design, so
@@ -1855,7 +1855,7 @@ If the diagnosis is that the Render service's environment variables have
 drifted from the local `.env`, the follow-up is:
 
 ```bash
-uv run python -m scripts.deploy --sync-env
+uv run python -m bot.scripts.deploy --sync-env
 ```
 
 That pushes the changed variables, triggers a deploy, waits for it to go live,
@@ -1899,7 +1899,7 @@ Full click-by-click detail for each: [`SETUP.md`](SETUP.md) §3.
 #### Verifying a deployment
 
 ```bash
-PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy
+PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m bot.scripts.deploy
 ```
 
 Run it from your own machine, not inside the Render container — `scripts/` is not
@@ -1935,7 +1935,7 @@ operator-local key. Neither is ever set on the Render service:
 With `RENDER_API_KEY` set, this is a complete, repeatable deploy:
 
 ```bash
-PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
+PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m bot.scripts.deploy --sync-env
 ```
 
 It pushes any of `DATABASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64`,
@@ -1952,7 +1952,7 @@ Claude Code users can run `/deploy` instead, which wraps the same CLI.
 
 - [ ] **Step 5: Update SETUP.md §3.4 and §3.5**
 
-In §3.4, replace the bare `python -m scripts.deploy` registration step with the
+In §3.4, replace the bare `python -m bot.scripts.deploy` registration step with the
 same content as README's "Verifying a deployment" and "Deploying" subsections —
 the six-check table, the three exit codes, the three optional keys with what each
 unlocks, and the `--sync-env` command. Keep the existing runs-locally and
@@ -2003,7 +2003,7 @@ Expected: all green, including both parameterizations of `test_env_var_names_mat
 
 - [ ] **Step 8: Verify the CLI runs end-to-end against nothing**
 
-Run: `uv run python -m scripts.deploy` with `GITHUB_TARGET_REPO` unset.
+Run: `uv run python -m bot.scripts.deploy` with `GITHUB_TARGET_REPO` unset.
 Expected: exit code 2 and the "GITHUB_TARGET_REPO and a public base URL ... are
 required" message on stderr — no traceback. Confirm with `echo $?`.
 

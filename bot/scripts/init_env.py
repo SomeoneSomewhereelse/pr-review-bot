@@ -1,6 +1,6 @@
 """Interactively scaffold .env and .env.config from the committed examples.
 
-    uv run python -m scripts.init_env
+    uv run python -m bot.scripts.init_env
 
 HUMAN-RUN ONLY -- it prompts for and writes real credentials. An agent must
 never invoke it (same rule as scripts/encode_credential.py).
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         write_env(merged, path, overwrite=True)
         print(f"wrote {path} ({len(chosen)} keys)")
 
-    print("next: uv run python -m scripts.doctor")
+    print("next: uv run python -m bot.scripts.doctor")
     return 0
 
 

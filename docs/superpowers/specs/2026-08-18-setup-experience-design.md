@@ -160,7 +160,7 @@ setup was "local machine + Cloudflare Tunnel", and `SETUP.md:734` records
 |---|---|---|
 | 5A | Get a Postgres | Docker, a native install, or any remote instance; set `DATABASE_URL` |
 | 6A | Start a tunnel | `cloudflared tunnel --url http://localhost:8000` in a second terminal; set `PUBLIC_BASE_URL` to the printed URL |
-| 7A | Register the webhook and verify | `uv run python -m scripts.deploy` — Render/pinger checks `SKIP` cleanly with no `RENDER_API_KEY` |
+| 7A | Register the webhook and verify | `uv run python -m bot.scripts.deploy` — Render/pinger checks `SKIP` cleanly with no `RENDER_API_KEY` |
 | 8A | Run and review | `uv run uvicorn app.main:app` · then `seed_demo_pr.py` |
 
 **Track B — hosted** (5B-8B):
@@ -308,7 +308,7 @@ use Claude Code."*
 The command loops: run `doctor --json`, explain the first failing line in plain
 language, name the next command, repeat. With one hard rule written into the
 command itself: **when a step requires entering a real credential, hand off** —
-"run `! uv run python -m scripts.init_env` yourself" — because `CLAUDE.md`
+"run `! uv run python -m bot.scripts.init_env` yourself" — because `CLAUDE.md`
 forbids the agent from opening `.env` at all. The agent only ever sees
 doctor's names, lengths, and booleans. That handoff is not a limitation routed
 around; it is what makes an agent-assisted setup safe.

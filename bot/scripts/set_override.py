@@ -2,16 +2,16 @@
 API-key-slot index or model override -- in one combined write+verification
 pass when several are given.
 
-    uv run python -m scripts.set_override groq
-    uv run python -m scripts.set_override --clear
-    uv run python -m scripts.set_override groq --index 1
-    uv run python -m scripts.set_override groq --index 1 --no-activate
-    uv run python -m scripts.set_override groq --clear-index
-    uv run python -m scripts.set_override groq --clear-index --no-activate
-    uv run python -m scripts.set_override vertex --model gemini-2.5-flash
-    uv run python -m scripts.set_override vertex --model gemini-2.5-flash --no-activate
-    uv run python -m scripts.set_override vertex --clear-model --no-activate
-    uv run python -m scripts.set_override --list
+    uv run python -m bot.scripts.set_override groq
+    uv run python -m bot.scripts.set_override --clear
+    uv run python -m bot.scripts.set_override groq --index 1
+    uv run python -m bot.scripts.set_override groq --index 1 --no-activate
+    uv run python -m bot.scripts.set_override groq --clear-index
+    uv run python -m bot.scripts.set_override groq --clear-index --no-activate
+    uv run python -m bot.scripts.set_override vertex --model gemini-2.5-flash
+    uv run python -m bot.scripts.set_override vertex --model gemini-2.5-flash --no-activate
+    uv run python -m bot.scripts.set_override vertex --clear-model --no-activate
+    uv run python -m bot.scripts.set_override --list
 
 --list prints names and booleans only -- which slots exist locally, which
 exist on Render, the active index, and the active model -- and never a
@@ -39,7 +39,7 @@ separately, after the presentation this was built for.
 
 Verifies against the EFFECTIVE index -- whatever will actually be active
 for this provider after the write, not always index 0 -- via
-scripts._override.verify_render_slot. This fixes a latent gap in
+bot.scripts._override.verify_render_slot. This fixes a latent gap in
 scripts/set_provider.py, which always verified index 0 regardless of any
 existing key-index override for that provider.
 
@@ -66,7 +66,7 @@ from datetime import datetime, timezone
 from bot.config import settings
 from bot.providers import active_model, pricing, registry
 from bot.queue import store
-from scripts import _override, _render
+from bot.scripts import _override, _render
 
 
 def build_parser() -> argparse.ArgumentParser:

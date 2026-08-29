@@ -44,13 +44,13 @@ only needs to exist on your own machine for this demo, since `seed_demo_pr`
 runs entirely locally; it doesn't need to be pushed to Render (the deployed
 service's own copy of `GITHUB_TARGET_REPO` is a separate, still-optional
 narrowing of which installed repos the bot itself acts on). If you skipped
-setting it locally, do it now — `uv run python -m scripts.doctor`'s
+setting it locally, do it now — `uv run python -m bot.scripts.doctor`'s
 `gh-auth` and `target-repo` rows will FAIL with the specific account/repo
 mismatch if there is one, rather than you finding out from `seed_demo_pr`
 failing below.
 
 ```bash
-uv run python -m scripts.seed_demo_pr
+uv run python -m bot.scripts.seed_demo_pr
 ```
 
 This clones the configured test repo, plants known-bad code from
@@ -78,6 +78,6 @@ clone, reviewed automatically, no manual step in between.
 
 ## Done
 
-All eight steps are complete. `uv run python -m scripts.doctor` should now
+All eight steps are complete. `uv run python -m bot.scripts.doctor` should now
 report every row `PASS` (or `SKIPPED` where a credential like
 `UPTIMEROBOT_API_KEY` was left unset by choice).

@@ -128,7 +128,7 @@ def test_local_numbered_slots_does_not_match_a_different_base(tmp_path):
 - [ ] **Step 3: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_override_helpers.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts._override'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts._override'`
 
 - [ ] **Step 4: Write minimal implementation**
 
@@ -375,7 +375,7 @@ def test_verify_render_slot_never_leaks_a_fetched_value(monkeypatch, db_url):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_override_helpers.py -v`
-Expected: 9 FAIL with `AttributeError: module 'scripts._override' has no attribute
+Expected: 9 FAIL with `AttributeError: module 'bot.scripts._override' has no attribute
 'verify_render_slot'`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -507,7 +507,7 @@ def test_wanted_env_pushes_numbered_slots_for_every_provider_not_just_the_select
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -k numbered_slot -v`
-Expected: 3 FAIL — `AttributeError: module 'scripts.deploy' has no attribute '_override'`
+Expected: 3 FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute '_override'`
 (or the first two assertions fail with a KeyError/missing-key, depending on which runs first)
 
 - [ ] **Step 3: Write minimal implementation**
@@ -812,7 +812,7 @@ def test_providers_track_independent_index_overrides():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_set_override_script.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'scripts.set_override'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'bot.scripts.set_override'`
 
 - [ ] **Step 3: Write the implementation (core grammar + persistence)**
 
@@ -823,12 +823,12 @@ Create `scripts/set_override.py`:
 API-key-slot index override -- in one combined write+verification pass
 when both are given.
 
-    uv run python -m scripts.set_override groq
-    uv run python -m scripts.set_override --clear
-    uv run python -m scripts.set_override groq --index 1
-    uv run python -m scripts.set_override groq --index 1 --no-activate
-    uv run python -m scripts.set_override groq --clear-index
-    uv run python -m scripts.set_override groq --clear-index --no-activate
+    uv run python -m bot.scripts.set_override groq
+    uv run python -m bot.scripts.set_override --clear
+    uv run python -m bot.scripts.set_override groq --index 1
+    uv run python -m bot.scripts.set_override groq --index 1 --no-activate
+    uv run python -m bot.scripts.set_override groq --clear-index
+    uv run python -m bot.scripts.set_override groq --clear-index --no-activate
 
 Full replacement for scripts/set_provider.py and scripts/set_api_key.py --
 see docs/superpowers/specs/2026-08-12-override-cli-unification-design.md
@@ -838,7 +838,7 @@ separately, after the presentation this was built for.
 
 Verifies against the EFFECTIVE index -- whatever will actually be active
 for this provider after the write, not always index 0 -- via
-scripts._override.verify_render_slot. This fixes a latent gap in
+bot.scripts._override.verify_render_slot. This fixes a latent gap in
 scripts/set_provider.py, which always verified index 0 regardless of any
 existing key-index override for that provider.
 """
@@ -1023,7 +1023,7 @@ def test_entry_point_runs_as_a_documented_module_invocation():
     """Mirrors the identically-motivated tests in test_set_provider_script.py
     and test_set_api_key_script.py."""
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.set_override", "--help"],
+        [sys.executable, "-m", "bot.scripts.set_override", "--help"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -1195,11 +1195,11 @@ when the Render service has no connected repo" at line 256):
 #### Setting the provider and key-index override together
 
 ```bash
-uv run python -m scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
-uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, same as set_api_key.py below
-uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same as set_api_key.py below
-uv run python -m scripts.set_override groq                  # activate only, same as set_provider.py below
-uv run python -m scripts.set_override --clear                # clear the provider override, same as set_provider.py below
+uv run python -m bot.scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
+uv run python -m bot.scripts.set_override groq --index 1 --no-activate   # index only, same as set_api_key.py below
+uv run python -m bot.scripts.set_override groq --clear-index --no-activate  # clear index only, same as set_api_key.py below
+uv run python -m bot.scripts.set_override groq                  # activate only, same as set_provider.py below
+uv run python -m bot.scripts.set_override --clear                # clear the provider override, same as set_provider.py below
 ```
 
 `scripts/set_override.py` is a full, standalone replacement for both `set_provider.py` and

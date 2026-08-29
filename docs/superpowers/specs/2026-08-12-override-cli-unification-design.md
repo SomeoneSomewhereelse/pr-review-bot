@@ -161,13 +161,13 @@ per §2, they stay untouched. Only the new script (§5) and `deploy.py`'s sync-e
 ## 5. Fix 3 — `scripts/set_override.py` (new, full replacement)
 
 ```
-uv run python -m scripts.set_override PROVIDER                            # activate PROVIDER only
-uv run python -m scripts.set_override --clear                              # clear provider override only
-uv run python -m scripts.set_override PROVIDER --index N --no-activate      # set PROVIDER's index only
-uv run python -m scripts.set_override PROVIDER --clear-index --no-activate   # clear PROVIDER's index only
-uv run python -m scripts.set_override PROVIDER --index N                   # activate PROVIDER + set its index, together (NEW)
-uv run python -m scripts.set_override PROVIDER --clear-index               # activate PROVIDER + clear its index, together
-uv run python -m scripts.set_override PROVIDER --index N --force           # bypass a failed live-verification refusal
+uv run python -m bot.scripts.set_override PROVIDER                            # activate PROVIDER only
+uv run python -m bot.scripts.set_override --clear                              # clear provider override only
+uv run python -m bot.scripts.set_override PROVIDER --index N --no-activate      # set PROVIDER's index only
+uv run python -m bot.scripts.set_override PROVIDER --clear-index --no-activate   # clear PROVIDER's index only
+uv run python -m bot.scripts.set_override PROVIDER --index N                   # activate PROVIDER + set its index, together (NEW)
+uv run python -m bot.scripts.set_override PROVIDER --clear-index               # activate PROVIDER + clear its index, together
+uv run python -m bot.scripts.set_override PROVIDER --index N --force           # bypass a failed live-verification refusal
 ```
 
 **Mapping to the two scripts it replaces** (both remain functionally reachable, this is a
@@ -323,7 +323,7 @@ addition with no behavioral risk — same treatment for `GROQ_API_KEY` and
   scripts' test shape): every row of §5's mapping table, both mutual-exclusion validation
   errors, `--force`, the effective-index resolution in all three cases (explicit `--index`,
   `--clear-index` → 0, neither given → read the existing override), and a `--help` subprocess
-  test (catching the `python scripts/x.py` vs `python -m scripts.x` pitfall the other two
+  test (catching the `python scripts/x.py` vs `python -m bot.scripts.x` pitfall the other two
   test files already guard against).
 - `scripts/deploy.py`: extend (not rewrite) the existing sync-env tests — a numbered slot
   with a local value gets pushed; one without a local value is left alone; existing

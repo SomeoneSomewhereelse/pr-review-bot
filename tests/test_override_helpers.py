@@ -9,7 +9,7 @@ import pytest
 import respx
 
 from bot.config import settings
-from scripts import _override
+from bot.scripts import _override
 
 
 @pytest.fixture(autouse=True)
@@ -194,7 +194,7 @@ def test_verify_render_slot_never_leaks_a_fetched_value(monkeypatch, db_url):
 def test_local_slot_indices_returns_indices_not_values(tmp_path, local_slot_discovery_allowed):
     """Discovery answers a NAMES question, so it must not hand back values --
     a caller cannot leak what it never received."""
-    from scripts import _override
+    from bot.scripts import _override
 
     env = tmp_path / ".env"
     env.write_text(
@@ -208,7 +208,7 @@ def test_local_slot_indices_returns_indices_not_values(tmp_path, local_slot_disc
 
 
 def test_local_slot_indices_skips_empty_slots(tmp_path, local_slot_discovery_allowed):
-    from scripts import _override
+    from bot.scripts import _override
 
     env = tmp_path / ".env"
     env.write_text("GROQ_API_KEY_1=sentinel-one\nGROQ_API_KEY_2=\n")
@@ -216,7 +216,7 @@ def test_local_slot_indices_skips_empty_slots(tmp_path, local_slot_discovery_all
 
 
 def test_local_slot_indices_is_empty_for_a_missing_file(local_slot_discovery_allowed):
-    from scripts import _override
+    from bot.scripts import _override
 
     assert _override.local_slot_indices("GROQ_API_KEY", env_path="no-such-file") == ()
 
@@ -226,7 +226,7 @@ def test_local_slot_values_still_carries_values_for_sync_env(
 ):
     """The value-bearing variant survives, narrowly: --sync-env genuinely has
     to push the values."""
-    from scripts import _override
+    from bot.scripts import _override
 
     env = tmp_path / ".env"
     env.write_text("GROQ_API_KEY_1=sentinel-one\n")

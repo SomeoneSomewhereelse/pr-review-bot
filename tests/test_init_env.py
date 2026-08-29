@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from bot.config import OPERATIONAL_KEYS
-from scripts import init_env
+from bot.scripts import init_env
 
 SENTINEL = "SENTINEL-4e8b03d5f7a91c62-EXISTING"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -197,7 +197,7 @@ def test_running_init_env_with_an_already_malformed_value_does_not_crash(tmp_pat
     (tmp_path / ".env.config").write_text("KEY_USAGE_RESET_TIME_UTC=4:00\n", encoding="utf-8")
     env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.init_env"],
+        [sys.executable, "-m", "bot.scripts.init_env"],
         cwd=tmp_path, env=env, input="", capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr

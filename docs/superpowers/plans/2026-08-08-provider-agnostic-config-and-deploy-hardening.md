@@ -1575,7 +1575,7 @@ def test_requires_a_provider_or_clear(capsys):
 - [ ] **Step 2: Run them to make sure they fail**
 
 Run: `TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest tests/test_set_provider_script.py -v`
-Expected: FAIL — `scripts.set_provider` does not exist.
+Expected: FAIL — `bot.scripts.set_provider` does not exist.
 
 - [ ] **Step 3: Write the script**
 
@@ -1603,7 +1603,7 @@ import sys
 from datetime import datetime, timezone
 
 from app.queue import store
-from scripts.deploy import _PROVIDERS
+from bot.scripts.deploy import _PROVIDERS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2376,13 +2376,13 @@ Run:
 ```bash
 TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest -q
 uv run ruff check .
-uv run python -m scripts.deploy --help
+uv run python -m bot.scripts.deploy --help
 ```
 Expected: all tests pass, ruff clean, `--help` prints usage and exits 0.
 
 - [ ] **Step 8: Smoke-test the failure path**
 
-Run: `env -u GITHUB_TARGET_REPO uv run python -m scripts.deploy; echo "exit=$?"`
+Run: `env -u GITHUB_TARGET_REPO uv run python -m bot.scripts.deploy; echo "exit=$?"`
 Expected: a clean one-line message and `exit=2`, with no traceback.
 
 - [ ] **Step 9: Commit**
@@ -2411,7 +2411,7 @@ Before finishing the branch:
 - [ ] `uv run ruff check .` — clean, with `E501` now enforced
 - [ ] `grep -rn "settings.llm_provider" app/ | grep -v config.py | grep -v active.py` — no output
 - [ ] `grep -rn "vertex" --include="*.py" --include="*.yaml" --include="*.example" . | grep -v .venv | grep -v docs` — only the retirement test and the explanatory docstring
-- [ ] `uv run python -m scripts.deploy --help` — exits 0
+- [ ] `uv run python -m bot.scripts.deploy --help` — exits 0
 - [ ] Spec §6's non-absorbed items are still *not* done, and that is correct: the health URL built in two checks, unbounded monitor enumeration, and Render list pagination.
 
 Then use `superpowers:finishing-a-development-branch`. **Do not push** —

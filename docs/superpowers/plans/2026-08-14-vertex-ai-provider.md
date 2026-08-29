@@ -1104,7 +1104,7 @@ The single deliberate live call that proves vertex actually works end-to-end. Mi
 
 **Interfaces:**
 - Consumes: `vertex_credentials.resolve_service_account_info`, `VertexProvider`, `estimate_cost_usd`, `validate_and_repair` — all from Tasks 2-4.
-- Produces: nothing importable; it is a CLI entry point (`uv run python -m scripts.manual_verify_vertex`). Not collected by pytest (`testpaths = ["tests"]`).
+- Produces: nothing importable; it is a CLI entry point (`uv run python -m bot.scripts.manual_verify_vertex`). Not collected by pytest (`testpaths = ["tests"]`).
 
 - [ ] **Step 1: Write the script**
 
@@ -1121,7 +1121,7 @@ login`).
 
 Run it directly:
 
-    uv run python -m scripts.manual_verify_vertex
+    uv run python -m bot.scripts.manual_verify_vertex
 
 It proves, against real Vertex AI, through the real validate-repair layer:
   1. A structured-output call succeeds and returns a validated instance of a
@@ -1241,7 +1241,7 @@ Confirm the Vertex AI API is enabled on that project. If no credential is availa
 
 Run:
 ```bash
-uv run python -m scripts.manual_verify_vertex
+uv run python -m bot.scripts.manual_verify_vertex
 ```
 Expected: prints `ok: True`, a parsed `Greeting(message=...)`, non-zero `tokens_in`/`tokens_out`, an estimated cost, and `SUCCESS`.
 
@@ -1374,7 +1374,7 @@ the Render dashboard, to add a new slot). `vertex` rides the identical
 mechanism with a differently-shaped credential: `GCP_SERVICE_ACCOUNT_KEY_B64`,
 `_1`, `_2`, ... on Render, and locally the same index instead selects among
 `GCP_SERVICE_ACCOUNT_KEY_PATH`, `_1`, `_2`, ... key files — so
-`uv run python -m scripts.set_override vertex --index 1` swaps service
+`uv run python -m bot.scripts.set_override vertex --index 1` swaps service
 accounts with no redeploy and no CLI change. Each provider tracks its own
 key-index independently, so switching providers never disturbs the slot
 chosen for the other two, and no secret value is ever written to, read

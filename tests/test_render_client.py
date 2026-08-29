@@ -8,7 +8,7 @@ import httpx
 import respx
 
 from bot.config import settings
-from scripts import _render
+from bot.scripts import _render
 
 RENDER_SERVICES = "https://api.render.com/v1/services"
 

@@ -155,7 +155,7 @@ class Settings(BaseSettings):
 
     # --- Draft PRs. Database-only, like the cooldown/usage-cap settings
     # above -- never a Render env var, so an operator can flip it with no
-    # redeploy (uv run python -m scripts.deploy --sync-config-db). False
+    # redeploy (uv run python -m bot.scripts.deploy --sync-config-db). False
     # (the default) skips a review while a PR is a draft; ready_for_review
     # still triggers one even with zero new commits (see app/webhook.py).
     review_draft_prs: bool = False

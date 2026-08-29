@@ -1,7 +1,7 @@
 """Prints a local file's base64 form -- for pasting into GITHUB_APP_PRIVATE_KEY
 or GCP_SERVICE_ACCOUNT_KEY[_n] in .env.
 
-    uv run python -m scripts.encode_credential path/to/file.pem
+    uv run python -m bot.scripts.encode_credential path/to/file.pem
 
 Human-run only. An agent must never invoke this against a real credential
 file: doing so would print secret-derived bytes into its own tool output --

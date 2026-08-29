@@ -702,13 +702,13 @@ nothing prints the new warning yet.
 In `scripts/set_provider.py`, change the import line:
 
 ```python
-from scripts.deploy import _PROVIDERS
+from bot.scripts.deploy import _PROVIDERS
 ```
 
 to:
 
 ```python
-from scripts.deploy import _PROVIDERS, _find_render_service_id, _render_env_vars
+from bot.scripts.deploy import _PROVIDERS, _find_render_service_id, _render_env_vars
 ```
 
 and add `from app.config import settings` to the imports. Then add, above
@@ -753,7 +753,7 @@ def _verify_render_credential(provider: str) -> tuple[bool, str]:
     if not live_value:
         return False, (
             f"{credential} is missing on the Render service; the override would fail "
-            "every review immediately. Push it first (uv run python -m scripts.deploy "
+            "every review immediately. Push it first (uv run python -m bot.scripts.deploy "
             "--sync-env) or pass --force"
         )
     if not local_value:

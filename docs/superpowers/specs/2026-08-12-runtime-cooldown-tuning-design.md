@@ -128,9 +128,9 @@ except Exception:  # noqa: BLE001
 Shaped like `scripts/set_provider.py`:
 
 ```
-uv run python -m scripts.set_cooldown --base 30 --factor 1.5
-uv run python -m scripts.set_cooldown --cap 600
-uv run python -m scripts.set_cooldown --clear
+uv run python -m bot.scripts.set_cooldown --base 30 --factor 1.5
+uv run python -m bot.scripts.set_cooldown --cap 600
+uv run python -m bot.scripts.set_cooldown --clear
 ```
 
 - `--base`, `--cap`, `--factor`: any subset; each given value overwrites just

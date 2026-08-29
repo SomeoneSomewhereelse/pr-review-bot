@@ -240,7 +240,7 @@ grep -rlZ --include='*.py' -E '^from app\.|^from app import|^import app\b' . \
 
 Also fix the one non-import string reference (an error message in
 `bot/github_app.py`, unrelated to the scripts/bot.scripts rename that
-happens in Task 4 — leave the `scripts.encode_credential` part of that
+happens in Task 4 — leave the `bot.scripts.encode_credential` part of that
 string alone for now):
 
 Run: `grep -rn "app\.main:app" . --include='*.py' --include='*.md' --include='*.yml' --include='Dockerfile' 2>/dev/null | grep -v .venv`
@@ -654,7 +654,7 @@ Expected: no output (everything already prefixed `bot.`).
 
 - [ ] **Step 3: Fix `from scripts import X` import lines specifically**
 
-The sweep above only rewrites the `scripts.module` attribute-access shape.
+The sweep above only rewrites the `bot.scripts.module` attribute-access shape.
 `from scripts import X` lines need a different substitution:
 
 ```bash
@@ -676,7 +676,7 @@ file doesn't reference scripts, skip if not found). For each hit, replace
 Find:
 ```yaml
       - name: Regenerate reference docs
-        run: uv run python -m scripts.gen_docs
+        run: uv run python -m bot.scripts.gen_docs
 ```
 Confirm Step 2's sweep already turned this into
 `uv run python -m bot.scripts.gen_docs` — if not (workflow YAML files were
@@ -685,8 +685,8 @@ correct), fix it by hand now.
 
 - [ ] **Step 6: Fix `.claude/commands/setup.md`**
 
-Confirm Step 2/3's sweep already updated `scripts.doctor` → `bot.scripts.doctor`,
-`scripts.init_env` → `bot.scripts.init_env`, `scripts.create_github_app` →
+Confirm Step 2/3's sweep already updated `bot.scripts.doctor` → `bot.scripts.doctor`,
+`bot.scripts.init_env` → `bot.scripts.init_env`, `bot.scripts.create_github_app` →
 `bot.scripts.create_github_app`, and `scripts/deploy.py` → `bot/scripts/deploy.py`,
 `scripts/doctor.py` → `bot/scripts/doctor.py` throughout the file. Read it
 back and fix any the sweep missed (the sweep's regex requires a
@@ -697,15 +697,15 @@ the file's prose sentences slipped past that).
 
 Find:
 ```python
-    for tool in ("scripts.init_env", "scripts.create_github_app"):
+    for tool in ("bot.scripts.init_env", "bot.scripts.create_github_app"):
 ```
 and
 ```python
-    assert "scripts.doctor" in text
+    assert "bot.scripts.doctor" in text
 ```
-Replace `"scripts.init_env"` → `"bot.scripts.init_env"`,
-`"scripts.create_github_app"` → `"bot.scripts.create_github_app"`,
-`"scripts.doctor"` → `"bot.scripts.doctor"`.
+Replace `"bot.scripts.init_env"` → `"bot.scripts.init_env"`,
+`"bot.scripts.create_github_app"` → `"bot.scripts.create_github_app"`,
+`"bot.scripts.doctor"` → `"bot.scripts.doctor"`.
 
 - [ ] **Step 8: Fix README.md's SPEC.md/cost.md links**
 

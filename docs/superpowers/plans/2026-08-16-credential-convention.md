@@ -89,7 +89,7 @@ def test_requires_exactly_one_argument(capsys):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_encode_credential.py -v`
-Expected: every test errors with `ModuleNotFoundError: No module named 'scripts.encode_credential'` (or `ImportError`).
+Expected: every test errors with `ModuleNotFoundError: No module named 'bot.scripts.encode_credential'` (or `ImportError`).
 
 - [ ] **Step 3: Write the implementation**
 
@@ -99,7 +99,7 @@ Create `scripts/encode_credential.py`:
 """Prints a local file's base64 form -- for pasting into GITHUB_APP_PRIVATE_KEY
 or GCP_SERVICE_ACCOUNT_KEY[_n] in .env.
 
-    uv run python -m scripts.encode_credential path/to/file.pem
+    uv run python -m bot.scripts.encode_credential path/to/file.pem
 
 Human-run only. An agent must never invoke this against a real credential
 file: doing so would print secret-derived bytes into its own tool output --
@@ -994,7 +994,7 @@ with:
 ```
 GITHUB_APP_INSTALLATION_ID=
 # Base64-encoded private key -- verbatim only, never a file path (kept out of
-# git). Encode a local PEM with: uv run python -m scripts.encode_credential
+# git). Encode a local PEM with: uv run python -m bot.scripts.encode_credential
 # path/to/github-app-private-key.pem
 GITHUB_APP_PRIVATE_KEY=
 GITHUB_WEBHOOK_SECRET=
@@ -1024,7 +1024,7 @@ with:
 # vertex (Vertex AI via google-genai's vertexai=True -- needs GCP billing)
 # The credential is a GCP service-account JSON key -- base64-encoded,
 # verbatim only, never a file path. Encode a local key file with:
-# uv run python -m scripts.encode_credential path/to/service-account-key.json
+# uv run python -m bot.scripts.encode_credential path/to/service-account-key.json
 # With none of the slots below set, google-auth falls back to your own
 # `gcloud auth application-default login` credentials.
 GCP_SERVICE_ACCOUNT_KEY=
@@ -1078,7 +1078,7 @@ the Render dashboard, to add a new slot). `vertex` rides the identical
 mechanism with a differently-shaped credential: `GCP_SERVICE_ACCOUNT_KEY_B64`,
 `_1`, `_2`, ... on Render, and locally the same index instead selects among
 `GCP_SERVICE_ACCOUNT_KEY_PATH`, `_1`, `_2`, ... key files — so
-`uv run python -m scripts.set_override vertex --index 1` swaps service
+`uv run python -m bot.scripts.set_override vertex --index 1` swaps service
 accounts with no redeploy and no CLI change. Each provider tracks its own
 key-index independently, so switching providers never disturbs the slot
 chosen for the other two, and no secret value is ever written to, read
@@ -1093,7 +1093,7 @@ of time exactly like any other env var (one redeploy, via `--sync-env` or
 the Render dashboard, to add a new slot). `vertex` rides the identical
 mechanism with a differently-shaped (but still verbatim, base64-encoded, no
 file path) credential: `GCP_SERVICE_ACCOUNT_KEY`, `_1`, `_2`, ... — so
-`uv run python -m scripts.set_override vertex --index 1` swaps service
+`uv run python -m bot.scripts.set_override vertex --index 1` swaps service
 accounts with no redeploy and no CLI change. Each provider tracks its own
 key-index independently, so switching providers never disturbs the slot
 chosen for the other two, and no secret value is ever written to, read
@@ -1137,7 +1137,7 @@ with:
   `github-app-private-key.pem` at the repo root (gitignored). Set
   `GITHUB_APP_PRIVATE_KEY` in `.env` to its base64 form (verbatim only, never
   a file path) — encode it with
-  `uv run python -m scripts.encode_credential github-app-private-key.pem`.
+  `uv run python -m bot.scripts.encode_credential github-app-private-key.pem`.
 ```
 
 and replace:
@@ -1182,7 +1182,7 @@ with:
 The PEM file must be base64-encoded for the `GITHUB_APP_PRIVATE_KEY` env var:
 
 ```bash
-uv run python -m scripts.encode_credential github-app-private-key.pem
+uv run python -m bot.scripts.encode_credential github-app-private-key.pem
 ```
 
 (equivalently, `base64 -w0 < github-app-private-key.pem` — both produce the
@@ -1210,7 +1210,7 @@ with:
   `app/providers/vertex_credentials.py`:
   1. `GCP_SERVICE_ACCOUNT_KEY` (+ numbered `_1`/`_2` siblings, base64-encoded,
      verbatim only — encode a local key file with
-     `uv run python -m scripts.encode_credential path/to/key.json`) —
+     `uv run python -m bot.scripts.encode_credential path/to/key.json`) —
      selected by the same `vertex_key_index` override gemini/groq use.
   2. Implicit ADC — with the above unset, `google-auth` discovers
      `gcloud auth application-default login`'s local credentials on its own.
@@ -1544,7 +1544,7 @@ with:
             problems.append(
                 f"{provider} model override {model!r} has no pricing-table entry "
                 f"(known {provider} models: {known}); clear it or add a pricing.py "
-                f"entry: uv run python -m scripts.set_override {provider} "
+                f"entry: uv run python -m bot.scripts.set_override {provider} "
                 "--clear-model --no-activate"
             )
         else:

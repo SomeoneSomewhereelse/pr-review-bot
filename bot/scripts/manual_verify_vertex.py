@@ -7,7 +7,7 @@ implicit ADC (`gcloud auth application-default login`).
 
 Run it directly:
 
-    uv run python -m scripts.manual_verify_vertex
+    uv run python -m bot.scripts.manual_verify_vertex
 
 It proves, against real Vertex AI, through the real validate-repair layer:
   1. A structured-output call succeeds and returns a validated instance of a

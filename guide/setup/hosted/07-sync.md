@@ -9,14 +9,14 @@ running one, with `RENDER_API_KEY` (Step 6) already set locally:
 === "bash"
 
     ```bash
-    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
+    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m bot.scripts.deploy --sync-env
     ```
 
 === "PowerShell"
 
     ```powershell
     $env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
-    uv run python -m scripts.deploy --sync-env
+    uv run python -m bot.scripts.deploy --sync-env
     ```
 
 See [What `--sync-env` pushes](../../reference/sync-env.md) for the exact

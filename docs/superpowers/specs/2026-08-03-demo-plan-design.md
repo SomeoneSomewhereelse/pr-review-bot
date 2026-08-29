@@ -287,12 +287,12 @@ Gemini (different tokenizer/model, not independently targeted).
 
 **Pre-demo setup, before narration starts:**
 
-- `uv run python -m scripts.set_cooldown --base 30` — the presentation-
+- `uv run python -m bot.scripts.set_cooldown --base 30` — the presentation-
   friendly cooldown (2026-08-12), set now, off-camera, rather than
   mid-Segment-B. It's inert until a review actually finalizes, so setting
   it this early causes no visible effect before Segment B needs it.
-- `uv run python -m scripts.set_provider --clear` and `uv run python -m
-  scripts.set_api_key groq --clear` — deterministic starting state:
+- `uv run python -m bot.scripts.set_provider --clear` and `uv run python -m
+  bot.scripts.set_api_key groq --clear` — deterministic starting state:
   provider falls back to the env default (`groq`), key index falls back
   to 0 (the base `GROQ_API_KEY`), regardless of whatever was left over
   from a prior rehearsal.
@@ -310,7 +310,7 @@ transient 504/503 variance, no `GEMINI_API_KEY` dependency for these
 segments. Two of the three provisioned Render `GROQ_API_KEY*` slots are
 assigned; the third (`GROQ_API_KEY_2`, index 2) is an unassigned spare —
 if index 0 or 1 turns out exhausted right before or during the real call,
-`uv run python -m scripts.set_api_key groq 2` is a live escape hatch with
+`uv run python -m bot.scripts.set_api_key groq 2` is a live escape hatch with
 no redeploy.
 
 **Open `https://pr-review-engine.onrender.com/` in a second tab/window now**
@@ -336,7 +336,7 @@ watches happen in real time.
 `GROQ_API_KEY`) — already the state from Segment 1's pre-demo setup, no
 script call needed here.
 
-- `uv run python -m scripts.seed_demo_pr` → opens a PR with the planted
+- `uv run python -m bot.scripts.seed_demo_pr` → opens a PR with the planted
   `fixtures/bad_code/billing_report.py` issues.
 - Previously measured on `groq`: 4.9s, $0.0034 — re-measure at the next
   rehearsal on the current `GROQ_API_KEY` (rotated 2026-08-12); the
@@ -356,8 +356,8 @@ turns the old "narrate the mechanism and move on without waiting"
 fallback into an actual on-screen heal that fits the time budget.
 
 - Provider is already `groq` (index 0) from Segment 2 — unchanged.
-- **Set the DB override:** `uv run python -m scripts.set_provider github_models`.
-- `uv run python -m scripts.seed_demo_pr` → opens a **fresh** PR (not the
+- **Set the DB override:** `uv run python -m bot.scripts.set_provider github_models`.
+- `uv run python -m bot.scripts.seed_demo_pr` → opens a **fresh** PR (not the
   happy-path one — a fully dead provider's failure still finalizes the
   review and would overwrite a good comment with an all-failed one).
 - **Measured live (previous rehearsal):** comment posts immediately (no
@@ -367,7 +367,7 @@ fallback into an actual on-screen heal that fits the time budget.
   GitHub's actual retirement, not a staged failure. The dashboard's review
   list shows this row too — a real failed review, visible and countable,
   not swept under the rug.
-- **Clear the override:** `uv run python -m scripts.set_provider --clear`
+- **Clear the override:** `uv run python -m bot.scripts.set_provider --clear`
   — falls back to `groq`, index 0 (the key-index override is untouched by
   a provider swap; each provider tracks its own slot independently, so
   returning to `groq` returns to whichever index was active before, still
@@ -396,11 +396,11 @@ limit on a bucket Segments 2 and B never touched, and vice versa: this
 segment's burst can't spill over and cause an unrelated defer somewhere
 else in the walkthrough.
 
-- **Set the key-index override:** `uv run python -m scripts.set_api_key groq 1`.
+- **Set the key-index override:** `uv run python -m bot.scripts.set_api_key groq 1`.
 
 Fire, back-to-back:
 
-1. `uv run python -m scripts.seed_bulk_demo_pr` → PR A
+1. `uv run python -m bot.scripts.seed_bulk_demo_pr` → PR A
 2. Same → PR B
 
 **Confirmed live (2026-08-10, post-fix):**
@@ -459,9 +459,9 @@ demand against a 12,000 cap is strictly stronger than two.
   with zero redeploy, three of the four demonstrated in this same
   walkthrough (cooldown, key-index; provider swap is Segment B's own
   story).
-- **Clean up before ending the call:** `uv run python -m scripts.set_provider
-  --clear`, `uv run python -m scripts.set_api_key groq --clear`, and `uv
-  run python -m scripts.set_cooldown --clear` — reverts provider to env
+- **Clean up before ending the call:** `uv run python -m bot.scripts.set_provider
+  --clear`, `uv run python -m bot.scripts.set_api_key groq --clear`, and `uv
+  run python -m bot.scripts.set_cooldown --clear` — reverts provider to env
   default, key index to 0, and the cooldown from Segment 1's 30s back to
   the real 300s default, so nothing demo-tuned is left live afterward.
 
@@ -476,9 +476,9 @@ demand against a 12,000 cap is strictly stronger than two.
    (stats/queue/reviews, no `"error"` fields) — confirms the dashboard
    itself is healthy before relying on it live in Segment 1.
 3. Confirm the UptimeRobot monitor is active.
-4. `uv run python -m scripts.set_provider --clear`, `uv run python -m
-   scripts.set_api_key groq --clear`, and `uv run python -m
-   scripts.set_cooldown --clear` — no stale DB override of any of the
+4. `uv run python -m bot.scripts.set_provider --clear`, `uv run python -m
+   bot.scripts.set_api_key groq --clear`, and `uv run python -m
+   bot.scripts.set_cooldown --clear` — no stale DB override of any of the
    three kinds left over from a prior rehearsal.
 5. Check the testbed repo for leftover open PRs from earlier rehearsals;
    close anything that would confuse the live narration.
@@ -487,7 +487,7 @@ demand against a 12,000 cap is strictly stronger than two.
    numbered slot needs a one-off manual push (see the finding above:
    `--sync-env` does *not* push numbered slots despite what README says;
    this is a real doc/code gap in the shipped feature, not yet fixed).
-   Confirm via `uv run python -m scripts.deploy` (`api-key-live` only
+   Confirm via `uv run python -m bot.scripts.deploy` (`api-key-live` only
    checks the *currently active* provider+index, so this alone doesn't
    prove index 1/2 are present — check presence directly, e.g. via
    `_render.env_vars()`, if a fresh slot was provisioned since the last
@@ -505,7 +505,7 @@ demand against a 12,000 cap is strictly stronger than two.
 8. Confirm `gh auth status` shows the account that owns `GITHUB_TARGET_REPO`.
 9. **After rotating any provider API key** (e.g. a fresh Groq key after a
    prior rehearsal exhausted the account): update it locally, then push
-   with `--sync-env` and re-run `scripts.deploy` to confirm `provider-live`
+   with `--sync-env` and re-run `bot.scripts.deploy` to confirm `provider-live`
    passes for the *currently overridden* provider before relying on it —
    the check only verifies whichever provider is active when it runs, not
    every provider's credential at once.

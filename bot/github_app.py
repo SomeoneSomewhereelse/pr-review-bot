@@ -102,7 +102,7 @@ def _read_private_key() -> str:
     except (binascii.Error, ValueError) as exc:
         raise ValueError(
             "GITHUB_APP_PRIVATE_KEY is not valid base64 -- encode the PEM with: "
-            "uv run python -m scripts.encode_credential github-app-private-key.pem"
+            "uv run python -m bot.scripts.encode_credential github-app-private-key.pem"
         ) from exc
 
 

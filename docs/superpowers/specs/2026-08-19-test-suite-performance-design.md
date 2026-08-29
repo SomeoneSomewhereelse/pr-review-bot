@@ -118,14 +118,14 @@ the local-hosting track; this is a separate, test-iteration-only concern
 that a hosted-track contributor — app running on Render+Supabase, no local
 Postgres otherwise — would not get from that page).
 
-- `uv run python -m scripts.test_db` (default `up` behavior): idempotent —
+- `uv run python -m bot.scripts.test_db` (default `up` behavior): idempotent —
   checks for a running, healthy container named `pr-review-test-pg`; starts
   one via `docker run` if absent or unhealthy. Uses **port 5433**, not 5432,
   specifically so it never collides with the local track's `pr-review-pg`
   container (which uses 5432) if a contributor has both running. Prints
   `export DATABASE_URL=postgresql://postgres:x@localhost:5433/postgres` to
-  stdout and nothing else, for `eval "$(uv run python -m scripts.test_db)"`.
-- `uv run python -m scripts.test_db down`: stops and removes the container.
+  stdout and nothing else, for `eval "$(uv run python -m bot.scripts.test_db)"`.
+- `uv run python -m bot.scripts.test_db down`: stops and removes the container.
 - The printed connection string's password is a fixed, throwaway,
   script-generated local value that authenticates nothing real — this is
   not the kind of secret CLAUDE.md's "Secret handling" section is about
@@ -408,7 +408,7 @@ executed against real Docker. Performed here against Docker 29.7.2:
 
 ### 8f. Safety gap found and closed during this fix wave
 
-README documents `eval "$(uv run python -m scripts.test_db)"` as the
+README documents `eval "$(uv run python -m bot.scripts.test_db)"` as the
 fast-iteration path, and `Settings.database_url` reads the process environment
 ahead of any `.env` file. `scripts/deploy.py::_wanted_env()` puts
 `settings.database_url` into what `--sync-env` pushes, and `DATABASE_URL` is in

@@ -161,7 +161,7 @@ def test_llm_provider_state_reports_name_and_credential_presence(monkeypatch):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_probes.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts._probes'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts._probes'`.
 
 - [ ] **Step 3: Write the module**
 
@@ -355,7 +355,7 @@ def test_install_hint_never_selects_behavior_only_text(system):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_prereqs.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts._prereqs'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts._prereqs'`.
 
 - [ ] **Step 3: Write the module**
 
@@ -574,7 +574,7 @@ def test_resolve_track_defaults_to_local(monkeypatch):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_doctor_steps.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.doctor'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts.doctor'`.
 
 - [ ] **Step 3: Write the pure core**
 
@@ -625,12 +625,12 @@ _SHARED: tuple[Step, ...] = (
     Step(1, "Install prerequisites", "prereqs",
          "uv sync, then install anything the prereqs rows above name"),
     Step(2, "Create the GitHub App", "app_credentials",
-         "uv run python -m scripts.create_github_app   (run this yourself -- it writes secrets)"),
+         "uv run python -m bot.scripts.create_github_app   (run this yourself -- it writes secrets)"),
     Step(3, "Install the App on your repo(s)", "app_installed",
          "open https://github.com/settings/apps -> your app -> Install App"),
     Step(4, "Configure an LLM provider", "llm_ready",
          "set LLM_PROVIDER in .env.config and its API key via "
-         "`uv run python -m scripts.init_env` (run this yourself)"),
+         "`uv run python -m bot.scripts.init_env` (run this yourself)"),
 )
 
 # Steps 5-8 diverge. 'keepalive' means something different per track: locally
@@ -644,7 +644,7 @@ _LOCAL: tuple[Step, ...] = (
          "cloudflared tunnel --url http://localhost:8000, then set PUBLIC_BASE_URL "
          "to the printed https URL"),
     Step(7, "Register the webhook", "webhook",
-         "uv run python -m scripts.deploy"),
+         "uv run python -m bot.scripts.deploy"),
     Step(8, "Run the service", "keepalive",
          "uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"),
 )
@@ -658,7 +658,7 @@ _HOSTED: tuple[Step, ...] = (
          "boot vars (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, "
          "DATABASE_URL)"),
     Step(7, "Sync config and verify", "webhook",
-         "uv run python -m scripts.deploy --sync-env"),
+         "uv run python -m bot.scripts.deploy --sync-env"),
     Step(8, "Add the keep-warm pinger", "keepalive",
          "create an UptimeRobot monitor on <your-service>/healthz at a 5-minute "
          "interval (the URL must match exactly); set UPTIMEROBOT_API_KEY locally "
@@ -864,7 +864,7 @@ def test_doctor_never_calls_the_mutating_webhook_setter():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_doctor.py -v`
-Expected: FAIL — `AttributeError: module 'scripts.doctor' has no attribute 'build_state'`.
+Expected: FAIL — `AttributeError: module 'bot.scripts.doctor' has no attribute 'build_state'`.
 
 - [ ] **Step 3: Write the I/O and CLI layers**
 
@@ -932,7 +932,7 @@ def check_local_config() -> deploy.CheckResult:
         problems.append(
             "GITHUB_APP_PRIVATE_KEY is set but does not base64-decode to a PEM "
             "-- it must be the base64 form, not the file's contents verbatim: "
-            "uv run python -m scripts.encode_credential github-app-private-key.pem"
+            "uv run python -m bot.scripts.encode_credential github-app-private-key.pem"
         )
     if problems:
         return deploy.CheckResult("local-config", "FAIL", "\n".join(problems))
@@ -982,7 +982,7 @@ def check_github_install() -> deploy.CheckResult:
 def check_webhook(base: str) -> deploy.CheckResult:
     """Whether the App's webhook points at `base`. READ-ONLY -- deliberately
     NOT deploy.check_installation_and_webhook, which PATCHes the URL when it is
-    wrong. Fixing it is `uv run python -m scripts.deploy`; reporting it is here."""
+    wrong. Fixing it is `uv run python -m bot.scripts.deploy`; reporting it is here."""
     if not base:
         return deploy.CheckResult("webhook", "SKIPPED", "no public base URL yet")
     if not all(name in _probes.present_secrets() for name in _APP_CREDENTIALS):
@@ -997,7 +997,7 @@ def check_webhook(base: str) -> deploy.CheckResult:
     return deploy.CheckResult(
         "webhook", "FAIL",
         f"points at {current or '(unset)'}, wanted {wanted} "
-        "-- fix with: uv run python -m scripts.deploy",
+        "-- fix with: uv run python -m bot.scripts.deploy",
     )
 
 
@@ -1124,7 +1124,7 @@ Expected: all PASS. `test_doctor_never_calls_the_mutating_webhook_setter` is the
 
 - [ ] **Step 5: Run doctor for real, on this checkout**
 
-Run: `uv run python -m scripts.doctor`
+Run: `uv run python -m bot.scripts.doctor`
 Expected: a table plus a "you are at step N of 8" line, exit 0. This repo is fully configured, so most rows should PASS; whatever it reports, it must not crash and must not print any value. Paste the output into your task report.
 
 - [ ] **Step 6: Commit**
@@ -1270,14 +1270,14 @@ def test_no_default_path_points_at_the_repo_root():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_create_github_app.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.create_github_app'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts.create_github_app'`.
 
 - [ ] **Step 3: Write the script**
 
 ```python
 """Create this project's GitHub App in one browser round-trip.
 
-    uv run python -m scripts.create_github_app --base-url https://your-host
+    uv run python -m bot.scripts.create_github_app --base-url https://your-host
 
 HUMAN-RUN ONLY. It writes real credentials to .env. An agent must never
 invoke it -- same rule, and same reason, as scripts/encode_credential.py's
@@ -1501,7 +1501,7 @@ def main(argv: list[str] | None = None) -> int:
     lengths = write_credentials(creds, Path(args.env_path), overwrite=args.overwrite)
     for name, length in lengths.items():
         print(f"wrote {name} (len {length})")
-    print("next: uv run python -m scripts.doctor")
+    print("next: uv run python -m bot.scripts.doctor")
     return 0
 
 
@@ -1623,14 +1623,14 @@ def test_write_env_requires_an_explicit_path():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_init_env.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.init_env'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts.init_env'`.
 
 - [ ] **Step 3: Write the script**
 
 ```python
 """Interactively scaffold .env and .env.config from the committed examples.
 
-    uv run python -m scripts.init_env
+    uv run python -m bot.scripts.init_env
 
 HUMAN-RUN ONLY -- it prompts for and writes real credentials. An agent must
 never invoke it (same rule as scripts/encode_credential.py).
@@ -1759,7 +1759,7 @@ def main(argv: list[str] | None = None) -> int:
         write_env(render_env(chosen), path, overwrite=args.overwrite)
         print(f"wrote {path} ({len(chosen)} keys)")
 
-    print("next: uv run python -m scripts.doctor")
+    print("next: uv run python -m bot.scripts.doctor")
     return 0
 
 
@@ -1816,7 +1816,7 @@ def test_the_command_exists_with_frontmatter():
 
 def test_it_drives_the_doctor_cli_and_holds_no_logic_of_its_own():
     text = _COMMAND.read_text(encoding="utf-8")
-    assert "scripts.doctor" in text
+    assert "bot.scripts.doctor" in text
     assert "--json" in text
     assert "works identically for people who do not use Claude Code" in text
 
@@ -1824,7 +1824,7 @@ def test_it_drives_the_doctor_cli_and_holds_no_logic_of_its_own():
 def test_it_hands_off_every_credential_writing_tool():
     """Both writers must be handed to the human, never run by the agent."""
     text = _COMMAND.read_text(encoding="utf-8")
-    for tool in ("scripts.init_env", "scripts.create_github_app"):
+    for tool in ("bot.scripts.init_env", "bot.scripts.create_github_app"):
         assert tool in text, f"{tool} must be named"
     assert "! uv run" in text, "the `!` prefix is how the user runs it themselves"
     assert ".env" in text
@@ -1845,7 +1845,7 @@ description: Walk through setting up this project from a fresh clone to a first 
 Run the setup doctor and report where things stand:
 
 ```bash
-uv run python -m scripts.doctor --json
+uv run python -m bot.scripts.doctor --json
 ```
 
 Read the JSON. It carries `track` (`local` or `hosted`), `step` (the current
@@ -1870,14 +1870,14 @@ Then, in a loop until `step` is `null`:
 single-line read. Two of this project's setup tools write real credentials to
 it:
 
-- `uv run python -m scripts.init_env`
-- `uv run python -m scripts.create_github_app`
+- `uv run python -m bot.scripts.init_env`
+- `uv run python -m bot.scripts.create_github_app`
 
 **Never run either of these yourself.** Ask the user to run it in this session
 with the `!` prefix, so its output lands in the conversation without you
 invoking it:
 
-> Run this yourself: `! uv run python -m scripts.create_github_app`
+> Run this yourself: `! uv run python -m bot.scripts.create_github_app`
 
 Both print names and lengths only, never values, so their output is safe to
 read and reason about afterwards. The doctor is safe for you to run as often as
@@ -1922,9 +1922,9 @@ Expected: zero failures. Baseline entering the stage was **675 passing**; report
 
 Run:
 ```bash
-uv run python -m scripts.doctor --track local
-uv run python -m scripts.doctor --track hosted
-uv run python -m scripts.doctor --json
+uv run python -m bot.scripts.doctor --track local
+uv run python -m bot.scripts.doctor --track hosted
+uv run python -m bot.scripts.doctor --json
 ```
 Expected: three clean reports, exit 0 each. The `--json` output must parse. Confirm no output line contains anything resembling a credential value, and paste all three into your report.
 

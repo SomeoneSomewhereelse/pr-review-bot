@@ -12,7 +12,7 @@ import httpx
 import pytest
 import respx
 
-from scripts import create_github_app as cga
+from bot.scripts import create_github_app as cga
 
 SENTINEL_SECRET = "SENTINEL-9c1e4b7a60df2358-WEBHOOK"
 SENTINEL_PEM = "-----BEGIN RSA PRIVATE KEY-----\nSENTINEL-PEM-BODY\n-----END RSA PRIVATE KEY-----\n"

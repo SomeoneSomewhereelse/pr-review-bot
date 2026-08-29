@@ -1,6 +1,6 @@
 """Compare app/providers/pricing.py's groq rates against Groq's live catalog.
 
-    uv run python -m scripts.pricing_check
+    uv run python -m bot.scripts.pricing_check
 
 Groq's /openai/v1/models returns pricing.prompt / pricing.completion (USD per
 token) inline -- which is where the existing groq entry came from. This is a

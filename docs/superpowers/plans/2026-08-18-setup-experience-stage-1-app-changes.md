@@ -878,14 +878,14 @@ def test_compare_offers_a_paste_ready_line_for_an_unpriced_model():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_pricing_check.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.pricing_check'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'bot.scripts.pricing_check'`.
 
 - [ ] **Step 3: Write the script**
 
 ```python
 """Compare app/providers/pricing.py's groq rates against Groq's live catalog.
 
-    uv run python -m scripts.pricing_check
+    uv run python -m bot.scripts.pricing_check
 
 Groq's /openai/v1/models returns pricing.prompt / pricing.completion (USD per
 token) inline -- which is where the existing groq entry came from. This is a
@@ -1064,7 +1064,7 @@ Expected: zero failures. Record the test count; it should be near the pre-stage 
 
 - [ ] **Step 2: Confirm the config check reports the new shape**
 
-Run: `uv run python -m scripts.deploy --health-only` against a local or deployed base URL, and separately confirm `deploy.check_pricing()` returns `PASS` for the configured models.
+Run: `uv run python -m bot.scripts.deploy --health-only` against a local or deployed base URL, and separately confirm `deploy.check_pricing()` returns `PASS` for the configured models.
 
 Expected: `pricing` appears as its own row; an unpriced model produces `WARN` and exit code 0.
 

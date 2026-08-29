@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from bot.config import settings
-from scripts import _prereqs
+from bot.scripts import _prereqs
 
 
 def test_every_required_tool_has_a_hint_for_all_three_platforms():

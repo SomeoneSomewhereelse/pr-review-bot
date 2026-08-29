@@ -20,7 +20,7 @@ from typing import NamedTuple
 
 from bot import github_app
 from bot.config import settings
-from scripts import _prereqs, _probes, create_github_app, deploy
+from bot.scripts import _prereqs, _probes, create_github_app, deploy
 
 TRACKS = ("local", "hosted")
 
@@ -57,7 +57,7 @@ _SHARED: tuple[Step, ...] = (
          "open https://github.com/settings/apps -> your app -> Install App"),
     Step(4, "Configure an LLM provider", "llm_ready",
          "set LLM_PROVIDER in .env.config and its API key via "
-         "`uv run python -m scripts.init_env` (run this yourself)"),
+         "`uv run python -m bot.scripts.init_env` (run this yourself)"),
 )
 
 # Steps 5-8 diverge. 'keepalive' means something different per track: locally
@@ -71,7 +71,7 @@ _LOCAL: tuple[Step, ...] = (
          "cloudflared tunnel --url http://localhost:8000, then set PUBLIC_BASE_URL "
          "to the printed https URL"),
     Step(7, "Register the webhook", "webhook",
-         "uv run python -m scripts.deploy"),
+         "uv run python -m bot.scripts.deploy"),
     Step(8, "Run the service", "keepalive",
          "uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000"),
 )
@@ -86,7 +86,7 @@ _HOSTED: tuple[Step, ...] = (
          "blank, then get a RENDER_API_KEY and run Step 7's --sync-env to push "
          "them all"),
     Step(7, "Sync config and verify", "webhook",
-         "uv run python -m scripts.deploy --sync-env"),
+         "uv run python -m bot.scripts.deploy --sync-env"),
     Step(8, "Add the keep-warm pinger", "keepalive",
          "create an UptimeRobot monitor on <your-service>/healthz at a 5-minute "
          "interval (the URL must match exactly); set UPTIMEROBOT_API_KEY locally "
@@ -194,7 +194,7 @@ def check_local_config() -> deploy.CheckResult:
         problems.append(
             "GITHUB_APP_PRIVATE_KEY is set but does not base64-decode to a PEM "
             "-- it must be the base64 form, not the file's contents verbatim: "
-            "uv run python -m scripts.encode_credential github-app-private-key.pem"
+            "uv run python -m bot.scripts.encode_credential github-app-private-key.pem"
         )
     if problems:
         return deploy.CheckResult("local-config", "FAIL", "\n".join(problems))
@@ -347,7 +347,7 @@ def _run_gh(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def check_gh_auth() -> deploy.CheckResult:
-    """Whether the LOCAL `gh` CLI (needed by scripts.seed_demo_pr, step 8) is
+    """Whether the LOCAL `gh` CLI (needed by bot.scripts.seed_demo_pr, step 8) is
     authenticated, and -- once GITHUB_TARGET_REPO is set -- whether that
     authenticated account can actually push to it. READ-ONLY: every gh
     subcommand used here only queries state (`auth status`, `api user`,
@@ -358,7 +358,7 @@ def check_gh_auth() -> deploy.CheckResult:
     BROWSER, `gh auth login` authenticates this MACHINE, and nothing ties the
     two to the same GitHub account. A user who approved the App as one
     account but ran `gh auth login` as another discovers it, today, only when
-    `scripts.seed_demo_pr` fails outright at step 8 -- this surfaces it as
+    `bot.scripts.seed_demo_pr` fails outright at step 8 -- this surfaces it as
     soon as GITHUB_TARGET_REPO is set instead, and names the likely cause
     rather than just relaying gh's own error text.
     """
@@ -409,7 +409,7 @@ def check_gh_auth() -> deploy.CheckResult:
 def check_webhook(base: str) -> deploy.CheckResult:
     """Whether the App's webhook points at `base`. READ-ONLY -- deliberately
     does not call deploy.py's equivalent check, which PATCHes the URL when it
-    is wrong. Fixing it is `uv run python -m scripts.deploy`; reporting it is
+    is wrong. Fixing it is `uv run python -m bot.scripts.deploy`; reporting it is
     here."""
     if not base:
         return deploy.CheckResult("webhook", "SKIPPED", "no public base URL yet")
@@ -425,7 +425,7 @@ def check_webhook(base: str) -> deploy.CheckResult:
     return deploy.CheckResult(
         "webhook", "FAIL",
         f"points at {current or '(unset)'}, wanted {wanted} "
-        "-- fix with: uv run python -m scripts.deploy",
+        "-- fix with: uv run python -m bot.scripts.deploy",
     )
 
 

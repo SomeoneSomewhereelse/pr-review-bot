@@ -45,7 +45,7 @@ Whichever option you picked, set the resulting connection string as
 ## Next
 
 ```bash
-uv run python -m scripts.doctor
+uv run python -m bot.scripts.doctor
 ```
 
 The `database` row turns `PASS` once `DATABASE_URL` is reachable. Then

@@ -230,8 +230,8 @@ else.
 Shaped exactly like `scripts/set_provider.py`:
 
 ```
-uv run python -m scripts.set_api_key groq 2
-uv run python -m scripts.set_api_key groq --clear   # back to index 0
+uv run python -m bot.scripts.set_api_key groq 2
+uv run python -m bot.scripts.set_api_key groq --clear   # back to index 0
 ```
 
 - Positional `provider` (one of the three names) + non-negative integer

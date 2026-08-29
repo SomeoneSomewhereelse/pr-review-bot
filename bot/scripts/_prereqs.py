@@ -86,7 +86,7 @@ GH = Tool(
 
 # Docker is NOT here: it is only one of the ways to satisfy the database
 # prerequisite -- see database_available(). gh IS here unconditionally, not
-# track-gated like TUNNEL_TOOL: both tracks' step 8 (scripts.seed_demo_pr)
+# track-gated like TUNNEL_TOOL: both tracks' step 8 (bot.scripts.seed_demo_pr)
 # need it to clone/push/open the demo PR.
 REQUIRED_TOOLS: tuple[Tool, ...] = (GIT, GH)
 

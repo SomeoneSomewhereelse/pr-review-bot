@@ -8,7 +8,7 @@
 review of that work: `scripts/deploy.py` and `scripts/set_provider.py` each
 talk to Render's API (service lookup, env-var fetch) and each resolve "which
 provider is actually running" — and `set_provider.py` does this today by
-importing `scripts.deploy`'s underscore-prefixed (nominally private)
+importing `bot.scripts.deploy`'s underscore-prefixed (nominally private)
 functions (`_find_render_service_id`, `_render_env_vars`, `_PROVIDERS`). That
 review explicitly declined to collapse the *data model* — local `.env`,
 Render's live env, and the DB override in Postgres encode three genuinely
@@ -96,10 +96,10 @@ Call sites affected: `check_provider_live`, `check_render_service`,
 
 ```python
 from scripts import _render
-from scripts.deploy import _PROVIDERS
+from bot.scripts.deploy import _PROVIDERS
 ```
 
-(Previously: `from scripts.deploy import _PROVIDERS, _find_render_service_id,
+(Previously: `from bot.scripts.deploy import _PROVIDERS, _find_render_service_id,
 _render_env_vars`.) `_verify_render_credential()`'s two call sites become
 `_render.find_service_id()` and `_render.env_vars(service_id)`.
 

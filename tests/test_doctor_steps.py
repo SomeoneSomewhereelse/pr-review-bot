@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from bot.config import settings
-from scripts import doctor
+from bot.scripts import doctor
 
 ALL_SATISFIED = doctor.State(
     prereqs=True, app_credentials=True, app_installed=True, llm_ready=True,

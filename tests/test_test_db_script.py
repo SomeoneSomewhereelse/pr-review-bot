@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from scripts import test_db
+from bot.scripts import test_db
 
 
 def _fake_run(responses):

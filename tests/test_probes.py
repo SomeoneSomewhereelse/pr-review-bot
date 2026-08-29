@@ -13,7 +13,7 @@ import json
 import pytest
 
 from bot.config import settings
-from scripts import _probes
+from bot.scripts import _probes
 
 # Distinctive, high-entropy, and structurally unlike a length or a name, so a
 # substring search cannot pass by accident.

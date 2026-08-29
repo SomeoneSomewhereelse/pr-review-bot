@@ -684,7 +684,7 @@ Replace the live-rehearsal steps 1-2 (lines 138-141) with:
 ```markdown
 1. Ensure the Render service is deployed and `/healthz` returns 200.
 2. The GitHub App's webhook URL is already the stable Render URL — no per-run
-   update needed (`uv run python -m scripts.deploy` sets it once).
+   update needed (`uv run python -m bot.scripts.deploy` sets it once).
 ```
 
 Delete the `- **Local tunnel testing (optional)** — …` bullet (lines 179-181).
@@ -698,7 +698,7 @@ Lines 20-24 (§1's webhook bullet): replace with:
 
 ```markdown
 - **Webhook URL**: set to the deployed service's `<public-url>/webhook`. This is
-  stable and set once by `uv run python -m scripts.deploy` (§3.4) — it does not
+  stable and set once by `uv run python -m bot.scripts.deploy` (§3.4) — it does not
   need re-editing between runs.
 ```
 
@@ -1137,7 +1137,7 @@ through the session pooler works on a first boot against a real Supabase project
 - [ ] **Step 5: Register the webhook**
 
 ```bash
-PUBLIC_BASE_URL=https://<service>.onrender.com uv run python -m scripts.deploy
+PUBLIC_BASE_URL=https://<service>.onrender.com uv run python -m bot.scripts.deploy
 ```
 
 Pass: exit 0 and a line like `registered: installation=<id> webhook=…/webhook`.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import base64
 
-from scripts import encode_credential
+from bot.scripts import encode_credential
 
 
 def test_prints_the_base64_form_of_the_file(tmp_path, capsys):

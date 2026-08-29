@@ -6,7 +6,7 @@ not import from scripts/."""
 from __future__ import annotations
 
 from bot.providers import registry
-from scripts import deploy
+from bot.scripts import deploy
 
 
 def test_registry_lists_all_providers():

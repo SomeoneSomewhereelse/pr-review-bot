@@ -32,7 +32,7 @@ needed on this track. Install it, then confirm with `cloudflared --version`:
     ```
 
 Official download page: <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/>.
-`uv run python -m scripts.doctor` also checks for it and prints the same
+`uv run python -m bot.scripts.doctor` also checks for it and prints the same
 install hint if it's missing.
 
 ## Start one

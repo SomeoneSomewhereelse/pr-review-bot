@@ -4,7 +4,7 @@
 **Status:** Approved for planning
 
 > **The CLI is the deliverable.** `scripts/deploy.py` is a standalone tool that
-> anyone can run with `uv run python -m scripts.deploy`, with no Claude Code and
+> anyone can run with `uv run python -m bot.scripts.deploy`, with no Claude Code and
 > no assistant involved. `/deploy` is a thin convenience wrapper around it for
 > people who happen to use Claude Code — one of two front doors, not the main
 > one. Every design decision below is made for the CLI first; §4.2 states the
@@ -83,7 +83,7 @@ either.
 | Pinger | **UptimeRobot** (free tier: 5-min interval, simple REST API), via optional `UPTIMEROBOT_API_KEY` |
 | Render API | **Optional `check_render_service`** + an opt-in `--sync-env` mode, via optional `RENDER_API_KEY` |
 | Env sync | **Explicit `--sync-env` flag**, single-key endpoint only, then trigger a deploy and poll until `live` |
-| Primary interface | **The standalone CLI** (`python -m scripts.deploy`); `/deploy` is a wrapper, not the product |
+| Primary interface | **The standalone CLI** (`python -m bot.scripts.deploy`); `/deploy` is a wrapper, not the product |
 | Output | **Terse aligned table**, fragments not sentences; explanatory depth lives in the docs (§7.4) |
 
 ## 4. Architecture
@@ -91,7 +91,7 @@ either.
 Three files carry the feature; each has one job.
 
 **`scripts/deploy.py`** — the product. All the logic, as plain testable
-Python. Keeps its existing `python -m scripts.deploy` entry point and its
+Python. Keeps its existing `python -m bot.scripts.deploy` entry point and its
 existing dependencies (`app.github_app`, `app.config`); gains `httpx` (already
 a project dependency) and `psycopg` (already a project dependency). No new
 packages. Nothing about it assumes Claude Code, an assistant, or an
@@ -99,7 +99,7 @@ interactive terminal.
 
 **`.claude/commands/deploy.md`** — a thin convenience wrapper for Claude Code
 users. Frontmatter with a one-line description. Body instructs: run
-`uv run python -m scripts.deploy`, show the printed table verbatim, and on a
+`uv run python -m bot.scripts.deploy`, show the printed table verbatim, and on a
 non-zero exit help the user act on each `FAIL` line using the hint that line
 already printed. It also documents `--sync-env` as the follow-up when the
 diagnosis is config drift. **No verification logic lives here** — the markdown
@@ -423,7 +423,7 @@ a pointer.
   table), the repeatable `--sync-env` deploy, what each of the six checklist
   lines means, the three exit codes, and the two optional keys with what each
   unlocks. A reader who never opens `SETUP.md` must still be able to deploy.
-- **`SETUP.md` §3.4** — replace the bare `python -m scripts.deploy` step with
+- **`SETUP.md` §3.4** — replace the bare `python -m bot.scripts.deploy` step with
   the checklist, documenting what each line means and the two optional keys.
   Keep the existing runs-locally / `PUBLIC_BASE_URL` guidance, which is still
   correct.

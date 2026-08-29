@@ -21,7 +21,7 @@ holds no logic — the CLI works identically without it.
 
 **Verified on the merged result:** 259 tests pass
 (`TESTCONTAINERS_RYUK_DISABLED=1 uv run pytest -q`), `ruff check .` clean, and
-`python -m scripts.deploy` with no config exits 2 with a clean message and no
+`python -m bot.scripts.deploy` with no config exits 2 with a clean message and no
 traceback.
 
 Three checks encode real failures from the first hosted run rather than

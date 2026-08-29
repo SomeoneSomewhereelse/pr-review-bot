@@ -141,7 +141,7 @@ mechanically, not a fixed list frozen here.
 
 - `.github/workflows/ci.yml`: unchanged in shape — `uv sync --all-extras
   --dev` installs the whole workspace, `uv run ruff check .` and `uv run
-  pytest -v` still run against everything. `scripts.gen_docs` in the `docs`
+  pytest -v` still run against everything. `bot.scripts.gen_docs` in the `docs`
   job needs its import path(s) updated for whatever moved under `bot/`.
 - `guide/`, `mkdocs.yml`: stay at root (published GitHub Pages site).
   Content updated wherever it references `app/`, the root `Dockerfile`, or

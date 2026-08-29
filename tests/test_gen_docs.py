@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from bot.config import OPERATIONAL_KEYS, settings
-from scripts import gen_docs
+from bot.scripts import gen_docs
 
 SENTINEL = "SENTINEL-6d21fa48c093be75-MUST-NOT-BE-PUBLISHED"
 
@@ -81,7 +81,7 @@ def test_config_table_marks_where_each_key_belongs():
 def test_generated_output_carries_the_do_not_edit_header():
     assert gen_docs.render_config().startswith(gen_docs.GENERATED_HEADER)
     assert "do not edit" in gen_docs.GENERATED_HEADER.lower()
-    assert "scripts.gen_docs" in gen_docs.GENERATED_HEADER
+    assert "bot.scripts.gen_docs" in gen_docs.GENERATED_HEADER
 
 
 def test_render_config_is_deterministic():
@@ -134,7 +134,7 @@ def test_pricing_table_explains_that_an_unpriced_model_still_runs():
 
 
 def test_sync_env_table_separates_pushed_from_never_pushed():
-    from scripts import deploy
+    from bot.scripts import deploy
 
     table = gen_docs.render_sync_env()
     for name in deploy._ALWAYS_SYNCED:
@@ -178,7 +178,7 @@ def test_escape_cell_escapes_a_literal_pipe():
 
 def test_checks_table_escapes_a_verifies_string_containing_a_pipe(monkeypatch):
     """A `verifies` string with a literal `|` must not corrupt the table."""
-    from scripts import deploy
+    from bot.scripts import deploy
 
     fake_check = deploy.CheckSpec(
         "fake-check", lambda: None, "verifies a | b", True
@@ -195,7 +195,7 @@ def test_checks_table_escapes_a_verifies_string_containing_a_pipe(monkeypatch):
 
 
 def test_checks_table_renders_every_registered_check_in_order():
-    from scripts import deploy
+    from bot.scripts import deploy
 
     table = gen_docs.render_checks()
     positions = [table.index(f"`{spec.name}`") for spec in deploy.CHECKS]
@@ -205,7 +205,7 @@ def test_checks_table_renders_every_registered_check_in_order():
 
 
 def test_checks_table_distinguishes_required_from_optional():
-    from scripts import deploy
+    from bot.scripts import deploy
 
     table = gen_docs.render_checks()
     for line in table.splitlines():
@@ -275,7 +275,7 @@ def test_committed_reference_files_are_up_to_date():
     root = Path(__file__).resolve().parent.parent
     for name, render in gen_docs.GENERATED_FILES.items():
         committed = (root / gen_docs.REFERENCE_DIR / name).read_text(encoding="utf-8")
-        assert committed == render(), f"{name} is stale -- run scripts.gen_docs"
+        assert committed == render(), f"{name} is stale -- run bot.scripts.gen_docs"
 
 
 def test_main_writes_and_reports(tmp_path, capsys):

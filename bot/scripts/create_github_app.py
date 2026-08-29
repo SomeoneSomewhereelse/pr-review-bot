@@ -1,6 +1,6 @@
 """Create this project's GitHub App in one browser round-trip.
 
-    uv run python -m scripts.create_github_app --base-url https://your-host
+    uv run python -m bot.scripts.create_github_app --base-url https://your-host
 
 HUMAN-RUN ONLY. It writes real credentials to .env. An agent must never
 invoke it -- same rule, and same reason, as scripts/encode_credential.py's
@@ -390,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     lengths = write_credentials(creds, Path(args.env_path), overwrite=args.overwrite)
     for name, length in lengths.items():
         print(f"wrote {name} (len {length})")
-    print("next: uv run python -m scripts.doctor")
+    print("next: uv run python -m bot.scripts.doctor")
     return 0
 
 

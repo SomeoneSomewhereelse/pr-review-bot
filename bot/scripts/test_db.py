@@ -1,9 +1,9 @@
 """Idempotent local test-only Postgres, for fast pytest iteration without
 paying testcontainers' cold-boot cost on every invocation.
 
-    uv run python -m scripts.test_db            # start (or reuse) it
-    eval "$(uv run python -m scripts.test_db)"   # also export DATABASE_URL
-    uv run python -m scripts.test_db down        # stop and remove it
+    uv run python -m bot.scripts.test_db            # start (or reuse) it
+    eval "$(uv run python -m bot.scripts.test_db)"   # also export DATABASE_URL
+    uv run python -m bot.scripts.test_db down        # stop and remove it
 
 Separate from guide/setup/local/05-postgres.md's `pr-review-pg` container --
 that one is the local-hosting track's app runtime database, on port 5432.
@@ -25,7 +25,7 @@ import subprocess
 import sys
 import time
 
-from scripts._prereqs import _looks_like_local_test_db
+from bot.scripts._prereqs import _looks_like_local_test_db
 
 _CONTAINER_NAME = "pr-review-test-pg"
 _PORT = 5433

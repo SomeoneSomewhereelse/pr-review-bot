@@ -1509,9 +1509,9 @@ override is per-provider — so flipping providers carries each one's correct mo
 what makes `set_override.py vertex` safe when gemini and vertex have different catalogs.
 
 ```
-    uv run python -m scripts.set_override vertex --model gemini-2.5-flash
-    uv run python -m scripts.set_override vertex --model gemini-2.5-flash --no-activate
-    uv run python -m scripts.set_override vertex --clear-model --no-activate
+    uv run python -m bot.scripts.set_override vertex --model gemini-2.5-flash
+    uv run python -m bot.scripts.set_override vertex --model gemini-2.5-flash --no-activate
+    uv run python -m bot.scripts.set_override vertex --clear-model --no-activate
 ```
 
 - [ ] **Step 8: Run the full suite, ruff, and commit**
@@ -1605,7 +1605,7 @@ def test_local_slot_values_still_carries_values_for_sync_env(
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_override_helpers.py tests/test_provider_registry.py -v -k "slot_env_name or local_slot"`
-Expected: FAIL — `AttributeError: module 'scripts._override' has no attribute
+Expected: FAIL — `AttributeError: module 'bot.scripts._override' has no attribute
 'local_slot_indices'`
 
 - [ ] **Step 3: Add the naming seam**
@@ -1926,7 +1926,7 @@ Expected: PASS
 Add to the usage block:
 
 ```
-    uv run python -m scripts.set_override --list
+    uv run python -m bot.scripts.set_override --list
 ```
 
 …plus a sentence noting `--list` prints names and booleans only, never a credential value,
@@ -2046,9 +2046,9 @@ Expected: FAIL — `ImportError: cannot import name 'set_usage_cap' from 'script
 ```python
 """Set or clear the DB-backed per-key usage-cap override (tokens/cost/reset).
 
-    uv run python -m scripts.set_usage_cap --tokens 20000
-    uv run python -m scripts.set_usage_cap --cost 0.50 --reset 06:30
-    uv run python -m scripts.set_usage_cap --clear
+    uv run python -m bot.scripts.set_usage_cap --tokens 20000
+    uv run python -m bot.scripts.set_usage_cap --cost 0.50 --reset 06:30
+    uv run python -m bot.scripts.set_usage_cap --clear
 
 The override takes effect on the next claimed ticket -- no restart, no
 redeploy. It writes to whatever DATABASE_URL points at, so against a local .env
@@ -2295,7 +2295,7 @@ def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_deploy_script.py -v -k "model_override"`
-Expected: FAIL — `AttributeError: module 'scripts.deploy' has no attribute
+Expected: FAIL — `AttributeError: module 'bot.scripts.deploy' has no attribute
 '_resolved_model_override'`
 
 - [ ] **Step 3: Add the resolver and the guard**
@@ -2336,7 +2336,7 @@ check, immediately after the provider check:
             print(
                 f"refusing to sync: a DB model override ({model_override}) is active for "
                 f"{settings.llm_provider} and wins over the {model_var}={local_model} "
-                "being pushed. Clear it first: uv run python -m scripts.set_override "
+                "being pushed. Clear it first: uv run python -m bot.scripts.set_override "
                 f"{settings.llm_provider} --clear-model --no-activate",
                 file=sys.stderr,
             )
@@ -2361,16 +2361,16 @@ credentials only, and nothing but a credential belongs there.
 
 Two ways to change a setting:
 
-- **Edit `.env.config`, then `uv run python -m scripts.deploy --sync-env`** —
+- **Edit `.env.config`, then `uv run python -m bot.scripts.deploy --sync-env`** —
   changes the baseline the service boots with. Costs a redeploy.
 - **A DB override** — takes effect on the next claimed ticket, no restart, no
   redeploy:
 
   ```bash
-  uv run python -m scripts.set_override vertex --model gemini-2.5-flash
-  uv run python -m scripts.set_override --list
-  uv run python -m scripts.set_usage_cap --tokens 20000 --reset 06:30
-  uv run python -m scripts.set_cooldown --base 30 --factor 1.5
+  uv run python -m bot.scripts.set_override vertex --model gemini-2.5-flash
+  uv run python -m bot.scripts.set_override --list
+  uv run python -m bot.scripts.set_usage_cap --tokens 20000 --reset 06:30
+  uv run python -m bot.scripts.set_cooldown --base 30 --factor 1.5
   ```
 
 `--list` prints slot inventory, the active index, and the active model as names
@@ -2431,7 +2431,7 @@ Do **not** perform these; report them. Include the exact key names
 1. Copy `.env.config.example` to `.env.config` and fill in the values currently in `.env`.
 2. Remove those same keys from `.env`.
 3. Re-run `uv run pytest tests/test_config.py` — green means the migration is complete.
-4. Run `uv run python -m scripts.deploy --sync-env` to push the renamed/new model vars, then
+4. Run `uv run python -m bot.scripts.deploy --sync-env` to push the renamed/new model vars, then
    set `KEY_USAGE_*` in the Render dashboard if the hosted service should have caps.
 
 ---

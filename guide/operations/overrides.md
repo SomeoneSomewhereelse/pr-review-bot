@@ -1,18 +1,18 @@
 # Switching providers and API keys
 
-`scripts/set_override.py` swaps which already-deployed provider, model, and
+`bot/scripts/set_override.py` swaps which already-deployed provider, model, and
 credential slot are active — live, with no restart and no redeploy.
 
 ```bash
-uv run python -m scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
-uv run python -m scripts.set_override groq --index 1 --no-activate   # index only, leave the active provider alone
-uv run python -m scripts.set_override groq --clear-index --no-activate  # clear index only, same
-uv run python -m scripts.set_override groq                  # activate only, keep the existing index override
-uv run python -m scripts.set_override --clear                # clear the provider override
-uv run python -m scripts.set_override groq --index 1 --force  # write despite a failed live check
-uv run python -m scripts.set_override vertex --model gemini-2.5-flash        # override this provider's model too
-uv run python -m scripts.set_override vertex --clear-model --no-activate     # clear the model override only
-uv run python -m scripts.set_override --list                 # slot inventory, active index, active model
+uv run python -m bot.scripts.set_override groq --index 1        # activate groq AND its index-1 slot, together
+uv run python -m bot.scripts.set_override groq --index 1 --no-activate   # index only, leave the active provider alone
+uv run python -m bot.scripts.set_override groq --clear-index --no-activate  # clear index only, same
+uv run python -m bot.scripts.set_override groq                  # activate only, keep the existing index override
+uv run python -m bot.scripts.set_override --clear                # clear the provider override
+uv run python -m bot.scripts.set_override groq --index 1 --force  # write despite a failed live check
+uv run python -m bot.scripts.set_override vertex --model gemini-2.5-flash        # override this provider's model too
+uv run python -m bot.scripts.set_override vertex --clear-model --no-activate     # clear the model override only
+uv run python -m bot.scripts.set_override --list                 # slot inventory, active index, active model
 ```
 
 ## What this actually writes
@@ -30,7 +30,7 @@ of time exactly like any other env var (one redeploy, via `--sync-env` or
 the Render dashboard, to add a new slot). `vertex` rides the identical
 mechanism with a differently-shaped (but still verbatim, base64-encoded, no
 file path) credential: `GCP_SERVICE_ACCOUNT_KEY`, `_1`, `_2`, ... — so
-`uv run python -m scripts.set_override vertex --index 1` swaps service
+`uv run python -m bot.scripts.set_override vertex --index 1` swaps service
 accounts with no redeploy and no CLI change.
 
 **Each provider tracks its own key-index independently**, so switching
@@ -62,7 +62,7 @@ is missing or, for index 0, differs from your local `.env`.
 
 ## The read-only counterparts
 
-`scripts/deploy.py`'s `provider`/`provider-live` checks are the read-only
+`bot/scripts/deploy.py`'s `provider`/`provider-live` checks are the read-only
 counterparts of the provider override: they confirm the resolved
 provider's credential is set locally, and genuinely present on Render,
 respectively. `api-key-live` is the read-only counterpart of the key-index

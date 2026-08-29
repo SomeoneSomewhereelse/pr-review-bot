@@ -133,8 +133,8 @@ git commit -m "perf: generate test_github_app.py's throwaway RSA key once per fi
 - Modify: `README.md` (one paragraph in the Testing section)
 
 **Interfaces:**
-- Consumes: `scripts._prereqs._looks_like_local_test_db(url: str) -> bool` (already exists, `scripts/_prereqs.py`).
-- Produces: `scripts.test_db.up() -> int`, `scripts.test_db.down() -> int`, `scripts.test_db.build_parser() -> argparse.ArgumentParser`, `scripts.test_db.main(argv: list[str] | None = None) -> int`. Module-level constants `_CONTAINER_NAME`, `_PORT` (5433), `_PASSWORD`, `_DATABASE_URL`, `_READY_TIMEOUT_SECONDS`, `_READY_POLL_INTERVAL_SECONDS` — no other task reads these directly, but keep the names if a later task needs to reference the port/URL.
+- Consumes: `bot.scripts._prereqs._looks_like_local_test_db(url: str) -> bool` (already exists, `scripts/_prereqs.py`).
+- Produces: `bot.scripts.test_db.up() -> int`, `bot.scripts.test_db.down() -> int`, `bot.scripts.test_db.build_parser() -> argparse.ArgumentParser`, `bot.scripts.test_db.main(argv: list[str] | None = None) -> int`. Module-level constants `_CONTAINER_NAME`, `_PORT` (5433), `_PASSWORD`, `_DATABASE_URL`, `_READY_TIMEOUT_SECONDS`, `_READY_POLL_INTERVAL_SECONDS` — no other task reads these directly, but keep the names if a later task needs to reference the port/URL.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -266,7 +266,7 @@ def test_main_dispatches_to_down(monkeypatch):
 
 Run: `uv run pytest tests/test_test_db_script.py -v`
 
-Expected: all FAIL with `ModuleNotFoundError: No module named 'scripts.test_db'`.
+Expected: all FAIL with `ModuleNotFoundError: No module named 'bot.scripts.test_db'`.
 
 - [ ] **Step 3: Implement the script**
 
@@ -276,9 +276,9 @@ Create `scripts/test_db.py`:
 """Idempotent local test-only Postgres, for fast pytest iteration without
 paying testcontainers' cold-boot cost on every invocation.
 
-    uv run python -m scripts.test_db            # start (or reuse) it
-    eval "$(uv run python -m scripts.test_db)"   # also export DATABASE_URL
-    uv run python -m scripts.test_db down        # stop and remove it
+    uv run python -m bot.scripts.test_db            # start (or reuse) it
+    eval "$(uv run python -m bot.scripts.test_db)"   # also export DATABASE_URL
+    uv run python -m bot.scripts.test_db down        # stop and remove it
 
 Separate from guide/setup/local/05-postgres.md's `pr-review-pg` container --
 that one is the local-hosting track's app runtime database, on port 5432.
@@ -300,7 +300,7 @@ import subprocess
 import sys
 import time
 
-from scripts._prereqs import _looks_like_local_test_db
+from bot.scripts._prereqs import _looks_like_local_test_db
 
 _CONTAINER_NAME = "pr-review-test-pg"
 _PORT = 5433
@@ -409,11 +409,11 @@ Expected: all pass.
 Run, in order, checking each result before moving to the next:
 
 ```bash
-uv run python -m scripts.test_db          # expect: export DATABASE_URL=postgresql://postgres:x@localhost:5433/postgres
-uv run python -m scripts.test_db          # run again: expect identical output, and confirm via `docker ps` that no second container was created
-eval "$(uv run python -m scripts.test_db)" && echo "$DATABASE_URL"    # confirm it actually exports into this shell -- never echo a *real* DATABASE_URL this way, only this throwaway one
+uv run python -m bot.scripts.test_db          # expect: export DATABASE_URL=postgresql://postgres:x@localhost:5433/postgres
+uv run python -m bot.scripts.test_db          # run again: expect identical output, and confirm via `docker ps` that no second container was created
+eval "$(uv run python -m bot.scripts.test_db)" && echo "$DATABASE_URL"    # confirm it actually exports into this shell -- never echo a *real* DATABASE_URL this way, only this throwaway one
 uv run pytest tests/test_queue_store.py -q    # confirm a DB-touching test file passes against this container
-uv run python -m scripts.test_db down     # expect: container removed
+uv run python -m bot.scripts.test_db down     # expect: container removed
 docker ps -a --filter name=pr-review-test-pg   # expect: no rows
 ```
 
@@ -436,7 +436,7 @@ Replace with:
 those tests fail with an opaque testcontainers error. CI provides this
 automatically via a `services: postgres` container — no action needed there.
 
-**Faster local iteration:** `eval "$(uv run python -m scripts.test_db)"` once per shell session starts a persistent local test Postgres and exports `DATABASE_URL`, so `pytest` skips testcontainers' cold boot; `uv run python -m scripts.test_db down` tears it down.
+**Faster local iteration:** `eval "$(uv run python -m bot.scripts.test_db)"` once per shell session starts a persistent local test Postgres and exports `DATABASE_URL`, so `pytest` skips testcontainers' cold boot; `uv run python -m bot.scripts.test_db down` tears it down.
 
 821 deterministic tests, no real network calls
 ```

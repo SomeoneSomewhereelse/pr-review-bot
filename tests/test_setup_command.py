@@ -17,7 +17,7 @@ def test_the_command_exists_with_frontmatter():
 
 def test_it_drives_the_doctor_cli_and_holds_no_logic_of_its_own():
     text = _COMMAND.read_text(encoding="utf-8")
-    assert "scripts.doctor" in text
+    assert "bot.scripts.doctor" in text
     assert "--json" in text
     assert "works identically for people who do not use Claude Code" in text
 
@@ -25,7 +25,7 @@ def test_it_drives_the_doctor_cli_and_holds_no_logic_of_its_own():
 def test_it_hands_off_every_credential_writing_tool():
     """Both writers must be handed to the human, never run by the agent."""
     text = _COMMAND.read_text(encoding="utf-8")
-    for tool in ("scripts.init_env", "scripts.create_github_app"):
+    for tool in ("bot.scripts.init_env", "bot.scripts.create_github_app"):
         assert tool in text, f"{tool} must be named"
     assert "! uv run" in text, "the `!` prefix is how the user runs it themselves"
     assert ".env" in text

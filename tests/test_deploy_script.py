@@ -19,7 +19,7 @@ import yaml
 
 from bot.config import OPERATIONAL_KEYS, Settings, settings
 from bot.providers import pricing
-from scripts import _prereqs, deploy
+from bot.scripts import _prereqs, deploy
 
 BASE = "https://x.onrender.com"
 HEALTH = f"{BASE}/healthz"
@@ -400,7 +400,7 @@ def test_check_pricing_warns_on_an_unpriced_db_model_override(complete_config, m
     assert "vertex" in result.detail
     assert "override" in result.detail.lower()
     assert "VERTEX_MODEL is not consulted" in result.detail
-    assert "scripts.set_override vertex --clear-model --no-activate" in result.detail
+    assert "bot.scripts.set_override vertex --clear-model --no-activate" in result.detail
 
 
 def test_check_pricing_passes_a_priced_db_model_override(complete_config, monkeypatch):
@@ -1656,14 +1656,14 @@ def test_sync_env_requires_a_render_api_key(monkeypatch):
 )
 def test_sync_env_refuses_a_local_test_database_url(sync_ready, monkeypatch, capsys, local_url):
     """DATABASE_URL is always-synced and Settings reads os.environ ahead of
-    .env, so a shell that ran `eval "$(uv run python -m scripts.test_db)"`
+    .env, so a shell that ran `eval "$(uv run python -m bot.scripts.test_db)"`
     would otherwise repoint the live Render service at a throwaway container
     on the operator's laptop."""
     monkeypatch.setattr(settings, "database_url", local_url)
     assert deploy.sync_env() == 2
     err = capsys.readouterr().err
     assert "refusing to sync" in err
-    assert "scripts.test_db" in err
+    assert "bot.scripts.test_db" in err
     assert "unset DATABASE_URL" in err
 
 
@@ -2125,7 +2125,7 @@ def test_sync_config_db_requires_a_database_url(monkeypatch, capsys):
 )
 def test_sync_config_db_refuses_a_local_test_database_url(monkeypatch, capsys, local_url):
     """Same shape as sync_env()'s guard (ISSUES.md Parked Issues) -- run from
-    a shell where `eval "$(uv run python -m scripts.test_db)"` is still
+    a shell where `eval "$(uv run python -m bot.scripts.test_db)"` is still
     exported, this would otherwise silently write config into the throwaway
     local container while an operator believes it reached production."""
     monkeypatch.setattr(settings, "database_url", local_url)
@@ -2833,7 +2833,7 @@ def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
     provider's model var must already be on the service -- not just the
     currently-selected one's."""
     from bot.config import settings
-    from scripts import deploy
+    from bot.scripts import deploy
 
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "llm_model", "model-gemini")
@@ -2860,7 +2860,7 @@ def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
     test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees
     for the distinct non-active-provider case."""
     from bot.config import settings
-    from scripts import deploy
+    from bot.scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
     monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
@@ -2881,7 +2881,7 @@ def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
 
 def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
     from bot.config import settings
-    from scripts import deploy
+    from bot.scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
     monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)
@@ -2919,7 +2919,7 @@ def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
     old guard only ever checked the active provider and would have missed
     this; the refusal must name vertex specifically."""
     from bot.config import settings
-    from scripts import deploy
+    from bot.scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
     monkeypatch.setattr(settings, "database_url", REMOTE_PLACEHOLDER_DB_URL)

@@ -17,7 +17,7 @@
 - **Tasks 2–6 add files only. They must not delete or edit `README.md` or `SETUP.md`.** That ordering is what makes the migration safe — the source text remains intact until Task 7 has the guide to replace it with. Do not "tidy up as you go".
 - **`guide/reference/` is generated output (Stage 3a).** Never hand-edit those four files; never add a fifth by hand. Link to them.
 - **Every file write passes `encoding="utf-8"` and `newline="\n"`** (spec §5a).
-- **Every documented command routes through `uv run python -m scripts.*` where one exists** (spec §5). Specifically: `base64 -w0` → `scripts.encode_credential` (`-w` is GNU-only; macOS/BSD errors), and `curl .../healthz` → `scripts.deploy --health-only` (on Windows PowerShell `curl` aliases `Invoke-WebRequest`, which takes different arguments and *looks* like it works).
+- **Every documented command routes through `uv run python -m scripts.*` where one exists** (spec §5). Specifically: `base64 -w0` → `bot.scripts.encode_credential` (`-w` is GNU-only; macOS/BSD errors), and `curl .../healthz` → `bot.scripts.deploy --health-only` (on Windows PowerShell `curl` aliases `Invoke-WebRequest`, which takes different arguments and *looks* like it works).
 - **Python 3.12.** ruff selects `E4, E7, E9, F, E501`, `line-length = 100`.
 - **Lint and test before every commit:** `uv run ruff check .` then `uv run pytest -v`. Baseline entering this stage: **788 passing**, ruff clean, HEAD `8b8a5ad`.
 - **No changes to `app/`.**
@@ -79,7 +79,7 @@ Every line of the two source documents has a destination. Nothing is dropped wit
 | 296–302 | §3 intro | → `guide/setup/index.md` |
 | 303–324 | §3.1 Supabase | → `guide/setup/hosted/05-supabase.md` |
 | 325–371 | §3.2 Render web service | → `guide/setup/hosted/06-render.md` |
-| 372–425 | §3.3 Secrets encoding | → `guide/setup/02-github-app.md` (**OS fix**: `base64 -w0` → `scripts.encode_credential`) |
+| 372–425 | §3.3 Secrets encoding | → `guide/setup/02-github-app.md` (**OS fix**: `base64 -w0` → `bot.scripts.encode_credential`) |
 | 426–541 | §3.4 App install, webhook, verification | → `guide/setup/03-install-app.md` + both tracks' step 7 (**OS fix**: `curl` → `--health-only`) |
 | 542–560 | §3.5 Keep-warm pinger | → `guide/setup/hosted/08-pinger.md` |
 | 561–601 | §3.6 `set_override.py` | → `guide/operations/overrides.md` (merge with README 262–316; **do not keep both**) |
@@ -237,7 +237,7 @@ Create `guide/index.md` with this outline (write the prose; keep it under ~80 li
 - **What you'll need** — a GitHub account, an LLM API key (Groq recommended: free tier, no card), and either a local Postgres or a free Supabase project. Say ~30 minutes.
 - **Prerequisites** — Python **3.12** (from `.python-version`), `uv`, `git`, and **a Postgres you can reach** (Docker is one of three ways, not the requirement itself). Note that `uv` and Python install instructions live here because `scripts/doctor.py` runs *via* `uv` and so cannot advise on installing it.
 - **Two tracks** — one sentence each, linking to `setup/index.md`.
-- **The one command to remember** — `uv run python -m scripts.doctor`, which answers "where am I, what's missing, what's next" at any point.
+- **The one command to remember** — `uv run python -m bot.scripts.doctor`, which answers "where am I, what's missing, what's next" at any point.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -309,7 +309,7 @@ def test_prerequisites_page_uses_portable_commands_only():
 
 def test_github_app_page_encodes_the_pem_with_the_project_script():
     text = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
-    assert "scripts.encode_credential" in text
+    assert "bot.scripts.encode_credential" in text
     assert "base64 -w0" not in text
 
 
@@ -334,15 +334,15 @@ Must survive:
 - Python **3.12** (`.python-version`).
 - **Docker *or* a reachable `DATABASE_URL`**, stated as one conditional — that is what `tests/conftest.py`'s `db_url` fixture actually imposes. Without either, DB-touching tests fail with an opaque testcontainers error.
 - The Docker install line becomes a **three-tab block** (Linux / macOS / Windows), each with the official URL as fallback. Get the exact commands from `scripts/_prereqs.py`'s `DOCKER.hints` — do not invent new ones.
-- Close with: run `uv run python -m scripts.doctor` and it will tell you what is missing.
+- Close with: run `uv run python -m bot.scripts.doctor` and it will tell you what is missing.
 
 **`guide/setup/02-github-app.md`** — source: `SETUP.md:6-64`, `SETUP.md:372-425`.
-Outline: the one-command path (`uv run python -m scripts.create_github_app`), what it does, then the manual fallback.
+Outline: the one-command path (`uv run python -m bot.scripts.create_github_app`), what it does, then the manual fallback.
 Must survive:
 - **Permissions** `pull_requests: write`, `contents: read`, `issues: write`, `metadata: read`; **event** `pull_request`.
 - **Keep the App private.** A public App lets any third party self-install and have their events accepted while `GITHUB_TARGET_REPO` is unset. Render this as a warning admonition.
 - The **three IDs** confusion: App ID → `GITHUB_APP_ID`; Installation ID → `GITHUB_APP_INSTALLATION_ID` (optional but recommended — pinning it removes the private-key read from the unconditional boot path); Client ID → **unused here**, and sits on the same page.
-- PEM encoding via `uv run python -m scripts.encode_credential github-app-private-key.pem`. **Do not mention `base64 -w0`** — `-w` is a GNU coreutils flag and macOS/BSD `base64` errors on it.
+- PEM encoding via `uv run python -m bot.scripts.encode_credential github-app-private-key.pem`. **Do not mention `base64 -w0`** — `-w` is a GNU coreutils flag and macOS/BSD `base64` errors on it.
 - The webhook URL is a **placeholder** at creation; step 7 corrects it.
 
 **`guide/setup/03-install-app.md`** — source: `SETUP.md:426-470` (the install half).
@@ -354,7 +354,7 @@ Outline: pick a provider, get a key, set it.
 Must survive:
 - **`LLM_PROVIDER` has no default** and the service refuses to start without it — set it in `.env.config` to one of `gemini`, `groq`, `vertex`.
 - **Groq is the recommended starting point**: free tier, no card, and it is what every live rehearsal used.
-- Credentials go in `.env` via `uv run python -m scripts.init_env` (**run it yourself** — it prompts for real secrets).
+- Credentials go in `.env` via `uv run python -m bot.scripts.init_env` (**run it yourself** — it prompts for real secrets).
 - A model with no pricing entry still runs; it just produces no cost estimate. Link `../reference/pricing.md`.
 
 Append the nav entries to `mkdocs.yml` under a `Setup` section.
@@ -428,11 +428,11 @@ Outline: why a tunnel is required at all (GitHub must reach you, or the trigger 
 Must survive:
 - **Cloudflare is the documented default, not a hard dependency** — it is the only option needing no account, no config, one binary, one command. ngrok now requires an account and authtoken. Anything yielding a public HTTPS URL works.
 - **The URL changes on every restart**, so step 7 is re-run each session. Note the named-tunnel alternative (stable hostname, needs a Cloudflare account and DNS) as out of scope.
-- An **optional milestone** before investing in the tunnel: `uv run python -m scripts.manual_verify_step3` has no public-URL dependency and proves App auth, diff fetch, and comment upsert against a real PR. It proves the *pipeline*, not the *trigger*. Mark it clearly optional.
+- An **optional milestone** before investing in the tunnel: `uv run python -m bot.scripts.manual_verify_step3` has no public-URL dependency and proves App auth, diff fetch, and comment upsert against a real PR. It proves the *pipeline*, not the *trigger*. Mark it clearly optional.
 
-**`07-webhook.md`** — `uv run python -m scripts.deploy` registers the webhook and verifies. Must survive: Render and pinger rows `SKIP` cleanly with no `RENDER_API_KEY` — that is expected here, not a problem. Use `--health-only` for a credential-free "is it up?" check; **never `curl`**.
+**`07-webhook.md`** — `uv run python -m bot.scripts.deploy` registers the webhook and verifies. Must survive: Render and pinger rows `SKIP` cleanly with no `RENDER_API_KEY` — that is expected here, not a problem. Use `--health-only` for a credential-free "is it up?" check; **never `curl`**.
 
-**`08-run.md`** — `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`, then `uv run python -m scripts.seed_demo_pr` to open a real PR with planted issues. What a good result looks like: a comment within ~15s naming issues across all three sections, with a footer showing runtime, tokens, and (if the model is priced) an estimated cost.
+**`08-run.md`** — `uv run uvicorn app.main:app --host 0.0.0.0 --port 8000`, then `uv run python -m bot.scripts.seed_demo_pr` to open a real PR with planted issues. What a good result looks like: a comment within ~15s naming issues across all three sections, with a footer showing runtime, tokens, and (if the model is priced) an estimated cost.
 
 - [ ] **Step 4: Run tests and build**
 
@@ -512,7 +512,7 @@ Must survive:
 - Troubleshooting the first deploy: `error connecting in 'pool-1'` usually means the Supabase project was not ready or the pooler string is mistyped; fix and click **Manual Deploy**.
 
 **`07-sync.md`** — source `README.md:204-261`.
-Outline: `PUBLIC_BASE_URL=... uv run python -m scripts.deploy --sync-env` in bash and PowerShell **tabs**. Link `../../reference/sync-env.md` for the push set rather than restating it. Budget up to ~30 minutes worst case; a warm redeploy is well under a minute. Note the Claude Code `/deploy` command wraps the same CLI.
+Outline: `PUBLIC_BASE_URL=... uv run python -m bot.scripts.deploy --sync-env` in bash and PowerShell **tabs**. Link `../../reference/sync-env.md` for the push set rather than restating it. Budget up to ~30 minutes worst case; a warm redeploy is well under a minute. Note the Claude Code `/deploy` command wraps the same CLI.
 
 **`08-pinger.md`** — source `SETUP.md:542-560`.
 Must survive: UptimeRobot monitor on `https://<your-service>.onrender.com/healthz`, **5-minute interval**, and the URL must match **exactly** — a stray trailing character 404s on every check while looking perfectly healthy in the dashboard. `/healthz` answers both `GET` and `HEAD` because the free tier sends `HEAD`. Set `UPTIMEROBOT_API_KEY` locally if you want `doctor`/`deploy` to verify it rather than report `SKIPPED`.
@@ -946,14 +946,14 @@ Expected: exit 0, no warnings. Every internal link resolves.
 
 Run:
 ```bash
-uv run python -m scripts.gen_docs
+uv run python -m bot.scripts.gen_docs
 git status --porcelain
 ```
 Expected: empty. A diff here means someone edited generated output by hand during the migration.
 
 - [ ] **Step 4: Read the guide end to end as a stranger would**
 
-Follow `guide/index.md` → `setup/index.md` → both tracks, and confirm: every step's title matches what `uv run python -m scripts.doctor --track local` and `--track hosted` print; no page shows a real credential value; no command uses `base64 -w0` or `curl`. Report anything that reads as though it assumes prior knowledge.
+Follow `guide/index.md` → `setup/index.md` → both tracks, and confirm: every step's title matches what `uv run python -m bot.scripts.doctor --track local` and `--track hosted` print; no page shows a real credential value; no command uses `base64 -w0` or `curl`. Report anything that reads as though it assumes prior knowledge.
 
 - [ ] **Step 5: Report completion**
 

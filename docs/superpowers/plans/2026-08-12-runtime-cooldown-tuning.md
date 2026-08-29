@@ -729,7 +729,7 @@ def test_rejects_an_abbreviated_flag(capsys):
 
 def test_entry_point_runs_as_a_documented_module_invocation():
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.set_cooldown", "--help"],
+        [sys.executable, "-m", "bot.scripts.set_cooldown", "--help"],
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
@@ -800,16 +800,16 @@ def test_clear_never_calls_the_render_verification(monkeypatch):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_set_cooldown_script.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'scripts.set_cooldown'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'bot.scripts.set_cooldown'`
 
 - [ ] **Step 3: Create `scripts/set_cooldown.py`**
 
 ```python
 """Set or clear the DB-backed cooldown override (base/cap/factor).
 
-    uv run python -m scripts.set_cooldown --base 30 --factor 1.5
-    uv run python -m scripts.set_cooldown --cap 600
-    uv run python -m scripts.set_cooldown --clear
+    uv run python -m bot.scripts.set_cooldown --base 30 --factor 1.5
+    uv run python -m bot.scripts.set_cooldown --cap 600
+    uv run python -m bot.scripts.set_cooldown --clear
 
 The override takes effect on the next claimed ticket -- no restart, no
 redeploy. It writes to whatever DATABASE_URL points at, so against a local
@@ -992,8 +992,8 @@ Expected: no new violations.
 - [ ] **Manual smoke test against a local Postgres**
 
 ```bash
-uv run python -m scripts.set_cooldown --base 5 --cap 20 --factor 1.5
-uv run python -m scripts.set_cooldown --clear
+uv run python -m bot.scripts.set_cooldown --base 5 --cap 20 --factor 1.5
+uv run python -m bot.scripts.set_cooldown --clear
 ```
 
 Expected: both exit 0 and print the override change / clear confirmation with

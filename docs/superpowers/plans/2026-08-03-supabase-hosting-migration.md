@@ -856,7 +856,7 @@ git commit -m "chore(deploy): Render blueprint + .env.example for Postgres/hoste
 
 - [ ] **Step 1: `SETUP.md` — the hosted deploy runbook**
 
-Add a "Deploying to Render + Supabase" section: (1) create a Supabase project, copy the **Session-mode pooler** connection string (port 5432 pooler host) → `DATABASE_URL`; (2) create the Render web service from `render.yaml`, set the dashboard env vars (incl. `GITHUB_APP_PRIVATE_KEY_B64 = base64 of the PEM`, `GITHUB_TARGET_REPO`); (3) one-time: install the GitHub App on the testbed repo via the GitHub UI; (4) run the registration (`/deploy` / `python -m scripts.deploy`) to verify the install + set the webhook URL; (5) register the Render `/healthz` URL with a free cron pinger (cron-job.org / UptimeRobot, ~10 min) to keep it warm; note this also keeps Supabase un-paused via the dispatcher's polling.
+Add a "Deploying to Render + Supabase" section: (1) create a Supabase project, copy the **Session-mode pooler** connection string (port 5432 pooler host) → `DATABASE_URL`; (2) create the Render web service from `render.yaml`, set the dashboard env vars (incl. `GITHUB_APP_PRIVATE_KEY_B64 = base64 of the PEM`, `GITHUB_TARGET_REPO`); (3) one-time: install the GitHub App on the testbed repo via the GitHub UI; (4) run the registration (`/deploy` / `python -m bot.scripts.deploy`) to verify the install + set the webhook URL; (5) register the Render `/healthz` URL with a free cron pinger (cron-job.org / UptimeRobot, ~10 min) to keep it warm; note this also keeps Supabase un-paused via the dispatcher's polling.
 
 - [ ] **Step 2: `README.md` — stop presenting the tunnel as the live path**
 

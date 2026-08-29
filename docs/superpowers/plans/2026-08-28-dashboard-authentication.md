@@ -57,7 +57,7 @@ signal to stop and ask, not to silently pick one.
   fixtures, `test_check_config_names_every_missing_key_at_once`'s neighbor,
   `test_boot_credentials_live_passes_when_all_present`; add 2 new tests)
 - Generate: `guide/reference/config.md`, `guide/reference/sync-env.md` (via
-  `uv run python -m scripts.gen_docs` — never hand-edit)
+  `uv run python -m bot.scripts.gen_docs` — never hand-edit)
 
 **Interfaces:**
 - Produces: `Settings.dashboard_username: str` (default `""`),
@@ -327,7 +327,7 @@ and `test_render_yaml_declares_every_synced_var`.
 
 - [ ] **Step 12: Regenerate the docs**
 
-Run: `uv run python -m scripts.gen_docs`
+Run: `uv run python -m bot.scripts.gen_docs`
 This rewrites `guide/reference/config.md` and `guide/reference/sync-env.md`
 from the code (their content is fully derived from `Settings.model_fields`,
 `OPERATIONAL_KEYS`, and `_ALWAYS_SYNCED` — see `scripts/gen_docs.py`'s own

@@ -92,7 +92,7 @@ _SETUP = _ROOT / "guide" / "setup"
 def test_shared_pages_match_doctors_step_titles():
     """If the guide and doctor disagree about a step's name, an operator
     following one while running the other cannot tell where they are."""
-    from scripts import doctor
+    from bot.scripts import doctor
 
     shared = [s for s in doctor.steps_for("local") if s.number <= 4]
     pages = {
@@ -118,7 +118,7 @@ def test_prerequisites_page_uses_portable_commands_only():
 
 def test_github_app_page_encodes_the_pem_with_the_project_script():
     text = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
-    assert "scripts.encode_credential" in text
+    assert "bot.scripts.encode_credential" in text
     assert "base64 -w0" not in text
 
 
@@ -158,15 +158,15 @@ def test_step_8_pages_point_back_to_step_3_instead_of_repeating_it():
 
 
 def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
-    """Regression: scripts.deploy's main() exits 2 immediately ("a public
+    """Regression: bot.scripts.deploy's main() exits 2 immediately ("a public
     base URL ... is required") before it ever reaches the installation-id
     discovery check -- and Step 3 is before Step 6, so no PUBLIC_BASE_URL or
-    RENDER_EXTERNAL_URL exists yet at this point in the guide. scripts.doctor
+    RENDER_EXTERNAL_URL exists yet at this point in the guide. bot.scripts.doctor
     needs no base URL and discovers the same installation id via its
     github-install check, so that's what this page must point at instead."""
     text = (_SETUP / "03-install-app.md").read_text(encoding="utf-8")
-    assert "uv run python -m scripts.doctor" in text
-    assert "```bash\nuv run python -m scripts.deploy\n```" not in text
+    assert "uv run python -m bot.scripts.doctor" in text
+    assert "```bash\nuv run python -m bot.scripts.deploy\n```" not in text
 
 
 def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env():
@@ -180,8 +180,8 @@ def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env(
     assert "cp .env.config.example .env.config" in step2
 
     step4 = (_SETUP / "04-llm-provider.md").read_text(encoding="utf-8")
-    assert "scripts.init_env" not in step4
-    assert "uv run python -m scripts.doctor" in step4
+    assert "bot.scripts.init_env" not in step4
+    assert "uv run python -m bot.scripts.doctor" in step4
 
 
 def test_setup_index_sends_the_reader_to_a_track():
@@ -190,7 +190,7 @@ def test_setup_index_sends_the_reader_to_a_track():
 
 
 def test_local_track_pages_match_doctors_titles():
-    from scripts import doctor
+    from bot.scripts import doctor
 
     pages = {5: "05-postgres.md", 6: "06-tunnel.md", 7: "07-webhook.md", 8: "08-run.md"}
     for step in doctor.steps_for("local"):
@@ -215,7 +215,7 @@ def test_tunnel_page_no_longer_points_at_manual_verify_step3():
     PyGithub 404 traceback instead of a clear error. doctor's own
     app-permissions/github-install/target-repo checks already verify the
     App auth and privileges live, so this milestone was redundant as well
-    as broken -- unwired rather than fixed, same as scripts.init_env."""
+    as broken -- unwired rather than fixed, same as bot.scripts.init_env."""
     text = (_SETUP / "local" / "06-tunnel.md").read_text(encoding="utf-8")
     assert "manual_verify_step3" not in text
 
@@ -243,7 +243,7 @@ def test_webhook_page_explains_the_chicken_and_egg_it_points_at():
 
 
 def test_hosted_track_pages_match_doctors_titles():
-    from scripts import doctor
+    from bot.scripts import doctor
 
     pages = {5: "05-supabase.md", 6: "06-render.md", 7: "07-sync.md", 8: "08-pinger.md"}
     for step in doctor.steps_for("hosted"):
@@ -389,7 +389,7 @@ _EXPECTED_GUIDE_BASE = "https://tovtechorg.github.io/pr-review-bot/"
 def test_deploy_points_at_a_guide_page_that_exists():
     """spec section 3d: the CLI prints this to a terminal user, so it must
     resolve to a real page -- on the right host, under the right repo."""
-    from scripts import deploy
+    from bot.scripts import deploy
 
     assert deploy._GUIDE_URL.startswith(_EXPECTED_GUIDE_BASE), (
         f"_GUIDE_URL must point at this repo's Pages site "

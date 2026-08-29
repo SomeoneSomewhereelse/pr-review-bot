@@ -34,8 +34,8 @@ from bot import github_app
 from bot.config import settings
 from bot.providers import pricing, registry
 from bot.queue import store
-from scripts import _override, _render
-from scripts._prereqs import _looks_like_local_test_db
+from bot.scripts import _override, _render
+from bot.scripts._prereqs import _looks_like_local_test_db
 
 _NAME_WIDTH = 18
 _STATUS_WIDTH = 9
@@ -306,7 +306,7 @@ def check_pricing() -> CheckResult:
                 f"(known {provider} models: {known}); {model_var} is not consulted "
                 "while this override is active -- reviews run, with no cost "
                 "estimate. Clear it or add a pricing.py entry: uv run python -m "
-                f"scripts.set_override {provider} --clear-model --no-activate"
+                f"bot.scripts.set_override {provider} --clear-model --no-activate"
             )
         else:
             lines.append(
@@ -1191,7 +1191,7 @@ def sync_config_db() -> int:
         print("--sync-config-db requires DATABASE_URL", file=sys.stderr)
         return 2
     # Same risk sync_env() already guards against (ISSUES.md Parked Issues):
-    # a shell that ran `eval "$(uv run python -m scripts.test_db)"` earlier
+    # a shell that ran `eval "$(uv run python -m bot.scripts.test_db)"` earlier
     # has a throwaway localhost:5433 URL sitting in os.environ, which Settings
     # reads ahead of any .env file -- this would silently write config into
     # that local container while an operator believes production was
@@ -1202,7 +1202,7 @@ def sync_config_db() -> int:
             f"refusing to sync: DATABASE_URL points at {host}, a local/test Postgres -- "
             "this would write config into a database on this machine, not production. "
             "This is almost certainly a shell where "
-            '`eval "$(uv run python -m scripts.test_db)"` was run; `unset DATABASE_URL` '
+            '`eval "$(uv run python -m bot.scripts.test_db)"` was run; `unset DATABASE_URL` '
             "(or use a fresh shell) and re-run.",
             file=sys.stderr,
         )
@@ -1283,7 +1283,7 @@ def sync_env() -> int:
         return 2
     # DATABASE_URL is in _ALWAYS_SYNCED, and Settings reads the process
     # environment ahead of any .env file -- so a shell that ran
-    # `eval "$(uv run python -m scripts.test_db)"` (README's fast-iteration
+    # `eval "$(uv run python -m bot.scripts.test_db)"` (README's fast-iteration
     # path) has a throwaway localhost:5433 URL sitting in os.environ, and
     # _wanted_env() would happily push THAT to the live service, repointing
     # production at a container on the operator's laptop. This project has
@@ -1301,7 +1301,7 @@ def sync_env() -> int:
             f"refusing to sync: DATABASE_URL points at {host}, a local/test Postgres -- "
             "pushing it would repoint the live Render service at a database on this "
             "machine. This is almost certainly a shell where "
-            '`eval "$(uv run python -m scripts.test_db)"` was run; `unset DATABASE_URL` '
+            '`eval "$(uv run python -m bot.scripts.test_db)"` was run; `unset DATABASE_URL` '
             "(or use a fresh shell) and re-run.",
             file=sys.stderr,
         )
@@ -1324,7 +1324,7 @@ def sync_env() -> int:
             print(
                 f"refusing to sync: a DB provider override ({override}) is active and "
                 f"wins over the LLM_PROVIDER={settings.llm_provider} being pushed. "
-                "Clear it first: uv run python -m scripts.set_override --clear",
+                "Clear it first: uv run python -m bot.scripts.set_override --clear",
                 file=sys.stderr,
             )
             return 2
@@ -1351,7 +1351,7 @@ def sync_env() -> int:
                 print(
                     f"refusing to sync: a DB model override ({model_override}) is active for "
                     f"{provider} and wins over the {model_var}={local_model} "
-                    "being pushed. Clear it first: uv run python -m scripts.set_override "
+                    "being pushed. Clear it first: uv run python -m bot.scripts.set_override "
                     f"{provider} --clear-model --no-activate",
                     file=sys.stderr,
                 )

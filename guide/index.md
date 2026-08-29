@@ -235,7 +235,7 @@ first four steps regardless of which track you pick.
 ## The one command to remember
 
 ```bash
-uv run python -m scripts.doctor
+uv run python -m bot.scripts.doctor
 ```
 
 Run it any time, from a fresh clone or mid-setup. It answers three
