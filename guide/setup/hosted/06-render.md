@@ -1,5 +1,18 @@
 # Step 6: Create the Render service
 
+!!! danger "This repo's own render.yaml no longer deploys the bot"
+    As of the 2026-08-29 project restructure, this repository's own
+    `render.yaml` builds `onboarding/Dockerfile` — the self-service setup
+    wizard — not the bot described on this page. Following the Blueprint
+    instructions below against this repo as-is will deploy the onboarding
+    wizard, not a working PR-review bot, even though its `/healthz` check
+    will still pass.
+
+    To deploy the bot itself, either use the onboarding wizard (it creates
+    its own Render service pointed at `bot/Dockerfile`), or manually create
+    a Render service with `dockerfilePath: ./bot/Dockerfile` instead of
+    following this page's Blueprint-from-this-repo instructions as written.
+
 ## Point Render at a repo
 
 Render's Blueprint flow needs a Git repository to build `render.yaml` from.

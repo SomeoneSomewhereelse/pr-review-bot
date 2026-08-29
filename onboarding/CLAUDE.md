@@ -1,7 +1,7 @@
 # onboarding/ — self-service setup wizard
 
 Loaded when working under `onboarding/`. This is a **separate service** from
-the review engine in `app/` — different process, different deploy, different
+the review engine in `bot/` — different process, different deploy, different
 threat model. Root `CLAUDE.md`'s secret-handling section still applies in
 full; the additions below are specific to what makes this service different.
 
@@ -34,13 +34,16 @@ section 3), not an oversight to fix.
   request. Do not special-case a "simple" integration into calling an
   external API directly from browser JS just because it doesn't strictly
   need server-side confidentiality (see design doc section 3 for why).
-- **This service and the review engine (`app/`) do not import from each
+- **This service and the review engine (`bot/`) do not import from each
   other's credential-handling code paths.** Shared *non-secret* utilities
   (HTTP client setup, logging config) may be factored into a common module
   if genuinely duplicated, but never a shared code path that touches both
-  the operator's own long-lived credentials (`app/config.py`'s `Settings`)
+  the operator's own long-lived credentials (`bot/config.py`'s `Settings`)
   and a visitor's transient ones — keeping these separate is what lets each
-  service's threat model be reasoned about independently.
+  service's threat model be reasoned about independently. (`dashboard/`
+  is exempt from this rule's concern: it doesn't handle either kind of
+  credential the way `bot/` and `onboarding/` do, and is deployed
+  in-process with `bot/` rather than as its own service.)
 
 ## What the implementation adds to these rules
 
@@ -108,7 +111,7 @@ section 3), not an oversight to fix.
   to this same directive rather than loosening `default-src`.
 - **`onboarding/config.py`'s `public_base_url` is checked for *presence* in
   `onboarding/main.py`'s `lifespan`, not as a pydantic-required field** —
-  same reasoning as `app/config.py`/`app/main.py`'s own pattern: a
+  same reasoning as `bot/config.py`/`bot/main.py`'s own pattern: a
   required field would raise at import time, breaking pytest collection
   before a clear error could ever be reported. Frame 2 cannot construct a
   working manifest without it, so the service still refuses to boot without
@@ -258,7 +261,7 @@ section 3), not an oversight to fix.
 
 - **UptimeRobot's v3 REST API (`Bearer` auth, JSON,
   `https://api.uptimerobot.com/v3/monitors`) is used for every call this
-  frame makes — never the legacy v2 form-API.** `scripts/deploy.py`'s
+  frame makes — never the legacy v2 form-API.** `bot/scripts/deploy.py`'s
   existing `check_uptime_pinger` still uses v2 for its own read-only
   `getMonitors` check, and that is intentionally untouched — no reason to
   migrate a working read-only check. But v2's `POST /newMonitor` was
@@ -363,17 +366,17 @@ section 3), not an oversight to fix.
   that doesn't exist.
 - **`GITHUB_TARGET_REPO`, `GCP_PROJECT`, and `GCP_LOCATION` are
   deliberately never pushed** — track-all mode and this project's own
-  matching defaults (`app/config.py`'s `gcp_location` default already
+  matching defaults (`bot/config.py`'s `gcp_location` default already
   equals `onboarding/llm_client.py`'s fixed `_VERTEX_LOCATION` constant,
   verified) make an explicit push redundant. Do not add them without a
   concrete reason a default has drifted.
-- **Deploy status polling reuses `scripts/deploy.py`'s own
+- **Deploy status polling reuses `bot/scripts/deploy.py`'s own
   `_DEPLOY_IN_FLIGHT_STATUSES`/`_DEPLOY_FAILED_STATUSES` status-bucket
   sets as a verbatim, paired-comment copy in `render_client.py`** — never
-  an import (`onboarding/` never imports from `scripts/` or `app/`, per
+  an import (`onboarding/` never imports from `bot/scripts/` or `bot/`, per
   this file's own no-shared-credential-path rule). Keep the two in sync
   by hand if either changes; `router.py`'s `_LLM_ENV_VAR_NAMES` mapping
-  is the same pattern, paired with `app/providers/registry.py::PROVIDERS`.
+  is the same pattern, paired with `bot/providers/registry.py::PROVIDERS`.
 - **Frame 5 (UptimeRobot)'s "blocked, no Render URL" state is no longer
   reachable in normal sequential flow** — the "Render service" frame now
   writes `onboarding.renderServiceUrl` two frames before UptimeRobot
@@ -419,7 +422,7 @@ section 3), not an oversight to fix.
   convention** every other push-and-clear frame uses (see the "Render
   service" section above), even though the real consequence is worse: a
   missing `DASHBOARD_PASSWORD`/`DASHBOARD_SESSION_SECRET` fails
-  `app/main.py`'s own boot guard, not just a feature. This was a deliberate
+  `bot/main.py`'s own boot guard, not just a feature. This was a deliberate
   choice for consistency over a one-off retry-until-verified gate on this
   single frame — "Finish & Deploy"'s own status poll surfaces a
   crash-looping deploy immediately, and "Change" lets the visitor redo this

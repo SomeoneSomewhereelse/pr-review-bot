@@ -50,8 +50,8 @@ which is why this section exists and is kept first in the file.
   including ones you weren't even asking about. Read or pass individual
   fields programmatically instead, and reduce any secret-bearing value to a
   boolean/length/hash *before* it can reach a print statement, log line, or
-  tool-result — mirroring `scripts/_render.py::env_vars()`'s documented
-  contract and `scripts/deploy.py::sync_env()`'s
+  tool-result — mirroring `bot/scripts/_render.py::env_vars()`'s documented
+  contract and `bot/scripts/deploy.py::sync_env()`'s
   `print(f"pushed {key} (len {len(value)})")` convention (name + length,
   never the value) — follow that same shape in any new ad hoc script that
   touches secrets.
@@ -105,16 +105,16 @@ which is why this section exists and is kept first in the file.
   single time it happens, not just the first.**
 - **To change state, reach for this project's CLI — never for a file that
   holds secrets.** Operational state (which provider and model are active,
-  which API-key slot) is changed through the `scripts/` entry points --
+  which API-key slot) is changed through the `bot/scripts/` entry points --
   `set_override.py` and its successors. Cooldown parameters and usage caps
   are edited in `.env.config` (not secret-bearing, safe to open directly)
-  and pushed into the database with `scripts/deploy.py --sync-config-db`
+  and pushed into the database with `bot/scripts/deploy.py --sync-config-db`
   (also runs automatically as part of `--sync-env`) -- never by hand-editing
   a secret-bearing file. Those scripts are agent-runnable *precisely because*
   of how they handle
   credentials: they read them programmatically through `Settings` and emit
-  names, lengths, and equality results only (`scripts/_render.py::env_vars()`
-  and `scripts/deploy.py::sync_env()` document that contract), so no value
+  names, lengths, and equality results only (`bot/scripts/_render.py::env_vars()`
+  and `bot/scripts/deploy.py::sync_env()` document that contract), so no value
   ever reaches a tool result. Any new state-changing script must be built to
   the same shape. The corollary is the part that binds hardest: **a CLI is a
   tool for changing state, never a route to a secret.** No script here may
@@ -154,12 +154,12 @@ which is why this section exists and is kept first in the file.
 
 ## Project
 
-Full design lives in `SPEC.md`; cost model in `cost.md`. Deployed as a Docker
+Full design lives in `bot/SPEC.md`; cost model in `bot/cost.md`. Deployed as a Docker
 container on Render (free tier) with the queue in Supabase Postgres, kept warm
-by a free external pinger — see `cost.md` for the alternatives that were weighed.
+by a free external pinger — see `bot/cost.md` for the alternatives that were weighed.
 
-Module boundaries and per-module contracts live in `app/CLAUDE.md`, which loads
-when working under `app/`.
+Module boundaries and per-module contracts live in `bot/CLAUDE.md`, which loads
+when working under `bot/`.
 
 ## Conventions
 
@@ -196,7 +196,7 @@ when working under `app/`.
   service-account identity rather than an API-key string:
   `GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
   see the 2026-08-16 credential-convention design) → implicit ADC, resolved
-  in `app/providers/vertex_credentials.py`. No secret reaches Postgres — only
+  in `bot/providers/vertex_credentials.py`. No secret reaches Postgres — only
   the slot index, exactly as for gemini/groq.
 
 ## Cost

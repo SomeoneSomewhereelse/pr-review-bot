@@ -275,7 +275,7 @@ accidentally start exercising the refusal path instead of the real one._
 - **Follow-up:** Bind `keydown` → Enter on the password input to call `validateRenderKey()`; add the empty-input test.
 - **Update (2026-08-27, parked-minors fix wave):** the third original sub-item here (the self-contradictory "Not started — checking…" label) is closed — `setFrameStatus(id, "ready", "checking")` was generalized to a dedicated `"checking"` status with its own `badge_checking` STRINGS key, applied to every frame that had the same composed-label shape (render-key, render-service, uptime-pinger), not just this one. The two items above are still open.
 
-### tests/test_onboarding_i18n.py: one RTL test asserts an exact whole-line literal string
+### onboarding/tests/test_onboarding_i18n.py: one RTL test asserts an exact whole-line literal string
 - **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-26-onboarding-wizard-render-frame.md`
 - **What:** `test_language_switch_sets_dir_for_rtl` asserts a full literal source line rather than a more targeted substring, making it more brittle than necessary to a harmless refactor of that one line.
 - **Why parked:** The reviewer's own assessment: the brittleness is doing real work here — it pins that the RTL direction is genuinely derived from the selected language, not just that `dir` is set to *something*. Not worth loosening.
@@ -315,7 +315,7 @@ accidentally start exercising the refusal path instead of the real one._
 - **Why parked:** Matches this file's existing style — `RenderKeyRequest`/`GithubManifestCodeRequest` don't share a base model either, and four repetitions of one field isn't yet enough duplication to justify introducing one.
 - **Follow-up:** Revisit only if a future sub-project adds enough additional `access_token`-bearing request models that the duplication becomes harder to keep in sync by hand.
 
-### tests/test_onboarding_page.py: one Supabase restore-from-session test only checks substrings, not structural nesting
+### onboarding/tests/test_onboarding_page.py: one Supabase restore-from-session test only checks substrings, not structural nesting
 - **Found during:** Task 7 review, `docs/superpowers/plans/2026-08-26-onboarding-supabase-provisioning-frame.md`
 - **What:** `test_restore_from_session_resumes_polling_for_a_ref_without_a_connection_string` only asserts that `showSupabaseProvisioning()`, `pollUntilReady(Date.now())`, and `function restoreFromSession` each appear somewhere in the served page — it doesn't confirm they're inside the same `else if` branch. The implementation itself was independently verified correct by direct code reading during task review; the test is just a weaker regression guard than its name implies.
 - **Why parked:** This test file is a content-substring harness by design (matching this repo's `tests/test_dashboard_page.py` convention), not a JS execution environment — a more structural assertion isn't cheaply available without changing that convention project-wide.
@@ -329,7 +329,7 @@ accidentally start exercising the refusal path instead of the real one._
 
 ### Spec section 6 (onboarding-uptimerobot-frame-design.md) described a browser-behavior test this project's suite cannot execute
 - **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-27-onboarding-uptimerobot-frame.md` (sub-project 5). Also filed under "Design Gaps" by mistake — relocated here 2026-08-27.
-- **What:** The spec asked for a test where "mocked `sessionStorage` without [the Render-URL] key renders the blocked message, no form" — this project's onboarding page tests are all static-HTML-source-substring assertions (`tests/test_onboarding_page.py`'s established convention, since there is no JS test runner anywhere in this project — no `package.json`, no jsdom/playwright/selenium). The implementer correctly substituted a static-source check for the blocked-state markup/logic's *presence*, matching every prior frame's convention, but this means the blocked-state *behavior* has zero executable coverage — only its source text does.
+- **What:** The spec asked for a test where "mocked `sessionStorage` without [the Render-URL] key renders the blocked message, no form" — this project's onboarding page tests are all static-HTML-source-substring assertions (`onboarding/tests/test_onboarding_page.py`'s established convention, since there is no JS test runner anywhere in this project — no `package.json`, no jsdom/playwright/selenium). The implementer correctly substituted a static-source check for the blocked-state markup/logic's *presence*, matching every prior frame's convention, but this means the blocked-state *behavior* has zero executable coverage — only its source text does.
 - **Why parked:** Not a defect in any implementation — the gap is in how the spec was written, describing a test shape the project's suite structurally cannot run.
 - **Follow-up:** Either add a lightweight JS test runner to this project (a real architecture decision, its own brainstorm), or have future specs stop describing browser-behavior tests in this style.
 
@@ -341,17 +341,71 @@ accidentally start exercising the refusal path instead of the real one._
 - **Why parked:** Both deliberately not worth fixing (see each item's own reasoning above) — the other three items in this entry's original bundle (the badge not resetting after a later successful retry; the raw internal provider id shown instead of its localized label; the missing throwaway-key comment in `tests/test_onboarding_llm_client.py`) were fixed in the 2026-08-27 parked-minors fix wave.
 - **Follow-up:** None planned for either remaining item; revisit only if either ever causes a real, reported problem.
 
-### tests/test_auth.py's `_no_login_delay` autouse fixture applies file-wide, not just to the route tests
+### dashboard/tests/test_auth.py's `_no_login_delay` autouse fixture applies file-wide, not just to the route tests
 - **Found during:** Task 3 review, `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`
-- **What:** The autouse fixture that patches out the fixed post-login-failure delay applies to every test in `tests/test_auth.py`, including the earlier Task 2 tests that only exercise credential/token/cookie logic and never touch the route layer or the delay function at all.
+- **What:** The autouse fixture that patches out the fixed post-login-failure delay applies to every test in `dashboard/tests/test_auth.py`, including the earlier Task 2 tests that only exercise credential/token/cookie logic and never touch the route layer or the delay function at all.
 - **Why parked:** Harmless in practice — the Task 2 tests never reference `_delay_after_login_failure`, so the patch is simply inert for them — but it's a wider blast radius than necessary as the file keeps growing (each new test added to this file silently inherits a patched-out internal function it may not know about). Confirmed still accurate, not worsened, by the branch's final whole-branch review.
 - **Follow-up:** Scope the fixture to just the route tests (a separate test class, a marker, or an explicit non-autouse fixture requested by name) if this file grows enough that the blast radius starts mattering in practice.
 
-### tests/test_login_page.py asserts on raw JS source text rather than behavior
+### dashboard/tests/test_login_page.py asserts on raw JS source text rather than behavior
 - **Found during:** Final whole-branch review of `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`, deliberately excluded from that review's own fix wave.
 - **What:** `test_login_page_posts_json_to_api_login` asserts `'method: "POST"' in body` — a literal match against the login page's inline `<script>` source text, not against actual request behavior. Any reformatting of that JS (e.g. rewording the `fetch()` call, a future prettifier pass) would break the test without indicating a real regression.
 - **Why parked:** Low value relative to the risk of touching a currently-passing test's assertions this late in an already-large fix wave that closed every other final-review finding.
 - **Follow-up:** Rewrite the assertion to check actual behavior (e.g. a DOM/JS-execution check that the form's submit handler issues a POST) rather than matching JS source text, or drop it if the file's other two tests (page reachability, form fields present) already cover what matters.
+
+### Unused `openai` dependency bumped to a major version by the workspace re-lock
+- **Found during:** Task 1 review and final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** `uv.lock`'s regeneration for the new workspace bumped `openai` from 2.48.0 to 3.6.0 (a major version). No code anywhere in the repo imports `openai` directly — `bot/providers/groq.py`'s "OpenAI-compatible" mentions are comments/docstrings only, and it was already declared-but-unused before this branch.
+- **Why parked:** No runtime path depends on it, so the major bump carries no observed risk; the real issue is the dependency being dead weight, not the version.
+- **Follow-up:** Drop `openai` from `bot/pyproject.toml`'s dependency list once confirmed nothing genuinely needs it (grep the whole repo for `import openai`/`from openai` one more time before removing, in case a not-yet-built feature was relying on it being present).
+
+### `bot/pyproject.toml`/`onboarding/pyproject.toml` lost the `pyjwt`/`requests` rationale comment
+- **Found during:** Task 1 review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** Root `pyproject.toml` used to carry a comment explaining that `pyjwt`/`requests` were added specifically for `onboarding/github_client.py`'s direct imports. The comment was dropped when the dependency list was split across the new per-package `pyproject.toml` files, and was never re-added to `onboarding/pyproject.toml` where the rationale now actually belongs.
+- **Why parked:** Purely cosmetic — the dependencies themselves are correctly declared, just without the explanatory comment.
+- **Follow-up:** Re-add a short comment to `onboarding/pyproject.toml` (or `bot/pyproject.toml`, since `bot/github_app.py` also uses `pyjwt` directly) explaining which module(s) need `pyjwt`/`requests` directly rather than transitively.
+
+### Leftover `app/`-path prose scattered across `bot/*.py` and `tests/*.py`
+- **Found during:** Task 2 review and final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** Roughly 100+ lines of docstrings/comments across `bot/orchestrator.py`, `bot/providers/factory.py`, `bot/config.py`, `bot/queue/*.py`, `tests/test_providers.py`, `tests/test_github_app.py`, and others still say `app/whatever.py` instead of `bot/whatever.py`. None of it is executable — pure documentation staleness.
+- **Why parked:** Out of scope for a mechanical rename task (the brief only mandated fixing import-path code, not exhaustive prose); the volume made it a poor fit for any single task's scope.
+- **Follow-up:** A dedicated cleanup pass — grep for `app/` across `bot/**/*.py` and `tests/**/*.py`, fix each genuine stale reference (watch for false positives like `github_app`, FastAPI's `app.include_router`/`@app.get`, and filename examples like `app.py`).
+
+### Leftover bare `scripts/`-path prose scattered across active non-doc files
+- **Found during:** Task 4 review and final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** Beyond the two `CLAUDE.md` files (fixed directly in this fix wave), several active files still say `scripts/whatever.py` instead of `bot/scripts/whatever.py` in comments/docstrings: `bot/main.py`'s module comment, `conftest.py` (several references plus its `tryfirst` docstring's stale premise about `testpaths = ["tests"]`, which is no longer the whole picture since `testpaths` now lists 4 directories — though the docstring's conclusion, that root conftest is still an initial conftest, still holds), `tests/test_xdist_group_ordering.py`'s docstrings and assertion-failure messages (still say `tests/conftest.py` instead of `conftest.py`), `.env.config.example`, `pyproject.toml`'s `db` marker description, and `render.yaml`'s build-filter comment (still describes the Dockerfile as only ever COPYing `app/`).
+- **Why parked:** Cosmetic documentation staleness, no functional impact; the volume and variety made it a poor fit for this fix wave, which is scoped to the two always-loaded CLAUDE.md files and the items with real functional consequences.
+- **Follow-up:** A dedicated cleanup pass — grep the whole active tree (excluding `docs/superpowers/**` and `ISSUES.md`, which are deliberately-preserved historical record) for bare `scripts/` and fix each.
+
+### `bot/SPEC.md`'s Module-layout tree (§2) and Deploy+cost model (§9) describe the pre-restructure architecture
+- **Found during:** Task 6 review and final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** §2's tree still shows a single `app/` package with `tests/`/`fixtures/`/`scripts/`/one `Dockerfile` at repo root, and a `SETUP.md` that no longer exists; §9 predates the two-Dockerfile (`bot/Dockerfile` + `onboarding/Dockerfile`) world. Only the one line Task 6's mandatory sweep caught (`uvicorn app.main:app` → `bot.main:app` at line 275) was fixed.
+- **Why parked:** `SPEC.md` is a living design document, and reconciling its architecture sections properly is a real content-writing task, not a mechanical path rename — correctly out of scope for this restructure plan.
+- **Follow-up:** Rewrite §2's module-layout tree and §9's deploy model to reflect the current `bot/`+`dashboard/`+`onboarding/` workspace structure.
+
+### `guide/setup/hosted/` track and `render.yaml`'s `envVars` list need full reconciliation with the onboarding-is-primary deploy model
+- **Found during:** Task 3 review, Task 6 review, and final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** This branch added an interim warning banner to `guide/setup/hosted/06-render.md` (see the top of this page) because its Blueprint-deploy instructions now target the wrong artifact — but the page's underlying content still walks a reader through deploying the bot via this repo's own Render Blueprint, which no longer works as described. Separately, `render.yaml`'s `envVars` list (`GITHUB_APP_ID`, `LLM_PROVIDER`, `GCP_SERVICE_ACCOUNT_KEY`, etc.) still reflects the bot's env vars even though `render.yaml` now builds `onboarding/Dockerfile`.
+- **Why parked:** Both are content/architecture decisions (what should the hosted track teach now that the onboarding wizard exists? what does onboarding's own Render service actually need in `envVars`?) rather than mechanical renames — explicitly out of scope for a "pure restructure, no behavior change" plan.
+- **Follow-up:** Decide whether the hosted track should be rewritten to describe using the onboarding wizard instead of a direct Blueprint deploy, or something else; swap `render.yaml`'s `envVars` list to onboarding's actual required env vars.
+
+### Docker images ship the test suite, scripts, and fixtures with no `.dockerignore`
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** `bot/Dockerfile`'s `COPY bot ./bot` includes `bot/tests/` (~2.7MB), `bot/scripts/` (~496KB operator tooling), `bot/fixtures/`, `bot/SPEC.md`, `bot/cost.md`, and any stray `__pycache__` directories — none of which the running service needs. `onboarding/Dockerfile` has the analogous issue for `onboarding/tests/`. The old root `Dockerfile` only ever copied `app/` (which didn't contain a `tests/` directory itself, so this wasn't a pre-existing issue at the same scale).
+- **Why parked:** Not a correctness problem (the extra files don't break anything), and adding a `.dockerignore` is a real, if small, piece of new work outside a "no behavior change" restructure's scope.
+- **Follow-up:** Add a repo-root `.dockerignore` excluding `**/tests/`, `**/__pycache__/`, and other non-runtime content from both Dockerfiles' build contexts.
+
+### `dashboard/pyproject.toml` doesn't document that standalone `uv sync --package dashboard` is unsupported
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** `dashboard/pyproject.toml` declares only `fastapi`/`pydantic`/`pyjwt` — genuinely insufficient to run `dashboard/` standalone, since it imports `bot.config`/`bot.queue.store` (needing `pydantic-settings`, `python-dotenv`, `psycopg`, etc. transitively). This is intentional per the design (dashboard is never deployed standalone, only in-process with `bot/`), but the file itself doesn't say so.
+- **Why parked:** Cosmetic — doesn't affect the actual working deployment shape (`bot/Dockerfile` always brings both packages).
+- **Follow-up:** Add a one-line comment to `dashboard/pyproject.toml` noting it's never synced/deployed standalone.
+
+### No `__init__.py` in the four test directories — latent duplicate-basename collision risk
+- **Found during:** Final whole-branch review, `docs/superpowers/plans/2026-08-29-project-restructure.md`
+- **What:** `tests/`, `bot/tests/`, `dashboard/tests/`, `onboarding/tests/` all lack `__init__.py`, matching the pre-restructure convention. Currently safe (every test-file basename is unique across all four directories), but under pytest's default `importmode=prepend`, a future duplicate basename in two different test directories (e.g. a second `test_config.py`) would produce an "import file mismatch" collection error that didn't exist when there was one test directory.
+- **Why parked:** Not a current bug — purely a latent risk for future test additions, and adding `__init__.py` files or switching `importmode` is a workspace-wide tooling decision outside this restructure's scope.
+- **Follow-up:** If a future test addition ever hits this collision, the fix is either adding `__init__.py` to each test directory (making them regular packages) or switching to `importmode=importlib` in `pyproject.toml`'s `[tool.pytest.ini_options]`.
 
 ---
 
