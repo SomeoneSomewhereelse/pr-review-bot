@@ -38,6 +38,6 @@ service runs:
   [hosted/05-supabase.md](hosted/05-supabase.md).
 
 Both tracks share steps 1–4 above, so a wrong guess this early costs
-nothing — `scripts/doctor.py` re-detects which track you're on from your
+nothing — `bot/scripts/doctor.py` re-detects which track you're on from your
 environment (a `RENDER_API_KEY` or an `onrender.com` URL means hosted;
 anything else means local).

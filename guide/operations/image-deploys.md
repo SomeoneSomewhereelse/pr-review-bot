@@ -7,7 +7,7 @@ uploads your local working tree, in either mode.
 If your Render service is configured against a registry image rather than a
 repo:
 
-1. Build locally: `docker build -t ghcr.io/<you>/pr-review-engine:<tag> .`
+1. Build locally: `docker build -f bot/Dockerfile -t ghcr.io/<you>/pr-review-engine:<tag> .`
 2. Push it to the registry: `docker push ghcr.io/<you>/pr-review-engine:<tag>`
 3. In the Render dashboard, point the service at that image and tag
    (Settings).

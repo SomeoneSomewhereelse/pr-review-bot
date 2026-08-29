@@ -91,7 +91,7 @@ GITHUB_TARGET_REPO=<you>/pr-review-bot-demo
 ```
 
 Step 8 (both tracks) needs a concrete answer to "which repo does the demo PR
-go on", and `doctor`'s `target-repo` row and `scripts/seed_demo_pr` both read
+go on", and `doctor`'s `target-repo` row and `bot/scripts/seed_demo_pr` both read
 this exact same setting — so setting it here, once, means Step 8 needs no
 further setup, and re-running `doctor` from this point on actually exercises
 the `gh-auth`/`target-repo` checks instead of leaving them `SKIPPED`. You can

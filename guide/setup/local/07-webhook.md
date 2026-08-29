@@ -6,7 +6,7 @@ uv run python -m bot.scripts.deploy
 
 This points the GitHub App's webhook at your current `PUBLIC_BASE_URL` (only
 patching it if it's wrong) and runs the same verification checklist
-`scripts/doctor.py` composes from.
+`bot/scripts/doctor.py` composes from.
 
 ## Two rows are expected to look wrong here, not broken
 
@@ -29,13 +29,13 @@ On this track, also expect five rows -- `boot-creds-live`, `provider-live`,
 `api-key-live`, `render-service`, and `uptime-pinger` -- to report `SKIPPED`
 cleanly with no `RENDER_API_KEY` or `UPTIMEROBOT_API_KEY` set — that is
 expected here too, not a problem. Those checks exist for the hosted track;
-nothing in `app/` knows Render exists at all.
+nothing in `bot/` knows Render exists at all.
 
 ## Re-run this each session
 
 Because a quick tunnel's URL is ephemeral (previous step), the webhook you
 registered last session is pointing at a URL that no longer exists.
-`scripts/deploy.py` corrects the App's webhook URL as a normal part of
+`bot/scripts/deploy.py` corrects the App's webhook URL as a normal part of
 verification — it is designed to tolerate this, not a workaround — so simply
 re-running it each time you restart the tunnel is enough.
 

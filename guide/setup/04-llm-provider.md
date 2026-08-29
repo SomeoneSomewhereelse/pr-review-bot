@@ -46,7 +46,7 @@ any time, with no script to re-run.
 
 A model with no entry in this project's pricing table still runs — the
 posted PR comment simply appears without a cost estimate, and
-`scripts/deploy.py`'s `pricing` check reports it as a warning, not a
+`bot/scripts/deploy.py`'s `pricing` check reports it as a warning, not a
 blocker. See [Model pricing](../reference/pricing.md) for the models this
 project has verified rates for.
 

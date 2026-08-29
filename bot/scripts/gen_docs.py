@@ -111,7 +111,7 @@ def render_pricing() -> str:
         "# Model pricing\n",
         "Rates are USD per 1M tokens. Pricing is **optional**: a model with no "
         "entry here still runs, the PR comment simply appears without a cost "
-        "estimate, and `scripts/deploy.py` reports it as a warning rather than "
+        "estimate, and `bot/scripts/deploy.py` reports it as a warning rather than "
         "blocking the deploy.\n",
         "| Provider | Model | In | Out | Verified | Source |",
         "| --- | --- | --- | --- | --- | --- |",

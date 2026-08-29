@@ -272,7 +272,7 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
 
 ## 9. Deploy + cost model
 
-- **Dockerfile**: `uvicorn app.main:app`; runs identical locally / on Render.
+- **Dockerfile**: `uvicorn bot.main:app`; runs identical locally / on Render.
 - **Production hosting**: Render web service (free tier, spin-down after 15 min
   idle) + Supabase Postgres for the durable review queue (free tier, pauses
   after ~7 days inactivity). A free cron pinger (cron-job.org / UptimeRobot,

@@ -3,7 +3,7 @@
 In your **first** terminal (the tunnel is running in the second):
 
 ```bash
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000
 ```
 
 This process itself is what "keeps the service warm" locally — there is no
@@ -32,7 +32,7 @@ uv run python -m bot.scripts.seed_demo_pr
 ```
 
 This clones the configured test repo, plants known-bad code from
-`fixtures/bad_code/`, and opens a real PR against it — which GitHub then
+`bot/fixtures/bad_code/`, and opens a real PR against it — which GitHub then
 delivers to your tunnel as a webhook event.
 
 ## What a good result looks like
@@ -51,7 +51,7 @@ the active model has a priced entry in this project's pricing table — an
 unpriced model still runs and reviews normally, just without the `est.`
 fragment.
 
-`fixtures/bad_code/` plants three specific problems, so you can check that
+`bot/fixtures/bad_code/` plants three specific problems, so you can check that
 the review caught the right things rather than only that a comment appeared:
 
 | Planted issue | Where | Which specialist should catch it |

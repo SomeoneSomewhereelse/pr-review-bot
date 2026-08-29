@@ -32,7 +32,7 @@ fill in the form:
 - **Webhook → Active** — check it.
 - **Webhook → Webhook URL** — same placeholder, with the path this
   project's webhook handler expects: `https://example.invalid/webhook`.
-  Step 7 (`scripts/deploy.py`) corrects this to your real URL once it
+  Step 7 (`bot/scripts/deploy.py`) corrects this to your real URL once it
   exists — that's normal, not something to fix here.
 - **Webhook → Webhook secret** — GitHub does not generate this for you;
   type in your own value (any random string long enough to not guess —
@@ -137,7 +137,7 @@ now, while you're already there:
 
 ## An automated alternative exists, but isn't the documented path here
 
-`scripts/create_github_app.py` drives GitHub's **App Manifest flow**
+`bot/scripts/create_github_app.py` drives GitHub's **App Manifest flow**
 instead: a browser form POSTs a manifest to `github.com/settings/apps/new`,
 you approve it, and the script exchanges GitHub's one-time redirect code for
 the App ID, private key, and webhook secret in one round trip, writing them

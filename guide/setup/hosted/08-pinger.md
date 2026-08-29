@@ -6,7 +6,7 @@ A free external pinger keeps both warm.
 ## Create the monitor
 
 1. Go to <https://uptimerobot.com> (free) — cron-job.org also works, but
-   UptimeRobot is what `scripts/deploy.py`'s `uptime-pinger` check verifies
+   UptimeRobot is what `bot/scripts/deploy.py`'s `uptime-pinger` check verifies
    against.
 2. Create a new monitor that pings your Render URL's `/healthz` endpoint:
 
@@ -54,7 +54,7 @@ uv run python -m bot.scripts.seed_demo_pr
 ```
 
 This clones the configured test repo, plants known-bad code from
-`fixtures/bad_code/`, and opens a real PR against it — which GitHub then
+`bot/fixtures/bad_code/`, and opens a real PR against it — which GitHub then
 delivers to your deployed Render service as a webhook event.
 
 ### What a good result looks like

@@ -59,6 +59,21 @@ See [`SPEC.md` §12](bot/SPEC.md#12-review-queue-rpm--daily-quota-handling) for
 the full queue design.
 </details>
 
+## Repo structure
+
+This is a 3-member uv workspace:
+
+- **`onboarding/`** — a self-service setup wizard. **This is what this
+  repo's own `render.yaml` deploys** — it provisions a *visitor's own*
+  bot+dashboard deployment on Render.
+- **`bot/`** — the review engine described above (webhook, orchestrator,
+  specialists, providers, queue). Deployed to a visitor's own Render
+  service by the onboarding wizard, not by this repo's own deploy.
+- **`dashboard/`** — the ops dashboard below, deployed in the same
+  process as `bot/` (one Render service, one Dockerfile:
+  `bot/Dockerfile`), organized as its own package for a clear module
+  boundary.
+
 ## What a review looks like
 
 A real posted comment, condensed to one finding per specialist:
@@ -115,7 +130,7 @@ uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000
 ### Docker
 
 ```bash
-docker build -t pr-review-engine .
+docker build -f bot/Dockerfile -t pr-review-engine .
 docker run -p 8000:8000 --env-file .env pr-review-engine
 ```
 
