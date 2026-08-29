@@ -401,7 +401,7 @@ def test_deploy_points_at_a_guide_page_that_exists():
 
 
 def test_no_script_still_points_at_setup_md():
-    """Scans scripts/*.py, root-level tracked *.md files (except ISSUES.md
+    """Scans bot/scripts/*.py, root-level tracked *.md files (except ISSUES.md
     and SPEC.md, which legitimately reference SETUP.md as historical/
     design-record content), .env*.example files, and .claude/commands/*.md.
 
@@ -412,7 +412,7 @@ def test_no_script_still_points_at_setup_md():
     docstring, and Stage 3a's ast-vs-grep note). Any test that scans source
     for a forbidden string must exclude the file asserting it.
     """
-    scanned: list[Path] = list(_ROOT.glob("scripts/*.py"))
+    scanned: list[Path] = list(_ROOT.glob("bot/scripts/*.py"))
     scanned += [
         p for p in _tracked_root_markdown_files() if p.name not in {"ISSUES.md", "SPEC.md"}
     ]
