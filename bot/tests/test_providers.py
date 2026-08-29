@@ -23,7 +23,7 @@ from bot.providers.factory import get_provider
 from bot.providers.google_genai import GeminiProvider, VertexProvider
 from bot.providers.validate import validate_and_repair
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @pytest.fixture(autouse=True)

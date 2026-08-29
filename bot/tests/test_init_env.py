@@ -13,7 +13,7 @@ from bot.config import OPERATIONAL_KEYS
 from bot.scripts import init_env
 
 SENTINEL = "SENTINEL-4e8b03d5f7a91c62-EXISTING"
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def test_key_names_returns_names_only_never_values(tmp_path):
@@ -46,7 +46,7 @@ def test_key_names_on_a_missing_file_is_empty(tmp_path):
 def test_example_keys_reads_the_committed_examples():
     from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parent.parent.parent
     secrets_keys = init_env.example_keys(root / ".env.example")
     config_keys = init_env.example_keys(root / ".env.config.example")
     assert "GITHUB_WEBHOOK_SECRET" in secrets_keys

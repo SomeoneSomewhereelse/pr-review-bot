@@ -272,7 +272,7 @@ def test_written_files_use_lf_endings(tmp_path):
 def test_committed_reference_files_are_up_to_date():
     """The repo's committed output must match what the code generates now --
     the same invariant CI enforces, checked here so a local run catches it."""
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parent.parent.parent
     for name, render in gen_docs.GENERATED_FILES.items():
         committed = (root / gen_docs.REFERENCE_DIR / name).read_text(encoding="utf-8")
         assert committed == render(), f"{name} is stale -- run bot.scripts.gen_docs"

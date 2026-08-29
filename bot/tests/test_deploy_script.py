@@ -2349,7 +2349,7 @@ def test_wanted_env_pushes_numbered_slots_for_every_provider_not_just_the_select
     assert wanted["GROQ_API_KEY_2"] == "gsk_slot2"
 
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def test_render_yaml_declares_every_synced_var():

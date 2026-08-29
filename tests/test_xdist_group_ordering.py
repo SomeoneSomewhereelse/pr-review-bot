@@ -162,7 +162,7 @@ def test_this_projects_conftest_hook_declares_tryfirst(request):
     ours = [
         impl
         for impl in hookimpls
-        if getattr(impl.plugin, "__file__", "").replace("\\", "/").endswith("tests/conftest.py")
+        if getattr(impl.plugin, "__file__", "").replace("\\", "/").endswith("conftest.py")
     ]
     assert len(ours) == 1, f"expected exactly one tests/conftest.py hookimpl, got {ours}"
     assert ours[0].tryfirst is True, (

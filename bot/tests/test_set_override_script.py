@@ -18,7 +18,7 @@ from bot.config import settings
 from bot.queue import store
 from bot.scripts import _override, set_override
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @pytest.fixture(autouse=True)

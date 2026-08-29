@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from bot.config import OPERATIONAL_KEYS, Settings
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_0-9]+)=")
 
 
