@@ -191,7 +191,7 @@ when working under `bot/`.
   payment-card requirement collided with this project's no-card constraint (see
   `guide/background/providers.md`), leaving it live-unrunnable and mock-only.
   GCP billing/ADC access later became available, so `vertex` is back as a
-  real, live-runnable third provider, matching `SPEC.md`'s stated default.
+  real, live-runnable third provider, matching `bot/SPEC.md`'s stated default.
   Its credential is a GCP
   service-account identity rather than an API-key string:
   `GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
@@ -203,7 +203,7 @@ when working under `bot/`.
 
 Documented production total ≈ **$8–10/mo** at brief scale (20 PRs/day). The demo
 runs at **$0** on free tiers + the $300 GCP trial credit. Cost is graded as a
-documented calculation, not as actual spend — see `cost.md`.
+documented calculation, not as actual spend — see `bot/cost.md`.
 
 ## LLM API testing hygiene (avoid Trust & Safety flags)
 
@@ -226,7 +226,7 @@ something to rely on being reversible.)
   sticks." One deliberate, single live call per real verification need.
 - **Prefer mocked/cassette tests for exploration.** Reserve real network calls
   for the one live-verification step a build step actually requires (per
-  SPEC.md section 8's testing strategy) — not for debugging or model-shopping.
+  `bot/SPEC.md` section 8's testing strategy) — not for debugging or model-shopping.
 - **If a provider starts returning 403/429, stop calling it immediately** and
   investigate via docs/support channels rather than retrying with different
   models/keys in quick succession — retrying does not help and each attempt
