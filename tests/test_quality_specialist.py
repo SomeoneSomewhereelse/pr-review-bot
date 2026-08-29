@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from app.specialists.quality import (
+from bot.specialists.quality import (
     QUALITY_SYSTEM_PROMPT,
     QualityFindings,
     run_quality_specialist,
 )
-from app.specialists.schemas import QualityFinding
+from bot.specialists.schemas import QualityFinding
 
 
 def test_quality_findings_container_wraps_list_of_quality_finding():
@@ -33,7 +33,7 @@ def test_quality_system_prompt_mentions_key_categories():
 
 
 async def test_run_quality_specialist_success(monkeypatch):
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     parsed = QualityFindings(
         findings=[
@@ -52,7 +52,7 @@ async def test_run_quality_specialist_success(monkeypatch):
             assert schema is QualityFindings
             return LLMResponse(raw_text="{}", tokens_in=15, tokens_out=8, parsed=parsed)
 
-    monkeypatch.setattr("app.specialists.base.get_provider", lambda: FakeProvider())
+    monkeypatch.setattr("bot.specialists.base.get_provider", lambda: FakeProvider())
 
     result = await run_quality_specialist("annotated diff text")
 

@@ -30,7 +30,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.config import OPERATIONAL_KEYS, Settings
+from bot.config import OPERATIONAL_KEYS, Settings
 
 # Captures the NAME and discards the value -- the whole point. A value may
 # contain '=', spaces, quotes, or '#' and none of it can reach the result.

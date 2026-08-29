@@ -1,0 +1,13 @@
+[project]
+name = "dashboard"
+version = "0.1.0"
+description = "Ops/demo dashboard for the bot — deployed in-process with bot/, not standalone"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "pyjwt>=2.13",
+]
+
+[tool.uv]
+package = false

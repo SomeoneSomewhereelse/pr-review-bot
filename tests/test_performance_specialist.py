@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from app.specialists.performance import (
+from bot.specialists.performance import (
     PERFORMANCE_SYSTEM_PROMPT,
     PerformanceFindings,
     run_performance_specialist,
 )
-from app.specialists.schemas import PerformanceFinding
+from bot.specialists.schemas import PerformanceFinding
 
 
 def test_performance_findings_container_wraps_list_of_performance_finding():
@@ -33,7 +33,7 @@ def test_performance_system_prompt_mentions_key_risk_categories():
 
 
 async def test_run_performance_specialist_success(monkeypatch):
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     parsed = PerformanceFindings(
         findings=[
@@ -52,7 +52,7 @@ async def test_run_performance_specialist_success(monkeypatch):
             assert schema is PerformanceFindings
             return LLMResponse(raw_text="{}", tokens_in=18, tokens_out=9, parsed=parsed)
 
-    monkeypatch.setattr("app.specialists.base.get_provider", lambda: FakeProvider())
+    monkeypatch.setattr("bot.specialists.base.get_provider", lambda: FakeProvider())
 
     result = await run_performance_specialist("annotated diff text")
 

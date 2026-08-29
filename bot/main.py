@@ -6,18 +6,18 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from app import github_app
-from app.auth import SessionRequired, require_session
-from app.auth import router as auth_router
-from app.config import settings
-from app.dashboard import router as dashboard_router
-from app.providers import registry
-from app.queue import dispatcher, store
-from app.webhook import router as webhook_router
+from bot import github_app
+from bot.config import settings
+from bot.providers import registry
+from bot.queue import dispatcher, store
+from bot.webhook import router as webhook_router
+from dashboard.auth import SessionRequired, require_session
+from dashboard.auth import router as auth_router
+from dashboard.router import router as dashboard_router
 
 # The root logger defaults to WARNING when nothing configures it, so every
-# module's logging.getLogger(__name__).info(...) call (app/webhook.py,
-# app/orchestrator.py, app/dashboard.py, app/queue/dispatcher.py) was
+# module's logging.getLogger(__name__).info(...) call (bot/webhook.py,
+# bot/orchestrator.py, dashboard/router.py, bot/queue/dispatcher.py) was
 # silently unreachable in production -- confirmed live via Render's Logs API
 # returning no match for a line known to have fired (ISSUES.md 2026-08-17).
 # uvicorn's own --log-level flag does NOT fix this: it only configures

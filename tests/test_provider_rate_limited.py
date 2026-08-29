@@ -13,9 +13,9 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from app.config import settings
-from app.providers.base import RateLimited, parse_retry_after
-from app.providers.groq import GroqProvider
+from bot.config import settings
+from bot.providers.base import RateLimited, parse_retry_after
+from bot.providers.groq import GroqProvider
 
 
 class Greeting(BaseModel):
@@ -37,7 +37,7 @@ class FakeRateLimitError(Exception):
 def _groq_raising(exc: Exception, monkeypatch):
     create = AsyncMock(side_effect=exc)
     monkeypatch.setattr(
-        "app.providers.groq.AsyncGroq",
+        "bot.providers.groq.AsyncGroq",
         lambda **kwargs: SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=create))
         ),

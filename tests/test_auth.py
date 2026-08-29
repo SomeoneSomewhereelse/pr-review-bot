@@ -1,4 +1,4 @@
-"""Tests for app/auth.py: credential check, session-token issue/verify, and
+"""Tests for dashboard/auth.py: credential check, session-token issue/verify, and
 cookie helpers -- plus route-level (login/logout HTTP) behavior and
 require_session's HTTP-gate behavior (the /healthz and /webhook routes stay
 reachable with no cookie at all; every /api/* and page route is gated).
@@ -13,9 +13,9 @@ from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
-from app import auth
-from app.config import settings
-from app.main import app
+from bot.config import settings
+from bot.main import app
+from dashboard import auth
 
 
 def _request_with_cookie(cookie_header: str | None) -> Request:

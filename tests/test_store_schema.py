@@ -4,7 +4,7 @@ statements (design spec 2026-08-18 section 6d). These tests lock the column
 set so the ALTER-folding refactor cannot silently change it."""
 from __future__ import annotations
 
-from app.queue import store
+from bot.queue import store
 
 EXPECTED_COLUMNS = {
     "tickets": {

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import OPERATIONAL_KEYS
+from bot.config import OPERATIONAL_KEYS
 from scripts import init_env
 
 SENTINEL = "SENTINEL-4e8b03d5f7a91c62-EXISTING"
@@ -129,8 +129,8 @@ def test_merge_env_drops_a_stale_duplicate_when_the_second_occurrence_is_updated
 def test_format_error_rejects_malformed_time():
     """Regression: init_env used to accept "4:00" verbatim with no
     validation, write it straight to .env.config, and only surface the
-    problem later as a pydantic crash out of doctor.py/app.config -- at
-    IMPORT time, before doctor could report anything. See app/config.py's
+    problem later as a pydantic crash out of doctor.py/bot.config -- at
+    IMPORT time, before doctor could report anything. See bot/config.py's
     time-typed key_usage_reset_time_utc field: it requires zero-padded
     HH:MM, same as the reset-time tests in tests/test_config.py."""
     assert init_env._format_error("KEY_USAGE_RESET_TIME_UTC", "4:00") is not None

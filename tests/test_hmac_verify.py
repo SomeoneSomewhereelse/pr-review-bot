@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 
-from app.hmac_verify import verify_signature
+from bot.hmac_verify import verify_signature
 
 SECRET = "test-secret"
 

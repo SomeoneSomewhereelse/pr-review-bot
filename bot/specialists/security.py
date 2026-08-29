@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.specialists.base import run_specialist
-from app.specialists.schemas import SecurityFinding, SpecialistResult
+from bot.specialists.base import run_specialist
+from bot.specialists.schemas import SecurityFinding, SpecialistResult
 
 SECURITY_SYSTEM_PROMPT = """\
 You are a senior application security engineer reviewing a GitHub pull \

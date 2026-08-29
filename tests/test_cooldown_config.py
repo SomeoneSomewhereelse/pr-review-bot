@@ -3,8 +3,8 @@ fail-safe fallback to env-var settings. Mirrors tests/test_provider_override.py'
 active-provider-cache tests, but for the cooldown triple."""
 from __future__ import annotations
 
-from app.config import settings
-from app.queue import cooldown_config
+from bot.config import settings
+from bot.queue import cooldown_config
 
 
 def _set_env_defaults(monkeypatch):

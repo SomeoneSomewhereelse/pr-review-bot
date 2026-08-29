@@ -4,8 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.formatting import format_schedule_notice
-from app.github_app import SCHEDULE_NOTE_END, SCHEDULE_NOTE_START
+from bot.formatting import format_schedule_notice
+from bot.github_app import SCHEDULE_NOTE_END, SCHEDULE_NOTE_START
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 

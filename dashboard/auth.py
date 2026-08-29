@@ -1,6 +1,6 @@
 """Dashboard authentication: a single shared operator credential gates
-app/dashboard.py's router. Knows nothing about tickets, reviews, or
-providers -- only app.config.settings for the three credential fields. See
+dashboard/router.py's router. Knows nothing about tickets, reviews, or
+providers -- only bot.config.settings for the three credential fields. See
 docs/superpowers/specs/2026-08-28-dashboard-authentication-design.md.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from app.config import settings
+from bot.config import settings
 
 SESSION_COOKIE_NAME = "dashboard_session"
 

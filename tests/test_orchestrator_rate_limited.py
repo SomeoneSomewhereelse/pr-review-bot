@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from types import SimpleNamespace
 
-from app.config import settings
-from app.providers.base import RateLimited
-from app.specialists.schemas import SpecialistResult
+from bot.config import settings
+from bot.providers.base import RateLimited
+from bot.specialists.schemas import SpecialistResult
 
 
 def _ok(name):
@@ -25,7 +25,7 @@ def _provider(monkeypatch):
 
 
 async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -55,7 +55,7 @@ async def test_attempt_review_returns_rate_limited_and_posts_nothing(monkeypatch
 
 
 async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -89,7 +89,7 @@ async def test_attempt_review_completes_and_posts_when_ok(monkeypatch):
 
 
 async def test_run_review_raises_on_rate_limited(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -114,7 +114,7 @@ async def test_run_review_raises_on_rate_limited(monkeypatch):
 async def test_run_specialist_lets_rate_limited_escape(monkeypatch):
     """run_specialist normally never raises — but RateLimited MUST escape so the
     orchestrator can defer instead of rendering a failed row."""
-    import app.specialists.base as base
+    import bot.specialists.base as base
 
     class FakeProvider:
         async def complete(self, system, user, schema):
@@ -122,7 +122,7 @@ async def test_run_specialist_lets_rate_limited_escape(monkeypatch):
 
     monkeypatch.setattr(base, "get_provider", lambda: FakeProvider())
 
-    from app.specialists.security import SecurityFindings, SECURITY_SYSTEM_PROMPT
+    from bot.specialists.security import SecurityFindings, SECURITY_SYSTEM_PROMPT
 
     with pytest.raises(RateLimited):
         await base.run_specialist(

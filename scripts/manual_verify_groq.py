@@ -25,10 +25,10 @@ import asyncio
 
 from pydantic import BaseModel
 
-from app.config import settings
-from app.providers.groq import GroqProvider
-from app.providers.pricing import estimate_cost_usd
-from app.providers.validate import validate_and_repair
+from bot.config import settings
+from bot.providers.groq import GroqProvider
+from bot.providers.pricing import estimate_cost_usd
+from bot.providers.validate import validate_and_repair
 
 
 class Greeting(BaseModel):

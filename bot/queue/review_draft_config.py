@@ -16,7 +16,7 @@ valid overrides.
 
 from __future__ import annotations
 
-from app.config import settings
+from bot.config import settings
 
 _override: bool | None = None
 

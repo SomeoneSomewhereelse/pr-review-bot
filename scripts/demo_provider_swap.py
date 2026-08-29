@@ -1,7 +1,7 @@
 """Step 7 live-swap demo: prove LLM_PROVIDER genuinely swaps behavior.
 
 Runs the real orchestrator against a real PR twice, swapping LLM_PROVIDER at
-runtime via monkeypatching app.config.settings (no server restart needed —
+runtime via monkeypatching bot.config.settings (no server restart needed —
 proves the abstraction is a true runtime seam, not just an env-file toggle):
 
   1. LLM_PROVIDER=groq   -> real success (as proven in steps 5-6).
@@ -27,8 +27,8 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from app.config import settings
-from app.orchestrator import run_review
+from bot.config import settings
+from bot.orchestrator import run_review
 
 DEFAULT_REPO = settings.github_target_repo
 DEFAULT_PR_NUMBER = 2

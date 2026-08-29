@@ -18,8 +18,8 @@ import subprocess
 import sys
 from typing import NamedTuple
 
-from app import github_app
-from app.config import settings
+from bot import github_app
+from bot.config import settings
 from scripts import _prereqs, _probes, create_github_app, deploy
 
 TRACKS = ("local", "hosted")
@@ -73,7 +73,7 @@ _LOCAL: tuple[Step, ...] = (
     Step(7, "Register the webhook", "webhook",
          "uv run python -m scripts.deploy"),
     Step(8, "Run the service", "keepalive",
-         "uv run uvicorn app.main:app --host 0.0.0.0 --port 8000"),
+         "uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000"),
 )
 
 _HOSTED: tuple[Step, ...] = (
@@ -226,7 +226,7 @@ def check_llm_provider() -> deploy.CheckResult:
 
 def check_app_permissions() -> deploy.CheckResult:
     """Whether the App's ACTUAL permissions and event subscriptions on
-    GitHub match what this project's code needs (app.github_app.
+    GitHub match what this project's code needs (bot.github_app.
     diff_app_permissions against scripts/create_github_app.MANIFEST_
     PERMISSIONS/MANIFEST_EVENTS -- the same constants the manifest flow
     itself requests, so there is exactly one definition of "what this App

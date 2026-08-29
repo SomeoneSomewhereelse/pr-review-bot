@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from github import Auth, Github, GithubException
 from github.IssueComment import IssueComment
 
-from app.config import settings
+from bot.config import settings
 
 # Hidden marker used to find the bot's own comment across re-reviews so a
 # `synchronize` event edits it in place instead of spamming a new one.

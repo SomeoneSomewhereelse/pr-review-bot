@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import settings
-from app.queue import cooldown_config, store
+from bot.config import settings
+from bot.queue import cooldown_config, store
 
 T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"

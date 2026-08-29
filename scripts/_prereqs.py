@@ -19,7 +19,7 @@ import sys
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
-from app.config import settings
+from bot.config import settings
 
 MINIMUM_PYTHON = (3, 12)
 

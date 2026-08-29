@@ -22,7 +22,7 @@ from __future__ import annotations
 import base64
 import json
 
-from app.providers import credentials
+from bot.providers import credentials
 
 
 def resolve_service_account_info(index: int) -> dict | None:

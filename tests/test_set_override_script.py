@@ -14,8 +14,8 @@ import httpx
 import pytest
 import respx
 
-from app.config import settings
-from app.queue import store
+from bot.config import settings
+from bot.queue import store
 from scripts import _override, set_override
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -368,7 +368,7 @@ def test_never_leaks_a_fetched_credential_value(monkeypatch, db_url, capsys):
 
 
 def test_list_reports_slots_and_active_state(capsys, monkeypatch):
-    from app.config import settings
+    from bot.config import settings
     from scripts import _override
 
     monkeypatch.setattr(settings, "groq_api_key", "sentinel-groq")
@@ -387,7 +387,7 @@ def test_list_reports_slots_and_active_state(capsys, monkeypatch):
 def test_list_never_prints_a_credential_value(capsys, monkeypatch):
     """The whole point of --list: an agent can answer "is --index 2 valid?"
     without opening .env, and nothing it prints can be a secret."""
-    from app.config import settings
+    from bot.config import settings
     from scripts import _override
 
     monkeypatch.setattr(settings, "groq_api_key", "SENTINEL-SECRET-VALUE")

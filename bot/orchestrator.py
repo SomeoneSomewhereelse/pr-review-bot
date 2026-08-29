@@ -20,19 +20,19 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app import github_app
-from app.diff_utils import annotate_and_cap
-from app.formatting import format_comment
-from app.providers.active import active_provider
-from app.providers.active_model import active_model
-from app.providers.base import RateLimited
-from app.providers.key_index import active_key_index
-from app.providers.pricing import estimate_cost_usd
-from app.queue import review_draft_config, store
-from app.specialists.performance import run_performance_specialist
-from app.specialists.quality import run_quality_specialist
-from app.specialists.schemas import ReviewResult, SpecialistResult
-from app.specialists.security import run_security_specialist
+from bot import github_app
+from bot.diff_utils import annotate_and_cap
+from bot.formatting import format_comment
+from bot.providers.active import active_provider
+from bot.providers.active_model import active_model
+from bot.providers.base import RateLimited
+from bot.providers.key_index import active_key_index
+from bot.providers.pricing import estimate_cost_usd
+from bot.queue import review_draft_config, store
+from bot.specialists.performance import run_performance_specialist
+from bot.specialists.quality import run_quality_specialist
+from bot.specialists.schemas import ReviewResult, SpecialistResult
+from bot.specialists.security import run_security_specialist
 
 logger = logging.getLogger(__name__)
 

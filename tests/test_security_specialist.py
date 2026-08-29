@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from app.specialists.security import (
+from bot.specialists.security import (
     SECURITY_SYSTEM_PROMPT,
     SecurityFindings,
     run_security_specialist,
 )
-from app.specialists.schemas import SecurityFinding
+from bot.specialists.schemas import SecurityFinding
 
 
 def test_security_findings_container_wraps_list_of_security_finding():
@@ -33,7 +33,7 @@ def test_security_system_prompt_mentions_key_risk_categories():
 
 
 async def test_run_security_specialist_success(monkeypatch):
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     parsed = SecurityFindings(
         findings=[
@@ -52,7 +52,7 @@ async def test_run_security_specialist_success(monkeypatch):
             assert schema is SecurityFindings
             return LLMResponse(raw_text="{}", tokens_in=20, tokens_out=10, parsed=parsed)
 
-    monkeypatch.setattr("app.specialists.base.get_provider", lambda: FakeProvider())
+    monkeypatch.setattr("bot.specialists.base.get_provider", lambda: FakeProvider())
 
     result = await run_security_specialist("annotated diff text")
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.specialists.schemas import (
+from bot.specialists.schemas import (
     PerformanceFinding,
     QualityFinding,
     ReviewResult,

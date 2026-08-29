@@ -20,11 +20,11 @@ trivial memory cost, no explicit teardown needed.
 
 from __future__ import annotations
 
-from app.config import settings
-from app.providers import credentials, key_index, registry, vertex_credentials
-from app.providers.active import active_provider
-from app.providers.active_model import active_model
-from app.providers.base import LLMProvider
+from bot.config import settings
+from bot.providers import credentials, key_index, registry, vertex_credentials
+from bot.providers.active import active_provider
+from bot.providers.active_model import active_model
+from bot.providers.base import LLMProvider
 
 _instances: dict[tuple[str, int, str], LLMProvider] = {}
 
@@ -62,7 +62,7 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
         # app/specialists/base.py's factory import used to pay eagerly, even
         # when never touching Gemini/Vertex. Only import it once a vertex
         # provider is actually being constructed.
-        from app.providers.google_genai import VertexProvider
+        from bot.providers.google_genai import VertexProvider
 
         return VertexProvider(
             project=project,
@@ -88,11 +88,11 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
         # vertex share google_genai.py, so this import is usually already
         # cached by the time either branch runs, but each stays independently
         # correct if that ever changes.
-        from app.providers.google_genai import GeminiProvider
+        from bot.providers.google_genai import GeminiProvider
 
         return GeminiProvider(api_key=api_key, model=model)
     if provider == "groq":
-        from app.providers.groq import GroqProvider
+        from bot.providers.groq import GroqProvider
 
         return GroqProvider(api_key=api_key, model=model)
     raise ValueError(f"registry lists {provider!r} but _build cannot construct it")

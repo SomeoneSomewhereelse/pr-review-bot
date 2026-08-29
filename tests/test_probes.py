@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from app.config import settings
+from bot.config import settings
 from scripts import _probes
 
 # Distinctive, high-entropy, and structurally unlike a length or a name, so a

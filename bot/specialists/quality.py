@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.specialists.base import run_specialist
-from app.specialists.schemas import QualityFinding, SpecialistResult
+from bot.specialists.base import run_specialist
+from bot.specialists.schemas import QualityFinding, SpecialistResult
 
 QUALITY_SYSTEM_PROMPT = """\
 You are a senior software engineer doing a code-quality review of a GitHub \

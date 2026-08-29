@@ -1,7 +1,7 @@
 """gen_docs reads CLASS metadata, never the live settings instance.
 
 That distinction is the whole safety story: Settings.model_fields carries
-declared defaults, while app.config.settings carries this machine's real
+declared defaults, while bot.config.settings carries this machine's real
 credentials -- and everything generated here is committed and published.
 """
 from __future__ import annotations
@@ -10,14 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from app.config import OPERATIONAL_KEYS, settings
+from bot.config import OPERATIONAL_KEYS, settings
 from scripts import gen_docs
 
 SENTINEL = "SENTINEL-6d21fa48c093be75-MUST-NOT-BE-PUBLISHED"
 
 
 def test_config_table_lists_every_settings_field():
-    from app.config import Settings
+    from bot.config import Settings
 
     table = gen_docs.render_config()
     for name in Settings.model_fields:
@@ -93,7 +93,7 @@ def test_default_text_handles_a_field_with_no_declared_default():
     """Fix D: a required field (or a default_factory-only one) has no plain
     default at all -- field.default is pydantic's PydanticUndefined sentinel.
     No Settings field is like this today, so this test builds a throwaway
-    local model rather than relying on one existing in app.config.Settings.
+    local model rather than relying on one existing in bot.config.Settings.
     Without the defensive branch, this would render the literal string
     "PydanticUndefined" into a published doc."""
     from pydantic import BaseModel, Field
@@ -111,7 +111,7 @@ def test_default_text_handles_a_field_with_no_declared_default():
 
 
 def test_pricing_table_carries_every_rate_with_its_provenance():
-    from app.providers import pricing
+    from bot.providers import pricing
 
     table = gen_docs.render_pricing()
     for (provider, model), rate in pricing._RATES.items():
@@ -157,7 +157,7 @@ def test_sync_env_table_explains_numbered_key_slots():
 
 
 def test_sync_env_table_lists_every_providers_model_var():
-    from app.providers import registry
+    from bot.providers import registry
 
     table = gen_docs.render_sync_env()
     for _credential, model_var in registry.PROVIDERS.values():

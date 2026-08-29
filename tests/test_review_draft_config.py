@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import settings
-from app.queue import review_draft_config
+from bot.config import settings
+from bot.queue import review_draft_config
 
 
 @pytest.fixture(autouse=True)

@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from app.providers import pricing
+from bot.providers import pricing
 
 
 def test_every_rate_carries_a_source_url_and_a_parseable_verified_date():

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.config import OPERATIONAL_KEYS, Settings
+from bot.config import OPERATIONAL_KEYS, Settings
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Z_0-9]+)=")
@@ -319,7 +319,7 @@ def test_importing_config_with_llm_provider_unset_does_not_raise(tmp_path):
     reads `settings` -- LLM_PROVIDER has no implicit default specifically so
     this can't happen (design spec 2026-08-18 section 6e).
 
-    Runs in a real subprocess, in true isolation: app.config's `settings`
+    Runs in a real subprocess, in true isolation: bot.config's `settings`
     singleton is now lazy (see its module-level __getattr__) and caches on
     first access for the life of a process, so an in-process
     importlib.reload can't reliably exercise a fresh construction once some
@@ -331,7 +331,7 @@ def test_importing_config_with_llm_provider_unset_does_not_raise(tmp_path):
     env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
     env.pop("LLM_PROVIDER", None)
     result = subprocess.run(
-        [sys.executable, "-c", "import app.config; app.config.settings; print('ok')"],
+        [sys.executable, "-c", "import bot.config; bot.config.settings; print('ok')"],
         cwd=tmp_path, env=env, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
@@ -341,7 +341,7 @@ def test_importing_config_with_llm_provider_unset_does_not_raise(tmp_path):
 def test_importing_config_with_a_malformed_value_does_not_raise(tmp_path):
     """Regression: scripts/init_env.py imports Settings (the class) and
     OPERATIONAL_KEYS, never touching the `settings` singleton itself -- but
-    app/config.py used to build that singleton unconditionally at import
+    bot/config.py used to build that singleton unconditionally at import
     time regardless of what any caller actually needed, so a single
     already-malformed value left over in .env/.env.config (e.g. from before
     init_env's own answer-validation existed) crashed the bare import with a
@@ -354,7 +354,7 @@ def test_importing_config_with_a_malformed_value_does_not_raise(tmp_path):
     """
     env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT), "KEY_USAGE_RESET_TIME_UTC": "4:00"}
     result = subprocess.run(
-        [sys.executable, "-c", "from app.config import Settings, OPERATIONAL_KEYS; print('ok')"],
+        [sys.executable, "-c", "from bot.config import Settings, OPERATIONAL_KEYS; print('ok')"],
         cwd=tmp_path, env=env, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
@@ -363,12 +363,12 @@ def test_importing_config_with_a_malformed_value_does_not_raise(tmp_path):
 
 def test_first_real_access_to_settings_still_raises_on_a_malformed_value(tmp_path):
     """The lazy singleton changes WHEN a genuinely invalid value is caught,
-    never WHETHER it is -- the app's own boot path (app/main.py) still reads
+    never WHETHER it is -- the app's own boot path (bot/main.py) still reads
     `settings` immediately on startup, so a real misconfiguration must still
     fail loudly the moment anything actually asks for it."""
     env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT), "KEY_USAGE_RESET_TIME_UTC": "4:00"}
     result = subprocess.run(
-        [sys.executable, "-c", "import app.config; app.config.settings"],
+        [sys.executable, "-c", "import bot.config; bot.config.settings"],
         cwd=tmp_path, env=env, capture_output=True, text=True,
     )
     assert result.returncode != 0

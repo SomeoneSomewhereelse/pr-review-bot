@@ -7,7 +7,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from app.config import settings
+from bot.config import settings
 from scripts import _render
 
 RENDER_SERVICES = "https://api.render.com/v1/services"

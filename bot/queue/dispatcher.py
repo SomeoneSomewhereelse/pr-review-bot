@@ -26,18 +26,18 @@ from typing import Literal
 
 from github.IssueComment import IssueComment
 
-from app import github_app
-from app.config import settings
-from app.formatting import (
+from bot import github_app
+from bot.config import settings
+from bot.formatting import (
     format_failure,
     format_failure_footnote,
     format_placeholder,
     format_schedule_notice,
 )
-from app.orchestrator import ReviewRateLimited, ReviewSkipped, attempt_review
-from app.providers import active, active_model, key_index
-from app.providers.active import active_provider
-from app.queue import cooldown_config, review_draft_config, store, usage_cap_config
+from bot.orchestrator import ReviewRateLimited, ReviewSkipped, attempt_review
+from bot.providers import active, active_model, key_index
+from bot.providers.active import active_provider
+from bot.queue import cooldown_config, review_draft_config, store, usage_cap_config
 
 logger = logging.getLogger(__name__)
 

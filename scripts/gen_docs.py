@@ -4,7 +4,7 @@
 
 THE ONE RULE. Every generator here reads CLASS-LEVEL metadata and module
 constants -- Settings.model_fields, OPERATIONAL_KEYS, pricing._RATES,
-deploy.CHECKS -- and NEVER app.config.settings. model_fields carries each
+deploy.CHECKS -- and NEVER bot.config.settings. model_fields carries each
 field's DECLARED DEFAULT; the settings instance carries this machine's real
 DATABASE_URL, API keys, and service-account material. Everything written here
 is committed and published, so reading the instance would publish those
@@ -31,8 +31,8 @@ from pathlib import Path
 
 from pydantic_core import PydanticUndefined
 
-from app.config import OPERATIONAL_KEYS, Settings
-from app.providers import pricing, registry
+from bot.config import OPERATIONAL_KEYS, Settings
+from bot.providers import pricing, registry
 from scripts import deploy
 
 GENERATED_HEADER = (

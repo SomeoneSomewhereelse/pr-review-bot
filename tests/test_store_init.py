@@ -14,8 +14,8 @@ import psycopg
 import pytest
 from psycopg_pool import PoolTimeout
 
-from app.config import settings
-from app.queue import store
+from bot.config import settings
+from bot.queue import store
 
 SENTINEL_PASSWORD = "sentinel-pw-must-not-appear"
 DEAD_URL = (

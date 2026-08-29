@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from datetime import time
 
-from app.config import settings
+from bot.config import settings
 
 _tokens: int | None = None
 _reset: str | None = None

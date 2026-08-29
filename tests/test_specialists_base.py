@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.specialists.base import run_specialist
+from bot.specialists.base import run_specialist
 
 
 class DummyFinding(BaseModel):
@@ -24,11 +24,11 @@ class FakeProvider:
 
 
 async def test_run_specialist_success_populates_findings_and_usage(monkeypatch):
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     parsed = DummyFindings(findings=[DummyFinding(note="a"), DummyFinding(note="b")])
     fake = FakeProvider(LLMResponse(raw_text="{}", tokens_in=10, tokens_out=5, parsed=parsed))
-    monkeypatch.setattr("app.specialists.base.get_provider", lambda: fake)
+    monkeypatch.setattr("bot.specialists.base.get_provider", lambda: fake)
 
     result = await run_specialist(
         name="Security",
@@ -47,10 +47,10 @@ async def test_run_specialist_success_populates_findings_and_usage(monkeypatch):
 
 
 async def test_run_specialist_failure_never_raises(monkeypatch):
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     fake = FakeProvider(LLMResponse(raw_text="garbage", tokens_in=1, tokens_out=1, parsed=None))
-    monkeypatch.setattr("app.specialists.base.get_provider", lambda: fake)
+    monkeypatch.setattr("bot.specialists.base.get_provider", lambda: fake)
 
     result = await run_specialist(
         name="Security",
@@ -69,7 +69,7 @@ async def test_run_specialist_never_raises_on_provider_exception(monkeypatch):
         async def complete(self, system, user, schema):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("app.specialists.base.get_provider", lambda: ExplodingProvider())
+    monkeypatch.setattr("bot.specialists.base.get_provider", lambda: ExplodingProvider())
 
     result = await run_specialist(
         name="Security",

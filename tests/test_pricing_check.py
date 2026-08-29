@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from app.config import settings
+from bot.config import settings
 from scripts import pricing_check
 
 _GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"

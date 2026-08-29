@@ -4,10 +4,11 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app import auth, dashboard
-from app.main import app
-from app.queue import dispatcher, store
-from app.specialists.schemas import ReviewResult, SpecialistResult
+from bot.main import app
+from bot.queue import dispatcher, store
+from bot.specialists.schemas import ReviewResult, SpecialistResult
+from dashboard import auth
+from dashboard import router as dashboard
 
 
 @pytest.fixture(autouse=True)

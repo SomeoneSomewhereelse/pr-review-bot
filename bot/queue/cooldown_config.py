@@ -17,7 +17,7 @@ override in another field.
 
 from __future__ import annotations
 
-from app.config import settings
+from bot.config import settings
 
 _base: float | None = None
 _cap: float | None = None

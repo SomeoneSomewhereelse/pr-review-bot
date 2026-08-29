@@ -36,11 +36,11 @@ import sys
 
 from pydantic import BaseModel
 
-from app.config import settings
-from app.providers import vertex_credentials
-from app.providers.google_genai import VertexProvider
-from app.providers.pricing import estimate_cost_usd
-from app.providers.validate import validate_and_repair
+from bot.config import settings
+from bot.providers import vertex_credentials
+from bot.providers.google_genai import VertexProvider
+from bot.providers.pricing import estimate_cost_usd
+from bot.providers.validate import validate_and_repair
 
 
 class Greeting(BaseModel):

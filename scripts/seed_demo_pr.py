@@ -33,7 +33,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from app.config import settings
+from bot.config import settings
 
 REPO = settings.github_target_repo
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "bad_code"

@@ -14,8 +14,8 @@ import json
 
 import pytest
 
-from app.config import settings
-from app.providers import vertex_credentials
+from bot.config import settings
+from bot.providers import vertex_credentials
 
 KEY = {
     "type": "service_account",

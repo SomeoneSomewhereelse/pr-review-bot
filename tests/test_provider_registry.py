@@ -5,7 +5,7 @@ _PROVIDERS dict -- app-side code now needs the same mapping, and app/ must
 not import from scripts/."""
 from __future__ import annotations
 
-from app.providers import registry
+from bot.providers import registry
 from scripts import deploy
 
 
@@ -30,7 +30,7 @@ def test_known_providers_matches_the_registry():
     """app/dashboard.py builds its per-provider backoff panel from
     KNOWN_PROVIDERS; a provider in one and not the other renders a panel that
     silently omits a real provider."""
-    from app.providers.base import KNOWN_PROVIDERS
+    from bot.providers.base import KNOWN_PROVIDERS
 
     assert set(KNOWN_PROVIDERS) == set(registry.PROVIDERS)
 
@@ -47,7 +47,7 @@ def test_vertex_owns_its_own_model_var():
     """gemini and vertex shared LLM_MODEL, but gemini-flash-latest does not
     exist in Vertex's catalog (404) -- so the shared var made the redeploy-free
     provider flip guaranteed-broken. Each provider owns its model."""
-    from app.providers import registry
+    from bot.providers import registry
 
     assert registry.PROVIDERS["vertex"][1] == "VERTEX_MODEL"
     assert registry.PROVIDERS["gemini"][1] == "LLM_MODEL"
@@ -57,7 +57,7 @@ def test_vertex_owns_its_own_model_var():
 
 
 def test_slot_env_name_is_the_single_naming_seam():
-    from app.providers import registry
+    from bot.providers import registry
 
     assert registry.slot_env_name("groq", 0) == "GROQ_API_KEY"
     assert registry.slot_env_name("groq", 2) == "GROQ_API_KEY_2"

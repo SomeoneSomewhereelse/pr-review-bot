@@ -17,9 +17,9 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from app.config import settings
-from app.providers import active
-from app.queue import store
+from bot.config import settings
+from bot.providers import active
+from bot.queue import store
 from scripts.deploy import _resolved_provider
 
 T0 = "2026-01-01T12:00:00+00:00"

@@ -1,7 +1,7 @@
 """Tests for dashboard.html markup content validation."""
 from pathlib import Path
 
-_DASHBOARD = Path(__file__).resolve().parent.parent / "app" / "static" / "dashboard.html"
+_DASHBOARD = Path(__file__).resolve().parent.parent / "dashboard" / "static" / "dashboard.html"
 
 
 def test_how_it_works_section_is_gone():

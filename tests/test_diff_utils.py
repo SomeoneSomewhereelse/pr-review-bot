@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.diff_utils import annotate_and_cap
+from bot.diff_utils import annotate_and_cap
 
 SAMPLE_DIFF = """diff --git a/app.py b/app.py
 @@ -10,3 +10,4 @@ def f():

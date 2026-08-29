@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import settings
-from app.providers import active_model
+from bot.config import settings
+from bot.providers import active_model
 
 
 @pytest.fixture(autouse=True)

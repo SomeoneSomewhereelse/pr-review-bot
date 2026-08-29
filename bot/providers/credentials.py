@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import os
 
-from app.config import settings
-from app.providers import registry
+from bot.config import settings
+from bot.providers import registry
 
 
 def resolve(provider: str, index: int) -> tuple[str, str]:

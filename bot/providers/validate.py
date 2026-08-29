@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from app.providers.base import LLMProvider
+from bot.providers.base import LLMProvider
 
 REPAIR_INSTRUCTION = (
     "\n\nReturn ONLY valid JSON matching the given schema. No prose, "

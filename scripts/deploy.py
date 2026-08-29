@@ -30,10 +30,10 @@ import httpx
 import psycopg
 from github import GithubException
 
-from app import github_app
-from app.config import settings
-from app.providers import pricing, registry
-from app.queue import store
+from bot import github_app
+from bot.config import settings
+from bot.providers import pricing, registry
+from bot.queue import store
 from scripts import _override, _render
 from scripts._prereqs import _looks_like_local_test_db
 

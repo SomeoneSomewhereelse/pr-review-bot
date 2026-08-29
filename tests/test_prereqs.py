@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import settings
+from bot.config import settings
 from scripts import _prereqs
 
 

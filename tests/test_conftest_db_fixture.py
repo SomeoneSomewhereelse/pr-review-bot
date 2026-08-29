@@ -14,7 +14,7 @@ both in `xdist_group(name="db")` -- the same group as every other db-marked
 test, no extra marker needed.
 """
 
-from app.queue import store
+from bot.queue import store
 
 _seen_pool_ids: list[int] = []
 

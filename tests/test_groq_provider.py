@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from app.config import settings
-from app.providers.groq import GroqProvider
+from bot.config import settings
+from bot.providers.groq import GroqProvider
 
 
 class Greeting(BaseModel):
@@ -34,7 +34,7 @@ def _fake_response(content: str, prompt_tokens: int = 10, completion_tokens: int
 async def test_groq_provider_parses_valid_structured_output(monkeypatch):
     fake_create = AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"}), 42, 7))
     monkeypatch.setattr(
-        "app.providers.groq.AsyncGroq",
+        "bot.providers.groq.AsyncGroq",
         lambda **kwargs: SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
         ),
@@ -56,7 +56,7 @@ async def test_groq_provider_parses_valid_structured_output(monkeypatch):
 async def test_groq_provider_returns_none_parsed_on_malformed_json(monkeypatch):
     fake_create = AsyncMock(return_value=_fake_response("not json at all", 10, 1))
     monkeypatch.setattr(
-        "app.providers.groq.AsyncGroq",
+        "bot.providers.groq.AsyncGroq",
         lambda **kwargs: SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
         ),
@@ -76,7 +76,7 @@ async def test_groq_provider_returns_none_parsed_on_off_schema_json(monkeypatch)
         return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1)
     )
     monkeypatch.setattr(
-        "app.providers.groq.AsyncGroq",
+        "bot.providers.groq.AsyncGroq",
         lambda **kwargs: SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
         ),
@@ -92,7 +92,7 @@ async def test_groq_provider_returns_none_parsed_on_off_schema_json(monkeypatch)
 async def test_groq_provider_includes_schema_in_system_prompt(monkeypatch):
     fake_create = AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"})))
     monkeypatch.setattr(
-        "app.providers.groq.AsyncGroq",
+        "bot.providers.groq.AsyncGroq",
         lambda **kwargs: SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=fake_create))
         ),

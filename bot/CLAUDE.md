@@ -1,6 +1,6 @@
-# app/ — module boundaries and contracts
+# bot/ — module boundaries and contracts
 
-Loaded when working with files under `app/`. Project-wide conventions,
+Loaded when working with files under `bot/`. Project-wide conventions,
 substitutions from the brief, and process rules live in the root `CLAUDE.md`.
 
 ## Layering constraints
@@ -21,7 +21,7 @@ substitutions from the brief, and process rules live in the root `CLAUDE.md`.
   can be computed from a single rate table (`pricing.py`).
 - Provider adapter constructors (`GeminiProvider`, `VertexProvider`,
   `GroqProvider`) take an explicit `model: str` parameter and must never read
-  `Settings` for the model internally. `app/providers/active_model.py` is the
+  `Settings` for the model internally. `bot/providers/active_model.py` is the
   single resolver of "which model is active for this provider" (env default or
   DB override); adapters only ever bake in whatever model value they were
   constructed with. This is what keeps the model reported in the PR comment

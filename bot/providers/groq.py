@@ -24,8 +24,8 @@ import json
 from groq import AsyncGroq
 from pydantic import BaseModel
 
-from app.config import settings
-from app.providers.base import LLMResponse, parse_or_none, translate_rate_limit
+from bot.config import settings
+from bot.providers.base import LLMResponse, parse_or_none, translate_rate_limit
 
 
 def _schema_system_prompt(system: str, schema: type[BaseModel]) -> str:

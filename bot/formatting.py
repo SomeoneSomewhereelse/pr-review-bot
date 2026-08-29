@@ -17,14 +17,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from app.github_app import (
+from bot.github_app import (
     COMMENT_MARKER,
     FAIL_NOTE_END,
     FAIL_NOTE_START,
     SCHEDULE_NOTE_END,
     SCHEDULE_NOTE_START,
 )
-from app.specialists.schemas import ReviewResult, SpecialistResult
+from bot.specialists.schemas import ReviewResult, SpecialistResult
 
 _SEVERITY_EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡"}
 

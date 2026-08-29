@@ -1,9 +1,9 @@
-"""Tests for app.main's lifespan: init_pool, recover_on_startup, and the
+"""Tests for bot.main's lifespan: init_pool, recover_on_startup, and the
 dispatcher background task's start/stop.
 
 ``ASGITransport`` (used in the existing webhook tests) never fires ASGI
 lifespan startup/shutdown events, so this behavior was previously unverified.
-We drive ``app.main.lifespan`` directly as an async context manager instead
+We drive ``bot.main.lifespan`` directly as an async context manager instead
 of spinning up a real ASGI transport — no new runtime/dev dependency needed.
 """
 from __future__ import annotations
@@ -13,9 +13,9 @@ import logging
 
 import pytest
 
-import app.main as main
-from app.config import settings
-from app.queue import dispatcher, store
+import bot.main as main
+from bot.config import settings
+from bot.queue import dispatcher, store
 
 
 @pytest.fixture(autouse=True)
@@ -45,17 +45,17 @@ async def _hang_forever() -> None:
 def test_importing_app_main_configures_the_root_logger_for_info_output():
     """ISSUES.md 2026-08-17: the root logger defaults to WARNING when
     unconfigured, which made every logger.info(...) call in the app
-    (app/webhook.py included) permanently unreachable in production --
+    (bot/webhook.py included) permanently unreachable in production --
     confirmed live via Render's Logs API returning no match for a line known
     to have fired. force=True matters specifically: a plain basicConfig() is
     a silent no-op once any handler already exists on root, which is exactly
     what happens under pytest itself (its own logging plugin attaches one) --
     the same failure shape this fix exists to eliminate, from a different
-    cause. Not scoped to a fresh import: app.main is already imported (by
+    cause. Not scoped to a fresh import: bot.main is already imported (by
     this file, above) by the time this runs, which is the real-world case
     every other test file in this suite relies on too.
     """
-    assert logging.getLogger("app.webhook").isEnabledFor(logging.INFO)
+    assert logging.getLogger("bot.webhook").isEnabledFor(logging.INFO)
 
 
 async def test_lifespan_inits_db_recovers_running_tickets_and_stops_dispatcher(monkeypatch):

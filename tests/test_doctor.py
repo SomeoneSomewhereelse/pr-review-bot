@@ -6,8 +6,8 @@ import subprocess
 
 import pytest
 
-from app import github_app
-from app.config import settings
+from bot import github_app
+from bot.config import settings
 from scripts import deploy, doctor
 
 SENTINEL = "SENTINEL-2b6d40af91ce7385-DO-NOT-LEAK"

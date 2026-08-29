@@ -17,18 +17,18 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from app.config import settings
-from app.providers import pricing
-from app.providers.factory import get_provider
-from app.providers.google_genai import GeminiProvider, VertexProvider
-from app.providers.validate import validate_and_repair
+from bot.config import settings
+from bot.providers import pricing
+from bot.providers.factory import get_provider
+from bot.providers.google_genai import GeminiProvider, VertexProvider
+from bot.providers.validate import validate_and_repair
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
 def _reset_provider_cache():
-    from app.providers.factory import reset_provider_cache
+    from bot.providers.factory import reset_provider_cache
 
     reset_provider_cache()
     yield
@@ -37,13 +37,13 @@ def _reset_provider_cache():
 
 @pytest.fixture(autouse=True)
 def _reset_active_overrides():
-    """Several tests below set overrides in app.providers.active,
+    """Several tests below set overrides in bot.providers.active,
     active_model, and factory to exercise the model-is-part-of-the-cache-key
     behavior. Resetting only at the end of the test body means an earlier
     assertion failure skips cleanup and pollutes every later test in the same
     run -- reset both before and after, mirroring
     tests/test_active_model.py's autouse fixture."""
-    from app.providers import active, active_model, factory
+    from bot.providers import active, active_model, factory
 
     active.reset_override_cache()
     active_model.reset_override_cache()
@@ -55,9 +55,9 @@ def _reset_active_overrides():
 
 
 def test_importing_the_factory_alone_does_not_pull_in_provider_sdks():
-    """app/providers/factory.py used to import GeminiProvider/VertexProvider
+    """bot/providers/factory.py used to import GeminiProvider/VertexProvider
     and GroqProvider unconditionally at module level, so every test or
-    request path that transitively imports the factory (app/specialists/base.py
+    request path that transitively imports the factory (bot/specialists/base.py
     is the sole importer) paid the full google.genai SDK import cost --
     measured via `-X importtime` at 4.2s across 323 modules, the single
     largest import in a full collection pass, bigger than pytest itself --
@@ -67,7 +67,7 @@ def test_importing_the_factory_alone_does_not_pull_in_provider_sdks():
 
     Checked in a fresh subprocess: this test process has already imported
     both SDKs via other test files (e.g. this file's own module-level
-    `from app.providers.google_genai import ...` above), so sys.modules
+    `from bot.providers.google_genai import ...` above), so sys.modules
     here would give a false pass.
     """
     result = subprocess.run(
@@ -75,7 +75,7 @@ def test_importing_the_factory_alone_does_not_pull_in_provider_sdks():
             sys.executable,
             "-c",
             "import sys\n"
-            "import app.providers.factory\n"
+            "import bot.providers.factory\n"
             "print('google.genai' in sys.modules)\n"
             "print('groq' in sys.modules)\n",
         ],
@@ -114,7 +114,7 @@ def _fake_response(text: str, tokens_in: int = 10, tokens_out: int = 5):
 async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
     fake_generate = AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"}), 42, 7))
     monkeypatch.setattr(
-        "app.providers.google_genai.genai.Client",
+        "bot.providers.google_genai.genai.Client",
         lambda **kwargs: SimpleNamespace(
             aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
         ),
@@ -135,7 +135,7 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
 async def test_provider_returns_none_parsed_on_malformed_json(monkeypatch):
     fake_generate = AsyncMock(return_value=_fake_response("not json at all", 10, 1))
     monkeypatch.setattr(
-        "app.providers.google_genai.genai.Client",
+        "bot.providers.google_genai.genai.Client",
         lambda **kwargs: SimpleNamespace(
             aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
         ),
@@ -155,7 +155,7 @@ async def test_provider_returns_none_parsed_on_off_schema_json(monkeypatch):
         return_value=_fake_response(json.dumps({"totally": "wrong shape"}), 10, 1)
     )
     monkeypatch.setattr(
-        "app.providers.google_genai.genai.Client",
+        "bot.providers.google_genai.genai.Client",
         lambda **kwargs: SimpleNamespace(
             aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
         ),
@@ -184,7 +184,7 @@ async def test_vertex_provider_parses_valid_structured_output(monkeypatch):
     captured: dict = {}
     fake_generate = AsyncMock(return_value=_fake_response(json.dumps({"message": "hi"}), 42, 7))
     monkeypatch.setattr(
-        "app.providers.google_genai.genai.Client",
+        "bot.providers.google_genai.genai.Client",
         _fake_client_factory(captured, fake_generate),
     )
 
@@ -210,7 +210,7 @@ def test_vertex_provider_passes_no_credentials_for_implicit_adc(monkeypatch):
     google-auth discover the local ADC file."""
     captured: dict = {}
     monkeypatch.setattr(
-        "app.providers.google_genai.genai.Client",
+        "bot.providers.google_genai.genai.Client",
         _fake_client_factory(captured, AsyncMock()),
     )
 
@@ -232,7 +232,7 @@ def test_vertex_provider_builds_credentials_from_the_service_account_info(monkey
     sentinel = object()
     seen: dict = {}
     monkeypatch.setattr(
-        "app.providers.google_genai.genai.Client",
+        "bot.providers.google_genai.genai.Client",
         _fake_client_factory(captured, AsyncMock()),
     )
 
@@ -242,7 +242,7 @@ def test_vertex_provider_builds_credentials_from_the_service_account_info(monkey
         return sentinel
 
     monkeypatch.setattr(
-        "app.providers.google_genai.service_account.Credentials.from_service_account_info",
+        "bot.providers.google_genai.service_account.Credentials.from_service_account_info",
         _fake_from_service_account_info,
     )
 
@@ -279,7 +279,7 @@ def test_factory_selects_groq(monkeypatch):
     # only rejects api_key=None, not an empty string.
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "dummy-key-for-construction-only")
-    from app.providers.groq import GroqProvider
+    from bot.providers.groq import GroqProvider
 
     assert isinstance(get_provider(), GroqProvider)
 
@@ -296,8 +296,8 @@ def test_factory_raises_a_clear_error_for_an_unprovisioned_key_index(monkeypatch
     dead-but-configured provider (a real credential for a vendor that's down
     or retired), which must NOT be affected by this check -- that case has a
     real, non-empty credential and fails at the live call, unchanged."""
-    from app.providers import key_index
-    from app.providers.factory import reset_provider_cache
+    from bot.providers import key_index
+    from bot.providers.factory import reset_provider_cache
 
     monkeypatch.setattr(settings, "llm_provider", "gemini")
     monkeypatch.setattr(settings, "gemini_api_key", "gk_index_0")
@@ -320,13 +320,13 @@ def test_factory_unaffected_by_a_dead_but_configured_provider(monkeypatch):
     this check only catches an EMPTY resolved value, nothing else."""
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_real_but_dead")
-    from app.providers.groq import GroqProvider
+    from bot.providers.groq import GroqProvider
 
     assert isinstance(get_provider(), GroqProvider)
 
 
 def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
-    from app.providers.factory import reset_provider_cache
+    from bot.providers.factory import reset_provider_cache
 
     monkeypatch.setattr(settings, "llm_provider", "groq")
     # _build()'s empty-credential check requires a non-empty api_key.
@@ -339,8 +339,8 @@ def test_factory_returns_the_same_instance_on_repeated_calls(monkeypatch):
 
 
 def test_factory_rebuilds_the_client_when_the_key_index_changes(monkeypatch):
-    from app.providers import key_index
-    from app.providers.factory import reset_provider_cache
+    from bot.providers import key_index
+    from bot.providers.factory import reset_provider_cache
 
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_index_0")
@@ -358,8 +358,8 @@ def test_factory_rebuilds_the_client_when_the_key_index_changes(monkeypatch):
 
 
 def test_factory_returns_to_the_original_cached_instance_after_switching_back(monkeypatch):
-    from app.providers import key_index
-    from app.providers.factory import reset_provider_cache
+    from bot.providers import key_index
+    from bot.providers.factory import reset_provider_cache
 
     monkeypatch.setattr(settings, "llm_provider", "groq")
     monkeypatch.setattr(settings, "groq_api_key", "gsk_index_0")
@@ -388,13 +388,13 @@ def _mock_vertex_client(monkeypatch, captured: dict | None = None):
             captured.update(kwargs)
         return SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace()))
 
-    monkeypatch.setattr("app.providers.google_genai.genai.Client", _build)
+    monkeypatch.setattr("bot.providers.google_genai.genai.Client", _build)
 
 
 def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch):
     """GCP_PROJECT unset is the COMMON case: an operator handed nothing but a
     service-account JSON key gets the project from the key's own project_id."""
-    from app.providers.google_genai import VertexProvider
+    from bot.providers.google_genai import VertexProvider
 
     captured: dict = {}
     _mock_vertex_client(monkeypatch, captured)
@@ -402,11 +402,11 @@ def test_factory_selects_vertex_and_derives_the_project_from_the_key(monkeypatch
     monkeypatch.setattr(settings, "gcp_project", "")
     monkeypatch.setattr(settings, "gcp_location", "us-central1")
     monkeypatch.setattr(
-        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        "bot.providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: {"type": "service_account", "project_id": "proj-from-key"},
     )
     monkeypatch.setattr(
-        "app.providers.google_genai.service_account.Credentials.from_service_account_info",
+        "bot.providers.google_genai.service_account.Credentials.from_service_account_info",
         lambda info, scopes=None: object(),
     )
 
@@ -423,11 +423,11 @@ def test_factory_prefers_an_explicit_gcp_project_over_the_keys_own(monkeypatch):
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
     monkeypatch.setattr(
-        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        "bot.providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: {"type": "service_account", "project_id": "proj-from-key"},
     )
     monkeypatch.setattr(
-        "app.providers.google_genai.service_account.Credentials.from_service_account_info",
+        "bot.providers.google_genai.service_account.Credentials.from_service_account_info",
         lambda info, scopes=None: object(),
     )
 
@@ -440,13 +440,13 @@ def test_factory_builds_vertex_from_implicit_adc_when_a_project_is_set(monkeypat
     EMPTY resolved credential is not an error for vertex. _build must not
     raise -- any failure then comes from the SDK/google-auth relying on
     implicit ADC, which is a live-call concern, not a config one."""
-    from app.providers.google_genai import VertexProvider
+    from bot.providers.google_genai import VertexProvider
 
     _mock_vertex_client(monkeypatch)
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
     monkeypatch.setattr(
-        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        "bot.providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: None,
     )
 
@@ -461,7 +461,7 @@ def test_factory_raises_when_vertex_has_neither_a_project_nor_a_credential(monke
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "gcp_project", "")
     monkeypatch.setattr(
-        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        "bot.providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: None,
     )
 
@@ -475,15 +475,15 @@ def test_factory_passes_the_active_key_index_to_vertex_credentials(monkeypatch):
     """vertex rides the same key-index override as gemini/groq -- the index
     must reach the credential resolver, or a slot swap would be a silent
     no-op for this provider alone."""
-    from app.providers import key_index
-    from app.providers.factory import reset_provider_cache
+    from bot.providers import key_index
+    from bot.providers.factory import reset_provider_cache
 
     _mock_vertex_client(monkeypatch)
     seen: list[int] = []
     monkeypatch.setattr(settings, "llm_provider", "vertex")
     monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
     monkeypatch.setattr(
-        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        "bot.providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: seen.append(index) or None,
     )
     reset_provider_cache()
@@ -515,7 +515,7 @@ class FakeProvider:
 
 @pytest.mark.asyncio
 async def test_validate_and_repair_succeeds_on_first_try():
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     provider = FakeProvider(
         [
@@ -539,7 +539,7 @@ async def test_validate_and_repair_succeeds_on_first_try():
 
 @pytest.mark.asyncio
 async def test_validate_and_repair_retries_once_then_succeeds():
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     provider = FakeProvider(
         [
@@ -567,7 +567,7 @@ async def test_validate_and_repair_retries_once_then_succeeds():
 
 @pytest.mark.asyncio
 async def test_validate_and_repair_fails_after_repair_also_fails():
-    from app.providers.base import LLMResponse
+    from bot.providers.base import LLMResponse
 
     provider = FakeProvider(
         [
@@ -644,8 +644,8 @@ def test_a_model_change_is_a_cache_miss(monkeypatch):
     """Adapters bake the model in at construction and factory._instances is
     process-lifetime, so a model override would silently no-op on a warm
     process unless the model is part of the cache key."""
-    from app.config import settings
-    from app.providers import active, active_model, factory, key_index
+    from bot.config import settings
+    from bot.providers import active, active_model, factory, key_index
 
     factory.reset_provider_cache()
     active.set_override_cache("groq")
@@ -673,7 +673,7 @@ def test_gemini_provider_uses_the_db_override_not_settings_llm_model(monkeypatch
     proves the constructor argument is what actually populates self._model --
     the single most important correctness property this branch adds (the model
     reported in the PR comment must equal the model actually sent)."""
-    from app.providers import active_model, factory
+    from bot.providers import active_model, factory
 
     factory.reset_provider_cache()
     monkeypatch.setattr(settings, "llm_provider", "gemini")
@@ -693,7 +693,7 @@ def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypa
     regression to reading settings.vertex_model internally would go uncaught
     by the existing vertex tests, which all pass settings.llm_model/whatever
     the ambient value is on both sides of their assertions."""
-    from app.providers import active_model, factory
+    from bot.providers import active_model, factory
 
     factory.reset_provider_cache()
     _mock_vertex_client(monkeypatch)
@@ -701,7 +701,7 @@ def test_vertex_provider_uses_the_db_override_not_settings_vertex_model(monkeypa
     monkeypatch.setattr(settings, "gcp_project", "proj-explicit")
     monkeypatch.setattr(settings, "vertex_model", "settings-model-must-not-be-used")
     monkeypatch.setattr(
-        "app.providers.factory.vertex_credentials.resolve_service_account_info",
+        "bot.providers.factory.vertex_credentials.resolve_service_account_info",
         lambda index: None,
     )
     active_model.set_override_cache({"vertex": "sentinel-vertex-model"})
@@ -717,9 +717,9 @@ def test_reported_model_equals_executed_model(monkeypatch):
     """orchestrator._active_model() feeds the PR comment; the adapter's
     _model is what actually runs. If these diverge, the comment reports a
     model that never ran -- a silent partial failure."""
-    from app import orchestrator
-    from app.config import settings
-    from app.providers import active, active_model, factory, key_index
+    from bot import orchestrator
+    from bot.config import settings
+    from bot.providers import active, active_model, factory, key_index
 
     factory.reset_provider_cache()
     active.set_override_cache("groq")

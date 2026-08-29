@@ -5,10 +5,10 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.config import settings
-from app.main import app
-from app import webhook
-from app.queue import store
+from bot.config import settings
+from bot.main import app
+from bot import webhook
+from bot.queue import store
 
 TEST_SECRET = "test-webhook-secret"
 

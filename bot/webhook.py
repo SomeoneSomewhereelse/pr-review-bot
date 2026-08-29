@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Response
 
-from app.config import settings
-from app.hmac_verify import verify_signature
-from app.providers.active import active_provider
-from app.queue import store
+from bot.config import settings
+from bot.hmac_verify import verify_signature
+from bot.providers.active import active_provider
+from bot.queue import store
 
 logger = logging.getLogger(__name__)
 

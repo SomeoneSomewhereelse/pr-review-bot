@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.specialists.base import run_specialist
-from app.specialists.schemas import PerformanceFinding, SpecialistResult
+from bot.specialists.base import run_specialist
+from bot.specialists.schemas import PerformanceFinding, SpecialistResult
 
 PERFORMANCE_SYSTEM_PROMPT = """\
 You are a senior performance engineer reviewing a GitHub pull request's \

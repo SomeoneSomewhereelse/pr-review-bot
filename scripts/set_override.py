@@ -63,9 +63,9 @@ import re
 import sys
 from datetime import datetime, timezone
 
-from app.config import settings
-from app.providers import active_model, pricing, registry
-from app.queue import store
+from bot.config import settings
+from bot.providers import active_model, pricing, registry
+from bot.queue import store
 from scripts import _override, _render
 
 

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.providers import key_index
-from app.queue import store
+from bot.providers import key_index
+from bot.queue import store
 
 T0 = "2026-01-01T12:00:00+00:00"
 T1 = "2026-01-01T12:00:01+00:00"

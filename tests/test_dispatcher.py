@@ -11,10 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.config import settings
-from app.providers import active
-from app.queue import cooldown_config, dispatcher, store, usage_cap_config
-import app.orchestrator as orchestrator
+from bot.config import settings
+from bot.providers import active
+from bot.queue import cooldown_config, dispatcher, store, usage_cap_config
+import bot.orchestrator as orchestrator
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -51,7 +51,7 @@ def _clean_cooldown_cache():
 
 @pytest.fixture(autouse=True)
 def _clean_key_index_cache():
-    from app.providers import key_index
+    from bot.providers import key_index
 
     key_index.reset_override_cache()
     yield
@@ -327,7 +327,7 @@ async def test_hard_failure_terminates_the_process_when_installation_confirmed_i
     id) must terminate the process rather than silently keep going under a
     stale identity -- an unhandled exception in a background task would
     otherwise just be logged and dropped, not actually fatal."""
-    from app import github_app
+    from bot import github_app
 
     _stub_comments(monkeypatch)
     monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 5)
@@ -1154,7 +1154,7 @@ async def test_claimed_ticket_runs_against_the_db_override(monkeypatch):
     seen = []
 
     async def fake_attempt(repo, pr, comment_id=None):
-        from app.providers.active import active_provider
+        from bot.providers.active import active_provider
         seen.append(active_provider())
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
@@ -1182,7 +1182,7 @@ async def test_claim_falls_back_to_env_when_the_override_read_fails(monkeypatch)
     seen = []
 
     async def fake_attempt(repo, pr, comment_id=None):
-        from app.providers.active import active_provider
+        from bot.providers.active import active_provider
         seen.append(active_provider())
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
@@ -1202,7 +1202,7 @@ async def test_claimed_ticket_uses_the_db_key_index_override(monkeypatch):
     seen = []
 
     async def fake_attempt(repo, pr, comment_id=None):
-        from app.providers import key_index
+        from bot.providers import key_index
         seen.append(key_index.active_key_index("groq"))
         return orchestrator.ReviewCompleted(review=type("R", (), {})())
 
@@ -1216,7 +1216,7 @@ async def test_claim_falls_back_to_index_zero_when_the_key_index_read_fails(monk
     """Fail-safe: an unreachable override must degrade to index 0, never
     abort the review, and never keep serving a stale cached override from a
     previous successful refresh."""
-    from app.providers import key_index
+    from bot.providers import key_index
 
     _stub_comments(monkeypatch)
     # A prior successful refresh cached a DIFFERENT index. If the failure
@@ -1461,8 +1461,8 @@ async def test_capped_ticket_with_a_visible_review_gets_no_placeholder(monkeypat
 async def test_model_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
     """Same fail-safe shape as the provider/cooldown/key-index refreshes: a
     failing refresh must never abort a review and never leave a stale cache."""
-    from app.providers import active_model
-    from app.queue import dispatcher, store
+    from bot.providers import active_model
+    from bot.queue import dispatcher, store
 
     active_model.set_override_cache({"groq": "stale-model"})
 
@@ -1480,7 +1480,7 @@ async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypa
     exact same shape, for _refresh_usage_cap_overrides (added by Task 5): a
     failing DB read must degrade the cache to "no override" rather than keep a
     stale token cap in force."""
-    from app.queue import dispatcher, store, usage_cap_config
+    from bot.queue import dispatcher, store, usage_cap_config
 
     usage_cap_config.set_override_cache(999, None)
 
@@ -1497,7 +1497,7 @@ async def test_usage_cap_override_refresh_degrades_to_env_on_db_failure(monkeypa
 async def test_review_draft_override_refresh_degrades_to_env_on_db_failure(monkeypatch):
     """Same fail-safe shape as the other refreshes: a failing DB read must
     degrade the cache to "no override" rather than keep a stale value."""
-    from app.queue import dispatcher, review_draft_config, store
+    from bot.queue import dispatcher, review_draft_config, store
 
     review_draft_config.set_override_cache(True)
 
@@ -1515,7 +1515,7 @@ async def test_process_next_due_refreshes_the_review_draft_override(monkeypatch)
     """The refresh must run once per claimed ticket, same cadence as the
     other overrides, so a DB-flipped value takes effect on the next ticket
     with no redeploy."""
-    from app.queue import review_draft_config
+    from bot.queue import review_draft_config
 
     _stub_comments(monkeypatch)
     _enqueue(pr=1)

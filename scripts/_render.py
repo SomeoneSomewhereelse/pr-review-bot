@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import httpx
 
-from app.config import settings
+from bot.config import settings
 
 RENDER_API = "https://api.render.com/v1"
 HTTP_TIMEOUT = 10.0

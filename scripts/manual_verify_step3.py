@@ -21,8 +21,8 @@ import sys
 
 from github import GithubException
 
-from app import github_app
-from app.config import settings
+from bot import github_app
+from bot.config import settings
 
 DEFAULT_REPO = settings.github_target_repo
 DEFAULT_PR_NUMBER = 1

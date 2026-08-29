@@ -6,8 +6,8 @@ from datetime import time
 
 import pytest
 
-from app.config import settings
-from app.queue import usage_cap_config
+from bot.config import settings
+from bot.queue import usage_cap_config
 
 
 @pytest.fixture(autouse=True)

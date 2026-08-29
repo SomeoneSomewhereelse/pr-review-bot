@@ -2,8 +2,8 @@
 provider's currently-active API-key slot."""
 from __future__ import annotations
 
-from app.config import settings
-from app.providers import credentials
+from bot.config import settings
+from bot.providers import credentials
 
 
 def test_index_zero_resolves_to_the_base_env_var_via_settings(monkeypatch):

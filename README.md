@@ -100,7 +100,7 @@ FastAPI (async) · `uv` · PyGitHub (GitHub App auth) · `google-genai` +
 ```bash
 uv sync
 cp .env.example .env   # fill in real values — see the guide's setup section
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000
 ```
 
 - `GET /healthz` → `200`

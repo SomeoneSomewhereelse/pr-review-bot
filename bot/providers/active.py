@@ -17,7 +17,7 @@ degrades to its configured provider rather than to no provider.
 
 from __future__ import annotations
 
-from app.config import settings
+from bot.config import settings
 
 _override: str | None = None
 

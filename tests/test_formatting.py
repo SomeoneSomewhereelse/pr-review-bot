@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from app.formatting import format_comment
-from app.github_app import COMMENT_MARKER
-from app.specialists.schemas import ReviewResult, SpecialistResult
+from bot.formatting import format_comment
+from bot.github_app import COMMENT_MARKER
+from bot.specialists.schemas import ReviewResult, SpecialistResult
 
 
 def test_format_comment_includes_marker_first():

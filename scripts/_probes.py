@@ -21,8 +21,8 @@ from __future__ import annotations
 import base64
 import binascii
 
-from app.config import settings
-from app.providers import registry
+from bot.config import settings
+from bot.providers import registry
 
 # Every secret-bearing env var doctor reports on. Enumerated literally rather
 # than derived from a prefix, for the same reason app/config.py's

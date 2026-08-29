@@ -1,5 +1,5 @@
 """Tests for the onboarding wizard's theme/language/RTL controls — mirrors
-app/static/dashboard.html's existing implementation (design doc section 7).
+dashboard/static/dashboard.html's existing implementation (design doc section 7).
 Content-substring checks, same convention as tests/test_dashboard_page.py."""
 from __future__ import annotations
 

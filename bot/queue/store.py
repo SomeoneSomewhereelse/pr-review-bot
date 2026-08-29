@@ -21,10 +21,10 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolTimeout
 
-from app.config import settings
-from app.providers import registry
-from app.queue import cooldown_config
-from app.specialists.schemas import ReviewResult
+from bot.config import settings
+from bot.providers import registry
+from bot.queue import cooldown_config
+from bot.specialists.schemas import ReviewResult
 
 # (name, SQL type + constraints) for every runtime_config column, in DDL
 # order. The single source of truth for that table's shape: _SCHEMA below

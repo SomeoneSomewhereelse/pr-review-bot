@@ -11,8 +11,8 @@ from datetime import datetime, time, timezone
 
 import pytest
 
-from app.queue import store
-from app.specialists.schemas import ReviewResult, SpecialistResult
+from bot.queue import store
+from bot.specialists.schemas import ReviewResult, SpecialistResult
 
 
 @pytest.fixture

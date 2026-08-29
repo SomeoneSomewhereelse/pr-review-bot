@@ -22,8 +22,8 @@ comment, so a defensive empty-string guard belongs here regardless.
 
 from __future__ import annotations
 
-from app.config import settings
-from app.providers import registry
+from bot.config import settings
+from bot.providers import registry
 
 _overrides: dict[str, str] = {}
 

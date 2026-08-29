@@ -20,8 +20,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from app.config import settings
-from app.queue import store
+from bot.config import settings
+from bot.queue import store
 from scripts import _render
 
 

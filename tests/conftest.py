@@ -8,8 +8,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from app.config import settings
-from app.queue import store
+from bot.config import settings
+from bot.queue import store
 
 # Hosts treated as "local/CI Postgres, safe for tests to TRUNCATE". Anything
 # else (e.g. a Supabase pooler hostname) is refused unless the operator

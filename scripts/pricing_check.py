@@ -22,8 +22,8 @@ from typing import NamedTuple
 
 import httpx
 
-from app.config import settings
-from app.providers import pricing
+from bot.config import settings
+from bot.providers import pricing
 
 _GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
 _HTTP_TIMEOUT = 10.0

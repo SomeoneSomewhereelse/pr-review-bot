@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from app.config import settings
-from app.specialists.schemas import SpecialistResult
+from bot.config import settings
+from bot.specialists.schemas import SpecialistResult
 
 
 def _ok_result(name: str, tokens_in: int = 10, tokens_out: int = 5) -> SpecialistResult:
@@ -22,7 +22,7 @@ def _ok_result(name: str, tokens_in: int = 10, tokens_out: int = 5) -> Specialis
 
 
 async def test_run_review_runs_all_three_specialists_and_posts_comment(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -74,7 +74,7 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     drop the other two specialists' results — SPEC's core resilience
     guarantee, enforced at the orchestrator's gather/merge layer too.
     """
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -120,7 +120,7 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
 
 
 async def test_run_review_reflects_active_model_per_provider(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -152,7 +152,7 @@ async def test_run_review_reflects_active_model_per_provider(monkeypatch):
 
 
 async def test_run_review_records_the_completed_review(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -202,7 +202,7 @@ async def test_run_review_records_the_completed_review(monkeypatch):
 async def test_run_review_survives_record_review_raising(monkeypatch):
     """A dashboard-persistence failure must never fail an otherwise-successful
     review — the PR comment is already posted by this point."""
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -241,7 +241,7 @@ async def test_attempt_review_migrates_a_renamed_repo(monkeypatch):
     resolved internally) -- when it differs from what was requested, the
     repo was renamed, and attempt_review must migrate the DB rows rather
     than silently keep using the stale name."""
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -274,7 +274,7 @@ async def test_attempt_review_migrates_a_renamed_repo(monkeypatch):
 
 
 async def test_attempt_review_does_not_migrate_when_name_is_unchanged(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -304,7 +304,7 @@ async def test_attempt_review_does_not_migrate_when_name_is_unchanged(monkeypatc
 async def test_attempt_review_survives_migrate_repo_rename_raising(monkeypatch):
     """A migration hiccup must never fail an otherwise-successful review --
     same guarantee as the existing record_review failure isolation."""
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -336,7 +336,7 @@ async def test_attempt_review_skips_entirely_on_an_empty_diff(monkeypatch):
     """An empty diff (e.g. an empty merge commit) must short-circuit before
     any specialist call, comment post, or dashboard record -- ISSUES.md's
     'Empty diffs still fan out all 3 specialists' gap."""
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -361,7 +361,7 @@ async def test_attempt_review_skips_a_draft_pr_by_default(monkeypatch):
     """ISSUES.md's 'Draft PRs are reviewed identically to ready-for-review
     PRs' gap: a draft PR must short-circuit before any specialist call,
     comment post, or dashboard record, same as an empty diff."""
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -383,7 +383,7 @@ async def test_attempt_review_skips_a_draft_pr_by_default(monkeypatch):
 
 
 async def test_attempt_review_reviews_a_draft_pr_when_the_override_allows_it(monkeypatch):
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -413,7 +413,7 @@ async def test_attempt_review_reviews_a_draft_pr_when_the_override_allows_it(mon
 async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypatch):
     """The rename check is cheap and orthogonal to diff content -- it must
     still run even when the diff itself turns out to be empty."""
-    import app.orchestrator as orchestrator
+    import bot.orchestrator as orchestrator
 
     monkeypatch.setattr(
         orchestrator.github_app, "fetch_pr_diff",
@@ -435,9 +435,9 @@ async def test_attempt_review_still_migrates_a_rename_on_an_empty_diff(monkeypat
 
 
 def test_active_model_resolves_per_provider_through_the_registry(monkeypatch):
-    from app import orchestrator
-    from app.config import settings
-    from app.providers import active
+    from bot import orchestrator
+    from bot.config import settings
+    from bot.providers import active
 
     monkeypatch.setattr(settings, "llm_model", "model-gemini")
     monkeypatch.setattr(settings, "groq_model", "model-groq")

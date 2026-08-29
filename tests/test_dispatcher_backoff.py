@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import settings
-from app.queue import dispatcher
+from bot.config import settings
+from bot.queue import dispatcher
 
 
 @pytest.fixture(autouse=True)

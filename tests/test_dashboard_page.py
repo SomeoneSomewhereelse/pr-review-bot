@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from app import auth
-from app.main import app
+from bot.main import app
+from dashboard import auth
 
 
 async def _client() -> AsyncClient:
@@ -53,7 +53,7 @@ async def test_render_stats_guards_on_queue_by_status_error_not_bare_queue_error
 
     /api/dashboard's queue payload is always {"by_status": ..., "backoff": ...} —
     there is no top-level "error" key on queue itself. build_dashboard_payload()
-    (app/dashboard.py) degrades queue.by_status to {"error": "data unavailable"}
+    (dashboard/router.py) degrades queue.by_status to {"error": "data unavailable"}
     on a store failure, not queue as a whole. A guard written as `queue.error`
     is permanently undefined and never trips, so a degraded queue would render
     a garbled stat tile (e.g. "q_error: data unavailable") instead of clearing

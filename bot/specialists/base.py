@@ -26,10 +26,10 @@ import time
 
 from pydantic import BaseModel
 
-from app.providers.base import RateLimited
-from app.providers.factory import get_provider
-from app.providers.validate import validate_and_repair
-from app.specialists.schemas import SpecialistResult
+from bot.providers.base import RateLimited
+from bot.providers.factory import get_provider
+from bot.providers.validate import validate_and_repair
+from bot.specialists.schemas import SpecialistResult
 
 SpecialistName = str  # narrowed to the Literal by SpecialistResult itself
 

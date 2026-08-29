@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.formatting import format_placeholder
-from app.github_app import COMMENT_MARKER
+from bot.formatting import format_placeholder
+from bot.github_app import COMMENT_MARKER
 
 NOW = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -24,7 +24,7 @@ def test_long_wait_is_daily_quota_wording_with_eta_and_marker():
 
 
 def test_format_failure_has_marker_pr_and_attempts_no_error_text():
-    from app.formatting import format_failure
+    from bot.formatting import format_failure
 
     body = format_failure(pr_number=42, attempts=5)
     assert COMMENT_MARKER in body
@@ -34,7 +34,7 @@ def test_format_failure_has_marker_pr_and_attempts_no_error_text():
 
 
 def test_format_failure_singular_grammar():
-    from app.formatting import format_failure
+    from bot.formatting import format_failure
 
     body = format_failure(pr_number=1, attempts=1)
     assert "1 attempt" in body
@@ -42,8 +42,8 @@ def test_format_failure_singular_grammar():
 
 
 def test_format_failure_footnote_submarkers_and_grammar():
-    from app.formatting import format_failure_footnote
-    from app.github_app import FAIL_NOTE_END, FAIL_NOTE_START
+    from bot.formatting import format_failure_footnote
+    from bot.github_app import FAIL_NOTE_END, FAIL_NOTE_START
 
     body = format_failure_footnote(attempts=3)
     assert FAIL_NOTE_START in body and FAIL_NOTE_END in body

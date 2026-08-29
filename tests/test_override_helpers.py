@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from app.config import settings
+from bot.config import settings
 from scripts import _override
 
 

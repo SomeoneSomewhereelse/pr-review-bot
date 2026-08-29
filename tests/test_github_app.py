@@ -17,8 +17,8 @@ import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from app import github_app
-from app.config import settings
+from bot import github_app
+from bot.config import settings
 
 REPO_FULL_NAME = "test-owner/pr-review-bot-testbed"
 PR_NUMBER = 1
@@ -828,7 +828,7 @@ def test_read_private_key_rejects_malformed_base64(monkeypatch):
 
 
 def test_discover_installation_id_returns_id(fake_transport):
-    from app import github_app
+    from bot import github_app
 
     fake_transport.route("GET", f"/repos/{REPO_FULL_NAME}/installation", {"id": 424242})
     assert github_app.discover_installation_id(REPO_FULL_NAME) == 424242
@@ -838,7 +838,7 @@ def test_discover_installation_id_non_404_is_not_misdiagnosed_as_not_installed(f
     """A 401 (e.g. a malformed GITHUB_APP_PRIVATE_KEY) or other non-404
     status must not be reported as "not installed" -- that's a misdiagnosis
     that would send an operator chasing the wrong fix."""
-    from app import github_app
+    from bot import github_app
 
     fake_transport.route(
         "GET", f"/repos/{REPO_FULL_NAME}/installation", {"message": "Bad credentials"}, 401
@@ -850,7 +850,7 @@ def test_discover_installation_id_non_404_is_not_misdiagnosed_as_not_installed(f
 
 
 def test_set_webhook_url_patches_hook_config(fake_transport):
-    from app import github_app
+    from bot import github_app
 
     fake_transport.route("PATCH", "/app/hook/config", {"url": "https://x/webhook"})
     github_app.set_webhook_url("https://x/webhook")  # must not raise

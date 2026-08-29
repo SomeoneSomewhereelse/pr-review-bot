@@ -17,8 +17,8 @@ import pytest
 import respx
 import yaml
 
-from app.config import OPERATIONAL_KEYS, Settings, settings
-from app.providers import pricing
+from bot.config import OPERATIONAL_KEYS, Settings, settings
+from bot.providers import pricing
 from scripts import _prereqs, deploy
 
 BASE = "https://x.onrender.com"
@@ -642,7 +642,7 @@ def github_seam(monkeypatch):
     (reading a stale/unset settings value internally) instead of passing
     through the id it just discovered.
     """
-    from app import github_app
+    from bot import github_app
 
     state = {
         "installation_id": 424242,
@@ -700,7 +700,7 @@ def test_webhook_absent_is_set_on_first_deploy(github_seam):
 
 
 def test_app_not_installed_fails_with_an_actionable_detail(github_seam, monkeypatch):
-    from app import github_app
+    from bot import github_app
 
     def _raise():
         raise github_app.AppNotInstalledError("not installed")
@@ -718,7 +718,7 @@ def test_failed_webhook_read_does_not_write(github_seam, monkeypatch):
     """Writing blind after a failed read is how a correct URL gets clobbered."""
     from github import GithubException
 
-    from app import github_app
+    from bot import github_app
 
     def _raise():
         raise GithubException(500, {"message": "boom"}, None)
@@ -737,7 +737,7 @@ def test_failed_webhook_write_fails_with_the_status(github_seam, monkeypatch):
     read path above it -- not fall through to the generic _safe() catch-all."""
     from github import GithubException
 
-    from app import github_app
+    from bot import github_app
 
     github_seam["current_url"] = "https://old.example/webhook"
 
@@ -758,7 +758,7 @@ def test_installation_lookup_non_404_reports_the_underlying_status(github_seam, 
     the generic RuntimeError message alone collapses both to the same string."""
     from github import GithubException
 
-    from app import github_app
+    from bot import github_app
 
     def _raise():
         try:
@@ -783,7 +783,7 @@ def test_multiple_installations_error_renders_the_actionable_message(github_seam
     'installation lookup failed; check App ID / private key' text, which
     would misdiagnose an ambiguous-installation state as a credentials
     problem."""
-    from app import github_app
+    from bot import github_app
 
     def _raise():
         raise RuntimeError(
@@ -879,7 +879,7 @@ def test_installation_and_webhook_fails_when_pinned_id_does_not_match_discovery(
 def test_installation_and_webhook_repo_list_failure_reports_status(github_seam, monkeypatch):
     from github import GithubException
 
-    from app import github_app
+    from bot import github_app
 
     def _raise(installation_id):
         raise GithubException(500, {"message": "boom"}, None)
@@ -2832,7 +2832,7 @@ def test_wanted_env_pushes_every_providers_model_var(monkeypatch):
     """A redeploy-free DB provider flip can activate ANY provider, so every
     provider's model var must already be on the service -- not just the
     currently-selected one's."""
-    from app.config import settings
+    from bot.config import settings
     from scripts import deploy
 
     monkeypatch.setattr(settings, "llm_provider", "vertex")
@@ -2859,7 +2859,7 @@ def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
     exercising the active-provider case this test is named for). See
     test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees
     for the distinct non-active-provider case."""
-    from app.config import settings
+    from bot.config import settings
     from scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
@@ -2880,7 +2880,7 @@ def test_sync_env_refuses_when_a_model_override_disagrees(monkeypatch, capsys):
 
 
 def test_sync_env_allows_an_agreeing_model_override(monkeypatch, capsys):
-    from app.config import settings
+    from bot.config import settings
     from scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
@@ -2918,7 +2918,7 @@ def test_sync_env_refuses_when_a_non_active_providers_model_override_disagrees(
     override diverging from the VERTEX_MODEL value about to be pushed. The
     old guard only ever checked the active provider and would have missed
     this; the refusal must name vertex specifically."""
-    from app.config import settings
+    from bot.config import settings
     from scripts import deploy
 
     monkeypatch.setattr(settings, "render_api_key", "sentinel-render-key")
