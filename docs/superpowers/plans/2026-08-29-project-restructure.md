@@ -69,6 +69,29 @@ Docker, Render, mkdocs.
 Replace its entire contents with:
 
 ```toml
+[project]
+name = "pr-review-engine"
+version = "0.1.0"
+description = "Autonomous code-review engine — GitHub PR webhook -> LLM specialists -> PR comment"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pygithub>=2.4",
+    "google-genai>=0.3",
+    "httpx>=0.27",
+    "groq>=1.5.0",
+    "openai>=2.48.0",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "python-dotenv>=1.0",
+    "google-auth>=2.35",
+    "pyjwt>=2.13",
+    "requests>=2.32",
+]
+
 [tool.uv.workspace]
 members = ["onboarding"]
 
@@ -113,11 +136,18 @@ markers = [
 ]
 ```
 
-(`app`'s dependencies are deliberately dropped from this file for now —
-they move to `bot/pyproject.toml` in Task 2. `testpaths` stays `["tests"]`
-for now; it grows in Task 5 once tests are redistributed. This root file has
-no `[project]` table on purpose — it is a "virtual" workspace root that
-ships no code of its own.)
+(`app/`'s `[project]` name/dependencies are deliberately KEPT here, unchanged,
+even though this is now also a workspace root — `app/` itself hasn't moved
+yet (that's Task 2), and `tests/conftest.py` (loaded for every test,
+including onboarding's, since `testpaths` still covers everything at this
+point) imports `app.queue.store`, which needs `psycopg` etc. Verified
+empirically: a workspace root can carry both a real `[project]` table with
+its own dependencies AND `[tool.uv.workspace]` members — root's deps and a
+member's deps both get installed into the one shared venv. Task 2, Step 10
+is where this root `[project]` table gets removed (once `bot/pyproject.toml`
+takes over providing these same dependencies) — do not remove it here.
+`testpaths` stays `["tests"]` for now; it grows in Task 5 once tests are
+redistributed.)
 
 - [ ] **Step 2: Create `onboarding/pyproject.toml`**
 
@@ -388,13 +418,24 @@ package = false
 note on this. It works because both are workspace members in the same
 venv, and this package is never synced/deployed standalone.)
 
-- [ ] **Step 10: Add both to the workspace and re-lock**
+- [ ] **Step 10: Add both to the workspace, remove root's now-redundant `[project]` table, and re-lock**
 
-Edit root `pyproject.toml`'s `[tool.uv.workspace]`:
+Task 1 deliberately kept root `pyproject.toml`'s `[project]` table (name
+`pr-review-engine` + all of `app/`'s former dependencies) because `app/`
+hadn't moved yet and `tests/conftest.py` needed those dependencies
+importable. Now that `bot/pyproject.toml` (Step 8, same dependency list)
+exists and provides them instead, remove root's `[project]` table entirely
+— root becomes a "virtual" workspace root that ships no code of its own,
+matching the design spec's intent. Root `pyproject.toml` should end up
+with no `[project]` table at all, just:
+
 ```toml
 [tool.uv.workspace]
 members = ["bot", "dashboard", "onboarding"]
 ```
+
+followed by the existing `[dependency-groups]`, `[tool.ruff]`,
+`[tool.ruff.lint]`, and `[tool.pytest.ini_options]` sections, unchanged.
 
 Run: `uv lock && uv sync --all-extras --dev`
 
