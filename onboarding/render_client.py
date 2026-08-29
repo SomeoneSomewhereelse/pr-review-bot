@@ -102,9 +102,11 @@ async def _resolve_owner_id(client: httpx.AsyncClient, api_key: str) -> httpx.Re
 async def create_service(api_key: str, repo_url: str, name: str) -> RenderServiceCreation:
     """Create a free-plan Docker web service from repo_url, with every env
     var left blank -- the visitor's later frames fill them in via
-    push_env_vars(). Mirrors render.yaml's own buildFilter/healthCheckPath/
-    dockerfilePath exactly, so a wizard-created service behaves identically
-    to this project's own production deploy. Never derives the returned
+    push_env_vars(). Mirrors bot/Dockerfile's own build shape
+    (buildFilter/healthCheckPath match render.yaml's conventions; the
+    dockerfilePath points at bot/Dockerfile specifically, since this
+    project's own render.yaml builds onboarding/Dockerfile instead -- see
+    the 2026-08-29 project-restructure design spec). Never derives the returned
     URL from `name`: Render may normalize it server-side, and a live call
     confirmed the create response carries no `service.url` field at all --
     the URL is built from the response's own `service.slug`.
@@ -142,7 +144,7 @@ async def create_service(api_key: str, repo_url: str, name: str) -> RenderServic
                         "runtime": "docker",
                         "plan": "free",
                         "healthCheckPath": "/healthz",
-                        "envSpecificDetails": {"dockerfilePath": "./Dockerfile"},
+                        "envSpecificDetails": {"dockerfilePath": "./bot/Dockerfile"},
                     },
                 },
             )

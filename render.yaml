@@ -2,7 +2,7 @@ services:
   - type: web
     name: pr-review-engine
     runtime: docker
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./onboarding/Dockerfile
     plan: free
     healthCheckPath: /healthz
     # Docs-only changes (README, SETUP, SPEC, CLAUDE.md, ISSUES.md, docs/**)
