@@ -44,11 +44,8 @@ def test_key_names_on_a_missing_file_is_empty(tmp_path):
 
 
 def test_example_keys_reads_the_committed_examples():
-    from pathlib import Path
-
-    root = Path(__file__).resolve().parent.parent.parent
-    secrets_keys = init_env.example_keys(root / ".env.example")
-    config_keys = init_env.example_keys(root / ".env.config.example")
+    secrets_keys = init_env.example_keys(_REPO_ROOT / "bot" / ".env.example")
+    config_keys = init_env.example_keys(_REPO_ROOT / "bot" / ".env.config.example")
     assert "GITHUB_WEBHOOK_SECRET" in secrets_keys
     assert "LLM_PROVIDER" in config_keys
 

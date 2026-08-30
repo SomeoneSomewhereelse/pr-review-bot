@@ -51,6 +51,27 @@ async def test_locked_frames_cannot_be_toggled_open():
     assert 'el.dataset.locked === "true"' in body
 
 
+async def test_frame_detail_is_a_separate_element_from_the_badge():
+    """A long detail value (an owner name, a deployed URL) must not wrap
+    inline with the title/badge/Change-button row and push the Change button
+    onto a second line -- .frame-detail's flex-basis: 100% forces it onto its
+    own line below instead, so every frame needs both elements and they must
+    stay distinct (never re-merged into one concatenated .frame-badge
+    string)."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('class="frame-detail"') == body.count('class="frame-badge"')
+    assert ".frame-detail { flex-basis: 100%" in body
+
+
+async def test_render_badge_writes_label_and_detail_to_separate_elements():
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_body = body[body.index("function renderBadge") : body.index("function refreshFrameBadges")]
+    assert "badgeEl(id).textContent = label;" in fn_body
+    assert "detailEl(id).textContent" in fn_body
+
+
 async def test_render_key_leaves_the_page_exactly_once():
     """The key must only ever transit the one relay call — anything else
     would be a second, unaudited exit path for a visitor's credential."""
@@ -130,9 +151,54 @@ async def test_frame2_strings_present_in_both_languages():
         "err_github_name_empty",
         "err_github_callback_invalid",
         "err_github_exchange_failed",
+        "frame2_install_copied",
     ):
         assert f"{key}:" in body
     assert body.count("create_app_button:") == 2  # STRINGS.en + STRINGS.he
+    assert body.count("frame2_install_copied:") == 2  # STRINGS.en + STRINGS.he
+
+
+async def test_install_link_is_copied_not_auto_navigated():
+    """A top-level navigation to the install URL that carries this page's
+    origin as Referer was confirmed live to get the visiting GitHub account
+    suspended for a ToS violation, reproduced across three separate throwaway
+    accounts, every time right at this install step (see ISSUES.md). Neither
+    a script-driven `location.href` redirect nor a plain `<a href>` may
+    target that URL -- the visitor must copy it and paste it into their own
+    address bar themselves, which sends no Referer at all."""
+    client = await _client()
+    body = (await client.get("/")).text
+    install_fn = body[
+        body.index("function installGithubApp") : body.index(
+            "async function pushGithubAppToRenderService"
+        )
+    ]
+    assert "location.href" not in install_fn
+    assert "<a " not in install_fn
+    assert "navigator.clipboard" in install_fn
+    assert 'id="github-app-install-url"' in body
+    assert "installations/new?state=" in install_fn
+
+
+async def test_locked_frame_click_is_prevented_before_toggle():
+    """The lock guard must call preventDefault() on the summary's click --
+    reacting to the `toggle` event afterward (the previous implementation)
+    lets the native <details> element visibly open for a frame before JS
+    closes it again, a flicker the visitor can see."""
+    client = await _client()
+    body = (await client.get("/")).text
+    guard_body = body[
+        body.index("function guardLockedFrames") : body.index("function attachChangeButtons")
+    ]
+    assert 'addEventListener("click"' in guard_body
+    assert "event.preventDefault()" in guard_body
+    assert 'dataset.locked === "true"' in guard_body
+
+
+async def test_locked_frames_are_visually_dimmed():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'details.frame[data-locked="true"] { opacity:' in body
 
 
 async def test_manifest_callback_handler_present():

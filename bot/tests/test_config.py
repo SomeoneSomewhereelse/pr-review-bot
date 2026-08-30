@@ -226,7 +226,7 @@ def test_every_operational_key_is_a_real_settings_field():
 def test_no_operational_key_lives_in_the_secrets_file():
     """Operational config must not sit in .env, because an agent may never open
     .env -- which is the entire point of the split. Reports NAMES only."""
-    misplaced = _key_names(_REPO_ROOT / ".env") & OPERATIONAL_KEYS
+    misplaced = _key_names(_REPO_ROOT / "bot" / ".env") & OPERATIONAL_KEYS
     assert not misplaced, (
         f"move these keys from .env to .env.config: {sorted(misplaced)}"
     )
@@ -234,7 +234,7 @@ def test_no_operational_key_lives_in_the_secrets_file():
 
 def test_no_unlisted_key_lives_in_the_config_file():
     """Secret-by-default: anything not on the allowlist must stay in .env."""
-    intruders = _key_names(_REPO_ROOT / ".env.config") - OPERATIONAL_KEYS
+    intruders = _key_names(_REPO_ROOT / "bot" / ".env.config") - OPERATIONAL_KEYS
     assert not intruders, (
         f"these keys are not on OPERATIONAL_KEYS and must live in .env: {sorted(intruders)}"
     )
@@ -259,7 +259,7 @@ def test_no_legacy_credential_var_lives_in_the_secrets_file():
     these four names, and vertex's numbered _B64_n/_PATH_n siblings, are
     retired and no Settings field reads them anymore. Reports NAMES only --
     see CLAUDE.md's "Secret handling" section."""
-    names = _key_names(_REPO_ROOT / ".env")
+    names = _key_names(_REPO_ROOT / "bot" / ".env")
     legacy = {
         name
         for name in names

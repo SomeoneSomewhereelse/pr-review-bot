@@ -110,19 +110,31 @@
     gap: 0.5rem;
     padding: 0.9rem 1.1rem;
   }
+  details.frame[data-locked="true"] { opacity: 0.55; }
   details.frame[data-locked="true"] > summary { cursor: not-allowed; color: var(--text-muted); }
   details.frame[data-status="done"] > summary,
   details.frame[data-status="deploy_done"] > summary { cursor: default; color: var(--text); }
   details.frame > summary::-webkit-details-marker { display: none; }
   .frame-title { font-weight: 600; }
   .frame-badge { font-size: 0.85rem; color: var(--text-muted); }
+  /* flex-basis: 100% forces this onto its own line below the title/badge/
+     Change-button row, however long the detail text (an owner name, a URL)
+     gets, instead of wrapping and pushing the Change button down with it. */
+  .frame-detail { flex-basis: 100%; font-size: 0.85rem; color: var(--text-muted); }
   details.frame[data-status="done"] .frame-badge,
-  details.frame[data-status="deploy_done"] .frame-badge { color: var(--ok); }
-  details.frame[data-status="error"] .frame-badge { color: var(--fail); }
+  details.frame[data-status="done"] .frame-detail,
+  details.frame[data-status="deploy_done"] .frame-badge,
+  details.frame[data-status="deploy_done"] .frame-detail { color: var(--ok); }
+  details.frame[data-status="error"] .frame-badge,
+  details.frame[data-status="error"] .frame-detail { color: var(--fail); }
   details.frame[data-status="app_created"] .frame-badge,
+  details.frame[data-status="app_created"] .frame-detail,
   details.frame[data-status="choosing_org"] .frame-badge,
+  details.frame[data-status="choosing_org"] .frame-detail,
   details.frame[data-status="checking"] .frame-badge,
-  details.frame[data-status="provisioning"] .frame-badge { color: var(--accent); }
+  details.frame[data-status="checking"] .frame-detail,
+  details.frame[data-status="provisioning"] .frame-badge,
+  details.frame[data-status="provisioning"] .frame-detail { color: var(--accent); }
   .frame-change {
     display: none;
     background: var(--surface-2);
@@ -135,6 +147,15 @@
   }
   details.frame[data-status="done"] .frame-change { display: inline-block; }
   .frame-body { padding: 0 1.1rem 1.1rem; border-top: 1px solid var(--border); }
+  .install-url {
+    font-family: monospace;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem;
+    word-break: break-all;
+    user-select: all;
+  }
   .frame-body input[type="password"], .frame-body input[type="text"], .frame-body select {
     width: 100%;
     padding: 0.5rem;
@@ -198,6 +219,7 @@
         <span class="frame-title" data-i18n="frame1_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="render-key" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <p data-i18n="frame1_instructions"></p>
@@ -212,6 +234,7 @@
         <span class="frame-title" data-i18n="frame_render_service_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="render-service" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <p data-i18n="frame_render_service_instructions"></p>
@@ -229,6 +252,7 @@
         <span class="frame-title" data-i18n="frame_dashboard_auth_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="dashboard-auth" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <p data-i18n="frame_dashboard_auth_instructions"></p>
@@ -252,6 +276,7 @@
         <span class="frame-title" data-i18n="frame2_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="github-app" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <div id="github-app-create-section">
@@ -262,6 +287,8 @@
         <div id="github-app-install-section" style="display: none;">
           <p data-i18n="frame2_install_instructions"></p>
           <button id="github-app-install-submit" type="button" data-i18n="install_button"></button>
+          <p id="github-app-install-url" class="install-url" style="display: none;"></p>
+          <p id="github-app-install-copied" data-i18n="frame2_install_copied" style="display: none;"></p>
         </div>
         <div id="github-app-webhook-retry-section" style="display: none;">
           <p data-i18n="frame2_webhook_retry_instructions"></p>
@@ -276,6 +303,7 @@
         <span class="frame-title" data-i18n="frame3_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="supabase" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <div id="supabase-connect-section">
@@ -301,6 +329,7 @@
         <span class="frame-title" data-i18n="frame4_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="llm-provider" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <p data-i18n="frame4_instructions"></p>
@@ -326,6 +355,7 @@
         <span class="frame-title" data-i18n="frame5_title"></span>
         <span class="frame-badge"></span>
         <button class="frame-change" type="button" data-frame="uptime-pinger" data-i18n="change_button"></button>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <div id="uptime-pinger-blocked-section">
@@ -344,6 +374,7 @@
       <summary>
         <span class="frame-title" data-i18n="frame6_title"></span>
         <span class="frame-badge"></span>
+        <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
         <div id="render-deploy-trigger-section">
@@ -434,8 +465,9 @@
       frame2_instructions: "Name your GitHub App (must be unique on GitHub), then click Create App. This will be created under whichever GitHub account you're currently logged into in this browser — check that's the right one before continuing.",
       frame2_name_placeholder: "my-pr-review-bot",
       create_app_button: "Create App",
-      frame2_install_instructions: "Your App was created. Now install it on the account/repos you want it to review.",
-      install_button: "Install App",
+      frame2_install_instructions: "Your App was created. Click below to copy the install link, then paste it into this tab's address bar (not a new tab, and don't just click a link) and press Enter to install it on the account/repos you want it to review. GitHub will bring you back here automatically once you're done.",
+      install_button: "Copy Install Link",
+      frame2_install_copied: "Copied! Paste it into this tab's address bar and press Enter.",
       err_github_name_empty: "Name your App first.",
       err_github_callback_invalid: "That didn't come back from GitHub as expected. Please try again.",
       err_github_exchange_failed: "GitHub rejected that — the code may have expired. Try creating the App again.",
@@ -565,8 +597,9 @@
       frame2_instructions: "תנו שם לאפליקציית ה-GitHub שלכם (חייב להיות ייחודי ב-GitHub), ואז לחצו על יצירת אפליקציה. האפליקציה תיווצר תחת חשבון ה-GitHub שאליו אתם מחוברים כרגע בדפדפן זה — ודאו שזה החשבון הנכון לפני שתמשיכו.",
       frame2_name_placeholder: "my-pr-review-bot",
       create_app_button: "יצירת אפליקציה",
-      frame2_install_instructions: "האפליקציה נוצרה. כעת התקינו אותה על החשבון/המאגרים שברצונכם שתבדוק.",
-      install_button: "התקנת אפליקציה",
+      frame2_install_instructions: "האפליקציה נוצרה. לחצו כאן כדי להעתיק את קישור ההתקנה, ואז הדביקו אותו בשורת הכתובת של הלשונית הזו (לא בלשונית חדשה, ולא רק ללחוץ על קישור) ולחצו Enter כדי להתקין אותה על החשבון/המאגרים שברצונכם שתבדוק. GitHub תחזיר אתכם לכאן אוטומטית בסיום.",
+      install_button: "העתקת קישור התקנה",
+      frame2_install_copied: "הועתק! הדביקו אותו בשורת הכתובת של הלשונית הזו ולחצו Enter.",
       err_github_name_empty: "תנו שם לאפליקציה קודם.",
       err_github_callback_invalid: "התגובה מ-GitHub לא הייתה כצפוי. נסו שוב.",
       err_github_exchange_failed: "GitHub דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו ליצור את האפליקציה מחדש.",
@@ -805,6 +838,10 @@
     return frameEl(id).querySelector(".frame-badge");
   }
 
+  function detailEl(id) {
+    return frameEl(id).querySelector(".frame-detail");
+  }
+
   function renderBadge(id) {
     const {status, detailKey, detailValue} = frameState[id];
     const label = t("badge_" + status);
@@ -816,7 +853,13 @@
     // gets translated, and it re-resolves on every render, including after a
     // language switch.
     const detail = detailKey ? `${t(detailKey)}${detailValue ? t(detailValue) : ""}` : "";
-    badgeEl(id).textContent = detail ? `${label} — ${detail}` : label;
+    // Split across two elements, not one: the short label stays in the top
+    // row next to the title and Change button, while the detail (which can
+    // be arbitrarily long -- a URL, an owner name) renders on its own line
+    // below via .frame-detail's flex-basis: 100%, instead of wrapping inline
+    // and pushing the Change button down with it.
+    badgeEl(id).textContent = label;
+    detailEl(id).textContent = detail ? `— ${detail}` : "";
   }
 
   function refreshFrameBadges() {
@@ -1662,6 +1705,14 @@
   }
 
   function installGithubApp() {
+    // Deliberately never navigates there itself (not even via a plain <a
+    // href>) -- a top-level navigation to this URL that carries this page's
+    // origin as Referer was confirmed live to get the visiting GitHub
+    // account suspended for a ToS violation, reproduced across three
+    // separate throwaway accounts, every time right at this install step.
+    // The visitor must copy this link and paste it into their own address
+    // bar (a manually-entered navigation sends no Referer at all) rather
+    // than click anything on this page. See ISSUES.md.
     const stored = readStoredGithubApp();
     if (!stored || !stored.slug) {
       githubAppError("err_github_callback_invalid");
@@ -1669,7 +1720,14 @@
     }
     const state = crypto.randomUUID();
     sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
-    location.href = `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new?state=${encodeURIComponent(state)}`;
+    const url = `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new?state=${encodeURIComponent(state)}`;
+    const urlEl = document.getElementById("github-app-install-url");
+    urlEl.textContent = url;
+    urlEl.style.display = "block";
+    document.getElementById("github-app-install-copied").style.display = "none";
+    navigator.clipboard?.writeText(url).then(() => {
+      document.getElementById("github-app-install-copied").style.display = "block";
+    }).catch(() => {});
   }
 
   async function pushGithubAppToRenderService(stored) {
@@ -2498,6 +2556,16 @@
 
   function guardLockedFrames() {
     document.querySelectorAll(".frame").forEach((el) => {
+      // Prevent the native <details> toggle before it happens -- a locked
+      // frame must never visibly open at all, not open-then-flicker-closed.
+      const summary = el.querySelector("summary");
+      if (summary) {
+        summary.addEventListener("click", (event) => {
+          if (el.dataset.locked === "true") event.preventDefault();
+        });
+      }
+      // Kept as defense-in-depth for any non-click path that can still set
+      // `.open` (e.g. programmatic toggling from outside this guard).
       el.addEventListener("toggle", () => {
         if (el.open && el.dataset.locked === "true") {
           el.open = false;
