@@ -290,10 +290,6 @@
           <p id="github-app-install-url" class="install-url" style="display: none;"></p>
           <p id="github-app-install-copied" data-i18n="frame2_install_copied" style="display: none;"></p>
         </div>
-        <div id="github-app-webhook-retry-section" style="display: none;">
-          <p data-i18n="frame2_webhook_retry_instructions"></p>
-          <button id="github-app-webhook-retry-submit" type="button" data-i18n="retry_button"></button>
-        </div>
         <p id="github-app-error" class="frame-error"></p>
       </div>
     </details>
@@ -474,10 +470,7 @@
       err_github_unreachable: "GitHub is unreachable right now. Try again in a moment.",
       err_github_installation_not_found: "GitHub couldn't find that installation. Try installing again.",
       err_github_invalid_credentials: "GitHub rejected the App's credentials. Try creating the App again.",
-      frame2_webhook_retry_instructions: "Your App and installation are set up, but pointing its webhook at your new instance failed. Click Retry to try again.",
-      retry_button: "Retry",
-      err_github_webhook_invalid_credentials: "GitHub rejected the webhook update. Your App's credentials may have changed — try the Change action above.",
-      err_github_webhook_unreachable: "GitHub's API is unreachable right now. Try again in a moment.",
+      err_github_no_render_service: "Your Render service isn't set up yet, and the App needs its address before it can be created. Complete the Render service step above first.",
       account_prefix: "account: ",
       frame3_instructions: "Name your Supabase project, then click Connect Supabase. This authorizes the wizard to create a new project on your own Supabase account.",
       frame3_name_placeholder: "pr-review-bot",
@@ -606,10 +599,7 @@
       err_github_unreachable: "GitHub אינו זמין כרגע. נסו שוב בעוד רגע.",
       err_github_installation_not_found: "GitHub לא מצא את ההתקנה. נסו להתקין שוב.",
       err_github_invalid_credentials: "GitHub דחה את פרטי האפליקציה. נסו ליצור את האפליקציה מחדש.",
-      frame2_webhook_retry_instructions: "האפליקציה וההתקנה הוגדרו בהצלחה, אך הפניית ה-webhook למופע החדש נכשלה. לחץ על נסה שוב.",
-      retry_button: "נסה שוב",
-      err_github_webhook_invalid_credentials: "GitHub דחה את עדכון ה-webhook. ייתכן שפרטי האפליקציה השתנו — נסה את פעולת השינוי למעלה.",
-      err_github_webhook_unreachable: "ה-API של GitHub אינו זמין כרגע. נסה שוב בעוד רגע.",
+      err_github_no_render_service: "שירות ה-Render שלכם עדיין לא הוגדר, והאפליקציה זקוקה לכתובת שלו לפני שניתן ליצור אותה. השלימו קודם את שלב שירות ה-Render למעלה.",
       account_prefix: "חשבון: ",
       frame3_instructions: "תנו שם לפרויקט ה-Supabase שלכם, ואז לחצו על חיבור Supabase. פעולה זו מאשרת לאשף ליצור פרויקט חדש בחשבון ה-Supabase שלכם.",
       frame3_name_placeholder: "pr-review-bot",
@@ -1595,12 +1585,19 @@
     }
   }
 
-  function buildManifest(appName) {
+  function buildManifest(appName, webhookUrl) {
     return {
       name: appName,
       url: window.ONBOARDING_BASE_URL,
       public: false,
-      hook_attributes: {url: "https://example.invalid/webhook", active: true},
+      // The App's real, final webhook URL, known already because the
+      // Render-service frame (position 2) completes two frames before this
+      // one. Creating the App pointed straight at its destination is what
+      // bot/scripts/create_github_app.py has always done for the CLI path;
+      // the wizard used to send a placeholder and correct it afterwards with
+      // a PATCH /app/hook/config, which was a leftover from when the
+      // Render-service frame did not exist yet.
+      hook_attributes: {url: webhookUrl, active: true},
       redirect_url: `${window.ONBOARDING_BASE_URL}/?gh_step=manifest`,
       setup_url: `${window.ONBOARDING_BASE_URL}/?gh_step=install`,
       default_events: MANIFEST_EVENTS,
@@ -1634,10 +1631,16 @@
 
   function resetGithubAppCreateSection() {
     document.getElementById("github-app-install-section").style.display = "none";
-    document.getElementById("github-app-webhook-retry-section").style.display = "none";
     document.getElementById("github-app-create-section").style.display = "block";
     document.getElementById("github-app-error").textContent = "";
-    document.getElementById("github-app-webhook-retry-submit").disabled = false;
+    // Clear the previous App's install link too -- it is slug-specific, and
+    // hiding only its container would leave it on screen (still display:
+    // block from the last run) the moment the install section reappears for
+    // the newly created App.
+    const urlEl = document.getElementById("github-app-install-url");
+    urlEl.textContent = "";
+    urlEl.style.display = "none";
+    document.getElementById("github-app-install-copied").style.display = "none";
     currentGithubAppErrorKey = null;
   }
 
@@ -1656,9 +1659,22 @@
       githubAppError("err_github_name_empty");
       return;
     }
+    // Hard precondition now that the webhook URL is baked into the manifest
+    // rather than patched in afterwards: without it we would mint an App
+    // permanently pointed at nothing. The manifest code is single-use, so
+    // there is no second chance to fix it -- refuse up front instead.
+    // Unreachable in normal sequential flow (the Render-service frame
+    // completes two frames earlier); this guards the same corrupted /
+    // hand-edited sessionStorage case the UptimeRobot frame's own
+    // blocked-state check exists for.
+    const renderService = readStoredRenderService();
+    if (!renderService || !renderService.service_url) {
+      githubAppError("err_github_no_render_service");
+      return;
+    }
     const state = crypto.randomUUID();
     sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
-    submitManifestForm(buildManifest(name), state);
+    submitManifestForm(buildManifest(name, `${renderService.service_url}/webhook`), state);
   }
 
   async function handleGithubManifestCallback() {
@@ -1761,72 +1777,19 @@
     delete stored.webhook_secret;
   }
 
-  async function setGithubWebhookUrl(stored) {
-    const renderService = readStoredRenderService();
-    if (!renderService || !renderService.service_url) {
-      return {ok: false, reason: "github_unreachable"};
-    }
-    let resp;
-    try {
-      resp = await fetch("/api/github/set-webhook-url", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          app_id: stored.app_id,
-          private_key_b64: stored.private_key_b64,
-          url: `${renderService.service_url}/webhook`,
-        }),
-      });
-    } catch (err) {
-      return {ok: false, reason: "github_unreachable"};
-    }
-    let body;
-    try {
-      if (!resp.ok) throw new Error("bad status");
-      body = await resp.json();
-    } catch (err) {
-      return {ok: false, reason: "github_unreachable"};
-    }
-    if (!body.valid) return {ok: false, reason: body.reason};
-    return {ok: true};
-  }
-
-  function showGithubWebhookRetry(reason) {
-    document.getElementById("github-app-install-section").style.display = "none";
-    document.getElementById("github-app-webhook-retry-section").style.display = "block";
-    githubAppError(
-      reason === "invalid_credentials"
-        ? "err_github_webhook_invalid_credentials"
-        : "err_github_webhook_unreachable"
-    );
-  }
-
   async function finishGithubAppSetup(stored, accountLogin) {
-    const webhookResult = await setGithubWebhookUrl(stored);
-    if (!webhookResult.ok) {
-      showGithubWebhookRetry(webhookResult.reason);
-      return;
-    }
+    // No webhook-correction step: the App was created already pointing at
+    // the right URL (see buildManifest), so all that is left is the
+    // best-effort push-and-clear every other frame does.
     await pushGithubAppToRenderService(stored);
     // Explicit flag, not inferred from installation_id's mere presence --
     // that field is written earlier (handleGithubInstallCallback, before
     // this function even runs) and would otherwise make restoreFromSession()
-    // treat a webhook-set failure as a completed frame on reload. Same
-    // pattern as the Supabase frame's own `completed` flag.
+    // treat an interrupted push-and-clear as a completed frame on reload.
+    // Same pattern as the Supabase frame's own `completed` flag.
     stored.completed = true;
     sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
     completeFrame("github-app", "account_prefix", accountLogin);
-  }
-
-  async function retryGithubWebhookSetup() {
-    const stored = readStoredGithubApp();
-    if (!stored || !stored.account_login) return;
-    document.getElementById("github-app-error").textContent = "";
-    currentGithubAppErrorKey = null;
-    const retryBtn = document.getElementById("github-app-webhook-retry-submit");
-    if (retryBtn) retryBtn.disabled = true;
-    await finishGithubAppSetup(stored, stored.account_login);
-    if (retryBtn) retryBtn.disabled = false;
   }
 
   async function handleGithubInstallCallback() {
@@ -2519,11 +2482,10 @@
     if (githubApp && githubApp.completed) {
       completeFrame("github-app", "restored", null);
     } else if (githubApp && githubApp.installation_id) {
-      // Installed, but the webhook-correction/push-and-clear step never
-      // finished (e.g. a reload right after a webhook-set failure) --
-      // resume it rather than falsely marking the frame done, the same way
-      // the Supabase branch below resumes an interrupted poll instead of
-      // completing on partial data.
+      // Installed, but the push-and-clear step never finished (e.g. a reload
+      // in the middle of it) -- resume it rather than falsely marking the
+      // frame done, the same way the Supabase branch below resumes an
+      // interrupted poll instead of completing on partial data.
       frameEl("github-app").open = true;
       finishGithubAppSetup(githubApp, githubApp.account_login);
     } else if (githubApp) {
@@ -2624,7 +2586,6 @@
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
     document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
-    document.getElementById("github-app-webhook-retry-submit").addEventListener("click", retryGithubWebhookSetup);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);

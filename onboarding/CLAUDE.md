@@ -384,26 +384,35 @@ section 3), not an oversight to fix.
   unchanged and NOT dead code: they remain a correctness safeguard for a
   corrupted or manually-manipulated `sessionStorage` state, not something
   this sub-project needed or was asked to remove.
-- **The GitHub App's webhook URL is corrected in frame 3 (GitHub), not
-  in the "Render service" or "Finish & Deploy" frames**, even though the
-  correction logically depends on the Render service already existing.
-  This is the one point in the whole flow where the private key (needed to
-  sign the webhook-update's App JWT) and the deployed service URL are both
-  available at once — `pushGithubAppToRenderService`'s later push-and-clear
-  step deletes the private key, so the webhook correction must happen
-  first. A failed webhook-set does NOT push-and-clear or complete the
-  frame; it shows a retry affordance instead, since retrying the whole
-  GitHub install flow is not otherwise reachable from that state.
+- **The GitHub App is created already pointing at its real webhook URL —
+  there is no webhook-correction step (2026-08-31).** `buildManifest()`
+  reads the Render service's URL out of `sessionStorage` and puts
+  `<service_url>/webhook` straight into `hook_attributes`, exactly as
+  `bot/scripts/create_github_app.py` has always done for the CLI path.
+  Earlier this frame sent a `https://example.invalid/webhook` placeholder
+  and corrected it afterwards via `PATCH /app/hook/config` — that was a
+  sub-project-2 leftover from when the Render-service frame did not exist
+  yet and no real URL was knowable at creation time. The Render-service
+  frame now completes two frames earlier, so it is. Removing it took the
+  `/api/github/set-webhook-url` endpoint, `github_client.set_webhook_url`,
+  and the whole webhook-retry section/strings with it; do not reintroduce
+  half of that flow.
+  **The consequence for `createGithubApp()` is a hard precondition:** a
+  missing `service_url` now aborts App creation
+  (`err_github_no_render_service`) instead of falling back to a
+  placeholder. This matters because the manifest code is single-use — an
+  App created with the wrong URL could not be corrected, only recreated.
+  Normal sequential flow can't hit it; it guards the same corrupted /
+  hand-edited `sessionStorage` case the UptimeRobot frame's blocked-state
+  check exists for.
   **The stored record's `completed` flag (not `installation_id`'s mere
   presence) is what `restoreFromSession()` gates the frame's "done" state
   on** (2026-08-28 fix, see `ISSUES.md`) — `installation_id` is written
-  before the webhook-set/push-and-clear step runs, so gating on it let a
-  reload right after a webhook-set failure falsely mark the frame done
-  with the webhook still pointed at the manifest's placeholder URL. On a
-  reload with `installation_id` set but `completed` still false,
-  `restoreFromSession()` re-invokes `finishGithubAppSetup` itself rather
-  than showing a dead end — same auto-resume shape as the Supabase branch
-  beside it.
+  before the push-and-clear step runs, so gating on it let a reload
+  mid-push falsely mark the frame done. On a reload with `installation_id`
+  set but `completed` still false, `restoreFromSession()` re-invokes
+  `finishGithubAppSetup` itself rather than showing a dead end — same
+  auto-resume shape as the Supabase branch beside it.
 
 ## What the "Dashboard login" frame (bounded addition, 2026-08-28) adds to these rules
 

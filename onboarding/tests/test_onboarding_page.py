@@ -1217,37 +1217,60 @@ async def test_push_helpers_skip_entirely_without_a_render_service():
     )
 
 
-async def test_set_webhook_url_fetch_leaves_the_page_exactly_once():
+async def test_manifest_carries_the_real_webhook_url_not_a_placeholder():
+    """The App is created already pointing at the visitor's own Render
+    service, the way bot/scripts/create_github_app.py has always done it.
+    The old placeholder-then-PATCH flow existed only because this frame
+    predated the Render-service frame that now runs two frames earlier."""
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/github/set-webhook-url"') == 1
+    assert "example.invalid" not in body
+    assert "hook_attributes: {url: webhookUrl, active: true}" in body
+    assert "buildManifest(name, `${renderService.service_url}/webhook`)" in body
 
 
-async def test_webhook_retry_section_markup_present():
+async def test_app_creation_refuses_without_a_render_service_url():
+    """The manifest code is single-use, so an App created without the real
+    URL could never be corrected -- refuse before creating it rather than
+    minting one permanently pointed at nothing."""
     client = await _client()
     body = (await client.get("/")).text
-    assert 'id="github-app-webhook-retry-section"' in body
-    assert 'id="github-app-webhook-retry-submit"' in body
+    create_fn = body[
+        body.index("function createGithubApp") : body.index(
+            "async function handleGithubManifestCallback"
+        )
+    ]
+    assert "if (!renderService || !renderService.service_url) {" in create_fn
+    assert 'githubAppError("err_github_no_render_service");' in create_fn
+    assert body.count("err_github_no_render_service:") == 2  # STRINGS.en + STRINGS.he
 
 
-async def test_webhook_set_gates_frame_completion_before_push_and_clear():
-    # setGithubWebhookUrl must be awaited, and its failure path must return
-    # before pushGithubAppToRenderService/completeFrame ever run -- this is
-    # the ordering that keeps the private key available for a retry.
+async def test_render_service_frame_precedes_the_github_app_frame():
+    """Load-bearing ordering, not cosmetic: the App's webhook URL is fixed at
+    creation time from the Render service's URL, so that URL must already
+    exist by the time this frame runs. Reordering these two would make every
+    App get created with no webhook URL available."""
     client = await _client()
     body = (await client.get("/")).text
-    assert "await finishGithubAppSetup(stored, body.account_login);" in body
-    assert "if (!webhookResult.ok) {" in body
+    order = body[body.index("const FRAME_ORDER = [") :]
+    order = order[: order.index("];")]
+    assert order.index('"render-service"') < order.index('"github-app"')
 
 
-async def test_webhook_retry_i18n_strings_present_in_both_languages():
+async def test_webhook_patch_flow_is_fully_removed():
+    """Endpoint, client call, retry UI and its strings all go together --
+    a leftover half of this flow is worse than either whole."""
     client = await _client()
     body = (await client.get("/")).text
-    keys = [
+    for gone in (
+        "/api/github/set-webhook-url",
+        "setGithubWebhookUrl",
+        "github-app-webhook-retry-section",
+        "github-app-webhook-retry-submit",
+        "retryGithubWebhookSetup",
         "frame2_webhook_retry_instructions",
         "retry_button",
         "err_github_webhook_invalid_credentials",
         "err_github_webhook_unreachable",
-    ]
-    for key in keys:
-        assert body.count(f"{key}:") == 2, f"{key} should appear once in en and once in he"
+    ):
+        assert gone not in body, f"{gone} survived the webhook-patch removal"

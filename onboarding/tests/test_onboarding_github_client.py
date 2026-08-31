@@ -7,6 +7,7 @@ sections 3-4."""
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import time
 
@@ -95,6 +96,23 @@ async def test_exchange_sends_no_authorization_header():
         )
         await github_client.exchange_manifest_code(CODE)
     assert "authorization" not in {h.lower() for h in route.calls.last.request.headers}
+
+
+async def test_exchange_sends_a_descriptive_user_agent():
+    """GitHub's API guidelines require a User-Agent naming the application.
+    httpx's default is a bare "python-httpx/<version>" -- the generic-library
+    shape those guidelines call out and anti-scraping heuristics score worst."""
+    with respx.mock:
+        route = respx.post(CONVERSIONS_URL).mock(
+            return_value=httpx.Response(
+                201,
+                json={"id": 1, "slug": "x", "pem": "pem", "webhook_secret": "whsec"},
+            )
+        )
+        await github_client.exchange_manifest_code(CODE)
+    sent = route.calls.last.request.headers["user-agent"]
+    assert sent == github_client.USER_AGENT
+    assert "httpx" not in sent
 
 
 @pytest.fixture(scope="module")
@@ -224,44 +242,12 @@ async def test_installation_response_missing_expected_fields_is_unreachable(
     assert result == github_client.InstallationInvalid(reason="github_unreachable")
 
 
-async def test_set_webhook_url_succeeds(fake_transport, _throwaway_key_material):
-    fake_transport.route("PATCH", "/app/hook/config", {"url": "https://x.onrender.com/webhook"})
-    result = await github_client.set_webhook_url(
-        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
-    )
-    assert result == github_client.WebhookUrlSet()
-
-
-async def test_set_webhook_url_unauthorized_is_invalid_credentials(
-    fake_transport, _throwaway_key_material
-):
-    fake_transport.route("PATCH", "/app/hook/config", {"message": "Bad credentials"}, 401)
-    result = await github_client.set_webhook_url(
-        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
-    )
-    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
-
-
-async def test_set_webhook_url_not_found_is_invalid_credentials(
-    fake_transport, _throwaway_key_material
-):
-    fake_transport.route("PATCH", "/app/hook/config", {"message": "Not Found"}, 404)
-    result = await github_client.set_webhook_url(
-        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
-    )
-    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
-
-
-async def test_set_webhook_url_server_error_is_unreachable(fake_transport, _throwaway_key_material):
-    fake_transport.route("PATCH", "/app/hook/config", {}, 500)
-    result = await github_client.set_webhook_url(
-        app_id=999, private_key_b64=_throwaway_key_material, url="https://x.onrender.com/webhook"
-    )
-    assert result == github_client.WebhookUrlSetFailed(reason="github_unreachable")
-
-
-async def test_set_webhook_url_malformed_base64_private_key_is_invalid_credentials():
-    result = await github_client.set_webhook_url(
-        app_id=999, private_key_b64="not-valid-base64!!", url="https://x.onrender.com/webhook"
-    )
-    assert result == github_client.WebhookUrlSetFailed(reason="invalid_credentials")
+def test_no_webhook_patch_helper_exists():
+    """The wizard bakes the App's real webhook URL into the manifest at
+    creation time, so there is nothing to correct afterwards. A
+    PATCH /app/hook/config helper reappearing here means the placeholder-
+    then-patch flow came back -- bot/github_app.py keeps its own
+    operator-side set_webhook_url for the CLI/deploy path, which is
+    unrelated and stays."""
+    assert not hasattr(github_client, "set_webhook_url")
+    assert "/app/hook/config" not in inspect.getsource(github_client)
