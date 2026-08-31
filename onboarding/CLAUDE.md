@@ -132,9 +132,15 @@ section 3), not an oversight to fix.
   (`GET /app/installations/{id}`, which 404s for anything that is not this
   App's installation), and the frame stays locked unless that passes — so
   the id is never trusted on its face, which is what GitHub's own setup-URL
-  docs require. The `setup_url` return is kept purely to pre-fill the input
-  when GitHub does happen to redirect; that value goes through the identical
-  verification, never around it. Do not "simplify" this into trusting the
+  docs require. **The manifest no longer sends a `setup_url` at all
+  (2026-08-31)** — the install is manual, GitHub's own UI does not redirect
+  back to this page afterward, and the "Setup URL (optional)" field this
+  used to populate served no purpose once the wizard stopped offering any
+  route to the install page in the first place. `handleGithubInstallReturn`
+  (pre-fills the installation-id box from a `?gh_step=install` redirect) is
+  consequently unreachable in normal flow and kept only as a defensive
+  no-op for a hand-constructed URL; its verification path is unchanged and
+  still never trusted on its face. Do not "simplify" this into trusting the
   redirect parameter, and do not drop the gate: `GITHUB_APP_INSTALLATION_ID`
   has no other source in this flow, and `bot/config.py` defaults it to `0`,
   which authenticates as nothing.
