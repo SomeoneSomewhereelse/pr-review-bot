@@ -17,12 +17,6 @@ from onboarding.router import router
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not settings.public_base_url:
-        raise RuntimeError(
-            "PUBLIC_BASE_URL is unset — refusing to start. Frame 2's GitHub "
-            "App manifest needs this service's own real public URL to build "
-            "redirect_url/setup_url; without it the manifest flow cannot work."
-        )
     if not settings.supabase_oauth_client_id:
         raise RuntimeError(
             "SUPABASE_OAUTH_CLIENT_ID is unset — refusing to start. Frame 3's "

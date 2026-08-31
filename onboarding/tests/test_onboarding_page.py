@@ -416,11 +416,22 @@ async def test_frame3_strings_present_in_both_languages():
     assert body.count("connect_supabase_button:") == 2  # STRINGS.en + STRINGS.he
 
 
-async def test_oauth_callback_handler_present():
+async def test_oauth_callback_is_routed_by_path_not_a_query_flag():
+    """Supabase matches registered redirect URIs exactly, and a query string
+    is the part most likely to be normalised away or mis-registered -- one
+    trailing-slash difference was enough to break this (see ISSUES.md). The
+    callback is a bare path, and the same URI is relayed to the exchange so
+    the two OAuth legs cannot disagree."""
     client = await _client()
     body = (await client.get("/")).text
     assert "async function handleSupabaseOauthCallback" in body
-    assert "supabase_step" in body
+    assert "supabase_step" not in body
+    assert (
+        "window.SUPABASE_OAUTH_REDIRECT_URI = "
+        "`${location.origin}/oauth/supabase/callback`;"
+    ) in body
+    assert 'location.pathname !== "/oauth/supabase/callback"' in body
+    assert "redirect_uri: window.SUPABASE_OAUTH_REDIRECT_URI," in body
 
 
 async def test_pkce_challenge_uses_sha256():

@@ -7,7 +7,7 @@ from __future__ import annotations
 from httpx import ASGITransport, AsyncClient
 
 from onboarding import github_client, llm_client, render_client, supabase_client, uptimerobot_client
-from onboarding.config import Settings, settings
+from onboarding.config import settings
 from onboarding.main import app
 
 SENTINEL_KEY = "rnd_SENTINEL_DO_NOT_LOG_9f3a"
@@ -98,30 +98,25 @@ async def test_validation_error_never_echoes_the_submitted_key():
     assert "input" not in resp.text
 
 
-async def test_index_serves_configured_base_url(monkeypatch):
-    """Exercises the REAL onboarding/static/index.html, which carries the
-    __ONBOARDING_BASE_URL__ token as of Task 5 — no _INDEX_HTML stand-in, so
-    the page a visitor actually gets is what's under test."""
-    monkeypatch.setattr(settings, "public_base_url", "https://onboarding.example.com")
+async def test_index_derives_its_base_url_in_the_browser():
+    """No __ONBOARDING_BASE_URL__ token and no templated value: the page reads
+    location.origin, which the browser already knows exactly. A hand-set env
+    var was a second source of truth for the same fact and the two drifted --
+    one trailing slash broke the Supabase OAuth leg (see ISSUES.md)."""
     client = await _client()
     resp = await client.get("/")
-    assert 'window.ONBOARDING_BASE_URL = "https://onboarding.example.com";' in resp.text
     assert "__ONBOARDING_BASE_URL__" not in resp.text
+    assert "window.ONBOARDING_BASE_URL = location.origin;" in resp.text
 
 
-async def test_index_never_serves_a_trailing_slash_base_url(monkeypatch):
-    """End-to-end cover for onboarding/config.py's normalization, through the
-    real page: index.html's buildManifest() appends `/?gh_step=...` to this
-    value, so a surviving trailing slash would produce a `//?gh_step=...`
-    redirect_url that Starlette will not route back to `/` — a 404 arriving
-    only AFTER the visitor has created a real GitHub App whose one-time
-    credentials are then unrecoverable."""
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://onboarding.example.com/")
-    monkeypatch.setattr(settings, "public_base_url", Settings().public_base_url)
+async def test_supabase_oauth_callback_path_serves_the_same_page():
+    """The redirect URI is a bare path so Supabase's exact matching has no
+    query string to normalise away. It has to actually route."""
     client = await _client()
-    resp = await client.get("/")
-    assert 'window.ONBOARDING_BASE_URL = "https://onboarding.example.com";' in resp.text
-    assert 'https://onboarding.example.com/"' not in resp.text
+    resp = await client.get("/oauth/supabase/callback")
+    assert resp.status_code == 200
+    assert "window.ONBOARDING_BASE_URL = location.origin;" in resp.text
+    assert resp.text == (await client.get("/")).text
 
 
 async def test_index_csp_allows_form_post_to_github():
@@ -262,7 +257,9 @@ async def test_index_serves_configured_supabase_oauth_client_id(monkeypatch):
 async def test_exchange_oauth_code_returns_tokens(monkeypatch):
     async def fake_exchange(code, code_verifier, redirect_uri):
         assert (code, code_verifier) == ("SENTINEL_CODE", "SENTINEL_VERIFIER")
-        assert redirect_uri.endswith("/?supabase_step=oauth_callback")
+        # Relayed verbatim from the browser, so the authorize and token legs
+        # cannot disagree about it.
+        assert redirect_uri == "https://onboarding.example.com/oauth/supabase/callback"
         return supabase_client.SupabaseTokens(
             access_token="at", refresh_token="rt", expires_in=3600
         )
@@ -271,7 +268,11 @@ async def test_exchange_oauth_code_returns_tokens(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/supabase/exchange-oauth-code",
-        json={"code": "SENTINEL_CODE", "code_verifier": "SENTINEL_VERIFIER"},
+        json={
+            "code": "SENTINEL_CODE",
+            "code_verifier": "SENTINEL_VERIFIER",
+            "redirect_uri": "https://onboarding.example.com/oauth/supabase/callback",
+        },
     )
     assert resp.status_code == 200
     assert resp.json() == {
@@ -289,7 +290,12 @@ async def test_exchange_oauth_code_reports_failure_reason(monkeypatch):
     monkeypatch.setattr(supabase_client, "exchange_oauth_code", fake_exchange)
     client = await _client()
     resp = await client.post(
-        "/api/supabase/exchange-oauth-code", json={"code": "bad", "code_verifier": "v"}
+        "/api/supabase/exchange-oauth-code",
+        json={
+            "code": "bad",
+            "code_verifier": "v",
+            "redirect_uri": "https://onboarding.example.com/oauth/supabase/callback",
+        },
     )
     assert resp.json() == {"valid": False, "reason": "invalid_code"}
 

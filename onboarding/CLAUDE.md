@@ -139,6 +139,34 @@ section 3), not an oversight to fix.
   has no other source in this flow, and `bot/config.py` defaults it to `0`,
   which authenticates as nothing.
 
+- **There is no `public_base_url` setting, and the page's base URL is never
+  templated in from the server (2026-08-31).** `index.html` derives it from
+  `location.origin`, which the browser already knows exactly and which is by
+  definition the origin GitHub and Supabase redirect back to. The old
+  hand-set `PUBLIC_BASE_URL` was a second source of truth for the same fact,
+  and the two drifted: the env var read `https://host` while the page was
+  served at `https://host/`, which broke Supabase's OAuth leg outright with
+  `redirect_uri not allowed`. Do not reintroduce the setting, its validator,
+  or the lifespan check without a use the browser genuinely cannot serve
+  itself — removing it also removed a raw-substitution injection surface, so
+  `supabase_oauth_client_id` is now the only value templated into the page's
+  `<script>` and keeps its own validator for exactly that reason.
+- **Supabase's OAuth callback is a bare path (`/oauth/supabase/callback`),
+  never a query flag.** Supabase matches registered redirect URIs exactly,
+  and a query string is the part most likely to be normalised away or
+  mis-registered. `router.py` serves the same document on that path as on
+  `/`, and the page routes on `location.pathname`. This is deliberately
+  *not* the pattern the GitHub legs use (`?gh_step=manifest`,
+  `?gh_step=install`): those are GitHub App config URLs, not OAuth
+  `redirect_uri`s, so they are not subject to the same exact matching.
+- **The browser sends the exact `redirect_uri` it used to
+  `exchange-oauth-code`, rather than the server rebuilding it.** OAuth
+  requires the authorize and token legs to agree byte-for-byte, and deriving
+  them independently on two sides is how they drift apart. Supabase
+  validates the value against the app's registered list, so accepting it
+  from the caller cannot redirect anything anywhere; the field still carries
+  a shape check so no arbitrary string is relayed outbound.
+
 ## What sub-project 3 (Supabase provisioning) adds to these rules
 
 - **`SUPABASE_OAUTH_CLIENT_ID`/`SUPABASE_OAUTH_CLIENT_SECRET` are this

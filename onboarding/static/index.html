@@ -432,7 +432,15 @@
   </main>
 
 <script>
-  window.ONBOARDING_BASE_URL = "__ONBOARDING_BASE_URL__";
+  // Derived from the page's own origin, never templated in from an env var.
+  // A hand-set PUBLIC_BASE_URL is a second source of truth for something the
+  // browser already knows exactly, and the two drift: one differing by a
+  // trailing slash was enough to break the Supabase OAuth leg outright.
+  // location.origin is already normalised (scheme + host + port, no trailing
+  // slash), and it is by definition the origin GitHub and Supabase will be
+  // redirecting back to.
+  window.ONBOARDING_BASE_URL = location.origin;
+  window.SUPABASE_OAUTH_REDIRECT_URI = `${location.origin}/oauth/supabase/callback`;
   window.SUPABASE_OAUTH_CLIENT_ID = "__SUPABASE_OAUTH_CLIENT_ID__";
 
   const STRINGS = {
@@ -2070,7 +2078,7 @@
       supabaseError("err_supabase_storage_failed");
       return;
     }
-    const redirectUri = `${window.ONBOARDING_BASE_URL}/?supabase_step=oauth_callback`;
+    const redirectUri = window.SUPABASE_OAUTH_REDIRECT_URI;
     const params = new URLSearchParams({
       client_id: window.SUPABASE_OAUTH_CLIENT_ID,
       redirect_uri: redirectUri,
@@ -2083,9 +2091,13 @@
   }
 
   async function handleSupabaseOauthCallback() {
+    // Routed on the pathname, not a query flag: Supabase matches registered
+    // redirect URIs exactly, and a query string is the part most likely to be
+    // normalised away or mis-registered (see ISSUES.md). Restores the URL to
+    // "/" afterwards so a reload does not re-enter this handler.
+    if (location.pathname !== "/oauth/supabase/callback") return;
     const params = new URLSearchParams(location.search);
-    if (params.get("supabase_step") !== "oauth_callback") return;
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(null, "", "/");
     // Same defensive shape as readStoredGithubApp()/readStoredSupabase()
     // above -- a corrupted/foreign-shaped stored value must never throw out
     // of this handler, which would otherwise leave the visitor back from
@@ -2107,7 +2119,12 @@
       resp = await fetch("/api/supabase/exchange-oauth-code", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({code: code, code_verifier: pending.verifier}),
+        // The same URI the authorize leg used, so the two cannot disagree.
+        body: JSON.stringify({
+          code: code,
+          code_verifier: pending.verifier,
+          redirect_uri: window.SUPABASE_OAUTH_REDIRECT_URI,
+        }),
       });
     } catch (err) {
       supabaseError("err_network");

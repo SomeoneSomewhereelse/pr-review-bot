@@ -44,8 +44,17 @@ class GithubInstallVerifyRequest(BaseModel):
 
 
 class SupabaseExchangeCodeRequest(BaseModel):
+    # The browser sends back the exact redirect_uri it used on the authorize
+    # leg. OAuth requires the two to match byte-for-byte, and deriving them
+    # separately (browser from its own origin, server from a hand-set env
+    # var) is precisely how they drift apart — a trailing slash was enough to
+    # break this in practice. Supabase validates the value against the app's
+    # registered list regardless, so accepting it from the caller cannot
+    # redirect anything anywhere; the shape check is to avoid relaying
+    # arbitrary junk outbound.
     code: str = Field(max_length=512)
     code_verifier: str = Field(max_length=256)
+    redirect_uri: str = Field(min_length=1, max_length=2048, pattern=r"^https?://[^\s\"'<>\\]+$")
 
 
 class SupabaseRefreshTokenRequest(BaseModel):
@@ -172,10 +181,15 @@ _LLM_ENV_VAR_NAMES = {
 }
 
 
-@router.get("/", response_class=HTMLResponse)
-async def index() -> HTMLResponse:
-    html = _INDEX_HTML.replace("__ONBOARDING_BASE_URL__", settings.public_base_url)
-    html = html.replace("__SUPABASE_OAUTH_CLIENT_ID__", settings.supabase_oauth_client_id)
+# Supabase's OAuth app registration matches redirect URIs exactly, so the
+# callback is a bare path: no query string to be normalised or dropped, and
+# no trailing-slash ambiguity. The wizard is a single page, so this route
+# serves the same document as "/" and the page routes on its own pathname.
+SUPABASE_OAUTH_CALLBACK_PATH = "/oauth/supabase/callback"
+
+
+def _render_index() -> HTMLResponse:
+    html = _INDEX_HTML.replace("__SUPABASE_OAUTH_CLIENT_ID__", settings.supabase_oauth_client_id)
     return HTMLResponse(
         html,
         headers={
@@ -188,6 +202,16 @@ async def index() -> HTMLResponse:
             "Referrer-Policy": "no-referrer",
         },
     )
+
+
+@router.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    return _render_index()
+
+
+@router.get(SUPABASE_OAUTH_CALLBACK_PATH, response_class=HTMLResponse)
+async def supabase_oauth_callback() -> HTMLResponse:
+    return _render_index()
 
 
 @router.post("/api/render/validate-key")
@@ -228,9 +252,8 @@ async def verify_github_installation(payload: GithubInstallVerifyRequest) -> dic
 
 @router.post("/api/supabase/exchange-oauth-code")
 async def exchange_supabase_oauth_code(payload: SupabaseExchangeCodeRequest) -> dict:
-    redirect_uri = f"{settings.public_base_url}/?supabase_step=oauth_callback"
     result = await supabase_client.exchange_oauth_code(
-        payload.code, payload.code_verifier, redirect_uri
+        payload.code, payload.code_verifier, payload.redirect_uri
     )
     if isinstance(result, supabase_client.SupabaseTokens):
         return {
