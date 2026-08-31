@@ -115,7 +115,7 @@ class SupabaseOrgsListed:
 class SupabaseApiFailed:
     reason: str
     # "unauthorized" | "forbidden" | "rate_limited" | "supabase_unreachable"
-    # | "pooler_config_unavailable" (Task 4 only)
+    # | "pooler_config_unavailable" | "pooler_not_ready" (connection-info only)
 
 
 SupabaseOrgsResult = SupabaseOrgsListed | SupabaseApiFailed
@@ -288,6 +288,11 @@ async def get_connection_info(
 
     try:
         entries = response.json()
+    except ValueError:
+        print("[DEBUG connection-info] response body did not parse as JSON")
+        return SupabaseApiFailed(reason="pooler_config_unavailable")
+
+    try:
         matched = next(
             e
             for e in entries
@@ -298,6 +303,14 @@ async def get_connection_info(
         db_port = int(matched["db_port"])
         db_name = str(matched["db_name"])
     except (ValueError, KeyError, TypeError, StopIteration, AttributeError):
+        # TEMPORARY diagnostic (remove once the pool_mode/database_type
+        # mismatch this is chasing is found) — logs only the two label
+        # fields being matched on, never db_user/db_host/connection_string.
+        try:
+            shapes = [(e.get("pool_mode"), e.get("database_type")) for e in entries]
+        except (TypeError, AttributeError):
+            shapes = f"entries was not a list of objects: {entries!r:.200}"
+        print(f"[DEBUG connection-info] no session/PRIMARY match; entries seen: {shapes}")
         return SupabaseApiFailed(reason="pooler_config_unavailable")
     return SupabaseConnectionInfo(
         db_user=db_user, db_host=db_host, db_port=db_port, db_name=db_name
