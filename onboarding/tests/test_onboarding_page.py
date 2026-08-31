@@ -151,33 +151,60 @@ async def test_frame2_strings_present_in_both_languages():
         "err_github_name_empty",
         "err_github_callback_invalid",
         "err_github_exchange_failed",
-        "frame2_install_copied",
+        "frame2_install_fallback",
     ):
         assert f"{key}:" in body
     assert body.count("create_app_button:") == 2  # STRINGS.en + STRINGS.he
-    assert body.count("frame2_install_copied:") == 2  # STRINGS.en + STRINGS.he
+    assert body.count("frame2_install_fallback:") == 2  # STRINGS.en + STRINGS.he
 
 
-async def test_install_link_is_copied_not_auto_navigated():
-    """A top-level navigation to the install URL that carries this page's
-    origin as Referer was confirmed live to get the visiting GitHub account
-    suspended for a ToS violation, reproduced across three separate throwaway
-    accounts, every time right at this install step (see ISSUES.md). Neither
-    a script-driven `location.href` redirect nor a plain `<a href>` may
-    target that URL -- the visitor must copy it and paste it into their own
-    address bar themselves, which sends no Referer at all."""
+async def test_install_link_suppresses_the_referer_and_never_auto_navigates():
+    """An automatic location.href redirect to the install URL was confirmed
+    live to get the visiting GitHub account suspended, three times across
+    three throwaway accounts (see ISSUES.md). The narrowed retry keeps the
+    navigation but strips the Referer, so GitHub never sees this page's
+    origin. Both halves matter: no script-driven navigation anywhere, and
+    both referrer attributes present on the anchor."""
     client = await _client()
     body = (await client.get("/")).text
-    install_fn = body[
-        body.index("function installGithubApp") : body.index(
+    render_fn = body[
+        body.index("function renderGithubAppInstallLink") : body.index(
             "async function pushGithubAppToRenderService"
         )
     ]
-    assert "location.href" not in install_fn
-    assert "<a " not in install_fn
-    assert "navigator.clipboard" in install_fn
+    # The assignment form specifically -- the prose above mentions the bare
+    # attribute name, and only an assignment/call actually navigates.
+    assert "location.href =" not in render_fn
+    assert "location.assign" not in render_fn
+    assert "location.replace" not in render_fn
+    assert "installations/new?state=" in render_fn
+
+    anchor = body[body.index('<a id="github-app-install-submit"') :]
+    anchor = anchor[: anchor.index(">") + 1]
+    assert 'rel="noreferrer"' in anchor
+    assert 'referrerpolicy="no-referrer"' in anchor
+
+    # The copy/paste path stays available as a fallback if this is flagged too.
     assert 'id="github-app-install-url"' in body
-    assert "installations/new?state=" in install_fn
+
+
+async def test_install_link_reuses_an_existing_state_rather_than_regenerating():
+    """restoreFromSession() -> showGithubAppReadyToInstall() runs BEFORE
+    handleGithubInstallCallback() in the DOMContentLoaded handler, so minting
+    a fresh state on every render would overwrite the one the callback is
+    about to compare against the value GitHub echoed back -- breaking every
+    install with err_github_callback_invalid."""
+    client = await _client()
+    body = (await client.get("/")).text
+    render_fn = body[
+        body.index("function renderGithubAppInstallLink") : body.index(
+            "async function pushGithubAppToRenderService"
+        )
+    ]
+    assert "let state = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);" in render_fn
+    assert "if (!state) {" in render_fn
+    # And the ordering this depends on must not be quietly swapped.
+    assert body.index("restoreFromSession();") < body.index("handleGithubInstallCallback();")
 
 
 async def test_locked_frame_click_is_prevented_before_toggle():
@@ -274,7 +301,8 @@ async def test_frame2_has_a_reset_path_wired_into_lock_and_change():
     App" (with stale credentials still in sessionStorage, so a refresh
     silently re-completes the frame), and relocking it from frame 1 clears
     the storage but leaves "Install App" on screen, where clicking it hits
-    installGithubApp()'s !stored branch and shows a misleading error."""
+    renderGithubAppInstallLink()'s !stored branch and shows a misleading
+    error."""
     client = await _client()
     body = (await client.get("/")).text
     assert "function resetGithubAppCreateSection" in body

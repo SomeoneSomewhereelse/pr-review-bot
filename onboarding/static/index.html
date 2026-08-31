@@ -175,6 +175,22 @@
     min-height: 2.5rem;
     cursor: pointer;
   }
+  /* An <a>, not a <button>, so the navigation to GitHub can carry
+     referrerpolicy="no-referrer" -- see renderGithubAppInstallLink(). Styled
+     to match .frame-body button exactly so it still reads as the primary
+     action. */
+  .install-link {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    min-height: 2.5rem;
+    line-height: 1.5rem;
+    box-sizing: border-box;
+    text-decoration: none;
+    cursor: pointer;
+  }
   .frame-error { color: var(--fail); min-height: 1.2em; }
   @media (max-width: 480px) {
     header.topbar { justify-content: center; }
@@ -286,9 +302,10 @@
         </div>
         <div id="github-app-install-section" style="display: none;">
           <p data-i18n="frame2_install_instructions"></p>
-          <button id="github-app-install-submit" type="button" data-i18n="install_button"></button>
-          <p id="github-app-install-url" class="install-url" style="display: none;"></p>
-          <p id="github-app-install-copied" data-i18n="frame2_install_copied" style="display: none;"></p>
+          <a id="github-app-install-submit" class="install-link" rel="noreferrer"
+             referrerpolicy="no-referrer" data-i18n="install_button"></a>
+          <p data-i18n="frame2_install_fallback"></p>
+          <p id="github-app-install-url" class="install-url"></p>
         </div>
         <p id="github-app-error" class="frame-error"></p>
       </div>
@@ -461,9 +478,9 @@
       frame2_instructions: "Name your GitHub App (must be unique on GitHub), then click Create App. This will be created under whichever GitHub account you're currently logged into in this browser — check that's the right one before continuing.",
       frame2_name_placeholder: "my-pr-review-bot",
       create_app_button: "Create App",
-      frame2_install_instructions: "Your App was created. Click below to copy the install link, then paste it into this tab's address bar (not a new tab, and don't just click a link) and press Enter to install it on the account/repos you want it to review. GitHub will bring you back here automatically once you're done.",
-      install_button: "Copy Install Link",
-      frame2_install_copied: "Copied! Paste it into this tab's address bar and press Enter.",
+      frame2_install_instructions: "Your App was created. Now install it on the account/repos you want it to review. GitHub will bring you back here automatically once you're done.",
+      install_button: "Install App",
+      frame2_install_fallback: "If that button doesn't work, copy this link and paste it into this tab's address bar instead:",
       err_github_name_empty: "Name your App first.",
       err_github_callback_invalid: "That didn't come back from GitHub as expected. Please try again.",
       err_github_exchange_failed: "GitHub rejected that — the code may have expired. Try creating the App again.",
@@ -590,9 +607,9 @@
       frame2_instructions: "תנו שם לאפליקציית ה-GitHub שלכם (חייב להיות ייחודי ב-GitHub), ואז לחצו על יצירת אפליקציה. האפליקציה תיווצר תחת חשבון ה-GitHub שאליו אתם מחוברים כרגע בדפדפן זה — ודאו שזה החשבון הנכון לפני שתמשיכו.",
       frame2_name_placeholder: "my-pr-review-bot",
       create_app_button: "יצירת אפליקציה",
-      frame2_install_instructions: "האפליקציה נוצרה. לחצו כאן כדי להעתיק את קישור ההתקנה, ואז הדביקו אותו בשורת הכתובת של הלשונית הזו (לא בלשונית חדשה, ולא רק ללחוץ על קישור) ולחצו Enter כדי להתקין אותה על החשבון/המאגרים שברצונכם שתבדוק. GitHub תחזיר אתכם לכאן אוטומטית בסיום.",
-      install_button: "העתקת קישור התקנה",
-      frame2_install_copied: "הועתק! הדביקו אותו בשורת הכתובת של הלשונית הזו ולחצו Enter.",
+      frame2_install_instructions: "האפליקציה נוצרה. כעת התקינו אותה על החשבון/המאגרים שברצונכם שתבדוק. GitHub תחזיר אתכם לכאן אוטומטית בסיום.",
+      install_button: "התקנת אפליקציה",
+      frame2_install_fallback: "אם הכפתור אינו עובד, העתיקו את הקישור הזה והדביקו אותו בשורת הכתובת של הלשונית הזו:",
       err_github_name_empty: "תנו שם לאפליקציה קודם.",
       err_github_callback_invalid: "התגובה מ-GitHub לא הייתה כצפוי. נסו שוב.",
       err_github_exchange_failed: "GitHub דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו ליצור את האפליקציה מחדש.",
@@ -1621,6 +1638,7 @@
   function showGithubAppReadyToInstall() {
     document.getElementById("github-app-create-section").style.display = "none";
     document.getElementById("github-app-install-section").style.display = "block";
+    renderGithubAppInstallLink();
     // Toggling those two sections is invisible on a collapsed <details> whose
     // badge still reads "Not started" — and the visitor has just approved a
     // real App on GitHub, so they need to see that it worked (spec section 3
@@ -1633,14 +1651,11 @@
     document.getElementById("github-app-install-section").style.display = "none";
     document.getElementById("github-app-create-section").style.display = "block";
     document.getElementById("github-app-error").textContent = "";
-    // Clear the previous App's install link too -- it is slug-specific, and
-    // hiding only its container would leave it on screen (still display:
-    // block from the last run) the moment the install section reappears for
-    // the newly created App.
-    const urlEl = document.getElementById("github-app-install-url");
-    urlEl.textContent = "";
-    urlEl.style.display = "none";
-    document.getElementById("github-app-install-copied").style.display = "none";
+    // Clear the previous App's install link too -- it is slug-specific, so
+    // leaving it behind would point the next render at the old App until
+    // renderGithubAppInstallLink() overwrites it.
+    document.getElementById("github-app-install-url").textContent = "";
+    document.getElementById("github-app-install-submit").removeAttribute("href");
     currentGithubAppErrorKey = null;
   }
 
@@ -1720,30 +1735,37 @@
     }
   }
 
-  function installGithubApp() {
-    // Deliberately never navigates there itself (not even via a plain <a
-    // href>) -- a top-level navigation to this URL that carries this page's
-    // origin as Referer was confirmed live to get the visiting GitHub
-    // account suspended for a ToS violation, reproduced across three
-    // separate throwaway accounts, every time right at this install step.
-    // The visitor must copy this link and paste it into their own address
-    // bar (a manually-entered navigation sends no Referer at all) rather
-    // than click anything on this page. See ISSUES.md.
+  function renderGithubAppInstallLink() {
+    // An automatic location.href redirect to this URL was confirmed live to
+    // get the visiting GitHub account suspended for a ToS violation, three
+    // times across three separate throwaway accounts (see ISSUES.md). This
+    // is the narrowed retry of that: still a real navigation the visitor
+    // initiates by clicking, but with rel="noreferrer"/referrerpolicy set on
+    // the anchor so GitHub never sees this page's origin as the Referer --
+    // the one variable that differs between the runs that got suspended and
+    // the runs that didn't. The copied-link fallback below stays visible, so
+    // a visitor is never stuck if this turns out to be flagged too.
     const stored = readStoredGithubApp();
     if (!stored || !stored.slug) {
       githubAppError("err_github_callback_invalid");
       return;
     }
-    const state = crypto.randomUUID();
-    sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
+    // Reuse an existing state rather than minting a new one on every render.
+    // restoreFromSession() -> showGithubAppReadyToInstall() runs BEFORE
+    // handleGithubInstallCallback() on the return trip from GitHub, so
+    // regenerating here would overwrite the very state that callback is
+    // about to check against the one GitHub echoed back, failing every
+    // install. The callback removes the state once it has consumed it, and
+    // createGithubApp() always writes a fresh one, so a stale value cannot
+    // outlive an install attempt.
+    let state = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
+    if (!state) {
+      state = crypto.randomUUID();
+      sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
+    }
     const url = `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new?state=${encodeURIComponent(state)}`;
-    const urlEl = document.getElementById("github-app-install-url");
-    urlEl.textContent = url;
-    urlEl.style.display = "block";
-    document.getElementById("github-app-install-copied").style.display = "none";
-    navigator.clipboard?.writeText(url).then(() => {
-      document.getElementById("github-app-install-copied").style.display = "block";
-    }).catch(() => {});
+    document.getElementById("github-app-install-submit").href = url;
+    document.getElementById("github-app-install-url").textContent = url;
   }
 
   async function pushGithubAppToRenderService(stored) {
@@ -2585,7 +2607,6 @@
     document.getElementById("render-deploy-trigger-submit").addEventListener("click", triggerRenderDeploy);
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
-    document.getElementById("github-app-install-submit").addEventListener("click", installGithubApp);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);
