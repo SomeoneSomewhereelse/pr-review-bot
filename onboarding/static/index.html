@@ -175,22 +175,41 @@
     min-height: 2.5rem;
     cursor: pointer;
   }
-  /* An <a>, not a <button>, so the navigation to GitHub can carry
-     referrerpolicy="no-referrer" -- see renderGithubAppInstallLink(). Styled
-     to match .frame-body button exactly so it still reads as the primary
-     action. */
-  .install-link {
-    display: inline-block;
-    background: var(--accent);
-    color: #fff;
-    border-radius: 6px;
-    padding: 0.5rem 1rem;
-    min-height: 2.5rem;
-    line-height: 1.5rem;
-    box-sizing: border-box;
-    text-decoration: none;
+  /* Password input with the reveal control sitting inside it. The container
+     owns the vertical spacing and the input's own margin is zeroed, so the
+     absolutely positioned button can stretch top-to-bottom and centre its
+     icon without depending on where that margin lands. Logical properties
+     (inset-inline-end / padding-inline-end) put the control on the correct
+     side automatically under the Hebrew RTL direction. */
+  .frame-body .password-field { position: relative; margin: 0.5rem 0; }
+  .frame-body .password-field input { margin: 0; padding-inline-end: 2.75rem; }
+  .frame-body .password-toggle {
+    position: absolute;
+    inset-inline-end: 0.35rem;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    min-height: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
     cursor: pointer;
   }
+  .frame-body .password-toggle:hover { color: var(--text); }
+  .frame-body .password-toggle svg { width: 1.15rem; height: 1.15rem; display: block; }
+  .frame-body .password-toggle svg[hidden] { display: none; }
+  .checkbox-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+  .checkbox-row input[type="checkbox"] { margin: 0.15rem 0 0; flex: none; }
   .frame-error { color: var(--fail); min-height: 1.2em; }
   @media (max-width: 480px) {
     header.topbar { justify-content: center; }
@@ -275,14 +294,27 @@
         <label data-i18n="frame_dashboard_auth_username_label"></label>
         <input id="dashboard-auth-username-input" type="text" autocomplete="off">
         <label data-i18n="frame_dashboard_auth_password_label"></label>
-        <input id="dashboard-auth-password-input" type="password" autocomplete="off">
-        <button id="dashboard-auth-password-toggle" type="button"></button>
+        <div class="password-field">
+          <input id="dashboard-auth-password-input" type="password" autocomplete="off">
+          <button id="dashboard-auth-password-toggle" class="password-toggle" type="button">
+            <svg id="dashboard-auth-eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg id="dashboard-auth-eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
         <button id="dashboard-auth-generate-submit" type="button" data-i18n="generate_password_button"></button>
-        <label>
+        <button id="dashboard-auth-submit" type="button" data-i18n="save_continue_button"></button>
+        <label class="checkbox-row">
           <input id="dashboard-auth-ack-checkbox" type="checkbox">
           <span data-i18n="dashboard_auth_ack_label"></span>
         </label>
-        <button id="dashboard-auth-submit" type="button" data-i18n="save_continue_button"></button>
         <p id="dashboard-auth-error" class="frame-error" aria-live="polite"></p>
       </div>
     </details>
@@ -302,10 +334,10 @@
         </div>
         <div id="github-app-install-section" style="display: none;">
           <p data-i18n="frame2_install_instructions"></p>
-          <a id="github-app-install-submit" class="install-link" rel="noreferrer"
-             referrerpolicy="no-referrer" data-i18n="install_button"></a>
-          <p data-i18n="frame2_install_fallback"></p>
           <p id="github-app-install-url" class="install-url"></p>
+          <button id="github-app-install-copy" type="button" data-i18n="copy_link_button"></button>
+          <p data-i18n="frame2_install_then"></p>
+          <button id="github-app-install-submit" type="button" data-i18n="install_done_button"></button>
         </div>
         <p id="github-app-error" class="frame-error"></p>
       </div>
@@ -478,14 +510,16 @@
       frame2_instructions: "Name your GitHub App (must be unique on GitHub), then click Create App. This will be created under whichever GitHub account you're currently logged into in this browser — check that's the right one before continuing.",
       frame2_name_placeholder: "my-pr-review-bot",
       create_app_button: "Create App",
-      frame2_install_instructions: "Your App was created. Now install it on the account/repos you want it to review. GitHub will bring you back here automatically once you're done.",
-      install_button: "Install App",
-      frame2_install_fallback: "If that button doesn't work, copy this link and paste it into this tab's address bar instead:",
+      frame2_install_instructions: "Your App was created, but it still has to be installed, and you need to do that part yourself — GitHub suspends accounts that reach the install page by following a link from another site. Copy the address below, paste it into your browser's address bar, and press Enter. Then pick the account and repos you want reviewed and confirm the install.",
+      copy_link_button: "Copy link",
+      copy_link_copied: "Copied!",
+      frame2_install_then: "Once GitHub says the App is installed, come back here and continue. (If GitHub returns you to this page by itself, it will continue automatically.)",
+      install_done_button: "I've installed it — continue",
       err_github_name_empty: "Name your App first.",
       err_github_callback_invalid: "That didn't come back from GitHub as expected. Please try again.",
       err_github_exchange_failed: "GitHub rejected that — the code may have expired. Try creating the App again.",
       err_github_unreachable: "GitHub is unreachable right now. Try again in a moment.",
-      err_github_installation_not_found: "GitHub couldn't find that installation. Try installing again.",
+      err_github_not_installed: "GitHub doesn't show the App as installed yet. Finish the install on GitHub, then continue.",
       err_github_invalid_credentials: "GitHub rejected the App's credentials. Try creating the App again.",
       err_github_no_render_service: "Your Render service isn't set up yet, and the App needs its address before it can be created. Complete the Render service step above first.",
       account_prefix: "account: ",
@@ -607,14 +641,16 @@
       frame2_instructions: "תנו שם לאפליקציית ה-GitHub שלכם (חייב להיות ייחודי ב-GitHub), ואז לחצו על יצירת אפליקציה. האפליקציה תיווצר תחת חשבון ה-GitHub שאליו אתם מחוברים כרגע בדפדפן זה — ודאו שזה החשבון הנכון לפני שתמשיכו.",
       frame2_name_placeholder: "my-pr-review-bot",
       create_app_button: "יצירת אפליקציה",
-      frame2_install_instructions: "האפליקציה נוצרה. כעת התקינו אותה על החשבון/המאגרים שברצונכם שתבדוק. GitHub תחזיר אתכם לכאן אוטומטית בסיום.",
-      install_button: "התקנת אפליקציה",
-      frame2_install_fallback: "אם הכפתור אינו עובד, העתיקו את הקישור הזה והדביקו אותו בשורת הכתובת של הלשונית הזו:",
+      frame2_install_instructions: "האפליקציה נוצרה, אך יש עוד להתקין אותה, ואת החלק הזה עליכם לבצע בעצמכם — GitHub משעה חשבונות שמגיעים לדף ההתקנה דרך קישור מאתר אחר. העתיקו את הכתובת שלמטה, הדביקו אותה בשורת הכתובת של הדפדפן ולחצו Enter. לאחר מכן בחרו את החשבון והמאגרים שברצונכם שייבדקו ואשרו את ההתקנה.",
+      copy_link_button: "העתקת קישור",
+      copy_link_copied: "הועתק!",
+      frame2_install_then: "לאחר ש-GitHub יאשר שהאפליקציה הותקנה, חזרו לכאן והמשיכו. (אם GitHub יחזיר אתכם לדף הזה בעצמו, התהליך יימשך אוטומטית.)",
+      install_done_button: "התקנתי — להמשיך",
       err_github_name_empty: "תנו שם לאפליקציה קודם.",
       err_github_callback_invalid: "התגובה מ-GitHub לא הייתה כצפוי. נסו שוב.",
       err_github_exchange_failed: "GitHub דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו ליצור את האפליקציה מחדש.",
       err_github_unreachable: "GitHub אינו זמין כרגע. נסו שוב בעוד רגע.",
-      err_github_installation_not_found: "GitHub לא מצא את ההתקנה. נסו להתקין שוב.",
+      err_github_not_installed: "GitHub עדיין לא מציג את האפליקציה כמותקנת. השלימו את ההתקנה ב-GitHub ואז המשיכו.",
       err_github_invalid_credentials: "GitHub דחה את פרטי האפליקציה. נסו ליצור את האפליקציה מחדש.",
       err_github_no_render_service: "שירות ה-Render שלכם עדיין לא הוגדר, והאפליקציה זקוקה לכתובת שלו לפני שניתן ליצור אותה. השלימו קודם את שלב שירות ה-Render למעלה.",
       account_prefix: "חשבון: ",
@@ -729,8 +765,9 @@
     if (currentDashboardAuthErrorKey) {
       document.getElementById("dashboard-auth-error").textContent = t(currentDashboardAuthErrorKey);
     }
-    document.getElementById("dashboard-auth-password-toggle").textContent =
-      t(dashboardAuthPasswordVisible ? "hide_password_button" : "show_password_button");
+    // Re-applies the toggle's aria-label/title in the new language; the
+    // function is the single place that string is resolved.
+    setDashboardAuthPasswordVisibility(dashboardAuthPasswordVisible);
     if (currentRenderDeployErrorKey) {
       document.getElementById("render-deploy-error").textContent = t(currentRenderDeployErrorKey);
     }
@@ -1456,8 +1493,16 @@
   function setDashboardAuthPasswordVisibility(visible) {
     dashboardAuthPasswordVisible = visible;
     document.getElementById("dashboard-auth-password-input").type = visible ? "text" : "password";
-    document.getElementById("dashboard-auth-password-toggle").textContent =
-      t(visible ? "hide_password_button" : "show_password_button");
+    // The control is an icon, so its label lives in aria-label/title rather
+    // than in text -- the strings stay translated, just not rendered.
+    const toggle = document.getElementById("dashboard-auth-password-toggle");
+    const label = t(visible ? "hide_password_button" : "show_password_button");
+    toggle.setAttribute("aria-label", label);
+    toggle.setAttribute("title", label);
+    toggle.setAttribute("aria-pressed", visible ? "true" : "false");
+    // Eye = "reveal it", crossed-out eye = "hide it again".
+    document.getElementById("dashboard-auth-eye-open").hidden = visible;
+    document.getElementById("dashboard-auth-eye-closed").hidden = !visible;
   }
 
   function toggleDashboardAuthPasswordVisibility() {
@@ -1638,7 +1683,7 @@
   function showGithubAppReadyToInstall() {
     document.getElementById("github-app-create-section").style.display = "none";
     document.getElementById("github-app-install-section").style.display = "block";
-    renderGithubAppInstallLink();
+    renderGithubAppInstallUrl();
     // Toggling those two sections is invisible on a collapsed <details> whose
     // badge still reads "Not started" — and the visitor has just approved a
     // real App on GitHub, so they need to see that it worked (spec section 3
@@ -1651,11 +1696,12 @@
     document.getElementById("github-app-install-section").style.display = "none";
     document.getElementById("github-app-create-section").style.display = "block";
     document.getElementById("github-app-error").textContent = "";
-    // Clear the previous App's install link too -- it is slug-specific, so
-    // leaving it behind would point the next render at the old App until
-    // renderGithubAppInstallLink() overwrites it.
+    // Clear the previous App's install URL too -- it is slug-specific, so
+    // leaving it behind would show the old App's link until
+    // renderGithubAppInstallUrl() overwrites it.
     document.getElementById("github-app-install-url").textContent = "";
-    document.getElementById("github-app-install-submit").removeAttribute("href");
+    document.getElementById("github-app-install-submit").disabled = false;
+    document.getElementById("github-app-install-copy").textContent = t("copy_link_button");
     currentGithubAppErrorKey = null;
   }
 
@@ -1735,37 +1781,90 @@
     }
   }
 
-  function renderGithubAppInstallLink() {
-    // An automatic location.href redirect to this URL was confirmed live to
-    // get the visiting GitHub account suspended for a ToS violation, three
-    // times across three separate throwaway accounts (see ISSUES.md). This
-    // is the narrowed retry of that: still a real navigation the visitor
-    // initiates by clicking, but with rel="noreferrer"/referrerpolicy set on
-    // the anchor so GitHub never sees this page's origin as the Referer --
-    // the one variable that differs between the runs that got suspended and
-    // the runs that didn't. The copied-link fallback below stays visible, so
-    // a visitor is never stuck if this turns out to be flagged too.
+  function renderGithubAppInstallUrl() {
+    // Rendered as copyable text, deliberately never as a clickable link.
+    // Four separate throwaway GitHub accounts were suspended for a ToS
+    // violation at exactly this step: three via an automatic location.href
+    // redirect, and a fourth via a plain <a> click carrying both
+    // rel="noreferrer" and referrerpolicy="no-referrer". That fourth run is
+    // what rules out the Referer header as the trigger -- a click still
+    // sends Sec-Fetch-Site: cross-site, which a linking page cannot
+    // suppress, whereas a navigation the visitor starts in their own
+    // address bar sends Sec-Fetch-Site: none. So the wizard hands over the
+    // URL and stops there; it never navigates to GitHub itself. See
+    // ISSUES.md.
+    //
+    // No ?state= either: nothing validates it any more. Completion is
+    // detected by asking GitHub which installations the App has
+    // (checkGithubAppInstallation), which works whether the visitor pastes
+    // this into the same tab, a new tab, or installs from GitHub's own UI
+    // later.
     const stored = readStoredGithubApp();
     if (!stored || !stored.slug) {
       githubAppError("err_github_callback_invalid");
       return;
     }
-    // Reuse an existing state rather than minting a new one on every render.
-    // restoreFromSession() -> showGithubAppReadyToInstall() runs BEFORE
-    // handleGithubInstallCallback() on the return trip from GitHub, so
-    // regenerating here would overwrite the very state that callback is
-    // about to check against the one GitHub echoed back, failing every
-    // install. The callback removes the state once it has consumed it, and
-    // createGithubApp() always writes a fresh one, so a stale value cannot
-    // outlive an install attempt.
-    let state = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
-    if (!state) {
-      state = crypto.randomUUID();
-      sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
+    document.getElementById("github-app-install-url").textContent =
+      `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new`;
+  }
+
+  function copyGithubAppInstallUrl() {
+    const url = document.getElementById("github-app-install-url").textContent;
+    if (!url) return;
+    navigator.clipboard?.writeText(url).then(() => {
+      document.getElementById("github-app-install-copy").textContent = t("copy_link_copied");
+    }).catch(() => {});
+  }
+
+  async function checkGithubAppInstallation() {
+    const stored = readStoredGithubApp();
+    if (!stored || !stored.app_id || !stored.private_key_b64) {
+      githubAppError("err_github_callback_invalid");
+      return;
     }
-    const url = `https://github.com/apps/${encodeURIComponent(stored.slug)}/installations/new?state=${encodeURIComponent(state)}`;
-    document.getElementById("github-app-install-submit").href = url;
-    document.getElementById("github-app-install-url").textContent = url;
+    const btn = document.getElementById("github-app-install-submit");
+    btn.disabled = true;
+    document.getElementById("github-app-error").textContent = "";
+    currentGithubAppErrorKey = null;
+    let resp;
+    try {
+      resp = await fetch("/api/github/find-installation", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          app_id: stored.app_id,
+          private_key_b64: stored.private_key_b64,
+        }),
+      });
+    } catch (err) {
+      btn.disabled = false;
+      githubAppError("err_network");
+      return;
+    }
+    let body;
+    try {
+      if (!resp.ok) throw new Error("bad status");
+      body = await resp.json();
+    } catch (err) {
+      btn.disabled = false;
+      githubAppError("err_github_unreachable");
+      return;
+    }
+    if (body.valid) {
+      stored.installation_id = body.installation_id;
+      stored.account_login = body.account_login;
+      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+      await finishGithubAppSetup(stored, body.account_login);
+      return;
+    }
+    btn.disabled = false;
+    if (body.reason === "not_installed") {
+      githubAppError("err_github_not_installed");
+    } else if (body.reason === "invalid_credentials") {
+      githubAppError("err_github_invalid_credentials");
+    } else {
+      githubAppError("err_github_unreachable");
+    }
   }
 
   async function pushGithubAppToRenderService(stored) {
@@ -1805,7 +1904,7 @@
     // best-effort push-and-clear every other frame does.
     await pushGithubAppToRenderService(stored);
     // Explicit flag, not inferred from installation_id's mere presence --
-    // that field is written earlier (handleGithubInstallCallback, before
+    // that field is written earlier (checkGithubAppInstallation, before
     // this function even runs) and would otherwise make restoreFromSession()
     // treat an interrupted push-and-clear as a completed frame on reload.
     // Same pattern as the Supabase frame's own `completed` flag.
@@ -1814,59 +1913,19 @@
     completeFrame("github-app", "account_prefix", accountLogin);
   }
 
-  async function handleGithubInstallCallback() {
+  function handleGithubInstallReturn() {
+    // GitHub sends the visitor back to the App's setup_url after an install,
+    // so this fires when they pasted the link into this same tab. The
+    // installation_id it carries is deliberately ignored -- GitHub's own
+    // setup-URL docs warn it can be spoofed -- and the return is treated
+    // purely as a hint that now is a good moment to ask GitHub what is
+    // actually installed. A visitor who used a different tab just clicks the
+    // button instead; both paths run the same authoritative check.
     const params = new URLSearchParams(location.search);
     if (params.get("gh_step") !== "install") return;
     history.replaceState(null, "", location.pathname);
-    const expectedState = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
-    sessionStorage.removeItem(GITHUB_MANIFEST_STATE_KEY);
-    const installationId = params.get("installation_id");
-    const parsedInstallationId = parseInt(installationId, 10);
-    if (!expectedState || params.get("state") !== expectedState || !installationId
-        || !Number.isInteger(parsedInstallationId) || parsedInstallationId <= 0) {
-      githubAppError("err_github_callback_invalid");
-      return;
-    }
-    const stored = readStoredGithubApp();
-    if (!stored) {
-      githubAppError("err_github_callback_invalid");
-      return;
-    }
-    let resp;
-    try {
-      resp = await fetch("/api/github/verify-installation", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          app_id: stored.app_id,
-          private_key_b64: stored.private_key_b64,
-          installation_id: parsedInstallationId,
-        }),
-      });
-    } catch (err) {
-      githubAppError("err_network");
-      return;
-    }
-    let body;
-    try {
-      if (!resp.ok) throw new Error("bad status");
-      body = await resp.json();
-    } catch (err) {
-      githubAppError("err_github_unreachable");
-      return;
-    }
-    if (body.valid) {
-      stored.installation_id = parsedInstallationId;
-      stored.account_login = body.account_login;
-      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
-      await finishGithubAppSetup(stored, body.account_login);
-    } else if (body.reason === "installation_not_found") {
-      githubAppError("err_github_installation_not_found");
-    } else if (body.reason === "invalid_credentials") {
-      githubAppError("err_github_invalid_credentials");
-    } else {
-      githubAppError("err_github_unreachable");
-    }
+    if (!readStoredGithubApp()) return;
+    checkGithubAppInstallation();
   }
 
   function base64UrlEncode(bytes) {
@@ -2607,6 +2666,8 @@
     document.getElementById("render-deploy-trigger-submit").addEventListener("click", triggerRenderDeploy);
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
+    document.getElementById("github-app-install-copy").addEventListener("click", copyGithubAppInstallUrl);
+    document.getElementById("github-app-install-submit").addEventListener("click", checkGithubAppInstallation);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);
@@ -2641,7 +2702,7 @@
     applyLanguage(currentLang);
     restoreFromSession();
     handleGithubManifestCallback();
-    handleGithubInstallCallback();
+    handleGithubInstallReturn();
     handleSupabaseOauthCallback();
   });
 </script>

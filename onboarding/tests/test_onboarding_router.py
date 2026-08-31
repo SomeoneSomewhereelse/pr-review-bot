@@ -160,35 +160,64 @@ async def test_manifest_code_exchange_reports_failure_reason(monkeypatch):
     assert resp.json() == {"valid": False, "reason": "exchange_failed"}
 
 
-async def test_verify_installation_returns_account_details(monkeypatch):
-    async def fake_verify(app_id, private_key_b64, installation_id):
-        assert (app_id, private_key_b64, installation_id) == (42, "cGVt", 100)
-        return github_client.InstallationVerified(account_login="octocat", repo_scope="all")
+async def test_find_installation_returns_id_and_account_details(monkeypatch):
+    async def fake_find(app_id, private_key_b64):
+        assert (app_id, private_key_b64) == (42, "cGVt")
+        return github_client.InstallationFound(
+            installation_id=100, account_login="octocat", repo_scope="all"
+        )
 
-    monkeypatch.setattr(github_client, "verify_installation", fake_verify)
+    monkeypatch.setattr(github_client, "find_installation", fake_find)
     client = await _client()
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": 100},
+        "/api/github/find-installation",
+        json={"app_id": 42, "private_key_b64": "cGVt"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"valid": True, "account_login": "octocat", "repo_scope": "all"}
+    assert resp.json() == {
+        "valid": True,
+        "installation_id": 100,
+        "account_login": "octocat",
+        "repo_scope": "all",
+    }
 
 
-async def test_verify_installation_reports_failure_reason(monkeypatch):
-    async def fake_verify(app_id, private_key_b64, installation_id):
-        return github_client.InstallationInvalid(reason="installation_not_found")
+async def test_find_installation_reports_failure_reason(monkeypatch):
+    async def fake_find(app_id, private_key_b64):
+        return github_client.InstallationInvalid(reason="not_installed")
 
-    monkeypatch.setattr(github_client, "verify_installation", fake_verify)
+    monkeypatch.setattr(github_client, "find_installation", fake_find)
     client = await _client()
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": 100},
+        "/api/github/find-installation",
+        json={"app_id": 42, "private_key_b64": "cGVt"},
     )
-    assert resp.json() == {"valid": False, "reason": "installation_not_found"}
+    assert resp.json() == {"valid": False, "reason": "not_installed"}
 
 
-async def test_verify_installation_validation_error_never_echoes_the_private_key():
+async def test_find_installation_ignores_a_caller_supplied_installation_id(monkeypatch):
+    """GitHub's setup-URL docs warn a redirect's installation_id can be
+    spoofed, so the request model must not carry one -- an extra field is
+    dropped by pydantic rather than reaching the client call."""
+    seen = {}
+
+    async def fake_find(app_id, private_key_b64):
+        seen["called"] = True
+        return github_client.InstallationFound(
+            installation_id=100, account_login="octocat", repo_scope="all"
+        )
+
+    monkeypatch.setattr(github_client, "find_installation", fake_find)
+    client = await _client()
+    resp = await client.post(
+        "/api/github/find-installation",
+        json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": 999},
+    )
+    assert seen.get("called") is True
+    assert resp.json()["installation_id"] == 100
+
+
+async def test_find_installation_validation_error_never_echoes_the_private_key():
     """The same guard as test_validation_error_never_echoes_the_submitted_key,
     for the one endpoint whose body carries a GitHub App's full private key —
     the most sensitive artifact in this wizard. FastAPI's *default* 422 body
@@ -201,8 +230,8 @@ async def test_verify_installation_validation_error_never_echoes_the_private_key
     # Misnamed field ("private_key" rather than "private_key_b64") fails
     # pydantic validation with the credential sitting in the rejected input.
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key": SENTINEL_PRIVATE_KEY, "installation_id": 100},
+        "/api/github/find-installation",
+        json={"app_id": 42, "private_key": SENTINEL_PRIVATE_KEY},
     )
     assert resp.status_code == 422
     assert SENTINEL_PRIVATE_KEY not in resp.text
@@ -210,17 +239,17 @@ async def test_verify_installation_validation_error_never_echoes_the_private_key
     assert "input" not in resp.text
 
 
-async def test_verify_installation_response_never_echoes_the_private_key(monkeypatch):
+async def test_find_installation_response_never_echoes_the_private_key(monkeypatch):
     sentinel_key_b64 = "U0VOVElORUxfUFJJVkFURV9LRVk="
 
-    async def fake_verify(app_id, private_key_b64, installation_id):
+    async def fake_find(app_id, private_key_b64):
         return github_client.InstallationInvalid(reason="invalid_credentials")
 
-    monkeypatch.setattr(github_client, "verify_installation", fake_verify)
+    monkeypatch.setattr(github_client, "find_installation", fake_find)
     client = await _client()
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key_b64": sentinel_key_b64, "installation_id": 100},
+        "/api/github/find-installation",
+        json={"app_id": 42, "private_key_b64": sentinel_key_b64},
     )
     assert sentinel_key_b64 not in resp.text
 

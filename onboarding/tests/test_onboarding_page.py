@@ -151,60 +151,55 @@ async def test_frame2_strings_present_in_both_languages():
         "err_github_name_empty",
         "err_github_callback_invalid",
         "err_github_exchange_failed",
-        "frame2_install_fallback",
+        "frame2_install_then",
     ):
         assert f"{key}:" in body
     assert body.count("create_app_button:") == 2  # STRINGS.en + STRINGS.he
-    assert body.count("frame2_install_fallback:") == 2  # STRINGS.en + STRINGS.he
+    assert body.count("frame2_install_then:") == 2  # STRINGS.en + STRINGS.he
 
 
-async def test_install_link_suppresses_the_referer_and_never_auto_navigates():
-    """An automatic location.href redirect to the install URL was confirmed
-    live to get the visiting GitHub account suspended, three times across
-    three throwaway accounts (see ISSUES.md). The narrowed retry keeps the
-    navigation but strips the Referer, so GitHub never sees this page's
-    origin. Both halves matter: no script-driven navigation anywhere, and
-    both referrer attributes present on the anchor."""
+async def test_install_url_is_shown_as_text_and_never_as_a_clickable_link():
+    """Four throwaway GitHub accounts were suspended for a ToS violation at
+    this step: three via an automatic location.href redirect, and a fourth
+    via a plain <a> carrying rel="noreferrer" and referrerpolicy="no-referrer"
+    (see ISSUES.md). That fourth run rules out the Referer as the trigger --
+    any click still sends Sec-Fetch-Site: cross-site, which a linking page
+    cannot suppress. So the page hands over the URL as copyable text and
+    never navigates to github.com itself, by link or by script."""
     client = await _client()
     body = (await client.get("/")).text
     render_fn = body[
-        body.index("function renderGithubAppInstallLink") : body.index(
-            "async function pushGithubAppToRenderService"
+        body.index("function renderGithubAppInstallUrl") : body.index(
+            "function copyGithubAppInstallUrl"
         )
     ]
-    # The assignment form specifically -- the prose above mentions the bare
-    # attribute name, and only an assignment/call actually navigates.
     assert "location.href =" not in render_fn
     assert "location.assign" not in render_fn
     assert "location.replace" not in render_fn
-    assert "installations/new?state=" in render_fn
-
-    anchor = body[body.index('<a id="github-app-install-submit"') :]
-    anchor = anchor[: anchor.index(">") + 1]
-    assert 'rel="noreferrer"' in anchor
-    assert 'referrerpolicy="no-referrer"' in anchor
-
-    # The copy/paste path stays available as a fallback if this is flagged too.
-    assert 'id="github-app-install-url"' in body
+    assert "installations/new" in render_fn
+    # No anchor anywhere on the page may target github.com.
+    assert "<a " not in body[body.index('id="github-app-install-section"') :][:800]
+    assert 'href="https://github.com' not in body
 
 
-async def test_install_link_reuses_an_existing_state_rather_than_regenerating():
-    """restoreFromSession() -> showGithubAppReadyToInstall() runs BEFORE
-    handleGithubInstallCallback() in the DOMContentLoaded handler, so minting
-    a fresh state on every render would overwrite the one the callback is
-    about to compare against the value GitHub echoed back -- breaking every
-    install with err_github_callback_invalid."""
+async def test_installation_is_discovered_not_read_from_the_redirect():
+    """GitHub's setup-URL docs warn the redirect's installation_id can be
+    spoofed, and the wizard no longer controls that navigation at all, so a
+    visitor may install from any tab or from GitHub's own UI. Completion is
+    therefore detected by asking GitHub what is installed."""
     client = await _client()
     body = (await client.get("/")).text
-    render_fn = body[
-        body.index("function renderGithubAppInstallLink") : body.index(
-            "async function pushGithubAppToRenderService"
+    assert body.count('fetch("/api/github/find-installation"') == 1
+    assert "/api/github/verify-installation" not in body
+
+    return_fn = body[
+        body.index("function handleGithubInstallReturn") : body.index(
+            "function base64UrlEncode"
         )
     ]
-    assert "let state = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);" in render_fn
-    assert "if (!state) {" in render_fn
-    # And the ordering this depends on must not be quietly swapped.
-    assert body.index("restoreFromSession();") < body.index("handleGithubInstallCallback();")
+    # The return is only a hint to re-check; its installation_id is ignored.
+    assert 'params.get("installation_id")' not in return_fn
+    assert "checkGithubAppInstallation();" in return_fn
 
 
 async def test_locked_frame_click_is_prevented_before_toggle():
@@ -261,23 +256,10 @@ async def test_manifest_permissions_match_the_cli_script():
     assert "public: false" in body
 
 
-async def test_installation_verify_leaves_the_page_exactly_once():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert body.count('fetch("/api/github/verify-installation"') == 1
-
-
 async def test_frame2_has_an_install_button():
     client = await _client()
     body = (await client.get("/")).text
     assert 'id="github-app-install-submit"' in body
-
-
-async def test_install_callback_handler_present():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "async function handleGithubInstallCallback" in body
-    assert '"install"' in body or "'install'" in body
 
 
 async def test_github_app_credential_never_persists_to_local_storage():
@@ -1117,6 +1099,57 @@ async def test_dashboard_auth_frame_markup_present():
     assert 'id="dashboard-auth-generate-submit"' in body
     assert 'id="dashboard-auth-ack-checkbox"' in body
     assert 'id="dashboard-auth-submit"' in body
+
+
+async def test_password_reveal_is_an_icon_inside_the_input():
+    """The reveal control sits inside the field as an eye/crossed-eye icon,
+    the way password inputs conventionally work -- not a separate "Show"
+    text button sitting beside it."""
+    client = await _client()
+    body = (await client.get("/")).text
+    field = body[body.index('<div class="password-field">') :]
+    field = field[: field.index("</div>")]
+    assert 'id="dashboard-auth-password-input"' in field
+    assert 'id="dashboard-auth-password-toggle"' in field
+    assert 'id="dashboard-auth-eye-open"' in field
+    assert 'id="dashboard-auth-eye-closed"' in field
+    # Positioned with logical properties so it lands on the correct side
+    # under the Hebrew RTL direction, not pinned to the physical right.
+    assert "inset-inline-end" in body
+    assert "padding-inline-end" in body
+
+
+async def test_password_toggle_label_is_translated_via_aria_not_text():
+    """An icon button still needs an accessible name, and it has to follow a
+    language switch like every other string on the page."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_body = body[
+        body.index("function setDashboardAuthPasswordVisibility") : body.index(
+            "function toggleDashboardAuthPasswordVisibility"
+        )
+    ]
+    assert 'toggle.setAttribute("aria-label", label)' in fn_body
+    assert '"hide_password_button" : "show_password_button"' in fn_body
+    # applyLanguage must re-resolve it rather than leaving a stale label.
+    apply_body = body[body.index("function applyLanguage") : body.index("function frameEl")]
+    assert "setDashboardAuthPasswordVisibility(dashboardAuthPasswordVisible);" in apply_body
+
+
+async def test_dashboard_auth_ack_checkbox_sits_below_both_buttons():
+    """Its own row under the buttons -- wedged between them it broke the
+    button row onto two lines."""
+    client = await _client()
+    body = (await client.get("/")).text
+    frame = body[body.index('id="frame-dashboard-auth"') :]
+    frame = frame[: frame.index("</details>")]
+    assert frame.index('id="dashboard-auth-generate-submit"') < frame.index(
+        'id="dashboard-auth-ack-checkbox"'
+    )
+    assert frame.index('id="dashboard-auth-submit"') < frame.index(
+        'id="dashboard-auth-ack-checkbox"'
+    )
+    assert 'class="checkbox-row"' in frame
 
 
 async def test_dashboard_auth_frame_positioned_right_after_render_service():

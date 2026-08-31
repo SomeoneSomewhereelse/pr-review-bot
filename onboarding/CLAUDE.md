@@ -102,9 +102,35 @@ section 3), not an oversight to fix.
 - **Multi-navigation flows use a `sessionStorage`-held random `state`,
   generated client-side before each redirect and checked on return before
   any exchange happens.** This is the CSRF pattern for any frame that
-  involves a full-page round trip to an external site (this one, and
-  Supabase's OAuth in sub-project 3) — reuse it rather than inventing a
-  per-frame variant.
+  involves a full-page round trip to an external site (this frame's
+  *manifest-creation* form POST, and Supabase's OAuth in sub-project 3) —
+  reuse it rather than inventing a per-frame variant. The App **install**
+  leg is the one exception, and not because the pattern was relaxed: the
+  wizard no longer initiates that navigation at all (see below), so there
+  is no redirect of ours to protect. It uses discovery instead.
+- **The wizard never navigates to GitHub's App-install URL — not by
+  redirect, not by link (2026-08-31).** It renders the URL as copyable text
+  and tells the visitor to paste it into their own address bar. Four
+  separate throwaway GitHub accounts were suspended for a ToS violation at
+  exactly this step: three via `location.href`, and a fourth via a plain
+  `<a>` carrying both `rel="noreferrer"` and `referrerpolicy="no-referrer"`.
+  That fourth run is what rules out the `Referer` header as the trigger —
+  any click still sends `Sec-Fetch-Site: cross-site`, which a linking page
+  cannot suppress, while an address-bar navigation sends
+  `Sec-Fetch-Site: none`. **Do not "restore the convenience" with another
+  link variant**; every clickable shape has the property that got four
+  accounts suspended. See `ISSUES.md`.
+- **Because of that, installation completion is *discovered*, never read
+  out of the redirect.** `find_installation` asks GitHub which installations
+  the App has, authenticating as the App itself (`GET /app/installations`
+  under the App JWT, so the answer can only describe this App). This is
+  also what GitHub's own setup-URL docs advise — they warn the redirect's
+  `installation_id` "can be spoofed" and should not be trusted — and it is
+  what makes the frame work no matter how the visitor installed: same tab,
+  a new tab, or GitHub's own UI days later. The `setup_url` return is kept
+  purely as a hint to re-run that check; its query parameters are ignored.
+  A relay endpoint here must never grow an `installation_id` request field
+  again.
 - **`GET /`'s CSP carries `form-action 'self' https://github.com;`**
   specifically for this frame's manifest-creation form POST. A future frame
   that needs to form-POST to a *different* external origin adds that origin

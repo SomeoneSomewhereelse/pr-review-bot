@@ -177,67 +177,74 @@ def fake_transport(monkeypatch):
     return transport
 
 
-async def test_valid_installation_returns_account_and_scope(
+async def test_found_installation_returns_id_account_and_scope(
     fake_transport, _throwaway_key_material
 ):
     fake_transport.route(
         "GET",
-        "/app/installations/456",
-        {"id": 456, "account": {"login": "octocat"}, "repository_selection": "selected"},
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "selected"}],
     )
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    result = await github_client.find_installation(
+        app_id=999, private_key_b64=_throwaway_key_material
     )
-    assert result == github_client.InstallationVerified(
-        account_login="octocat", repo_scope="selected"
+    assert result == github_client.InstallationFound(
+        installation_id=456, account_login="octocat", repo_scope="selected"
     )
 
 
-async def test_installation_not_found_is_reported(fake_transport, _throwaway_key_material):
-    fake_transport.route("GET", "/app/installations/456", {"message": "Not Found"}, 404)
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+async def test_empty_installation_list_is_not_installed(fake_transport, _throwaway_key_material):
+    """The visitor created the App but has not installed it yet -- a normal,
+    expected state now that the wizard no longer drives that navigation and
+    cannot know when they finish."""
+    fake_transport.route("GET", "/app/installations", [])
+    result = await github_client.find_installation(
+        app_id=999, private_key_b64=_throwaway_key_material
     )
-    assert result == github_client.InstallationInvalid(reason="installation_not_found")
+    assert result == github_client.InstallationInvalid(reason="not_installed")
+
+
+def test_installation_id_is_never_taken_from_the_caller():
+    """GitHub's setup-URL docs warn the redirect's installation_id can be
+    spoofed. It is discovered through the App's own JWT instead, so the
+    function must not accept one at all."""
+    params = inspect.signature(github_client.find_installation).parameters
+    assert "installation_id" not in params
 
 
 async def test_unauthorized_is_invalid_credentials(fake_transport, _throwaway_key_material):
-    fake_transport.route("GET", "/app/installations/456", {"message": "Bad credentials"}, 401)
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    fake_transport.route("GET", "/app/installations", {"message": "Bad credentials"}, 401)
+    result = await github_client.find_installation(
+        app_id=999, private_key_b64=_throwaway_key_material
     )
     assert result == github_client.InstallationInvalid(reason="invalid_credentials")
 
 
 async def test_server_error_is_unreachable(fake_transport, _throwaway_key_material):
-    fake_transport.route("GET", "/app/installations/456", {}, 500)
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    fake_transport.route("GET", "/app/installations", {}, 500)
+    result = await github_client.find_installation(
+        app_id=999, private_key_b64=_throwaway_key_material
     )
     assert result == github_client.InstallationInvalid(reason="github_unreachable")
 
 
 async def test_malformed_base64_private_key_is_invalid_credentials():
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64="not-valid-base64!!", installation_id=456
-    )
+    result = await github_client.find_installation(app_id=999, private_key_b64="not-valid-base64!!")
     assert result == github_client.InstallationInvalid(reason="invalid_credentials")
 
 
 async def test_valid_base64_but_not_a_real_pem_is_invalid_credentials():
     garbage_pem_b64 = base64.b64encode(b"not a real PEM").decode()
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=garbage_pem_b64, installation_id=456
-    )
+    result = await github_client.find_installation(app_id=999, private_key_b64=garbage_pem_b64)
     assert result == github_client.InstallationInvalid(reason="invalid_credentials")
 
 
 async def test_installation_response_missing_expected_fields_is_unreachable(
     fake_transport, _throwaway_key_material
 ):
-    fake_transport.route("GET", "/app/installations/456", {"id": 456})
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    fake_transport.route("GET", "/app/installations", [{"id": 456}])
+    result = await github_client.find_installation(
+        app_id=999, private_key_b64=_throwaway_key_material
     )
     assert result == github_client.InstallationInvalid(reason="github_unreachable")
 
