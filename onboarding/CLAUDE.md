@@ -107,52 +107,37 @@ section 3), not an oversight to fix.
   reuse it rather than inventing a per-frame variant. The App **install**
   leg is the one exception, and not because the pattern was relaxed: the
   wizard no longer initiates that navigation at all (see below), so there
-  is no redirect of ours to protect. It uses discovery instead.
-- **The wizard never navigates to GitHub's App-install URL — not by
-  redirect, not by link (2026-08-31).** It renders the URL as copyable text
-  and tells the visitor to paste it into their own address bar. Four
+  is no redirect of ours to protect. It gates on a verified installation id
+  instead.
+- **The wizard offers no route to GitHub's App-install page — no redirect,
+  no link, and no URL text to copy either (2026-08-31).** Frame 4 tells the
+  visitor to install the App from GitHub's own UI and nothing more. Five
   separate throwaway GitHub accounts were suspended for a ToS violation at
-  exactly this step: three via `location.href`, and a fourth via a plain
-  `<a>` carrying both `rel="noreferrer"` and `referrerpolicy="no-referrer"`.
-  That fourth run is what rules out the `Referer` header as the trigger —
-  any click still sends `Sec-Fetch-Site: cross-site`, which a linking page
-  cannot suppress, while an address-bar navigation sends
-  `Sec-Fetch-Site: none`. **Do not "restore the convenience" with another
-  link variant**; every clickable shape has the property that got four
-  accounts suspended. See `ISSUES.md`.
-- **Because of that, installation completion is *discovered*, never read
-  out of the redirect.** `find_installation` asks GitHub which installations
-  the App has, authenticating as the App itself (`GET /app/installations`
-  under the App JWT, so the answer can only describe this App). This is
-  also what GitHub's own setup-URL docs advise — they warn the redirect's
-  `installation_id` "can be spoofed" and should not be trusted — and it is
-  what makes the frame work no matter how the visitor installed: same tab,
-  a new tab, or GitHub's own UI days later. The `setup_url` return is kept
-  purely as a hint to re-run that check; its query parameters are ignored.
-  A relay endpoint here must never grow an `installation_id` request field
-  again.
-- **`GET /`'s CSP carries `form-action 'self' https://github.com;`**
-  specifically for this frame's manifest-creation form POST. A future frame
-  that needs to form-POST to a *different* external origin adds that origin
-  to this same directive rather than loosening `default-src`.
-- **`onboarding/config.py`'s `public_base_url` is checked for *presence* in
-  `onboarding/main.py`'s `lifespan`, not as a pydantic-required field** —
-  same reasoning as `bot/config.py`/`bot/main.py`'s own pattern: a
-  required field would raise at import time, breaking pytest collection
-  before a clear error could ever be reported. Frame 2 cannot construct a
-  working manifest without it, so the service still refuses to boot without
-  it — just via an explicit check, not a schema constraint.
-  Its *shape*, in contrast, does live in a pydantic `field_validator`:
-  whitespace and a trailing `/` are stripped, and anything that is not a
-  plain `http(s)://` base URL is rejected. That split is deliberate, and the
-  shape half is not cosmetic — the value is both concatenated into the
-  manifest's `redirect_url`/`setup_url` (a trailing slash yields an
-  unroutable `//` path, and the 404 lands *after* the visitor has already
-  created a real App whose one-time credentials are then unrecoverable) and
-  substituted raw into a `<script>` block on a page holding a GitHub App
-  private key (a `"` or `<` there is an injection, not a typo). An unset
-  value still normalizes to `""` rather than erroring, so the lifespan check
-  stays the one thing that reports a missing value.
+  exactly this step: three via `location.href`, one via an `<a>` carrying
+  both `rel="noreferrer"` and `referrerpolicy="no-referrer"`, and one via the
+  visitor pasting the URL into their own address bar. The fourth run rules
+  out the `Referer` header (a click still sends `Sec-Fetch-Site:
+  cross-site`, which no page can suppress); the fifth rules out the
+  navigation's initiator too. What the surviving runs have in common is that
+  the visitor reached the install page by navigating *inside GitHub*.
+  **There is no link variant left to try** — the page must not construct
+  that URL at all, which `test_page_offers_no_route_to_the_install_page_at_all`
+  enforces by asserting `github.com/apps/` appears nowhere in the served
+  page. See `ISSUES.md`.
+- **Because the install happens where this page cannot observe it, the
+  visitor supplies the installation id and the frame gates on verifying
+  it.** There is no way to detect completion otherwise: no redirect is
+  guaranteed, and the install may happen in another tab or days later.
+  `verify_installation` checks the typed id against the App's own JWT
+  (`GET /app/installations/{id}`, which 404s for anything that is not this
+  App's installation), and the frame stays locked unless that passes — so
+  the id is never trusted on its face, which is what GitHub's own setup-URL
+  docs require. The `setup_url` return is kept purely to pre-fill the input
+  when GitHub does happen to redirect; that value goes through the identical
+  verification, never around it. Do not "simplify" this into trusting the
+  redirect parameter, and do not drop the gate: `GITHUB_APP_INSTALLATION_ID`
+  has no other source in this flow, and `bot/config.py` defaults it to `0`,
+  which authenticates as nothing.
 
 ## What sub-project 3 (Supabase provisioning) adds to these rules
 

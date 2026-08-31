@@ -158,48 +158,66 @@ async def test_frame2_strings_present_in_both_languages():
     assert body.count("frame2_install_then:") == 2  # STRINGS.en + STRINGS.he
 
 
-async def test_install_url_is_shown_as_text_and_never_as_a_clickable_link():
-    """Four throwaway GitHub accounts were suspended for a ToS violation at
-    this step: three via an automatic location.href redirect, and a fourth
-    via a plain <a> carrying rel="noreferrer" and referrerpolicy="no-referrer"
-    (see ISSUES.md). That fourth run rules out the Referer as the trigger --
-    any click still sends Sec-Fetch-Site: cross-site, which a linking page
-    cannot suppress. So the page hands over the URL as copyable text and
-    never navigates to github.com itself, by link or by script."""
+async def test_page_offers_no_route_to_the_install_page_at_all():
+    """Five throwaway GitHub accounts were suspended for a ToS violation at
+    this step (see ISSUES.md): three via an automatic location.href redirect,
+    one via an <a> with rel="noreferrer"/referrerpolicy="no-referrer", and one
+    via the visitor pasting the URL into their own address bar. Reaching
+    /installations/new from anywhere but inside GitHub appears to be what
+    trips it, so the page must offer no route -- no redirect, no link, and no
+    URL text to copy either."""
     client = await _client()
     body = (await client.get("/")).text
-    render_fn = body[
-        body.index("function renderGithubAppInstallUrl") : body.index(
-            "function copyGithubAppInstallUrl"
-        )
-    ]
-    assert "location.href =" not in render_fn
-    assert "location.assign" not in render_fn
-    assert "location.replace" not in render_fn
-    assert "installations/new" in render_fn
-    # No anchor anywhere on the page may target github.com.
-    assert "<a " not in body[body.index('id="github-app-install-section"') :][:800]
+    # The App-install URL shape specifically. Not a bare "installations/new"
+    # check: the code comment explaining this rule names that path, and the
+    # manifest form legitimately posts to github.com/settings/apps/new.
+    assert "github.com/apps/" not in body
     assert 'href="https://github.com' not in body
-
-
-async def test_installation_is_discovered_not_read_from_the_redirect():
-    """GitHub's setup-URL docs warn the redirect's installation_id can be
-    spoofed, and the wizard no longer controls that navigation at all, so a
-    visitor may install from any tab or from GitHub's own UI. Completion is
-    therefore detected by asking GitHub what is installed."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert body.count('fetch("/api/github/find-installation"') == 1
-    assert "/api/github/verify-installation" not in body
-
-    return_fn = body[
-        body.index("function handleGithubInstallReturn") : body.index(
-            "function base64UrlEncode"
+    install_fn = body[
+        body.index("async function markGithubAppInstalled") : body.index(
+            "function handleGithubInstallReturn"
         )
     ]
-    # The return is only a hint to re-check; its installation_id is ignored.
-    assert 'params.get("installation_id")' not in return_fn
-    assert "checkGithubAppInstallation();" in return_fn
+    assert "location.href =" not in install_fn
+    assert "location.assign" not in install_fn
+    assert "location.replace" not in install_fn
+
+
+async def test_frame4_gates_unlock_on_a_verified_installation_id():
+    """The install happens where this page cannot see it, so the visitor
+    reports the id -- and it is verified against GitHub before anything
+    unlocks, never taken on trust."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="github-app-installation-id-input"' in body
+    assert body.count('fetch("/api/github/verify-installation"') == 1
+    install_fn = body[
+        body.index("async function markGithubAppInstalled") : body.index(
+            "function handleGithubInstallReturn"
+        )
+    ]
+    # Rejected client-side before the round trip, then gated on the relay's
+    # verdict -- completeFrame runs only inside the body.valid branch.
+    assert 'githubAppError("err_github_installation_id_invalid")' in install_fn
+    assert "if (body.valid) {" in install_fn
+    assert install_fn.index("if (body.valid) {") < install_fn.index("finishGithubAppSetup")
+    assert 'githubAppError("err_github_installation_not_found")' in install_fn
+
+
+async def test_setup_url_return_only_prefills_the_id_it_never_bypasses_verification():
+    """GitHub's setup-URL docs warn its installation_id can be spoofed, so the
+    redirect is a convenience that fills the box -- the value still goes
+    through the same verification a typed one does."""
+    client = await _client()
+    body = (await client.get("/")).text
+    return_fn = body[
+        body.index("function handleGithubInstallReturn") : body.index("function base64UrlEncode")
+    ]
+    assert (
+        'document.getElementById("github-app-installation-id-input").value = supplied;'
+    ) in return_fn
+    assert "markGithubAppInstalled();" in return_fn
+    assert "completeFrame" not in return_fn
 
 
 async def test_locked_frame_click_is_prevented_before_toggle():

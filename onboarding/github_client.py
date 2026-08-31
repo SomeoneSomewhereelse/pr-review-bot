@@ -83,45 +83,44 @@ async def exchange_manifest_code(code: str) -> GithubAppResult:
 
 
 @dataclasses.dataclass(frozen=True)
-class InstallationFound:
-    installation_id: int
+class InstallationVerified:
     account_login: str
     repo_scope: str  # "all" | "selected"
 
 
 @dataclasses.dataclass(frozen=True)
 class InstallationInvalid:
-    reason: str  # "not_installed" | "invalid_credentials" | "github_unreachable"
+    reason: str  # "installation_not_found" | "invalid_credentials" | "github_unreachable"
 
 
-InstallationResult = InstallationFound | InstallationInvalid
+InstallationResult = InstallationVerified | InstallationInvalid
 
 
-def _list_installations(app_id: int, private_key_pem: str) -> object:
+def _fetch_installation(app_id: int, private_key_pem: str, installation_id: int) -> dict:
     """Blocking PyGithub call — run via asyncio.to_thread by the caller.
     Builds its own independent client from the visitor's just-minted
     app_id/private_key (never bot/github_app.py's operator-tied helpers —
     onboarding/CLAUDE.md's no-shared-credential-path rule). App-JWT only
-    (Auth.AppAuth, not an installation access token), which is exactly what
-    GET /app/installations authenticates as: an App listing its own
-    installations, so the result can only ever describe this App."""
+    (Auth.AppAuth, not an installation access token): under that auth GitHub
+    404s any installation that is not this App's, which is precisely the
+    check being made."""
     gh = Github(auth=Auth.AppAuth(app_id, private_key_pem), user_agent=USER_AGENT)
-    _, data = gh.requester.requestJsonAndCheck("GET", "/app/installations")
+    _, data = gh.requester.requestJsonAndCheck("GET", f"/app/installations/{installation_id}")
     return data
 
 
-async def find_installation(app_id: int, private_key_b64: str) -> InstallationResult:
-    """Ask GitHub which installations this App has, rather than trusting an
-    installation_id handed to us in a redirect's query string.
+async def verify_installation(
+    app_id: int, private_key_b64: str, installation_id: int
+) -> InstallationResult:
+    """Confirm `installation_id` really is an installation of `app_id`'s App.
 
-    GitHub's own setup-URL docs warn that "bad actors can hit this URL with a
-    spoofed installation_id... you should not rely on the validity of the
-    installation_id parameter." Discovering it through the App's own JWT
-    sidesteps that entirely, and — the reason this exists — it works no
-    matter how the visitor installed the App: same tab, a new tab, or
-    straight from GitHub's own UI days later. The wizard no longer drives
-    that navigation at all (see ISSUES.md), so it cannot assume a round trip
-    it controls.
+    The id is typed in by the visitor (the wizard cannot navigate them to the
+    install page — see ISSUES.md — so it cannot observe the installation
+    happening either). GitHub's setup-URL docs warn that an installation_id
+    arriving from outside must not be trusted on its face; this call is that
+    mitigation, and it is what the frame's unlock gates on. A typo, someone
+    else's installation id, or a stale id from a since-removed installation
+    all 404 under this App's own JWT.
 
     Never logs the private key, in full or truncated — same sensitivity tier
     as this project's own GITHUB_APP_PRIVATE_KEY."""
@@ -131,8 +130,12 @@ async def find_installation(app_id: int, private_key_b64: str) -> InstallationRe
         return InstallationInvalid(reason="invalid_credentials")
 
     try:
-        data = await asyncio.to_thread(_list_installations, app_id, private_key_pem)
+        data = await asyncio.to_thread(
+            _fetch_installation, app_id, private_key_pem, installation_id
+        )
     except GithubException as exc:
+        if exc.status == 404:
+            return InstallationInvalid(reason="installation_not_found")
         if exc.status in (401, 403):
             return InstallationInvalid(reason="invalid_credentials")
         return InstallationInvalid(reason="github_unreachable")
@@ -148,23 +151,13 @@ async def find_installation(app_id: int, private_key_b64: str) -> InstallationRe
     except requests.exceptions.RequestException:
         return InstallationInvalid(reason="github_unreachable")
 
-    if not isinstance(data, list) or not data:
-        return InstallationInvalid(reason="not_installed")
-
-    # A wizard-created App is private (the manifest sets public: false), so
-    # only its own owner can install it and one installation is the norm.
-    # Take the first rather than paging: there is no second one to miss.
     try:
-        first = data[0]
-        installation_id = int(first["id"])
-        account_login = str(first["account"]["login"])
-        repo_scope = str(first["repository_selection"])
-    except (KeyError, TypeError, ValueError):
+        account_login = str(data["account"]["login"])
+        repo_scope = str(data["repository_selection"])
+    except (KeyError, TypeError):
         return InstallationInvalid(reason="github_unreachable")
 
-    return InstallationFound(
-        installation_id=installation_id, account_login=account_login, repo_scope=repo_scope
-    )
+    return InstallationVerified(account_login=account_login, repo_scope=repo_scope)
 
 
 # No set_webhook_url here: the wizard bakes the App's real webhook URL into

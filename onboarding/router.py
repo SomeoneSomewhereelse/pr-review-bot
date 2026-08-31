@@ -32,12 +32,15 @@ class GithubManifestCodeRequest(BaseModel):
     code: str = Field(max_length=128)
 
 
-class GithubFindInstallRequest(BaseModel):
-    # No installation_id: it is discovered through the App's own JWT rather
-    # than accepted from the caller — GitHub's setup-URL docs warn that the
-    # redirect's installation_id can be spoofed.
+class GithubInstallVerifyRequest(BaseModel):
+    # installation_id is supplied by the visitor, who reads it off their own
+    # GitHub installation page — the wizard cannot navigate them there (see
+    # ISSUES.md) and so cannot observe the install. It is never trusted on its
+    # face: verify_installation checks it against the App's own JWT, and the
+    # frame only unlocks if that check passes.
     app_id: int = Field(gt=0)
     private_key_b64: str = Field(max_length=16384)
+    installation_id: int = Field(gt=0)
 
 
 class SupabaseExchangeCodeRequest(BaseModel):
@@ -209,13 +212,14 @@ async def exchange_github_manifest_code(payload: GithubManifestCodeRequest) -> d
     return {"valid": False, "reason": result.reason}
 
 
-@router.post("/api/github/find-installation")
-async def find_github_installation(payload: GithubFindInstallRequest) -> dict:
-    result = await github_client.find_installation(payload.app_id, payload.private_key_b64)
-    if isinstance(result, github_client.InstallationFound):
+@router.post("/api/github/verify-installation")
+async def verify_github_installation(payload: GithubInstallVerifyRequest) -> dict:
+    result = await github_client.verify_installation(
+        payload.app_id, payload.private_key_b64, payload.installation_id
+    )
+    if isinstance(result, github_client.InstallationVerified):
         return {
             "valid": True,
-            "installation_id": result.installation_id,
             "account_login": result.account_login,
             "repo_scope": result.repo_scope,
         }
