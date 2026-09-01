@@ -502,10 +502,13 @@ async def test_connect_supabase_opens_a_popup_with_a_same_tab_fallback():
     assert fn_body.count("location.href = authorizeUrl;") == 1
 
 
-async def test_popup_forwards_result_to_opener_and_closes():
-    """The popup does no work itself -- it hands the result back to the tab
-    that holds the pending state/verifier (and every earlier frame's
-    credentials), then closes."""
+async def test_popup_forwards_result_over_broadcast_channel_and_closes():
+    """The popup does no work itself -- window.opener is unreliable (many
+    OAuth providers, Supabase included, sever it via Cross-Origin-Opener-Policy
+    once the popup navigates to their login/consent page -- see ISSUES.md),
+    so the popup is identified by the ABSENCE of its own pending state, not
+    by window.opener, and hands the result to whichever tab is listening on
+    BroadcastChannel before closing."""
     client = await _client()
     body = (await client.get("/")).text
     fn_body = body[
@@ -513,32 +516,32 @@ async def test_popup_forwards_result_to_opener_and_closes():
             "  async function fetchSupabaseOrganizations"
         )
     ]
-    opener_body = fn_body[fn_body.index("if (window.opener && window.opener !== window) {") :]
-    assert (
-        'window.opener.postMessage({type: "supabase-oauth-result", code, state}, location.origin);'
-    ) in opener_body
-    assert "window.close();" in opener_body
-    assert opener_body.index("postMessage") < opener_body.index("window.close();")
-    # Without an opener, the exchange still completes in this tab -- the
-    # popup-blocked fallback, or a direct reload/bookmark of the callback URL.
+    # No functional reliance on window.opener anywhere -- only mentioned, if
+    # at all, in a comment explaining why it was rejected.
+    assert "window.opener." not in fn_body
+    assert "window.opener &&" not in fn_body
+    popup_body = fn_body[fn_body.index("No pending state here") :]
+    assert "new BroadcastChannel(SUPABASE_OAUTH_CHANNEL_NAME)" in popup_body
+    assert "channel.postMessage({type: \"supabase-oauth-result\", code, state});" in popup_body
+    assert "window.close();" in popup_body
+    assert popup_body.index("postMessage") < popup_body.index("window.close();")
+    # With pending state present in this tab, the exchange still completes
+    # here -- the popup-blocked fallback, or a direct reload/bookmark of the
+    # callback URL.
+    assert "if (pending) {" in fn_body
     assert "await completeSupabaseOAuth(code, state);" in fn_body
 
 
-async def test_popup_message_handler_validates_origin_and_source():
-    """A same-origin message from some other window must not be trusted as
-    the OAuth popup's result -- only a message whose source is the exact
-    popup this tab opened, from this tab's own origin, is accepted."""
+async def test_broadcast_channel_message_handler_checks_the_message_type():
     client = await _client()
     body = (await client.get("/")).text
     fn_body = body[
-        body.index("function handleSupabaseOauthMessage") : body.index(
+        body.index("function handleSupabaseOauthChannelMessage") : body.index(
             "async function connectSupabase"
         )
     ]
-    assert "if (event.origin !== location.origin) return;" in fn_body
-    assert "if (!supabaseOauthPopup || event.source !== supabaseOauthPopup) return;" in fn_body
-    assert 'event.data.type !== "supabase-oauth-result"' in fn_body
-    assert "completeSupabaseOAuth(event.data.code, event.data.state);" in fn_body
+    assert 'if (!event.data || event.data.type !== "supabase-oauth-result") return;' in fn_body
+    assert "completeSupabaseOAuth(code, state);" in fn_body
 
 
 async def test_abandoned_popup_reenables_the_connect_button():
@@ -557,11 +560,11 @@ async def test_abandoned_popup_reenables_the_connect_button():
     assert "cleanupSupabaseOauthPopup();" in fn_body
     cleanup_body = body[
         body.index("function cleanupSupabaseOauthPopup") : body.index(
-            "function handleSupabaseOauthMessage"
+            "function handleSupabaseOauthChannelMessage"
         )
     ]
     assert 'document.getElementById("supabase-connect-submit").disabled = false;' in cleanup_body
-    assert "window.removeEventListener(\"message\", handleSupabaseOauthMessage);" in cleanup_body
+    assert "supabaseOauthChannel.close();" in cleanup_body
 
 
 async def test_project_status_leaves_the_page_exactly_once():

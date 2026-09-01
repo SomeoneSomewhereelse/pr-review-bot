@@ -2020,33 +2020,40 @@
     }
   }
 
-  // Set while an OAuth popup is open (connectSupabase to its resolution) so
-  // handleSupabaseOauthMessage can confirm a received message really came
-  // from the popup this tab opened, not some other same-origin window.
+  // Cross-tab handoff channel, not window.opener/postMessage: Supabase's
+  // own authorize/login pages send Cross-Origin-Opener-Policy: same-origin
+  // (a deliberate, increasingly common anti-tabnabbing default many OAuth
+  // providers use), which permanently severs window.opener for this popup
+  // the moment it navigates there -- confirmed live (see ISSUES.md). By the
+  // time the popup lands back on our own origin, window.opener is null,
+  // even though the popup and this tab are still both same-origin.
+  // BroadcastChannel only needs a shared name and same origin, not an
+  // opener relationship, so it is unaffected by COOP.
+  const SUPABASE_OAUTH_CHANNEL_NAME = "onboarding.supabaseOauthResult";
+
   let supabaseOauthPopup = null;
   let supabaseOauthPopupWatcher = null;
+  let supabaseOauthChannel = null;
 
   function cleanupSupabaseOauthPopup() {
     if (supabaseOauthPopupWatcher) {
       clearInterval(supabaseOauthPopupWatcher);
       supabaseOauthPopupWatcher = null;
     }
-    window.removeEventListener("message", handleSupabaseOauthMessage);
+    if (supabaseOauthChannel) {
+      supabaseOauthChannel.close();
+      supabaseOauthChannel = null;
+    }
     supabaseOauthPopup = null;
     setFrameStatus("supabase", "ready");
     document.getElementById("supabase-connect-submit").disabled = false;
   }
 
-  function handleSupabaseOauthMessage(event) {
-    // origin AND source both checked -- origin alone would accept a
-    // same-origin message from any window, not just the popup this tab
-    // opened; source alone is meaningless without confirming the sender is
-    // who it claims to be.
-    if (event.origin !== location.origin) return;
-    if (!supabaseOauthPopup || event.source !== supabaseOauthPopup) return;
+  function handleSupabaseOauthChannelMessage(event) {
     if (!event.data || event.data.type !== "supabase-oauth-result") return;
+    const {code, state} = event.data;
     cleanupSupabaseOauthPopup();
-    completeSupabaseOAuth(event.data.code, event.data.state);
+    completeSupabaseOAuth(code, state);
   }
 
   async function connectSupabase() {
@@ -2107,7 +2114,8 @@
     supabaseOauthPopup = popup;
     setFrameStatus("supabase", "checking");
     document.getElementById("supabase-connect-submit").disabled = true;
-    window.addEventListener("message", handleSupabaseOauthMessage);
+    supabaseOauthChannel = new BroadcastChannel(SUPABASE_OAUTH_CHANNEL_NAME);
+    supabaseOauthChannel.onmessage = handleSupabaseOauthChannelMessage;
     supabaseOauthPopupWatcher = setInterval(() => {
       if (popup.closed) {
         // Closed without ever posting a message -- the visitor changed
@@ -2187,25 +2195,39 @@
     history.replaceState(null, "", "/");
     const code = params.get("code");
     const state = params.get("state");
-    if (window.opener && window.opener !== window) {
-      // Running inside the popup connectSupabase() opened: hand the result
-      // back to the tab that actually holds the pending state/verifier and
-      // every earlier frame's credentials, rather than completing the
-      // exchange here. Best-effort -- if postMessage itself throws (e.g.
-      // the opener navigated away), the opener's popup.closed poll notices
-      // this popup closing without ever having sent a message.
-      try {
-        window.opener.postMessage({type: "supabase-oauth-result", code, state}, location.origin);
-      } catch (err) {
-        // fall through to close()
-      }
-      window.close();
+    // The pending state/verifier only ever exists in the ORIGINAL tab that
+    // generated it (connectSupabase's sessionStorage.setItem) -- a popup is
+    // a brand-new tab with its own empty sessionStorage, so checking for
+    // pending here is what reliably tells "am I the popup" apart from "am I
+    // the tab that started this flow," unlike window.opener (unreliable --
+    // see the SUPABASE_OAUTH_CHANNEL_NAME comment above).
+    let pending;
+    try {
+      pending = JSON.parse(sessionStorage.getItem(SUPABASE_PENDING_KEY) || "null");
+    } catch (err) {
+      pending = null;
+    }
+    if (pending) {
+      // Either the popup-blocked fallback (a same-tab redirect, same as
+      // before popups existed), or the visitor reloaded/bookmarked this URL
+      // directly. Complete the exchange in this tab.
+      await completeSupabaseOAuth(code, state);
       return;
     }
-    // No opener: either the popup-blocked fallback (a same-tab redirect,
-    // same as before popups existed), or the visitor reloaded/bookmarked
-    // this URL directly. Complete the exchange in this tab.
-    await completeSupabaseOAuth(code, state);
+    // No pending state here: this is the popup. Hand the result to
+    // whichever tab is listening on the shared channel and close -- do no
+    // work here. Best-effort -- if the channel itself throws (unsupported
+    // API, though every browser this project targets has it), the opener's
+    // popup.closed poll notices this popup closing without ever having sent
+    // a result.
+    try {
+      const channel = new BroadcastChannel(SUPABASE_OAUTH_CHANNEL_NAME);
+      channel.postMessage({type: "supabase-oauth-result", code, state});
+      channel.close();
+    } catch (err) {
+      // fall through to close()
+    }
+    window.close();
   }
 
   async function fetchSupabaseOrganizations() {

@@ -219,20 +219,33 @@ section 3), not an oversight to fix.
   mobile browser, where a lengthy trip to Supabase's consent screen let the
   browser reclaim the tab's browsing context while it was away; per spec, a
   recreated browsing context gets fresh, empty `sessionStorage` even though
-  the origin and URL are unchanged on return. See `ISSUES.md`. The popup
-  does no work itself: `handleSupabaseOauthCallback()` detects it's running
-  inside a popup via `window.opener`, forwards `{code, state}` to the
-  opener with `postMessage` (targeted at this origin), and closes — the
-  opener (which still holds `pending.verifier` and every other frame's
-  state, untouched since it never navigated) does the actual token exchange
-  via `completeSupabaseOAuth()`. The opener validates both `event.origin`
-  and `event.source` before trusting a received message — origin alone
-  would accept a message from any same-origin window, not just the popup
-  this tab opened. If `window.open` is blocked or folded into a same-tab
-  navigation by the browser, `connectSupabase()` falls back to the original
-  same-tab redirect (still exercised when there's no `window.opener` on the
-  callback page) — do not remove that fallback path assuming popups always
-  work.
+  the origin and URL are unchanged on return. See `ISSUES.md`.
+  **Cross-tab handoff uses `BroadcastChannel`, not `window.opener`/
+  `postMessage`** — a first attempt at this used `window.opener`, but
+  Supabase's own authorize/login pages send
+  `Cross-Origin-Opener-Policy: same-origin` (a deliberate, increasingly
+  common anti-tabnabbing default many OAuth providers use), which
+  permanently severs `window.opener` for the popup the moment it navigates
+  there. By the time the popup lands back on this app's own origin,
+  `window.opener` is `null` even though popup and opener are still
+  same-origin — confirmed live, see `ISSUES.md`. `handleSupabaseOauthCallback()`
+  instead tells "am I the popup" apart from "am I the tab that started this
+  flow" by checking for its OWN `sessionStorage`'s pending state: a popup is
+  a brand-new tab whose `sessionStorage` never had it (only the original
+  tab's `connectSupabase()` wrote it), so its absence is what identifies the
+  popup, not `window.opener`. The popup then hands `{code, state}` to
+  whichever tab is listening via a shared-name `BroadcastChannel`
+  (`SUPABASE_OAUTH_CHANNEL_NAME`) and closes — `BroadcastChannel` only needs
+  same origin, not an opener relationship, so it is unaffected by COOP. The
+  tab holding the pending state (which still has `pending.verifier` and
+  every other frame's state, untouched since it never navigated) does the
+  actual token exchange via `completeSupabaseOAuth()`. If `window.open` is
+  blocked or folded into a same-tab navigation by the browser,
+  `connectSupabase()` falls back to the original same-tab redirect (the
+  callback page then finds its own pending state and completes the exchange
+  itself, same as before popups existed) — do not remove that fallback path
+  assuming popups always work, and do not reintroduce a `window.opener`
+  check as the popup-detection mechanism.
 - **`connection-info` never returns Supabase's own `connection_string`/
   `connectionString` fields.** Whether they embed the real password or a
   masked placeholder could not be verified from documentation during this
