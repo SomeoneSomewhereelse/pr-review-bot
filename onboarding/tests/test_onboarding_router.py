@@ -119,97 +119,160 @@ async def test_supabase_oauth_callback_path_serves_the_same_page():
     assert resp.text == (await client.get("/")).text
 
 
-async def test_index_csp_allows_form_post_to_github():
+async def test_index_csp_no_longer_needs_a_github_form_action():
+    """No cross-origin form POST remains in this frame -- App creation is
+    fully manual now."""
     client = await _client()
     resp = await client.get("/")
-    assert "form-action 'self' https://github.com" in resp.headers["content-security-policy"]
+    csp = resp.headers["content-security-policy"]
+    assert "form-action 'self';" in csp
+    assert "github.com" not in csp
 
 
-async def test_manifest_code_exchange_returns_app_credentials(monkeypatch):
-    async def fake_exchange(code: str):
-        assert code == "SENTINEL_CODE"
-        return github_client.GithubAppCreated(
-            app_id=42, slug="my-app", private_key_b64="cGVt", webhook_secret="whsec"
+async def test_validate_app_returns_the_full_checklist(monkeypatch):
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        assert (app_id, private_key_b64, expected_webhook_url) == (
+            42, "cGVt", "https://my-service.onrender.com/webhook",
+        )
+        return github_client.AppValidated(
+            permissions=[
+                github_client.PermissionCheck(
+                    name="contents", wanted="read", actual="read", ok=True
+                ),
+            ],
+            events=[github_client.EventCheck(name="pull_request", ok=True)],
+            installation=github_client.InstallationFound(
+                installation_id=100, account_login="octocat", repo_scope="all"
+            ),
+            webhook=github_client.WebhookCheck(
+                ok=True, actual_url="https://my-service.onrender.com/webhook"
+            ),
         )
 
-    monkeypatch.setattr(github_client, "exchange_manifest_code", fake_exchange)
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
     client = await _client()
-    resp = await client.post("/api/github/exchange-manifest-code", json={"code": "SENTINEL_CODE"})
+    resp = await client.post(
+        "/api/github/validate-app",
+        json={
+            "app_id": 42,
+            "private_key_b64": "cGVt",
+            "expected_webhook_url": "https://my-service.onrender.com/webhook",
+        },
+    )
     assert resp.status_code == 200
     assert resp.json() == {
         "valid": True,
-        "app_id": 42,
-        "slug": "my-app",
-        "private_key_b64": "cGVt",
-        "webhook_secret": "whsec",
+        "all_ok": True,
+        "permissions": [{"name": "contents", "wanted": "read", "actual": "read", "ok": True}],
+        "events": [{"name": "pull_request", "ok": True}],
+        "installation": {
+            "status": "found", "installation_id": 100,
+            "account_login": "octocat", "repo_scope": "all",
+        },
+        "webhook": {"ok": True, "actual_url": "https://my-service.onrender.com/webhook"},
     }
 
 
-async def test_manifest_code_exchange_reports_failure_reason(monkeypatch):
-    async def fake_exchange(code: str):
-        return github_client.GithubAppExchangeFailed(reason="exchange_failed")
+async def test_validate_app_all_ok_is_false_when_anything_fails(monkeypatch):
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        return github_client.AppValidated(
+            permissions=[
+                github_client.PermissionCheck(name="issues", wanted="write", actual=None, ok=False),
+            ],
+            events=[github_client.EventCheck(name="pull_request", ok=True)],
+            installation=github_client.InstallationNotFound(),
+            webhook=github_client.WebhookCheck(ok=False, actual_url=""),
+        )
 
-    monkeypatch.setattr(github_client, "exchange_manifest_code", fake_exchange)
-    client = await _client()
-    resp = await client.post("/api/github/exchange-manifest-code", json={"code": "bad"})
-    assert resp.json() == {"valid": False, "reason": "exchange_failed"}
-
-
-async def test_verify_installation_returns_account_details(monkeypatch):
-    async def fake_verify(app_id, private_key_b64, installation_id):
-        assert (app_id, private_key_b64, installation_id) == (42, "cGVt", 100)
-        return github_client.InstallationVerified(account_login="octocat", repo_scope="all")
-
-    monkeypatch.setattr(github_client, "verify_installation", fake_verify)
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
     client = await _client()
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": 100},
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key_b64": "cGVt",
+            "expected_webhook_url": "https://x.example/webhook",
+        },
     )
-    assert resp.status_code == 200
-    assert resp.json() == {"valid": True, "account_login": "octocat", "repo_scope": "all"}
+    body = resp.json()
+    assert body["valid"] is True
+    assert body["all_ok"] is False
+    assert body["installation"] == {"status": "none"}
 
 
-async def test_verify_installation_reports_failure_reason(monkeypatch):
-    async def fake_verify(app_id, private_key_b64, installation_id):
-        return github_client.InstallationInvalid(reason="installation_not_found")
+async def test_validate_app_reports_multiple_installations(monkeypatch):
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        return github_client.AppValidated(
+            permissions=[],
+            events=[],
+            installation=github_client.MultipleInstallationsFound(
+                account_logins=["octocat", "monalisa"]
+            ),
+            webhook=github_client.WebhookCheck(ok=True, actual_url="https://x.example/webhook"),
+        )
 
-    monkeypatch.setattr(github_client, "verify_installation", fake_verify)
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
     client = await _client()
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": 100},
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key_b64": "cGVt",
+            "expected_webhook_url": "https://x.example/webhook",
+        },
     )
-    assert resp.json() == {"valid": False, "reason": "installation_not_found"}
+    body = resp.json()
+    assert body["installation"] == {"status": "multiple", "account_logins": ["octocat", "monalisa"]}
+    assert body["all_ok"] is False
 
 
-async def test_verify_installation_rejects_a_non_positive_installation_id():
-    """The id is visitor-typed, so the obvious junk values must not reach the
-    GitHub call at all."""
+async def test_validate_app_reports_credentials_failure_reason(monkeypatch):
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        return github_client.AppCredentialsInvalid(reason="unauthorized")
+
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
+    client = await _client()
+    resp = await client.post(
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key_b64": "cGVt",
+            "expected_webhook_url": "https://x.example/webhook",
+        },
+    )
+    assert resp.json() == {"valid": False, "reason": "unauthorized"}
+
+
+async def test_validate_app_rejects_a_non_positive_app_id():
     client = await _client()
     for bad in (0, -1):
         resp = await client.post(
-            "/api/github/verify-installation",
-            json={"app_id": 42, "private_key_b64": "cGVt", "installation_id": bad},
+            "/api/github/validate-app",
+            json={
+                "app_id": bad, "private_key_b64": "cGVt",
+                "expected_webhook_url": "https://x.example/webhook",
+            },
         )
         assert resp.status_code == 422
 
 
-async def test_verify_installation_validation_error_never_echoes_the_private_key():
-    """The same guard as test_validation_error_never_echoes_the_submitted_key,
-    for the one endpoint whose body carries a GitHub App's full private key —
-    the most sensitive artifact in this wizard. FastAPI's *default* 422 body
-    includes the rejected input verbatim; only onboarding/main.py's app-wide
-    RequestValidationError handler stops that, and it protects this router
-    solely because main.py mounts the router on the app the handler is
-    registered on (onboarding/CLAUDE.md calls this out as a non-obvious
-    cross-file dependency a future remount could lose silently)."""
+async def test_validate_app_rejects_a_malformed_webhook_url():
     client = await _client()
-    # Misnamed field ("private_key" rather than "private_key_b64") fails
-    # pydantic validation with the credential sitting in the rejected input.
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key": SENTINEL_PRIVATE_KEY, "installation_id": 100},
+        "/api/github/validate-app",
+        json={"app_id": 42, "private_key_b64": "cGVt", "expected_webhook_url": "not-a-url"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_validate_app_validation_error_never_echoes_the_private_key():
+    """Same guard as every other endpoint carrying a private key: FastAPI's
+    default 422 body echoes rejected input verbatim; only main.py's app-wide
+    RequestValidationError handler stops that."""
+    client = await _client()
+    resp = await client.post(
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key": SENTINEL_PRIVATE_KEY,
+            "expected_webhook_url": "https://x.example/webhook",
+        },
     )
     assert resp.status_code == 422
     assert SENTINEL_PRIVATE_KEY not in resp.text
@@ -217,17 +280,20 @@ async def test_verify_installation_validation_error_never_echoes_the_private_key
     assert "input" not in resp.text
 
 
-async def test_verify_installation_response_never_echoes_the_private_key(monkeypatch):
+async def test_validate_app_response_never_echoes_the_private_key(monkeypatch):
     sentinel_key_b64 = "U0VOVElORUxfUFJJVkFURV9LRVk="
 
-    async def fake_verify(app_id, private_key_b64, installation_id):
-        return github_client.InstallationInvalid(reason="invalid_credentials")
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        return github_client.AppCredentialsInvalid(reason="invalid_key")
 
-    monkeypatch.setattr(github_client, "verify_installation", fake_verify)
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
     client = await _client()
     resp = await client.post(
-        "/api/github/verify-installation",
-        json={"app_id": 42, "private_key_b64": sentinel_key_b64, "installation_id": 100},
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key_b64": sentinel_key_b64,
+            "expected_webhook_url": "https://x.example/webhook",
+        },
     )
     assert sentinel_key_b64 not in resp.text
 

@@ -1,10 +1,6 @@
 """onboarding/router.py — the wizard's only HTTP surface: GET / (the static
 page) and one relay endpoint per external service. Every relay endpoint
-returns a verdict, never the credential it was given — except
-POST /api/github/exchange-manifest-code, a documented exception (see
-docs/superpowers/specs/2026-08-26-onboarding-github-app-frame-design.md
-section 4: it mints and returns credentials belonging to the caller who
-just created them).
+returns a verdict, never the credential it was given.
 """
 
 from __future__ import annotations
@@ -28,19 +24,19 @@ class RenderKeyRequest(BaseModel):
     api_key: str = Field(max_length=512)
 
 
-class GithubManifestCodeRequest(BaseModel):
-    code: str = Field(max_length=128)
-
-
-class GithubInstallVerifyRequest(BaseModel):
-    # installation_id is supplied by the visitor, who reads it off their own
-    # GitHub installation page — the wizard cannot navigate them there (see
-    # ISSUES.md) and so cannot observe the install. It is never trusted on its
-    # face: verify_installation checks it against the App's own JWT, and the
-    # frame only unlocks if that check passes.
+class GithubValidateAppRequest(BaseModel):
+    # App ID + private key are pasted in by the visitor after hand-creating
+    # the App in GitHub's UI (see onboarding/CLAUDE.md) -- validate_app()
+    # reads the App's actual live configuration back from GitHub rather
+    # than trusting anything about how it was created.
     app_id: int = Field(gt=0)
     private_key_b64: str = Field(max_length=16384)
-    installation_id: int = Field(gt=0)
+    # Computed client-side from the already-known Render service URL, sent
+    # up rather than recomputed server-side -- this service holds no state
+    # to recompute it from.
+    expected_webhook_url: str = Field(
+        min_length=1, max_length=2048, pattern=r"^https?://[^\s\"'<>\\]+$"
+    )
 
 
 class SupabaseExchangeCodeRequest(BaseModel):
@@ -196,7 +192,7 @@ def _render_index() -> HTMLResponse:
             "Content-Security-Policy": (
                 "default-src 'none'; style-src 'unsafe-inline'; "
                 "script-src 'unsafe-inline'; connect-src 'self'; "
-                "form-action 'self' https://github.com; frame-ancestors 'none'"
+                "form-action 'self'; frame-ancestors 'none'"
             ),
             "X-Frame-Options": "DENY",
             "Referrer-Policy": "no-referrer",
@@ -222,32 +218,46 @@ async def validate_render_key(payload: RenderKeyRequest) -> dict:
     return {"valid": False, "reason": result.reason}
 
 
-@router.post("/api/github/exchange-manifest-code")
-async def exchange_github_manifest_code(payload: GithubManifestCodeRequest) -> dict:
-    result = await github_client.exchange_manifest_code(payload.code)
-    if isinstance(result, github_client.GithubAppCreated):
-        return {
-            "valid": True,
-            "app_id": result.app_id,
-            "slug": result.slug,
-            "private_key_b64": result.private_key_b64,
-            "webhook_secret": result.webhook_secret,
-        }
-    return {"valid": False, "reason": result.reason}
-
-
-@router.post("/api/github/verify-installation")
-async def verify_github_installation(payload: GithubInstallVerifyRequest) -> dict:
-    result = await github_client.verify_installation(
-        payload.app_id, payload.private_key_b64, payload.installation_id
+@router.post("/api/github/validate-app")
+async def validate_github_app(payload: GithubValidateAppRequest) -> dict:
+    result = await github_client.validate_app(
+        payload.app_id, payload.private_key_b64, payload.expected_webhook_url
     )
-    if isinstance(result, github_client.InstallationVerified):
-        return {
-            "valid": True,
-            "account_login": result.account_login,
-            "repo_scope": result.repo_scope,
+    if isinstance(result, github_client.AppCredentialsInvalid):
+        return {"valid": False, "reason": result.reason}
+
+    if isinstance(result.installation, github_client.InstallationFound):
+        installation = {
+            "status": "found",
+            "installation_id": result.installation.installation_id,
+            "account_login": result.installation.account_login,
+            "repo_scope": result.installation.repo_scope,
         }
-    return {"valid": False, "reason": result.reason}
+        installation_ok = True
+    elif isinstance(result.installation, github_client.MultipleInstallationsFound):
+        installation = {"status": "multiple", "account_logins": result.installation.account_logins}
+        installation_ok = False
+    else:
+        installation = {"status": "none"}
+        installation_ok = False
+
+    all_ok = (
+        all(p.ok for p in result.permissions)
+        and all(e.ok for e in result.events)
+        and installation_ok
+        and result.webhook.ok
+    )
+    return {
+        "valid": True,
+        "all_ok": all_ok,
+        "permissions": [
+            {"name": p.name, "wanted": p.wanted, "actual": p.actual, "ok": p.ok}
+            for p in result.permissions
+        ],
+        "events": [{"name": e.name, "ok": e.ok} for e in result.events],
+        "installation": installation,
+        "webhook": {"ok": result.webhook.ok, "actual_url": result.webhook.actual_url},
+    }
 
 
 @router.post("/api/supabase/exchange-oauth-code")
