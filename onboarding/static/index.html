@@ -2020,6 +2020,35 @@
     }
   }
 
+  // Set while an OAuth popup is open (connectSupabase to its resolution) so
+  // handleSupabaseOauthMessage can confirm a received message really came
+  // from the popup this tab opened, not some other same-origin window.
+  let supabaseOauthPopup = null;
+  let supabaseOauthPopupWatcher = null;
+
+  function cleanupSupabaseOauthPopup() {
+    if (supabaseOauthPopupWatcher) {
+      clearInterval(supabaseOauthPopupWatcher);
+      supabaseOauthPopupWatcher = null;
+    }
+    window.removeEventListener("message", handleSupabaseOauthMessage);
+    supabaseOauthPopup = null;
+    setFrameStatus("supabase", "ready");
+    document.getElementById("supabase-connect-submit").disabled = false;
+  }
+
+  function handleSupabaseOauthMessage(event) {
+    // origin AND source both checked -- origin alone would accept a
+    // same-origin message from any window, not just the popup this tab
+    // opened; source alone is meaningless without confirming the sender is
+    // who it claims to be.
+    if (event.origin !== location.origin) return;
+    if (!supabaseOauthPopup || event.source !== supabaseOauthPopup) return;
+    if (!event.data || event.data.type !== "supabase-oauth-result") return;
+    cleanupSupabaseOauthPopup();
+    completeSupabaseOAuth(event.data.code, event.data.state);
+  }
+
   async function connectSupabase() {
     const input = document.getElementById("supabase-project-name-input");
     const name = input.value.trim();
@@ -2058,17 +2087,38 @@
       code_challenge: challenge,
       code_challenge_method: "S256",
     });
-    location.href = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
+    const authorizeUrl = `https://api.supabase.com/v1/oauth/authorize?${params.toString()}`;
+    // A separate tab/window, not a same-tab redirect: this tab's own
+    // sessionStorage (the pending state above, and every earlier frame's
+    // credentials) must survive the trip to Supabase's consent screen
+    // intact. A same-tab redirect risks a mobile browser reclaiming this
+    // tab's browsing context while it's away, which resets sessionStorage
+    // even though the origin and URL are unchanged on return (see
+    // ISSUES.md).
+    const popup = window.open(authorizeUrl, "_blank");
+    if (!popup) {
+      // Blocked, or folded into a same-tab navigation by the browser --
+      // fall back to the flow that already works today rather than leaving
+      // the visitor stuck. sessionStorage is already written above, so this
+      // is exactly the pre-popup behavior.
+      location.href = authorizeUrl;
+      return;
+    }
+    supabaseOauthPopup = popup;
+    setFrameStatus("supabase", "checking");
+    document.getElementById("supabase-connect-submit").disabled = true;
+    window.addEventListener("message", handleSupabaseOauthMessage);
+    supabaseOauthPopupWatcher = setInterval(() => {
+      if (popup.closed) {
+        // Closed without ever posting a message -- the visitor changed
+        // their mind, or the flow failed silently in the popup. Not an
+        // error: just stop waiting and let them try again.
+        cleanupSupabaseOauthPopup();
+      }
+    }, 500);
   }
 
-  async function handleSupabaseOauthCallback() {
-    // Routed on the pathname, not a query flag: Supabase matches registered
-    // redirect URIs exactly, and a query string is the part most likely to be
-    // normalised away or mis-registered (see ISSUES.md). Restores the URL to
-    // "/" afterwards so a reload does not re-enter this handler.
-    if (location.pathname !== "/oauth/supabase/callback") return;
-    const params = new URLSearchParams(location.search);
-    history.replaceState(null, "", "/");
+  async function completeSupabaseOAuth(code, state) {
     // Same defensive shape as readStoredGithubApp()/readStoredSupabase()
     // above -- a corrupted/foreign-shaped stored value must never throw out
     // of this handler, which would otherwise leave the visitor back from
@@ -2080,8 +2130,7 @@
       pending = null;
     }
     sessionStorage.removeItem(SUPABASE_PENDING_KEY);
-    const code = params.get("code");
-    if (!pending || params.get("state") !== pending.state || !code) {
+    if (!pending || state !== pending.state || !code) {
       supabaseError("err_supabase_callback_invalid");
       return;
     }
@@ -2126,6 +2175,37 @@
       return;
     }
     await fetchSupabaseOrganizations();
+  }
+
+  async function handleSupabaseOauthCallback() {
+    // Routed on the pathname, not a query flag: Supabase matches registered
+    // redirect URIs exactly, and a query string is the part most likely to be
+    // normalised away or mis-registered (see ISSUES.md). Restores the URL to
+    // "/" afterwards so a reload does not re-enter this handler.
+    if (location.pathname !== "/oauth/supabase/callback") return;
+    const params = new URLSearchParams(location.search);
+    history.replaceState(null, "", "/");
+    const code = params.get("code");
+    const state = params.get("state");
+    if (window.opener && window.opener !== window) {
+      // Running inside the popup connectSupabase() opened: hand the result
+      // back to the tab that actually holds the pending state/verifier and
+      // every earlier frame's credentials, rather than completing the
+      // exchange here. Best-effort -- if postMessage itself throws (e.g.
+      // the opener navigated away), the opener's popup.closed poll notices
+      // this popup closing without ever having sent a message.
+      try {
+        window.opener.postMessage({type: "supabase-oauth-result", code, state}, location.origin);
+      } catch (err) {
+        // fall through to close()
+      }
+      window.close();
+      return;
+    }
+    // No opener: either the popup-blocked fallback (a same-tab redirect,
+    // same as before popups existed), or the visitor reloaded/bookmarked
+    // this URL directly. Complete the exchange in this tab.
+    await completeSupabaseOAuth(code, state);
   }
 
   async function fetchSupabaseOrganizations() {

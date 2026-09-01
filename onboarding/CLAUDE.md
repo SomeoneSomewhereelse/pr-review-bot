@@ -212,6 +212,27 @@ section 3), not an oversight to fix.
   way it produces a private key), so keeping it browser-originated avoids
   growing the mint-and-return exception list for a value that doesn't need
   it.
+- **The OAuth authorize leg opens in a popup (`window.open`), not a
+  same-tab redirect (2026-09-02).** A same-tab `location.href` redirect was
+  found to reset `sessionStorage` — including every earlier frame's
+  credentials, not just this frame's pending OAuth state — on at least one
+  mobile browser, where a lengthy trip to Supabase's consent screen let the
+  browser reclaim the tab's browsing context while it was away; per spec, a
+  recreated browsing context gets fresh, empty `sessionStorage` even though
+  the origin and URL are unchanged on return. See `ISSUES.md`. The popup
+  does no work itself: `handleSupabaseOauthCallback()` detects it's running
+  inside a popup via `window.opener`, forwards `{code, state}` to the
+  opener with `postMessage` (targeted at this origin), and closes — the
+  opener (which still holds `pending.verifier` and every other frame's
+  state, untouched since it never navigated) does the actual token exchange
+  via `completeSupabaseOAuth()`. The opener validates both `event.origin`
+  and `event.source` before trusting a received message — origin alone
+  would accept a message from any same-origin window, not just the popup
+  this tab opened. If `window.open` is blocked or folded into a same-tab
+  navigation by the browser, `connectSupabase()` falls back to the original
+  same-tab redirect (still exercised when there's no `window.opener` on the
+  callback page) — do not remove that fallback path assuming popups always
+  work.
 - **`connection-info` never returns Supabase's own `connection_string`/
   `connectionString` fields.** Whether they embed the real password or a
   masked placeholder could not be verified from documentation during this
