@@ -80,10 +80,13 @@ async def test_render_key_leaves_the_page_exactly_once():
     assert body.count('fetch("/api/render/validate-key"') == 1
 
 
-async def test_manifest_code_leaves_the_page_exactly_once():
+async def test_validate_github_app_leaves_the_page_exactly_once():
+    """The App ID/private key must only ever transit the one relay call —
+    anything else would be a second, unaudited exit path for a visitor's
+    credential."""
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/github/exchange-manifest-code"') == 1
+    assert body.count('fetch("/api/github/validate-app"') == 1
 
 
 async def test_render_key_never_persists_to_local_storage():
@@ -134,11 +137,25 @@ async def test_page_has_a_mobile_breakpoint():
     assert "@media (max-width: 480px)" in body
 
 
-async def test_frame2_has_a_name_input_and_create_button():
+async def test_frame2_has_app_id_and_key_file_inputs():
     client = await _client()
     body = (await client.get("/")).text
-    assert 'id="github-app-name-input"' in body
-    assert 'id="github-app-create-submit"' in body
+    assert 'id="github-app-id-input"' in body
+    assert 'id="github-app-key-file-input"' in body
+    assert 'type="file"' in body[body.index('id="github-app-key-file-input"') - 40 :]
+    assert 'id="github-app-validate-submit"' in body
+
+
+async def test_frame2_no_longer_has_a_name_or_install_section():
+    """The old two-section (create/install) shape is fully replaced by one
+    instructions+credentials+checklist section."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'id="github-app-name-input"' not in body
+    assert 'id="github-app-create-submit"' not in body
+    assert 'id="github-app-install-section"' not in body
+    assert 'id="github-app-installation-id-input"' not in body
+    assert 'id="github-app-install-submit"' not in body
 
 
 async def test_frame2_strings_present_in_both_languages():
@@ -146,16 +163,40 @@ async def test_frame2_strings_present_in_both_languages():
     body = (await client.get("/")).text
     for key in (
         "frame2_instructions",
-        "frame2_name_placeholder",
-        "create_app_button",
-        "err_github_name_empty",
-        "err_github_callback_invalid",
-        "err_github_exchange_failed",
-        "frame2_install_then",
+        "frame2_step_create",
+        "frame2_step_webhook_url",
+        "frame2_step_webhook_secret",
+        "frame2_step_permissions",
+        "frame2_step_install",
+        "frame2_app_id_label",
+        "frame2_private_key_label",
+        "err_github_app_id_invalid",
+        "err_github_no_file",
+        "err_github_invalid_key_file",
     ):
         assert f"{key}:" in body
-    assert body.count("create_app_button:") == 2  # STRINGS.en + STRINGS.he
-    assert body.count("frame2_install_then:") == 2  # STRINGS.en + STRINGS.he
+        assert body.count(f"{key}:") == 2, f"{key} missing a translation"
+
+
+async def test_page_offers_no_route_to_github_app_creation_either():
+    """Extends the existing install-page policy to App creation too: after
+    another suspension during this frame even with the install-page fix
+    already shipped (see ISSUES.md), no github.com URL of any kind is
+    rendered in frame 4's own markup or JS — creation is described only as
+    breadcrumb text. (Scoped to frame 4 specifically: other frames
+    legitimately reference github.com, e.g. the Render-service frame's
+    default repo URL suggestion.)"""
+    client = await _client()
+    body = (await client.get("/")).text
+    frame_start = body.index('id="frame-github-app"')
+    frame_markup = body[frame_start : body.index("</details>", frame_start)]
+    assert "github.com" not in frame_markup
+    js_block = body[
+        body.index("function resetGithubAppSetupSection") : body.index(
+            "async function pushGithubAppToRenderService"
+        )
+    ]
+    assert "github.com" not in js_block
 
 
 async def test_page_offers_no_route_to_the_install_page_at_all():
@@ -169,55 +210,20 @@ async def test_page_offers_no_route_to_the_install_page_at_all():
     client = await _client()
     body = (await client.get("/")).text
     # The App-install URL shape specifically. Not a bare "installations/new"
-    # check: the code comment explaining this rule names that path, and the
-    # manifest form legitimately posts to github.com/settings/apps/new.
+    # check: the code comment explaining this rule names that path.
     assert "github.com/apps/" not in body
     assert 'href="https://github.com' not in body
-    install_fn = body[
-        body.index("async function markGithubAppInstalled") : body.index(
-            "function handleGithubInstallReturn"
-        )
-    ]
-    assert "location.href =" not in install_fn
-    assert "location.assign" not in install_fn
-    assert "location.replace" not in install_fn
-
-
-async def test_frame4_gates_unlock_on_a_verified_installation_id():
-    """The install happens where this page cannot see it, so the visitor
-    reports the id -- and it is verified against GitHub before anything
-    unlocks, never taken on trust."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert 'id="github-app-installation-id-input"' in body
-    assert body.count('fetch("/api/github/verify-installation"') == 1
-    install_fn = body[
-        body.index("async function markGithubAppInstalled") : body.index(
-            "function handleGithubInstallReturn"
-        )
-    ]
-    # Rejected client-side before the round trip, then gated on the relay's
-    # verdict -- completeFrame runs only inside the body.valid branch.
-    assert 'githubAppError("err_github_installation_id_invalid")' in install_fn
-    assert "if (body.valid) {" in install_fn
-    assert install_fn.index("if (body.valid) {") < install_fn.index("finishGithubAppSetup")
-    assert 'githubAppError("err_github_installation_not_found")' in install_fn
-
-
-async def test_setup_url_return_only_prefills_the_id_it_never_bypasses_verification():
-    """GitHub's setup-URL docs warn its installation_id can be spoofed, so the
-    redirect is a convenience that fills the box -- the value still goes
-    through the same verification a typed one does."""
-    client = await _client()
-    body = (await client.get("/")).text
-    return_fn = body[
-        body.index("function handleGithubInstallReturn") : body.index("function base64UrlEncode")
-    ]
-    assert (
-        'document.getElementById("github-app-installation-id-input").value = supplied;'
-    ) in return_fn
-    assert "markGithubAppInstalled();" in return_fn
-    assert "completeFrame" not in return_fn
+    # No navigation call anywhere on the page targets GitHub at all -- a
+    # whole-body scan rather than one scoped to a specific function, since
+    # this frame no longer has a dedicated "install" function to scope to
+    # (App creation and installation are both fully manual now; see
+    # test_page_offers_no_route_to_github_app_creation_either).
+    for pattern in ("location.href =", "location.assign(", "location.replace("):
+        idx = body.find(pattern)
+        while idx != -1:
+            snippet = body[idx : idx + 200]
+            assert "github" not in snippet.lower(), f"{pattern} appears to target GitHub: {snippet}"
+            idx = body.find(pattern, idx + 1)
 
 
 async def test_locked_frame_click_is_prevented_before_toggle():
@@ -241,15 +247,8 @@ async def test_locked_frames_are_visually_dimmed():
     assert 'details.frame[data-locked="true"] { opacity:' in body
 
 
-async def test_manifest_callback_handler_present():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "async function handleGithubManifestCallback" in body
-    assert "gh_step" in body
-
-
-async def test_manifest_permissions_match_the_cli_script():
-    """The page's JS MANIFEST_PERMISSIONS/MANIFEST_EVENTS must mirror
+async def test_required_permissions_match_the_cli_script():
+    """The page's JS REQUIRED_PERMISSIONS/REQUIRED_EVENTS must mirror
     scripts/create_github_app.py's, which is the single source of truth (a
     paired comment in each file points at the other; there is no shared
     JS/Python boundary a real shared constant could live in).
@@ -263,21 +262,13 @@ async def test_manifest_permissions_match_the_cli_script():
     for name, level in MANIFEST_PERMISSIONS.items():
         assert f'{name}: "{level}"' in body, f"page is missing permission {name}: {level}"
     for event in MANIFEST_EVENTS:
-        assert f'"{event}"' in body, f"page is missing default event {event}"
-    # The page must not silently grant MORE than the CLI script does either.
-    js_perms = body[body.index("const MANIFEST_PERMISSIONS = {") :]
+        assert f'"{event}"' in body, f"page is missing required event {event}"
+    js_perms = body[body.index("const REQUIRED_PERMISSIONS = {") :]
     js_perms = js_perms[: js_perms.index("};")]
     assert js_perms.count(":") == len(MANIFEST_PERMISSIONS)
-    js_events = body[body.index("const MANIFEST_EVENTS = [") :]
+    js_events = body[body.index("const REQUIRED_EVENTS = [") :]
     js_events = js_events[: js_events.index("];")]
     assert js_events.count('"') == 2 * len(MANIFEST_EVENTS)
-    assert "public: false" in body
-
-
-async def test_frame2_has_an_install_button():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert 'id="github-app-install-submit"' in body
 
 
 async def test_github_app_credential_never_persists_to_local_storage():
@@ -287,55 +278,61 @@ async def test_github_app_credential_never_persists_to_local_storage():
     assert 'localStorage.getItem(STORAGE_KEYS["github-app"]' not in body
 
 
-async def test_restore_from_session_handles_partial_github_app_state():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "showGithubAppReadyToInstall()" in body
-    assert "function restoreFromSession" in body
-
-
 async def test_frame2_has_a_reset_path_wired_into_lock_and_change():
-    """showGithubAppReadyToInstall() hides the create section for good unless
-    something reverses it. Without that reversal, both re-entry paths strand
-    frame 2: its own "Change" reopens a frame that can only offer "Install
-    App" (with stale credentials still in sessionStorage, so a refresh
-    silently re-completes the frame), and relocking it from frame 1 clears
-    the storage but leaves "Install App" on screen, where clicking it hits
-    renderGithubAppInstallLink()'s !stored branch and shows a misleading
-    error."""
+    """A locked-then-reopened or Change-clicked frame 4 must not strand a
+    stale App ID/checklist on screen from a previous attempt."""
     client = await _client()
     body = (await client.get("/")).text
-    assert "function resetGithubAppCreateSection" in body
+    assert "function resetGithubAppSetupSection" in body
 
     lock_body = body[body.index("function lockFrame") : body.index("function unlockFrame")]
-    assert "resetGithubAppCreateSection()" in lock_body
+    assert "resetGithubAppSetupSection()" in lock_body
     assert 'id === "github-app"' in lock_body
 
     change_body = body[
         body.index("function beginChange") : body.index("async function validateRenderKey")
     ]
-    assert "resetGithubAppCreateSection()" in change_body
-    # beginChange must clear this frame's own stored credentials too — only
-    # lockFrame/relockDownstreamOf did that before, and neither runs on a
-    # frame's own Change. (Scoped to frame 2 deliberately: frame 1's
-    # equivalent gap is a separate parked issue, see root ISSUES.md.)
+    assert "resetGithubAppSetupSection()" in change_body
     assert 'sessionStorage.removeItem(STORAGE_KEYS["github-app"])' in change_body
 
 
-async def test_created_but_not_installed_state_is_visible_to_the_visitor():
-    """Spec section 3 step 7: after approving the App on GitHub the visitor
-    must see an explicit intermediate state. Toggling two `display`
-    properties inside a collapsed <details> whose badge still reads "Not
-    started" is invisible — the frame has to open and the badge has to say
-    what happened."""
+async def test_validate_github_app_refuses_without_a_render_service_url():
+    """The webhook URL instruction and the request both depend on the
+    Render service's URL already existing -- unreachable in normal
+    sequential flow (that frame completes two frames earlier), but guards
+    the same corrupted/hand-edited sessionStorage case the UptimeRobot and
+    Supabase frames' own equivalents guard."""
     client = await _client()
     body = (await client.get("/")).text
-    show_body = body[
-        body.index("function showGithubAppReadyToInstall") : body.index("function githubAppError")
+    validate_fn = body[
+        body.index("async function validateGithubApp") : body.index(
+            "function renderGithubAppChecklist"
+        )
     ]
-    assert 'frameEl("github-app").open = true' in show_body
-    assert 'setFrameStatus("github-app", "app_created")' in show_body
-    assert body.count("badge_app_created:") == 2  # STRINGS.en + STRINGS.he
+    assert "if (!renderService || !renderService.service_url) {" in validate_fn
+    assert 'githubAppError("err_github_no_render_service");' in validate_fn
+
+
+async def test_validate_github_app_runs_every_check_before_pushing():
+    """all_ok gates the push-and-clear step -- a partial pass must not push
+    stale/incomplete credentials to Render."""
+    client = await _client()
+    body = (await client.get("/")).text
+    validate_fn = body[
+        body.index("async function validateGithubApp") : body.index(
+            "function renderGithubAppChecklist"
+        )
+    ]
+    assert "if (!body.all_ok)" in validate_fn
+    assert validate_fn.index("if (!body.all_ok)") < validate_fn.index("finishGithubAppSetup")
+
+
+async def test_webhook_secret_is_generated_client_side_not_pasted_back():
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function ensureGithubAppWebhookSecret" in body
+    assert 'id="github-app-webhook-secret"' in body
+    assert 'id="github-app-webhook-secret-input"' not in body
 
 
 async def test_stored_github_app_credentials_are_parsed_defensively():
@@ -1305,34 +1302,6 @@ async def test_push_helpers_skip_entirely_without_a_render_service():
     assert (
         body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 4
     )
-
-
-async def test_manifest_carries_the_real_webhook_url_not_a_placeholder():
-    """The App is created already pointing at the visitor's own Render
-    service, the way bot/scripts/create_github_app.py has always done it.
-    The old placeholder-then-PATCH flow existed only because this frame
-    predated the Render-service frame that now runs two frames earlier."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "example.invalid" not in body
-    assert "hook_attributes: {url: webhookUrl, active: true}" in body
-    assert "buildManifest(name, `${renderService.service_url}/webhook`)" in body
-
-
-async def test_app_creation_refuses_without_a_render_service_url():
-    """The manifest code is single-use, so an App created without the real
-    URL could never be corrected -- refuse before creating it rather than
-    minting one permanently pointed at nothing."""
-    client = await _client()
-    body = (await client.get("/")).text
-    create_fn = body[
-        body.index("function createGithubApp") : body.index(
-            "async function handleGithubManifestCallback"
-        )
-    ]
-    assert "if (!renderService || !renderService.service_url) {" in create_fn
-    assert 'githubAppError("err_github_no_render_service");' in create_fn
-    assert body.count("err_github_no_render_service:") == 2  # STRINGS.en + STRINGS.he
 
 
 async def test_render_service_frame_precedes_the_github_app_frame():

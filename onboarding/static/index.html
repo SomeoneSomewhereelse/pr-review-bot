@@ -318,19 +318,29 @@
         <span class="frame-detail"></span>
       </summary>
       <div class="frame-body">
-        <div id="github-app-create-section">
-          <p data-i18n="frame2_instructions"></p>
-          <input id="github-app-name-input" type="text">
-          <button id="github-app-create-submit" type="button" data-i18n="create_app_button"></button>
-        </div>
-        <div id="github-app-install-section" style="display: none;">
-          <p data-i18n="frame2_install_instructions"></p>
-          <p data-i18n="frame2_install_then"></p>
-          <label data-i18n="frame2_installation_id_label"></label>
-          <input id="github-app-installation-id-input" type="text" inputmode="numeric"
-                 autocomplete="off">
-          <button id="github-app-install-submit" type="button" data-i18n="install_done_button"></button>
-        </div>
+        <p data-i18n="frame2_instructions"></p>
+        <ol>
+          <li data-i18n="frame2_step_create"></li>
+          <li><span data-i18n="frame2_step_homepage_url"></span> <code id="github-app-homepage-url"></code></li>
+          <li><span data-i18n="frame2_step_webhook_url"></span> <code id="github-app-webhook-url"></code></li>
+          <li><span data-i18n="frame2_step_webhook_secret"></span> <code id="github-app-webhook-secret"></code></li>
+          <li>
+            <span data-i18n="frame2_step_permissions"></span>
+            <table>
+              <thead><tr><th data-i18n="frame2_permission_col"></th><th data-i18n="frame2_access_col"></th></tr></thead>
+              <tbody id="github-app-permissions-table-body"></tbody>
+            </table>
+          </li>
+          <li data-i18n="frame2_step_events"></li>
+          <li data-i18n="frame2_step_private"></li>
+          <li data-i18n="frame2_step_install"></li>
+        </ol>
+        <label data-i18n="frame2_app_id_label"></label>
+        <input id="github-app-id-input" type="text" inputmode="numeric" autocomplete="off">
+        <label data-i18n="frame2_private_key_label"></label>
+        <input id="github-app-key-file-input" type="file" accept=".pem,application/x-pem-file">
+        <button id="github-app-validate-submit" type="button" data-i18n="validate_button"></button>
+        <ul id="github-app-checklist"></ul>
         <p id="github-app-error" class="frame-error"></p>
       </div>
     </details>
@@ -500,28 +510,38 @@
       badge_error: "Error", badge_done: "✓ Validated",
       badge_checking: "Checking…",
       badge_deploy_done: "✓ Live",
-      badge_app_created: "✓ App created — install it next",
       err_empty_key: "Paste your Render API key first.",
       err_invalid_key: "That key was rejected by Render. Double-check it and try again.",
       err_unreachable: "Render's API is unreachable right now. Try again in a moment.",
       err_network: "Could not reach the wizard's server. Try again.",
       restored: "restored from this session",
       owner_prefix: "owner: ",
-      frame2_instructions: "Name your GitHub App (must be unique on GitHub), then click Create App. This will be created under whichever GitHub account you're currently logged into in this browser — check that's the right one before continuing.",
-      frame2_name_placeholder: "my-pr-review-bot",
-      create_app_button: "Create App",
-      frame2_install_instructions: "Your App was created. The last step is to install it, which you do from GitHub yourself.",
-      frame2_install_then: "On github.com, open Settings → Developer settings → GitHub Apps, choose the App you just created, and click Install App, then pick the account and repositories you want reviewed. Afterwards GitHub shows the installation at a URL ending in a number — for example github.com/settings/installations/12345678. Enter that number below.",
-      frame2_installation_id_label: "Installation ID",
-      install_done_button: "App installed",
-      err_github_name_empty: "Name your App first.",
-      err_github_callback_invalid: "That didn't come back from GitHub as expected. Please try again.",
-      err_github_exchange_failed: "GitHub rejected that — the code may have expired. Try creating the App again.",
+      frame2_instructions: "Create a GitHub App by hand and install it, following the steps below — this is done entirely in GitHub's own UI. The wizard never navigates you there.",
+      frame2_step_create: "Go to Settings → Developer settings → GitHub Apps → New GitHub App on GitHub, and fill in the form. Pick any unique name.",
+      frame2_step_homepage_url: "Homepage URL:",
+      frame2_step_webhook_url: "Webhook → Webhook URL (and check Webhook → Active):",
+      frame2_step_webhook_secret: "Webhook → Webhook secret — paste this exact value:",
+      frame2_step_permissions: "Repository permissions — set exactly:",
+      frame2_permission_col: "Permission",
+      frame2_access_col: "Access",
+      frame2_access_read: "Read-only",
+      frame2_access_write: "Read and write",
+      frame2_step_events: "Subscribe to events: Pull request only.",
+      frame2_step_private: "Where can this GitHub App be installed?: Only on this account.",
+      frame2_step_install: "Click Create GitHub App, then install it on your account/repos from the App's own settings page in GitHub's UI (Settings → Developer settings → GitHub Apps → your App → Install App).",
+      frame2_app_id_label: "App ID",
+      frame2_private_key_label: "Private key — click \"Generate a private key\" on the App's page to download a .pem file, then choose it here:",
+      err_github_app_id_invalid: "Enter the App ID — the number on your App's General settings page.",
+      err_github_no_file: "Choose your App's private key .pem file first.",
+      err_github_invalid_key_file: "That file isn't a valid private key. Check you picked the right .pem file.",
       err_github_unreachable: "GitHub is unreachable right now. Try again in a moment.",
-      err_github_installation_not_found: "GitHub has no installation with that ID for this App. Check the number and try again.",
-      err_github_installation_id_invalid: "Enter the installation ID — the number at the end of your installation's GitHub URL.",
-      err_github_invalid_credentials: "GitHub rejected the App's credentials. Try creating the App again.",
-      err_github_no_render_service: "Your Render service isn't set up yet, and the App needs its address before it can be created. Complete the Render service step above first.",
+      err_github_invalid_credentials: "GitHub rejected the App ID/private key pair. Double-check both and try again.",
+      err_github_no_render_service: "Your Render service isn't set up yet, and the App needs its address before it can be validated. Complete the Render service step above first.",
+      frame2_check_event_prefix: "event: ",
+      frame2_check_installation_found_prefix: "Installation found: ",
+      frame2_check_installation_multiple: "Multiple installations found — this wizard expects exactly one",
+      frame2_check_installation_none: "No installation found yet — install the App first, then Validate again",
+      frame2_check_webhook: "Webhook URL matches",
       account_prefix: "account: ",
       frame3_instructions: "Name your Supabase project, then click Connect Supabase. This authorizes the wizard to create a new project on your own Supabase account.",
       frame3_name_placeholder: "pr-review-bot",
@@ -631,28 +651,38 @@
       badge_error: "שגיאה", badge_done: "✓ אומת",
       badge_checking: "בודק…",
       badge_deploy_done: "✓ פעיל",
-      badge_app_created: "✓ האפליקציה נוצרה — כעת התקינו אותה",
       err_empty_key: "הדביקו קודם את מפתח ה-API של Render.",
       err_invalid_key: "המפתח נדחה על ידי Render. בדקו אותו שוב ונסו שנית.",
       err_unreachable: "שירות ה-API של Render אינו זמין כרגע. נסו שוב בעוד רגע.",
       err_network: "לא ניתן להתחבר לשרת האשף. נסו שוב.",
       restored: "שוחזר מהפעלה זו",
       owner_prefix: "בעלים: ",
-      frame2_instructions: "תנו שם לאפליקציית ה-GitHub שלכם (חייב להיות ייחודי ב-GitHub), ואז לחצו על יצירת אפליקציה. האפליקציה תיווצר תחת חשבון ה-GitHub שאליו אתם מחוברים כרגע בדפדפן זה — ודאו שזה החשבון הנכון לפני שתמשיכו.",
-      frame2_name_placeholder: "my-pr-review-bot",
-      create_app_button: "יצירת אפליקציה",
-      frame2_install_instructions: "האפליקציה נוצרה. השלב האחרון הוא להתקין אותה, ואת זה תעשו מתוך GitHub בעצמכם.",
-      frame2_install_then: "ב-github.com, פתחו Settings ← Developer settings ← GitHub Apps, בחרו את האפליקציה שיצרתם ולחצו Install App, ואז בחרו את החשבון והמאגרים שברצונכם שייבדקו. לאחר מכן GitHub יציג את ההתקנה בכתובת שמסתיימת במספר — לדוגמה github.com/settings/installations/12345678. הזינו את המספר הזה למטה.",
-      frame2_installation_id_label: "מזהה התקנה (Installation ID)",
-      install_done_button: "האפליקציה הותקנה",
-      err_github_name_empty: "תנו שם לאפליקציה קודם.",
-      err_github_callback_invalid: "התגובה מ-GitHub לא הייתה כצפוי. נסו שוב.",
-      err_github_exchange_failed: "GitHub דחה את הבקשה — ייתכן שהקוד פג תוקף. נסו ליצור את האפליקציה מחדש.",
+      frame2_instructions: "צרו אפליקציית GitHub באופן ידני והתקינו אותה, לפי השלבים למטה. הכול נעשה בממשק של GitHub עצמו — האשף לעולם לא ינווט אתכם לשם.",
+      frame2_step_create: "עברו ב-GitHub אל Settings ← Developer settings ← GitHub Apps ← New GitHub App ומלאו את הטופס. בחרו שם ייחודי כלשהו.",
+      frame2_step_homepage_url: "כתובת דף הבית (Homepage URL):",
+      frame2_step_webhook_url: "Webhook ← Webhook URL (וסמנו את Webhook ← Active):",
+      frame2_step_webhook_secret: "Webhook ← Webhook secret — הדביקו בדיוק את הערך הזה:",
+      frame2_step_permissions: "הרשאות המאגר (Repository permissions) — הגדירו בדיוק כך:",
+      frame2_permission_col: "הרשאה",
+      frame2_access_col: "גישה",
+      frame2_access_read: "קריאה בלבד",
+      frame2_access_write: "קריאה וכתיבה",
+      frame2_step_events: "הירשמו לאירועים (Subscribe to events): Pull request בלבד.",
+      frame2_step_private: "היכן ניתן להתקין את האפליקציה? רק בחשבון הזה (Only on this account).",
+      frame2_step_install: "לחצו Create GitHub App, ואז התקינו אותה על החשבון/המאגרים שלכם מתוך דף ההגדרות של האפליקציה ב-GitHub (Settings ← Developer settings ← GitHub Apps ← האפליקציה שלכם ← Install App).",
+      frame2_app_id_label: "מזהה האפליקציה (App ID)",
+      frame2_private_key_label: "מפתח פרטי — לחצו על \"Generate a private key\" בדף האפליקציה כדי להוריד קובץ .pem, ואז בחרו אותו כאן:",
+      err_github_app_id_invalid: "הזינו את מזהה האפליקציה — המספר שבדף ההגדרות הכלליות של האפליקציה שלכם.",
+      err_github_no_file: "בחרו תחילה את קובץ המפתח הפרטי (.pem) של האפליקציה.",
+      err_github_invalid_key_file: "הקובץ הזה אינו מפתח פרטי תקין. ודאו שבחרתם את קובץ ה-.pem הנכון.",
       err_github_unreachable: "GitHub אינו זמין כרגע. נסו שוב בעוד רגע.",
-      err_github_installation_not_found: "ל-GitHub אין התקנה עם המזהה הזה עבור האפליקציה. בדקו את המספר ונסו שוב.",
-      err_github_installation_id_invalid: "הזינו את מזהה ההתקנה — המספר שבסוף כתובת ה-GitHub של ההתקנה.",
-      err_github_invalid_credentials: "GitHub דחה את פרטי האפליקציה. נסו ליצור את האפליקציה מחדש.",
-      err_github_no_render_service: "שירות ה-Render שלכם עדיין לא הוגדר, והאפליקציה זקוקה לכתובת שלו לפני שניתן ליצור אותה. השלימו קודם את שלב שירות ה-Render למעלה.",
+      err_github_invalid_credentials: "GitHub דחה את צירוף מזהה האפליקציה והמפתח הפרטי. בדקו את שניהם ונסו שוב.",
+      err_github_no_render_service: "שירות ה-Render שלכם עדיין לא הוגדר, והאפליקציה זקוקה לכתובת שלו לפני שניתן לאמת אותה. השלימו קודם את שלב שירות ה-Render למעלה.",
+      frame2_check_event_prefix: "אירוע: ",
+      frame2_check_installation_found_prefix: "נמצאה התקנה: ",
+      frame2_check_installation_multiple: "נמצאו מספר התקנות — האשף מצפה בדיוק לאחת",
+      frame2_check_installation_none: "לא נמצאה התקנה עדיין — התקינו את האפליקציה קודם, ואז בדקו שוב",
+      frame2_check_webhook: "כתובת ה-Webhook תואמת",
       account_prefix: "חשבון: ",
       frame3_instructions: "תנו שם לפרויקט ה-Supabase שלכם, ואז לחצו על חיבור Supabase. פעולה זו מאשרת לאשף ליצור פרויקט חדש בחשבון ה-Supabase שלכם.",
       frame3_name_placeholder: "pr-review-bot",
@@ -837,16 +867,16 @@
     }
   }
 
-  // SOURCE OF TRUTH: scripts/create_github_app.py's MANIFEST_PERMISSIONS /
-  // MANIFEST_EVENTS. These two lists must stay identical — the CLI script and
-  // this wizard create the same App. Change them there first, then here;
-  // tests/test_onboarding_page.py::test_manifest_permissions_match_the_cli_script
+  // SOURCE OF TRUTH: bot/scripts/create_github_app.py's MANIFEST_PERMISSIONS /
+  // MANIFEST_EVENTS. These two lists must stay identical -- the CLI script's
+  // manifest and this wizard's validation checklist both describe the same
+  // requirement. Change them there first, then here;
+  // tests/test_onboarding_page.py::test_required_permissions_match_the_cli_script
   // imports the Python constants and fails if these drift.
-  const MANIFEST_PERMISSIONS = {
+  const REQUIRED_PERMISSIONS = {
     pull_requests: "write", contents: "read", issues: "write", metadata: "read",
   };
-  const MANIFEST_EVENTS = ["pull_request"];
-  const GITHUB_MANIFEST_STATE_KEY = "onboarding.githubManifestState";
+  const REQUIRED_EVENTS = ["pull_request"];
 
   const FRAME_ORDER = [
     "render-key", "render-service", "dashboard-auth", "github-app", "supabase",
@@ -933,7 +963,7 @@
     // Frame 3's connect/org-picker/provisioning sections are the same
     // shape, one step longer.
     if (id === "dashboard-auth") resetDashboardAuthSection();
-    if (id === "github-app") resetGithubAppCreateSection();
+    if (id === "github-app") resetGithubAppSetupSection();
     if (id === "supabase") resetSupabaseConnectSection();
     if (id === "llm-provider") resetLlmProviderSection();
     if (id === "uptime-pinger") resetUptimePingerSection();
@@ -950,6 +980,7 @@
     setFrameStatus(id, "ready");
     if (id === "uptime-pinger") refreshUptimePingerBlockedState();
     if (id === "render-service") prefillRenderServiceDefaults();
+    if (id === "github-app") renderGithubAppInstructions();
   }
 
   function relockDownstreamOf(id) {
@@ -1030,7 +1061,8 @@
     }
     if (id === "github-app") {
       sessionStorage.removeItem(STORAGE_KEYS["github-app"]);
-      resetGithubAppCreateSection();
+      resetGithubAppSetupSection();
+      renderGithubAppInstructions();
     }
     if (id === "supabase") {
       sessionStorage.removeItem(STORAGE_KEYS["supabase"]);
@@ -1647,57 +1679,12 @@
     }
   }
 
-  function buildManifest(appName, webhookUrl) {
-    return {
-      name: appName,
-      url: window.ONBOARDING_BASE_URL,
-      public: false,
-      // The App's real, final webhook URL, known already because the
-      // Render-service frame (position 2) completes two frames before this
-      // one. Creating the App pointed straight at its destination is what
-      // bot/scripts/create_github_app.py has always done for the CLI path;
-      // the wizard used to send a placeholder and correct it afterwards with
-      // a PATCH /app/hook/config, which was a leftover from when the
-      // Render-service frame did not exist yet.
-      hook_attributes: {url: webhookUrl, active: true},
-      redirect_url: `${window.ONBOARDING_BASE_URL}/?gh_step=manifest`,
-      default_events: MANIFEST_EVENTS,
-      default_permissions: MANIFEST_PERMISSIONS,
-    };
-  }
-
-  function submitManifestForm(manifest, state) {
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = `https://github.com/settings/apps/new?state=${encodeURIComponent(state)}`;
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "manifest";
-    input.value = JSON.stringify(manifest);
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
-  }
-
-  function showGithubAppReadyToInstall() {
-    document.getElementById("github-app-create-section").style.display = "none";
-    document.getElementById("github-app-install-section").style.display = "block";
-    // Toggling those two sections is invisible on a collapsed <details> whose
-    // badge still reads "Not started" — and the visitor has just approved a
-    // real App on GitHub, so they need to see that it worked (spec section 3
-    // step 7's intermediate state).
-    frameEl("github-app").open = true;
-    setFrameStatus("github-app", "app_created");
-  }
-
-  function resetGithubAppCreateSection() {
-    document.getElementById("github-app-install-section").style.display = "none";
-    document.getElementById("github-app-create-section").style.display = "block";
+  function resetGithubAppSetupSection() {
     document.getElementById("github-app-error").textContent = "";
-    document.getElementById("github-app-install-submit").disabled = false;
-    // The id belongs to the App being discarded -- leaving it in the box
-    // would offer a stale number for the next App the visitor creates.
-    document.getElementById("github-app-installation-id-input").value = "";
+    document.getElementById("github-app-checklist").innerHTML = "";
+    document.getElementById("github-app-id-input").value = "";
+    document.getElementById("github-app-key-file-input").value = "";
+    document.getElementById("github-app-validate-submit").disabled = false;
     currentGithubAppErrorKey = null;
   }
 
@@ -1707,52 +1694,90 @@
     document.getElementById("github-app-error").textContent = t(key);
   }
 
-  function createGithubApp() {
-    const input = document.getElementById("github-app-name-input");
-    const name = input.value.trim();
+  // Generated once per session and persisted immediately -- GitHub's API
+  // never returns a webhook secret to check it against, so this value only
+  // needs to exist long enough for the visitor to copy it into GitHub's
+  // form and for this frame to push it to Render once validation passes.
+  function ensureGithubAppWebhookSecret() {
+    let stored = readStoredGithubApp() || {};
+    if (!stored.webhook_secret) {
+      stored.webhook_secret = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+      try {
+        sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+      } catch (err) {
+        // best-effort -- validateGithubApp still works this session even if
+        // the value can't be persisted across a reload.
+      }
+    }
+    return stored.webhook_secret;
+  }
+
+  function renderGithubAppInstructions() {
+    const renderService = readStoredRenderService();
+    const webhookUrl = renderService && renderService.service_url
+      ? `${renderService.service_url}/webhook` : "—";
+    document.getElementById("github-app-homepage-url").textContent = window.ONBOARDING_BASE_URL;
+    document.getElementById("github-app-webhook-url").textContent = webhookUrl;
+    document.getElementById("github-app-webhook-secret").textContent = ensureGithubAppWebhookSecret();
+    const ACCESS_LABELS = {read: t("frame2_access_read"), write: t("frame2_access_write")};
+    const tbody = document.getElementById("github-app-permissions-table-body");
+    tbody.innerHTML = "";
+    Object.entries(REQUIRED_PERMISSIONS).forEach(([name, level]) => {
+      const tr = document.createElement("tr");
+      const nameTd = document.createElement("td");
+      nameTd.textContent = name;
+      const accessTd = document.createElement("td");
+      accessTd.textContent = ACCESS_LABELS[level] || level;
+      tr.appendChild(nameTd);
+      tr.appendChild(accessTd);
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function validateGithubApp() {
     document.getElementById("github-app-error").textContent = "";
     currentGithubAppErrorKey = null;
-    if (!name) {
-      githubAppError("err_github_name_empty");
-      return;
-    }
-    // Hard precondition now that the webhook URL is baked into the manifest
-    // rather than patched in afterwards: without it we would mint an App
-    // permanently pointed at nothing. The manifest code is single-use, so
-    // there is no second chance to fix it -- refuse up front instead.
-    // Unreachable in normal sequential flow (the Render-service frame
-    // completes two frames earlier); this guards the same corrupted /
-    // hand-edited sessionStorage case the UptimeRobot frame's own
-    // blocked-state check exists for.
+    document.getElementById("github-app-checklist").innerHTML = "";
     const renderService = readStoredRenderService();
     if (!renderService || !renderService.service_url) {
       githubAppError("err_github_no_render_service");
       return;
     }
-    const state = crypto.randomUUID();
-    sessionStorage.setItem(GITHUB_MANIFEST_STATE_KEY, state);
-    submitManifestForm(buildManifest(name, `${renderService.service_url}/webhook`), state);
-  }
-
-  async function handleGithubManifestCallback() {
-    const params = new URLSearchParams(location.search);
-    if (params.get("gh_step") !== "manifest") return;
-    history.replaceState(null, "", location.pathname);
-    const expectedState = sessionStorage.getItem(GITHUB_MANIFEST_STATE_KEY);
-    sessionStorage.removeItem(GITHUB_MANIFEST_STATE_KEY);
-    const code = params.get("code");
-    if (!expectedState || params.get("state") !== expectedState || !code) {
-      githubAppError("err_github_callback_invalid");
+    const appIdRaw = document.getElementById("github-app-id-input").value.trim();
+    if (!/^[0-9]+$/.test(appIdRaw) || Number(appIdRaw) <= 0) {
+      githubAppError("err_github_app_id_invalid");
       return;
     }
+    const fileInput = document.getElementById("github-app-key-file-input");
+    const file = fileInput.files[0];
+    if (!file) {
+      githubAppError("err_github_no_file");
+      return;
+    }
+    let privateKeyB64;
+    try {
+      privateKeyB64 = await readFileAsBase64(file);
+    } catch (err) {
+      githubAppError("err_github_invalid_key_file");
+      return;
+    }
+    const btn = document.getElementById("github-app-validate-submit");
+    btn.disabled = true;
+    setFrameStatus("github-app", "checking");
+    const expectedWebhookUrl = `${renderService.service_url}/webhook`;
     let resp;
     try {
-      resp = await fetch("/api/github/exchange-manifest-code", {
+      resp = await fetch("/api/github/validate-app", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({code: code}),
+        body: JSON.stringify({
+          app_id: Number(appIdRaw),
+          private_key_b64: privateKeyB64,
+          expected_webhook_url: expectedWebhookUrl,
+        }),
       });
     } catch (err) {
+      btn.disabled = false;
       githubAppError("err_network");
       return;
     }
@@ -1761,20 +1786,59 @@
       if (!resp.ok) throw new Error("bad status");
       body = await resp.json();
     } catch (err) {
+      btn.disabled = false;
       githubAppError("err_github_unreachable");
       return;
     }
-    if (body.valid) {
-      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify({
-        app_id: body.app_id, slug: body.slug,
-        private_key_b64: body.private_key_b64, webhook_secret: body.webhook_secret,
-      }));
-      showGithubAppReadyToInstall();
-    } else if (body.reason === "exchange_failed") {
-      githubAppError("err_github_exchange_failed");
-    } else {
-      githubAppError("err_github_unreachable");
+    btn.disabled = false;
+    if (!body.valid) {
+      setFrameStatus("github-app", "error");
+      if (body.reason === "unauthorized") {
+        githubAppError("err_github_invalid_credentials");
+      } else if (body.reason === "invalid_key") {
+        githubAppError("err_github_invalid_key_file");
+      } else {
+        githubAppError("err_github_unreachable");
+      }
+      return;
     }
+    renderGithubAppChecklist(body);
+    if (!body.all_ok) {
+      setFrameStatus("github-app", "error");
+      return;
+    }
+    const stored = readStoredGithubApp() || {};
+    stored.app_id = Number(appIdRaw);
+    stored.private_key_b64 = privateKeyB64;
+    stored.installation_id = body.installation.installation_id;
+    stored.account_login = body.installation.account_login;
+    sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
+    await finishGithubAppSetup(stored, body.installation.account_login);
+  }
+
+  function renderGithubAppChecklist(body) {
+    const list = document.getElementById("github-app-checklist");
+    list.innerHTML = "";
+    const addRow = (label, ok) => {
+      const li = document.createElement("li");
+      li.className = ok ? "check-pass" : "check-fail";
+      li.textContent = `${ok ? "✓" : "✗"} ${label}`;
+      list.appendChild(li);
+    };
+    body.permissions.forEach((p) => {
+      addRow(`${p.name}: ${p.wanted}${p.ok ? "" : ` (have: ${p.actual || "none"})`}`, p.ok);
+    });
+    body.events.forEach((e) => {
+      addRow(`${t("frame2_check_event_prefix")}${e.name}`, e.ok);
+    });
+    if (body.installation.status === "found") {
+      addRow(`${t("frame2_check_installation_found_prefix")}${body.installation.account_login}`, true);
+    } else if (body.installation.status === "multiple") {
+      addRow(t("frame2_check_installation_multiple"), false);
+    } else {
+      addRow(t("frame2_check_installation_none"), false);
+    }
+    addRow(t("frame2_check_webhook"), body.webhook.ok);
   }
 
   async function pushGithubAppToRenderService(stored) {
@@ -1809,110 +1873,18 @@
   }
 
   async function finishGithubAppSetup(stored, accountLogin) {
-    // No webhook-correction step: the App was created already pointing at
-    // the right URL (see buildManifest), so all that is left is the
+    // No webhook-correction step: validateGithubApp() only reaches here once
+    // the webhook checklist item already passed, so all that is left is the
     // best-effort push-and-clear every other frame does.
     await pushGithubAppToRenderService(stored);
     // Explicit flag, not inferred from installation_id's mere presence --
-    // that field is written earlier (markGithubAppInstalled, before
+    // that field is written earlier (validateGithubApp, before
     // this function even runs) and would otherwise make restoreFromSession()
     // treat an interrupted push-and-clear as a completed frame on reload.
     // Same pattern as the Supabase frame's own `completed` flag.
     stored.completed = true;
     sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
     completeFrame("github-app", "account_prefix", accountLogin);
-  }
-
-  async function markGithubAppInstalled() {
-    // The wizard offers no install link, no address, not even copyable text.
-    // Five separate throwaway GitHub accounts were suspended for a ToS
-    // violation at this step: three via an automatic location.href redirect,
-    // one via an <a> carrying rel="noreferrer"/referrerpolicy="no-referrer",
-    // and one via the visitor pasting the URL into their own address bar.
-    // Reaching /installations/new by any route other than navigating inside
-    // GitHub itself is what appears to trip it, so the wizard stops
-    // supplying a route and only says where to go. See ISSUES.md.
-    //
-    // Since the install happens somewhere this page cannot observe, the
-    // visitor reports the installation id themselves. It is never taken on
-    // trust: the relay checks it against the App's own JWT, and the frame
-    // stays locked unless that check passes.
-    const stored = readStoredGithubApp();
-    if (!stored || !stored.app_id || !stored.private_key_b64) {
-      githubAppError("err_github_callback_invalid");
-      return;
-    }
-    const input = document.getElementById("github-app-installation-id-input");
-    const raw = input.value.trim();
-    document.getElementById("github-app-error").textContent = "";
-    currentGithubAppErrorKey = null;
-    // Checked before the call so an empty or mistyped box is an immediate,
-    // specific message rather than a round trip ending in a generic 404.
-    if (!/^[0-9]+$/.test(raw) || Number(raw) <= 0) {
-      githubAppError("err_github_installation_id_invalid");
-      return;
-    }
-    const installationId = Number(raw);
-    const btn = document.getElementById("github-app-install-submit");
-    btn.disabled = true;
-    let resp;
-    try {
-      resp = await fetch("/api/github/verify-installation", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          app_id: stored.app_id,
-          private_key_b64: stored.private_key_b64,
-          installation_id: installationId,
-        }),
-      });
-    } catch (err) {
-      btn.disabled = false;
-      githubAppError("err_network");
-      return;
-    }
-    let body;
-    try {
-      if (!resp.ok) throw new Error("bad status");
-      body = await resp.json();
-    } catch (err) {
-      btn.disabled = false;
-      githubAppError("err_github_unreachable");
-      return;
-    }
-    if (body.valid) {
-      stored.installation_id = installationId;
-      stored.account_login = body.account_login;
-      sessionStorage.setItem(STORAGE_KEYS["github-app"], JSON.stringify(stored));
-      await finishGithubAppSetup(stored, body.account_login);
-      return;
-    }
-    btn.disabled = false;
-    if (body.reason === "installation_not_found") {
-      githubAppError("err_github_installation_not_found");
-    } else if (body.reason === "invalid_credentials") {
-      githubAppError("err_github_invalid_credentials");
-    } else {
-      githubAppError("err_github_unreachable");
-    }
-  }
-
-  function handleGithubInstallReturn() {
-    // GitHub sends the visitor back to the App's setup_url after an install,
-    // including when they installed from GitHub's own UI, so this spares
-    // them copying the id by hand. It only ever pre-fills the box: the value
-    // still goes through the same verification as a typed one, which is what
-    // GitHub's setup-URL docs require (they warn this parameter can be
-    // spoofed). A visitor who installed in another tab, or who never gets
-    // redirected, just types the id and clicks the button instead.
-    const params = new URLSearchParams(location.search);
-    if (params.get("gh_step") !== "install") return;
-    history.replaceState(null, "", location.pathname);
-    if (!readStoredGithubApp()) return;
-    const supplied = params.get("installation_id") || "";
-    if (!/^[0-9]+$/.test(supplied)) return;
-    document.getElementById("github-app-installation-id-input").value = supplied;
-    markGithubAppInstalled();
   }
 
   function base64UrlEncode(bytes) {
@@ -2559,14 +2531,12 @@
     if (githubApp && githubApp.completed) {
       completeFrame("github-app", "restored", null);
     } else if (githubApp && githubApp.installation_id) {
-      // Installed, but the push-and-clear step never finished (e.g. a reload
-      // in the middle of it) -- resume it rather than falsely marking the
-      // frame done, the same way the Supabase branch below resumes an
-      // interrupted poll instead of completing on partial data.
+      // Validated, but the push-and-clear step never finished (e.g. a
+      // reload in the middle of it) -- resume it rather than falsely
+      // marking the frame done, the same way the Supabase branch below
+      // resumes an interrupted poll instead of completing on partial data.
       frameEl("github-app").open = true;
       finishGithubAppSetup(githubApp, githubApp.account_login);
-    } else if (githubApp) {
-      showGithubAppReadyToInstall();
     }
     const supabaseState = readStoredSupabase();
     if (supabaseState && supabaseState.completed) {
@@ -2661,8 +2631,7 @@
     document.getElementById("dashboard-auth-password-toggle").addEventListener("click", toggleDashboardAuthPasswordVisibility);
     document.getElementById("render-deploy-trigger-submit").addEventListener("click", triggerRenderDeploy);
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
-    document.getElementById("github-app-create-submit").addEventListener("click", createGithubApp);
-    document.getElementById("github-app-install-submit").addEventListener("click", markGithubAppInstalled);
+    document.getElementById("github-app-validate-submit").addEventListener("click", validateGithubApp);
     document.getElementById("supabase-connect-submit").addEventListener("click", connectSupabase);
     document.getElementById("supabase-org-submit").addEventListener("click", confirmSupabaseOrg);
     document.getElementById("supabase-check-status-submit").addEventListener("click", checkSupabaseStatusOnce);
@@ -2696,8 +2665,6 @@
 
     applyLanguage(currentLang);
     restoreFromSession();
-    handleGithubManifestCallback();
-    handleGithubInstallReturn();
     handleSupabaseOauthCallback();
   });
 </script>
