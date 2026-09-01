@@ -1,126 +1,31 @@
-"""Tests for onboarding/github_client.py — GitHub App manifest-code
-exchange never logs or returns anything but the documented fields, and
-distinguishes a rejected/expired code from GitHub being unreachable. See
-docs/superpowers/specs/2026-08-26-onboarding-github-app-frame-design.md
-sections 3-4."""
+"""Tests for onboarding/github_client.py — validate_app() reads a visitor's
+hand-created GitHub App's actual configuration back from GitHub and reports
+per-item pass/fail against REQUIRED_PERMISSIONS/REQUIRED_EVENTS, installation,
+and webhook URL. Never logs or echoes the private key. See
+docs/superpowers/specs/2026-09-01-onboarding-github-app-manual-validation-design.md."""
 
 from __future__ import annotations
 
 import base64
-import inspect
 import json
 import time
 
-import httpx
 import pytest
 import requests as requests_lib
-import respx
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from onboarding import github_client
 
-CODE = "SENTINEL_MANIFEST_CODE"
-CONVERSIONS_URL = f"https://api.github.com/app-manifests/{CODE}/conversions"
-
-
-async def test_valid_code_returns_app_credentials():
-    with respx.mock:
-        respx.post(CONVERSIONS_URL).mock(
-            return_value=httpx.Response(
-                201,
-                json={
-                    "id": 42,
-                    "slug": "my-pr-review-bot",
-                    "pem": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
-                    "webhook_secret": "whsec_sentinel",
-                },
-            )
-        )
-        result = await github_client.exchange_manifest_code(CODE)
-    assert isinstance(result, github_client.GithubAppCreated)
-    assert result.app_id == 42
-    assert result.slug == "my-pr-review-bot"
-    assert result.webhook_secret == "whsec_sentinel"
-    assert base64.b64decode(result.private_key_b64).decode() == (
-        "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n"
-    )
-
-
-async def test_expired_or_bad_code_is_exchange_failed():
-    with respx.mock:
-        respx.post(CONVERSIONS_URL).mock(
-            return_value=httpx.Response(404, json={"message": "Not Found"})
-        )
-        result = await github_client.exchange_manifest_code(CODE)
-    assert result == github_client.GithubAppExchangeFailed(reason="exchange_failed")
-
-
-async def test_github_5xx_is_unreachable_not_exchange_failed():
-    with respx.mock:
-        respx.post(CONVERSIONS_URL).mock(return_value=httpx.Response(500))
-        result = await github_client.exchange_manifest_code(CODE)
-    assert result == github_client.GithubAppExchangeFailed(reason="github_unreachable")
-
-
-async def test_timeout_is_unreachable():
-    with respx.mock:
-        respx.post(CONVERSIONS_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
-        result = await github_client.exchange_manifest_code(CODE)
-    assert result == github_client.GithubAppExchangeFailed(reason="github_unreachable")
-
-
-async def test_malformed_200_body_is_unreachable_not_a_crash():
-    with respx.mock:
-        respx.post(CONVERSIONS_URL).mock(return_value=httpx.Response(201, text="not json"))
-        result = await github_client.exchange_manifest_code(CODE)
-    assert result == github_client.GithubAppExchangeFailed(reason="github_unreachable")
-
-
-async def test_response_missing_expected_fields_is_unreachable():
-    with respx.mock:
-        respx.post(CONVERSIONS_URL).mock(return_value=httpx.Response(201, json={"id": 42}))
-        result = await github_client.exchange_manifest_code(CODE)
-    assert result == github_client.GithubAppExchangeFailed(reason="github_unreachable")
-
-
-async def test_exchange_sends_no_authorization_header():
-    """The manifest code IS the credential — no auth header is needed or
-    sent, matching scripts/create_github_app.py::exchange_code()."""
-    with respx.mock:
-        route = respx.post(CONVERSIONS_URL).mock(
-            return_value=httpx.Response(
-                201,
-                json={"id": 1, "slug": "x", "pem": "pem", "webhook_secret": "whsec"},
-            )
-        )
-        await github_client.exchange_manifest_code(CODE)
-    assert "authorization" not in {h.lower() for h in route.calls.last.request.headers}
-
-
-async def test_exchange_sends_a_descriptive_user_agent():
-    """GitHub's API guidelines require a User-Agent naming the application.
-    httpx's default is a bare "python-httpx/<version>" -- the generic-library
-    shape those guidelines call out and anti-scraping heuristics score worst."""
-    with respx.mock:
-        route = respx.post(CONVERSIONS_URL).mock(
-            return_value=httpx.Response(
-                201,
-                json={"id": 1, "slug": "x", "pem": "pem", "webhook_secret": "whsec"},
-            )
-        )
-        await github_client.exchange_manifest_code(CODE)
-    sent = route.calls.last.request.headers["user-agent"]
-    assert sent == github_client.USER_AGENT
-    assert "httpx" not in sent
+WEBHOOK_URL = "https://my-service.onrender.com/webhook"
 
 
 @pytest.fixture(scope="module")
 def _throwaway_key_material() -> str:
-    """A throwaway RSA key, base64-encoded like the real
-    exchange_manifest_code output would be. Only used for local JWT
-    signing in these tests — every HTTP call is mocked below, so nothing
-    is ever sent anywhere with it."""
+    """A throwaway RSA key, base64-encoded like a real downloaded .pem's
+    base64-encoded bytes would be. Only used for local JWT signing in these
+    tests — every HTTP call is mocked below, so nothing is ever sent
+    anywhere with it."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -132,20 +37,17 @@ def _throwaway_key_material() -> str:
 
 @pytest.fixture(autouse=True)
 def _no_pygithub_rate_limit_sleep(monkeypatch):
-    """Mirrors tests/test_github_app.py's own fixture of the same name:
-    PyGithub's Requester paces real requests with time.sleep(); every call
-    here goes through fake_transport below, so the throttle protects
+    """PyGithub's Requester paces real requests with time.sleep(); every
+    call here goes through fake_transport below, so the throttle protects
     nothing and only wastes wall-clock."""
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
 
 class _FakeGithubTransport:
     """Routes requests by (method, url-substring) to canned JSON responses.
-    PyGithub calls through `requests`, not `httpx` — respx cannot intercept
-    it — so this patches the same requests.adapters.HTTPAdapter.send
-    transport boundary tests/test_github_app.py's own FakeGithubTransport
-    uses, scoped down to what onboarding/github_client.py actually needs
-    (one App-JWT endpoint, no installation-token exchange)."""
+    PyGithub calls through `requests`, not `httpx` — this patches the
+    requests.adapters.HTTPAdapter.send transport boundary, same pattern as
+    tests/test_github_app.py's own FakeGithubTransport."""
 
     def __init__(self):
         self.routes: list[tuple[str, str, dict, int]] = []
@@ -177,81 +79,210 @@ def fake_transport(monkeypatch):
     return transport
 
 
-async def test_valid_installation_returns_account_and_scope(
-    fake_transport, _throwaway_key_material
-):
+REQUIRED_PERMISSIONS_RESPONSE = {
+    "permissions": {
+        "pull_requests": "write",
+        "contents": "read",
+        "issues": "write",
+        "metadata": "read",
+    },
+    "events": ["pull_request"],
+}
+
+
+def _route_all_passing(fake_transport):
+    fake_transport.route("GET", "/app", REQUIRED_PERMISSIONS_RESPONSE)
     fake_transport.route(
         "GET",
-        "/app/installations/456",
-        {"id": 456, "account": {"login": "octocat"}, "repository_selection": "selected"},
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "all"}],
     )
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
-    )
-    assert result == github_client.InstallationVerified(
-        account_login="octocat", repo_scope="selected"
-    )
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
 
 
-async def test_unknown_installation_id_is_reported_not_accepted(
+async def test_all_checks_pass_when_everything_matches(fake_transport, _throwaway_key_material):
+    _route_all_passing(fake_transport)
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert isinstance(result, github_client.AppValidated)
+    assert all(p.ok for p in result.permissions)
+    assert all(e.ok for e in result.events)
+    assert result.installation == github_client.InstallationFound(
+        installation_id=456, account_login="octocat", repo_scope="all"
+    )
+    assert result.webhook == github_client.WebhookCheck(ok=True, actual_url=WEBHOOK_URL)
+
+
+async def test_missing_permission_is_reported_not_ok(fake_transport, _throwaway_key_material):
+    fake_transport.route(
+        "GET",
+        "/app",
+        {
+            "permissions": {"pull_requests": "write", "contents": "read", "metadata": "read"},
+            "events": ["pull_request"],
+        },
+    )
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "all"}],
+    )
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert isinstance(result, github_client.AppValidated)
+    issues = {p.name: p for p in result.permissions}
+    assert issues["issues"] == github_client.PermissionCheck(
+        name="issues", wanted="write", actual=None, ok=False
+    )
+    assert issues["pull_requests"].ok
+
+
+async def test_broader_than_needed_permission_still_passes(fake_transport, _throwaway_key_material):
+    """Rank-based: admin satisfies a write requirement -- least-privilege is
+    an operator-side doctor.py WARN concern, not a blocker here."""
+    response = dict(REQUIRED_PERMISSIONS_RESPONSE)
+    response["permissions"] = dict(response["permissions"], pull_requests="admin")
+    fake_transport.route("GET", "/app", response)
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "all"}],
+    )
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert next(p for p in result.permissions if p.name == "pull_requests").ok
+
+
+async def test_missing_event_is_reported_not_ok(fake_transport, _throwaway_key_material):
+    response = dict(REQUIRED_PERMISSIONS_RESPONSE)
+    response["events"] = []
+    fake_transport.route("GET", "/app", response)
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "all"}],
+    )
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result.events == [github_client.EventCheck(name="pull_request", ok=False)]
+
+
+async def test_no_installation_is_reported(fake_transport, _throwaway_key_material):
+    fake_transport.route("GET", "/app", REQUIRED_PERMISSIONS_RESPONSE)
+    fake_transport.route("GET", "/app/installations", [])
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result.installation == github_client.InstallationNotFound()
+
+
+async def test_multiple_installations_is_reported_distinctly(
     fake_transport, _throwaway_key_material
 ):
-    """The id is typed in by the visitor, so a typo or someone else's id is
-    the expected failure mode -- and the frame's unlock gates on this."""
-    fake_transport.route("GET", "/app/installations/456", {"message": "Not Found"}, 404)
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+    fake_transport.route("GET", "/app", REQUIRED_PERMISSIONS_RESPONSE)
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [
+            {"id": 1, "account": {"login": "octocat"}, "repository_selection": "all"},
+            {"id": 2, "account": {"login": "monalisa"}, "repository_selection": "all"},
+        ],
     )
-    assert result == github_client.InstallationInvalid(reason="installation_not_found")
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result.installation == github_client.MultipleInstallationsFound(
+        account_logins=["octocat", "monalisa"]
+    )
 
 
-async def test_unauthorized_is_invalid_credentials(fake_transport, _throwaway_key_material):
-    fake_transport.route("GET", "/app/installations/456", {"message": "Bad credentials"}, 401)
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
+async def test_mismatched_webhook_url_is_not_ok(fake_transport, _throwaway_key_material):
+    fake_transport.route("GET", "/app", REQUIRED_PERMISSIONS_RESPONSE)
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "all"}],
     )
-    assert result == github_client.InstallationInvalid(reason="invalid_credentials")
+    fake_transport.route("GET", "/app/hook/config", {"url": "https://wrong.example/webhook"})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result.webhook == github_client.WebhookCheck(
+        ok=False, actual_url="https://wrong.example/webhook"
+    )
+
+
+async def test_unset_webhook_is_empty_string_not_the_synthetic_path(
+    fake_transport, _throwaway_key_material
+):
+    """PyGithub's Requester injects a synthetic `url` key (the literal
+    request path) into a GET response dict that lacks one -- an
+    unconfigured webhook must not be mistaken for one pointed at that path."""
+    fake_transport.route("GET", "/app", REQUIRED_PERMISSIONS_RESPONSE)
+    fake_transport.route(
+        "GET",
+        "/app/installations",
+        [{"id": 456, "account": {"login": "octocat"}, "repository_selection": "all"}],
+    )
+    fake_transport.route("GET", "/app/hook/config", {})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result.webhook == github_client.WebhookCheck(ok=False, actual_url="")
+
+
+async def test_bad_credentials_short_circuits_with_no_checklist_data(
+    fake_transport, _throwaway_key_material
+):
+    fake_transport.route("GET", "/app", {"message": "Bad credentials"}, 401)
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result == github_client.AppCredentialsInvalid(reason="unauthorized")
+
+
+async def test_forbidden_is_unauthorized(fake_transport, _throwaway_key_material):
+    fake_transport.route("GET", "/app", {"message": "Forbidden"}, 403)
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result == github_client.AppCredentialsInvalid(reason="unauthorized")
 
 
 async def test_server_error_is_unreachable(fake_transport, _throwaway_key_material):
-    fake_transport.route("GET", "/app/installations/456", {}, 500)
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
-    )
-    assert result == github_client.InstallationInvalid(reason="github_unreachable")
+    fake_transport.route("GET", "/app", {}, 500)
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert result == github_client.AppCredentialsInvalid(reason="github_unreachable")
 
 
-async def test_malformed_base64_private_key_is_invalid_credentials():
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64="not-valid-base64!!", installation_id=456
-    )
-    assert result == github_client.InstallationInvalid(reason="invalid_credentials")
+async def test_malformed_base64_private_key_is_invalid_key():
+    result = await github_client.validate_app(999, "not-valid-base64!!", WEBHOOK_URL)
+    assert result == github_client.AppCredentialsInvalid(reason="invalid_key")
 
 
-async def test_valid_base64_but_not_a_real_pem_is_invalid_credentials():
+async def test_valid_base64_but_not_a_real_pem_is_invalid_key():
     garbage_pem_b64 = base64.b64encode(b"not a real PEM").decode()
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=garbage_pem_b64, installation_id=456
-    )
-    assert result == github_client.InstallationInvalid(reason="invalid_credentials")
+    result = await github_client.validate_app(999, garbage_pem_b64, WEBHOOK_URL)
+    assert result == github_client.AppCredentialsInvalid(reason="invalid_key")
 
 
-async def test_installation_response_missing_expected_fields_is_unreachable(
+async def test_installation_lookup_failure_does_not_hide_permission_results(
     fake_transport, _throwaway_key_material
 ):
-    fake_transport.route("GET", "/app/installations/456", {"id": 456})
-    result = await github_client.verify_installation(
-        app_id=999, private_key_b64=_throwaway_key_material, installation_id=456
-    )
-    assert result == github_client.InstallationInvalid(reason="github_unreachable")
+    """No check may abort the run: a transient failure fetching installations
+    must not suppress the permissions/events results already fetched from
+    GET /app."""
+    fake_transport.route("GET", "/app", REQUIRED_PERMISSIONS_RESPONSE)
+    fake_transport.route("GET", "/app/installations", {}, 500)
+    fake_transport.route("GET", "/app/hook/config", {"url": WEBHOOK_URL})
+    result = await github_client.validate_app(999, _throwaway_key_material, WEBHOOK_URL)
+    assert isinstance(result, github_client.AppValidated)
+    assert all(p.ok for p in result.permissions)
+    assert result.installation == github_client.InstallationNotFound()
+    assert result.webhook.ok
 
 
-def test_no_webhook_patch_helper_exists():
-    """The wizard bakes the App's real webhook URL into the manifest at
-    creation time, so there is nothing to correct afterwards. A
-    PATCH /app/hook/config helper reappearing here means the placeholder-
-    then-patch flow came back -- bot/github_app.py keeps its own
-    operator-side set_webhook_url for the CLI/deploy path, which is
-    unrelated and stays."""
-    assert not hasattr(github_client, "set_webhook_url")
-    assert "/app/hook/config" not in inspect.getsource(github_client)
+def test_required_permissions_and_events_match_the_cli_script():
+    from bot.scripts.create_github_app import MANIFEST_EVENTS, MANIFEST_PERMISSIONS
+
+    assert github_client.REQUIRED_PERMISSIONS == MANIFEST_PERMISSIONS
+    assert github_client.REQUIRED_EVENTS == MANIFEST_EVENTS
+
+
+def test_no_manifest_exchange_or_single_installation_verify_leftover():
+    """These functions belonged to the removed manifest-flow/typed-
+    installation-id design -- their reappearance means half of that flow
+    came back without the other half."""
+    assert not hasattr(github_client, "exchange_manifest_code")
+    assert not hasattr(github_client, "verify_installation")
+    assert not hasattr(github_client, "GithubAppCreated")
+    assert not hasattr(github_client, "InstallationVerified")
