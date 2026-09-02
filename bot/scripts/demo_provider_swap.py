@@ -30,7 +30,7 @@ import sys
 from bot.config import settings
 from bot.orchestrator import run_review
 
-DEFAULT_REPO = settings.github_target_repo
+DEFAULT_REPO = settings.default_target_repo()
 DEFAULT_PR_NUMBER = 2
 
 

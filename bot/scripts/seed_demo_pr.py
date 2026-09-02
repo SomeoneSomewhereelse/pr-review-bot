@@ -35,7 +35,7 @@ from pathlib import Path
 
 from bot.config import settings
 
-REPO = settings.github_target_repo
+REPO = settings.default_target_repo()
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "bad_code"
 
 

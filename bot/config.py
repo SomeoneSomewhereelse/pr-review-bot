@@ -193,6 +193,18 @@ class Settings(BaseSettings):
         """
         return frozenset(r.strip() for r in self.github_target_repo.split(",") if r.strip())
 
+    def default_target_repo(self) -> str:
+        """The first entry of GITHUB_TARGET_REPO's comma-separated list (or
+        "" if unset) -- for a manual/demo script that operates against
+        exactly one repo (seed_demo_pr.py, demo_provider_swap.py), never
+        target_repos() itself: that returns an unordered frozenset, correct
+        for webhook.py's membership check but wrong here, where a single
+        deterministic repo is needed. Reading github_target_repo directly
+        would break under multi-repo config -- the raw field is the whole
+        comma-joined string, not a single repo."""
+        first, _, _ = self.github_target_repo.partition(",")
+        return first.strip()
+
 
 # Deliberately lazy: constructing Settings() reads and validates the real
 # .env/.env.config, and raises ValidationError if either genuinely

@@ -302,6 +302,30 @@ def test_target_repos_single_value_has_no_comma():
     assert settings.target_repos() == frozenset({"org/repo"})
 
 
+def test_default_target_repo_is_the_only_value_when_single():
+    settings = Settings(github_target_repo="org/repo", _env_file=None)
+    assert settings.default_target_repo() == "org/repo"
+
+
+def test_default_target_repo_is_the_first_of_several():
+    """Regression test: a demo script (seed_demo_pr.py, demo_provider_swap.py)
+    reading github_target_repo directly under multi-repo config gets the
+    whole comma-joined string, not a single valid repo -- default_target_repo()
+    exists so those scripts get one deterministic repo instead."""
+    settings = Settings(github_target_repo="org/repo-a,org/repo-b", _env_file=None)
+    assert settings.default_target_repo() == "org/repo-a"
+
+
+def test_default_target_repo_strips_whitespace():
+    settings = Settings(github_target_repo=" org/repo-a , org/repo-b ", _env_file=None)
+    assert settings.default_target_repo() == "org/repo-a"
+
+
+def test_default_target_repo_empty_when_unset():
+    settings = Settings(github_target_repo="", _env_file=None)
+    assert settings.default_target_repo() == ""
+
+
 def test_cost_cap_is_gone_entirely():
     """A dollar cap built on unverified rates is a safety control that can fail
     open -- worse than no cap (design spec 2026-08-18 section 6c)."""
