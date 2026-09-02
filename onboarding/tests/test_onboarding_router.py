@@ -101,6 +101,8 @@ async def test_index_sets_security_headers():
 
 
 async def test_valid_key_returns_owner_name(monkeypatch):
+    _use_fake_session_store(monkeypatch)
+
     async def fake_validate_key(api_key: str):
         assert api_key == SENTINEL_KEY
         return render_client.RenderKeyValid(owner_name="Ada Lovelace")
@@ -110,6 +112,35 @@ async def test_valid_key_returns_owner_name(monkeypatch):
     resp = await client.post("/api/render/validate-key", json={"api_key": SENTINEL_KEY})
     assert resp.status_code == 200
     assert resp.json() == {"valid": True, "owner_name": "Ada Lovelace"}
+
+
+async def test_valid_key_creates_a_session_and_sets_the_cookie(monkeypatch):
+    _use_fake_session_store(monkeypatch)
+
+    async def fake_validate_key(api_key: str):
+        return render_client.RenderKeyValid(owner_name="Ada Lovelace")
+
+    monkeypatch.setattr(render_client, "validate_key", fake_validate_key)
+    client = await _client()
+    resp = await client.post("/api/render/validate-key", json={"api_key": SENTINEL_KEY})
+    assert "onboarding_session=" in resp.headers.get("set-cookie", "")
+
+
+async def test_valid_key_reuses_an_existing_session_cookie(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+
+    async def fake_validate_key(api_key: str):
+        return render_client.RenderKeyValid(owner_name="Ada Lovelace")
+
+    monkeypatch.setattr(render_client, "validate_key", fake_validate_key)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/validate-key", json={"api_key": SENTINEL_KEY},
+        cookies={"onboarding_session": session_id},
+    )
+    assert "set-cookie" not in resp.headers
+    assert fake.read_frame(session_id, "render")["owner_name"] == "Ada Lovelace"
 
 
 async def test_invalid_key_reports_the_reason(monkeypatch):
@@ -1010,7 +1041,12 @@ async def test_uptimerobot_delete_monitor_rejects_empty_key():
 
 
 async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x"})
+
     async def fake_create_service(api_key, repo_url, name):
+        assert api_key == "rnd_x"
         return render_client.RenderServiceCreated(
             service_id="srv-1", service_url="https://x.onrender.com"
         )
@@ -1019,7 +1055,8 @@ async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/render/create-service",
-        json={"api_key": "rnd_x", "repo_url": "https://github.com/a/b", "name": "n"},
+        json={"repo_url": "https://github.com/a/b", "name": "n"},
+        cookies={"onboarding_session": session_id},
     )
     assert resp.status_code == 200
     assert resp.json() == {
@@ -1030,6 +1067,10 @@ async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
 
 
 async def test_create_service_endpoint_relays_rejection_message(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x"})
+
     async def fake_create_service(api_key, repo_url, name):
         return render_client.RenderServiceCreationFailed(
             reason="request_rejected", message="name taken"
@@ -1039,9 +1080,18 @@ async def test_create_service_endpoint_relays_rejection_message(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/render/create-service",
-        json={"api_key": "rnd_x", "repo_url": "https://github.com/a/b", "name": "n"},
+        json={"repo_url": "https://github.com/a/b", "name": "n"},
+        cookies={"onboarding_session": session_id},
     )
     assert resp.json() == {"valid": False, "reason": "request_rejected", "message": "name taken"}
+
+
+async def test_create_service_endpoint_with_no_session_fails_closed():
+    client = await _client()
+    resp = await client.post(
+        "/api/render/create-service", json={"repo_url": "https://github.com/a/b", "name": "n"}
+    )
+    assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
 async def test_github_push_render_vars_endpoint(monkeypatch):
@@ -1164,62 +1214,73 @@ async def test_llm_push_render_vars_endpoint_rejects_unknown_provider(monkeypatc
     assert resp.status_code == 422
 
 
-async def test_dashboard_auth_push_render_vars_endpoint(monkeypatch):
-    captured = {}
-
-    async def fake_push_env_vars(api_key, service_id, values):
-        captured["values"] = values
-        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
-
-    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+async def test_confirm_dashboard_auth_persists_to_session(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
     client = await _client()
     resp = await client.post(
-        "/api/dashboard-auth/push-render-vars",
+        "/api/dashboard-auth/confirm",
         json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
+            "username": "operator",
+            "password": "correct-horse-battery",
+            "session_secret": "s" * 43,
+        },
+        cookies={"onboarding_session": session_id},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"valid": True}
+    assert fake.read_frame(session_id, "dashboard_auth") == {
+        "username": "operator",
+        "password": "correct-horse-battery",
+        "session_secret": "s" * 43,
+    }
+
+
+async def test_confirm_dashboard_auth_with_no_session_fails_closed():
+    client = await _client()
+    resp = await client.post(
+        "/api/dashboard-auth/confirm",
+        json={
             "username": "operator",
             "password": "correct-horse-battery",
             "session_secret": "s" * 43,
         },
     )
-    assert resp.status_code == 200
-    assert resp.json()["valid"] is True
-    assert captured["values"] == {
-        "DASHBOARD_USERNAME": "operator",
-        "DASHBOARD_PASSWORD": "correct-horse-battery",
-        "DASHBOARD_SESSION_SECRET": "s" * 43,
-    }
+    assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
-async def test_dashboard_auth_push_render_vars_endpoint_rejects_short_password():
+async def test_confirm_dashboard_auth_rejects_short_password(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
     client = await _client()
     resp = await client.post(
-        "/api/dashboard-auth/push-render-vars",
-        json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
-            "username": "operator",
-            "password": "short1",
-            "session_secret": "s" * 43,
-        },
+        "/api/dashboard-auth/confirm",
+        json={"username": "operator", "password": "short1", "session_secret": "s" * 43},
+        cookies={"onboarding_session": session_id},
     )
     assert resp.status_code == 422
 
 
-async def test_dashboard_auth_push_render_vars_endpoint_rejects_short_session_secret():
+async def test_confirm_dashboard_auth_rejects_short_session_secret(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
     client = await _client()
     resp = await client.post(
-        "/api/dashboard-auth/push-render-vars",
+        "/api/dashboard-auth/confirm",
         json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
             "username": "operator",
             "password": "correct-horse-battery",
             "session_secret": "tooshort",
         },
+        cookies={"onboarding_session": session_id},
     )
     assert resp.status_code == 422
+
+
+async def test_dashboard_auth_push_render_vars_endpoint_is_gone():
+    client = await _client()
+    resp = await client.post("/api/dashboard-auth/push-render-vars", json={})
+    assert resp.status_code == 404
 
 
 async def test_push_render_vars_partial_failure_reports_pushed_keys(monkeypatch):

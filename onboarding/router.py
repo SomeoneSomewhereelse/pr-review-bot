@@ -158,7 +158,6 @@ class UptimeRobotCreateMonitorRequest(BaseModel):
 
 
 class RenderServiceCreateRequest(BaseModel):
-    api_key: str = Field(max_length=512)
     repo_url: str = Field(min_length=1, max_length=512)
     name: str = Field(min_length=1, max_length=64)
 
@@ -185,7 +184,7 @@ class LlmPushRenderVarsRequest(RenderPushEnvVarsRequest):
     model: str = Field(min_length=1, max_length=256)
 
 
-class DashboardAuthPushRenderVarsRequest(RenderPushEnvVarsRequest):
+class DashboardAuthConfirmRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=8, max_length=256)
     session_secret: str = Field(min_length=32, max_length=256)
@@ -272,9 +271,22 @@ async def reset_session(request: Request, response: Response) -> Response:
 
 
 @router.post("/api/render/validate-key")
-async def validate_render_key(payload: RenderKeyRequest) -> dict:
+async def validate_render_key(
+    payload: RenderKeyRequest, request: Request, response: Response
+) -> dict:
     result = await render_client.validate_key(payload.api_key)
     if isinstance(result, render_client.RenderKeyValid):
+        # The wizard's session entry point -- the ONLY endpoint allowed to
+        # call create_session(). Every other endpoint below requires an
+        # existing session and fails closed instead (session_store.py's
+        # update_frame() enforces this at the storage layer too).
+        session_id = _get_session_id(request)
+        if session_id is None or session_store.get_session(session_id) is None:
+            session_id = session_store.create_session()
+            _set_session_cookie(response, session_id)
+        session_store.update_frame(
+            session_id, "render", {"api_key": payload.api_key, "owner_name": result.owner_name}
+        )
         return {"valid": True, "owner_name": result.owner_name}
     return {"valid": False, "reason": result.reason}
 
@@ -438,9 +450,20 @@ async def delete_uptimerobot_monitor(payload: UptimeRobotDeleteMonitorRequest) -
 
 
 @router.post("/api/render/create-service")
-async def create_render_service(payload: RenderServiceCreateRequest) -> dict:
-    result = await render_client.create_service(payload.api_key, payload.repo_url, payload.name)
+async def create_render_service(payload: RenderServiceCreateRequest, request: Request) -> dict:
+    session_id = _get_session_id(request)
+    render_frame = session_id and session_store.read_frame(session_id, "render")
+    if not render_frame or "api_key" not in render_frame:
+        return {"valid": False, "reason": "no_session"}
+    result = await render_client.create_service(
+        render_frame["api_key"], payload.repo_url, payload.name
+    )
     if isinstance(result, render_client.RenderServiceCreated):
+        session_store.update_frame(
+            session_id,
+            "render",
+            {"service_id": result.service_id, "service_url": result.service_url},
+        )
         return {"valid": True, "service_id": result.service_id, "service_url": result.service_url}
     if result.message:
         return {"valid": False, "reason": result.reason, "message": result.message}
@@ -491,18 +514,23 @@ async def push_llm_render_vars(payload: LlmPushRenderVarsRequest) -> dict:
     return _push_result(result)
 
 
-@router.post("/api/dashboard-auth/push-render-vars")
-async def push_dashboard_auth_render_vars(payload: DashboardAuthPushRenderVarsRequest) -> dict:
-    result = await render_client.push_env_vars(
-        payload.render_api_key,
-        payload.render_service_id,
+@router.post("/api/dashboard-auth/confirm")
+async def confirm_dashboard_auth(payload: DashboardAuthConfirmRequest, request: Request) -> dict:
+    # No external API to validate against -- this value is wizard/visitor-
+    # chosen, never checked against anything else. This endpoint's only job
+    # is persisting it to the session for the final bulk push.
+    session_id = _get_session_id(request)
+    if session_id is None or session_store.get_session(session_id) is None:
+        return {"valid": False, "reason": "no_session"}
+    session_store.update_frame(
+        session_id, "dashboard_auth",
         {
-            "DASHBOARD_USERNAME": payload.username,
-            "DASHBOARD_PASSWORD": payload.password,
-            "DASHBOARD_SESSION_SECRET": payload.session_secret,
+            "username": payload.username,
+            "password": payload.password,
+            "session_secret": payload.session_secret,
         },
     )
-    return _push_result(result)
+    return {"valid": True}
 
 
 @router.post("/api/render/trigger-deploy")
