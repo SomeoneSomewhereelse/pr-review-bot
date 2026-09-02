@@ -55,15 +55,30 @@ def reset_dedup_cache() -> None:
 
 
 def _is_duplicate_delivery(delivery_id: str) -> bool:
-    """Check-and-mark a delivery id against the bounded LRU dedup cache."""
+    """Check only -- does not mark. Marking is a separate step
+    (_mark_delivery_processed), applied only once the delivery has been
+    fully and successfully handled -- see that function's docstring for why
+    check-and-mark in one step is wrong here."""
     if delivery_id in _seen_deliveries:
         _seen_deliveries.move_to_end(delivery_id)
         return True
+    return False
 
+
+def _mark_delivery_processed(delivery_id: str) -> None:
+    """Record a delivery id as done against the bounded LRU dedup cache.
+
+    Deliberately NOT called until _handle_pull_request_payload has returned
+    without raising. Marking at check-time (the previous behavior) meant a
+    delivery that failed mid-processing (e.g. Postgres briefly unreachable
+    during store.enqueue_or_update) was already recorded as seen -- GitHub's
+    own Redeliver reuses the same X-GitHub-Delivery id, so the retry would
+    hit the dedup cache and return 200 "already processed" while the PR was
+    never actually enqueued, with no way to force a real redelivery short of
+    restarting the process (which clears the in-memory cache)."""
     _seen_deliveries[delivery_id] = None
     if len(_seen_deliveries) > _DEDUP_CAPACITY:
         _seen_deliveries.popitem(last=False)
-    return False
 
 
 async def _handle_pull_request_payload(payload: dict) -> None:
@@ -149,4 +164,6 @@ async def webhook(request: Request) -> Response:
 
     payload = json.loads(raw_body)
     await _handle_pull_request_payload(payload)
+    if delivery_id is not None:
+        _mark_delivery_processed(delivery_id)
     return Response(status_code=202)

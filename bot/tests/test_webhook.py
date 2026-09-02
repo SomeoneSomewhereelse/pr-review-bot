@@ -77,6 +77,43 @@ async def test_replayed_delivery_id_is_noop(monkeypatch):
     assert second.status_code == 200
 
 
+async def test_a_delivery_that_fails_to_enqueue_can_be_redelivered(monkeypatch):
+    """A delivery id must only be marked seen once it's fully processed --
+    if store.enqueue_or_update raises (e.g. Postgres briefly unreachable),
+    GitHub's own Redeliver (same X-GitHub-Delivery id) must reach the
+    handler again, not get a false 200 'already processed' from the dedup
+    cache with the PR never actually enqueued."""
+    payload = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 42, "head": {"sha": "def456"}},
+    }
+    body = json.dumps(payload).encode()
+    headers = {
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    }
+
+    original_enqueue = store.enqueue_or_update
+
+    def _boom(**kwargs):
+        raise RuntimeError("db unreachable")
+
+    monkeypatch.setattr(store, "enqueue_or_update", _boom)
+    async with await _client() as c:
+        with pytest.raises(RuntimeError):
+            await c.post("/webhook", content=body, headers=headers)
+
+    monkeypatch.setattr(store, "enqueue_or_update", original_enqueue)
+    async with await _client() as c:
+        retry = await c.post("/webhook", content=body, headers=headers)
+
+    assert retry.status_code == 202
+    ticket = store.claim_next_due(now="2026-01-01T12:00:00+00:00")
+    assert ticket is not None
+    assert ticket.pr_number == 42
+
+
 async def test_opened_action_enqueues_ticket():
     payload = {
         "action": "opened",
