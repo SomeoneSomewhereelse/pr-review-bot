@@ -43,7 +43,17 @@ async def _complete(
     raw_text = response.text or ""
     usage = response.usage_metadata
     tokens_in = (usage.prompt_token_count or 0) if usage else 0
-    tokens_out = (usage.candidates_token_count or 0) if usage else 0
+    # candidates_token_count alone excludes thoughts_token_count, but Google
+    # bills thinking tokens at the output rate -- both gemini-flash-latest
+    # and gemini-2.5-flash think by default, so omitting this silently
+    # under-reports cost and under-counts against the usage cap. See
+    # GenerateContentResponseUsageMetadata.total_token_count's own docstring
+    # (sum of prompt + candidates + tool_use_prompt + thoughts).
+    tokens_out = (
+        (usage.candidates_token_count or 0) + (getattr(usage, "thoughts_token_count", 0) or 0)
+        if usage
+        else 0
+    )
 
     return LLMResponse(
         raw_text=raw_text,

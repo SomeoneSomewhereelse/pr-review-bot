@@ -94,13 +94,14 @@ class Greeting(BaseModel):
     message: str
 
 
-def _fake_response(text: str, tokens_in: int = 10, tokens_out: int = 5):
+def _fake_response(text: str, tokens_in: int = 10, tokens_out: int = 5, thoughts_tokens: int = 0):
     """Build a stand-in for google.genai.types.GenerateContentResponse."""
     return SimpleNamespace(
         text=text,
         usage_metadata=SimpleNamespace(
             prompt_token_count=tokens_in,
             candidates_token_count=tokens_out,
+            thoughts_token_count=thoughts_tokens,
         ),
     )
 
@@ -129,6 +130,31 @@ async def test_gemini_provider_parses_valid_structured_output(monkeypatch):
     fake_generate.assert_awaited_once()
     _, kwargs = fake_generate.call_args
     assert kwargs["model"] == settings.llm_model
+
+
+@pytest.mark.asyncio
+async def test_gemini_provider_includes_thinking_tokens_in_tokens_out(monkeypatch):
+    """Google bills thinking tokens (thoughts_token_count) at the output
+    rate, but they're excluded from candidates_token_count -- tokens_out
+    must add them in, or cost estimates and the usage cap both silently
+    under-count for any thinking-enabled model (the default for both
+    gemini-flash-latest and gemini-2.5-flash)."""
+    fake_generate = AsyncMock(
+        return_value=_fake_response(
+            json.dumps({"message": "hi"}), tokens_in=42, tokens_out=7, thoughts_tokens=15
+        )
+    )
+    monkeypatch.setattr(
+        "bot.providers.google_genai.genai.Client",
+        lambda **kwargs: SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=fake_generate))
+        ),
+    )
+
+    provider = GeminiProvider(api_key="dummy-key-for-construction-only", model=settings.llm_model)
+    result = await provider.complete("system prompt", "user prompt", Greeting)
+
+    assert result.tokens_out == 22  # 7 candidates + 15 thinking
 
 
 @pytest.mark.asyncio
