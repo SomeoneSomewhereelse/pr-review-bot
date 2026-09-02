@@ -22,6 +22,38 @@ def test_format_comment_includes_marker_first():
     assert body.startswith(COMMENT_MARKER)
 
 
+def test_format_comment_surfaces_diff_truncation():
+    """SPEC.md requires truncation to be visible in the comment, not just
+    seen by the model via TRUNCATION_MARKER -- a human reading the PR must
+    know most of the diff was never reviewed."""
+    result = ReviewResult(
+        pr_number=42,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[SpecialistResult(name="Security", status="ok", findings=[], elapsed_ms=100)],
+        total_elapsed_ms=100,
+        total_tokens_in=10,
+        total_tokens_out=5,
+        diff_truncated=True,
+    )
+    body = format_comment(result)
+    assert "truncated" in body.lower()
+
+
+def test_format_comment_omits_truncation_notice_when_not_truncated():
+    result = ReviewResult(
+        pr_number=42,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[SpecialistResult(name="Security", status="ok", findings=[], elapsed_ms=100)],
+        total_elapsed_ms=100,
+        total_tokens_in=10,
+        total_tokens_out=5,
+    )
+    body = format_comment(result)
+    assert "truncated" not in body.lower()
+
+
 def test_format_comment_renders_findings_table():
     result = ReviewResult(
         pr_number=42,

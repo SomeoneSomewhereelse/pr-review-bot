@@ -123,6 +123,11 @@ def format_comment(result: ReviewResult) -> str:
         f"## 🤖 Automated Code Review — PR #{result.pr_number}\n"
         f"_{n} {plural} · {result.model} ({result.provider}) · {runtime_s:.1f}s{cost_str}_\n"
     )
+    if result.diff_truncated:
+        header += (
+            "\n⚠️ This PR's diff exceeded the review token budget and was "
+            "truncated — some changes may not have been reviewed.\n"
+        )
 
     sections = "\n".join(_render_section(spec) for spec in result.results)
 

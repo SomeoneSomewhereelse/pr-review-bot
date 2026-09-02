@@ -60,3 +60,7 @@ class ReviewResult(BaseModel):
     total_tokens_in: int
     total_tokens_out: int
     est_cost_usd: float | None = None
+    # True when diff_utils.annotate_and_cap truncated the diff for exceeding
+    # its token budget -- surfaced in the comment (formatting.py) per
+    # SPEC.md's "visible truncation" requirement, not just seen by the model.
+    diff_truncated: bool = False

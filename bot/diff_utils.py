@@ -77,6 +77,11 @@ def _annotate(raw_diff: str) -> str:
         elif line.startswith("-") and not line.startswith("---"):
             # Removed line: no target-file line number, still shown for context.
             out_lines.append(line)
+        elif line.startswith("\\ No newline at end of file"):
+            # Diff metadata, not a real line -- must not consume a new-file
+            # line number, or every added line after it in the same hunk
+            # gets annotated one line too high.
+            out_lines.append(line)
         else:
             # Context line: still consumes a new-file line number.
             out_lines.append(line)

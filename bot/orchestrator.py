@@ -164,6 +164,7 @@ async def attempt_review(
         total_tokens_in=total_tokens_in,
         total_tokens_out=total_tokens_out,
         est_cost_usd=est_cost_usd,
+        diff_truncated=annotated.truncated,
     )
 
     body = format_comment(review_result)
