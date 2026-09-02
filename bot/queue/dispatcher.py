@@ -250,6 +250,13 @@ async def process_next_due(now: datetime) -> StepResult:
     ticket = await asyncio.to_thread(store.claim_next_due, now.isoformat())
     if ticket is None:
         return StepResult(action="idle")
+    logger.info(
+        "Claimed ticket %s for %s#%s (attempts=%d)",
+        ticket.id,
+        ticket.repo_full_name,
+        ticket.pr_number,
+        ticket.attempts,
+    )
 
     # Refresh the provider override once per claimed ticket, not once per idle
     # tick. A failure here must never abort a review: active_provider() falls

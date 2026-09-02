@@ -73,11 +73,13 @@ async def _handle_pull_request_payload(payload: dict) -> None:
     or merges, or no-op for everything else."""
     action = payload.get("action")
     is_base_retarget = action == "edited" and _is_base_retarget(payload)
+    logger.info("pull_request webhook: action=%s", action)
     if (
         action not in _REVIEW_TRIGGER_ACTIONS
         and action not in _CANCEL_ACTIONS
         and not is_base_retarget
     ):
+        logger.info("Ignoring non-triggering action=%s", action)
         return
     pull_request = payload.get("pull_request") or {}
     repository = payload.get("repository") or {}
@@ -88,10 +90,15 @@ async def _handle_pull_request_payload(payload: dict) -> None:
         return
     target_repos = settings.target_repos()
     if target_repos and repo_full_name.casefold() not in {r.casefold() for r in target_repos}:
-        logger.info("Ignoring webhook for non-target repo %s", repo_full_name)
+        logger.info(
+            "Ignoring webhook for non-target repo %s (target_repos=%s)",
+            repo_full_name,
+            sorted(target_repos),
+        )
         return
 
     if action in _CANCEL_ACTIONS:
+        logger.info("Cancelling ticket for %s#%s", repo_full_name, pr_number)
         await asyncio.to_thread(
             store.cancel_ticket,
             repo_full_name=repo_full_name,
@@ -101,6 +108,13 @@ async def _handle_pull_request_payload(payload: dict) -> None:
         return
 
     head_sha = (pull_request.get("head") or {}).get("sha")
+    logger.info(
+        "Enqueuing review ticket for %s#%s (head_sha=%s, provider=%s)",
+        repo_full_name,
+        pr_number,
+        head_sha,
+        active_provider(),
+    )
     await asyncio.to_thread(
         store.enqueue_or_update,
         repo_full_name=repo_full_name,
@@ -109,6 +123,7 @@ async def _handle_pull_request_payload(payload: dict) -> None:
         provider=active_provider(),
         now=datetime.now(timezone.utc).isoformat(),
     )
+    logger.info("Enqueued review ticket for %s#%s", repo_full_name, pr_number)
 
 
 @router.post("/webhook")
@@ -116,12 +131,20 @@ async def webhook(request: Request) -> Response:
     raw_body = await request.body()
     signature_header = request.headers.get("X-Hub-Signature-256")
     delivery_id = request.headers.get("X-GitHub-Delivery")
+    event_type = request.headers.get("X-GitHub-Event")
+    logger.info(
+        "Received webhook: event=%s delivery=%s bytes=%d",
+        event_type,
+        delivery_id,
+        len(raw_body),
+    )
 
     if not verify_signature(raw_body, signature_header, settings.github_webhook_secret):
         logger.warning("Rejected webhook: invalid signature (delivery=%s)", delivery_id)
         return Response(status_code=401)
 
     if delivery_id is not None and _is_duplicate_delivery(delivery_id):
+        logger.info("Duplicate delivery=%s; already processed", delivery_id)
         return Response(status_code=200, content="already processed")
 
     payload = json.loads(raw_body)
