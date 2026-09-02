@@ -167,7 +167,59 @@ instead of fabricating disconnected state.
   the session cookie, and calls `read_frame` for `github_app`, `supabase`,
   and `render` before deploying.
 
-### 3.4 Frontend changes
+### 3.4 Redirect-and-resume pattern (Supabase OAuth)
+
+This is the concrete replacement for the popup + `BroadcastChannel`
+machinery, and the reason this design exists in the first place. It works
+because a cookie — unlike `sessionStorage` — is part of the browser's
+persistent cookie jar, not tied to a specific browsing-context instance,
+and because `SameSite=Lax` cookies are sent on exactly the request shape
+this flow produces: a top-level GET navigation landing back on our origin
+after a cross-site redirect.
+
+1. Frame 5's connect endpoint generates the PKCE `state` and verifier,
+   writes them into the session via `update_frame(session_id, "supabase",
+   {"_pending_oauth": {"state": ..., "verifier": ...}})` (encrypted like any
+   other stored value), and returns the authorize URL. The frontend does a
+   plain `location.href = authorizeUrl` — same tab, no popup.
+2. Supabase's authorize page redirects back to our own
+   `/oauth/supabase/callback?code=...&state=...` via GET. The session
+   cookie rides along automatically.
+3. That route reads the cookie, calls `get_session`, reads
+   `frame_data["supabase"]["_pending_oauth"]`, and rejects (falls back to
+   the same "no session" shape) if it's missing or `state` doesn't match —
+   this is the CSRF-binding property discussed earlier, now free: an
+   attacker who merely captures the redirect URL doesn't have this
+   browser's session cookie.
+4. It exchanges `code` + the stored verifier with Supabase, then calls
+   `update_frame` with the real result (the access/refresh tokens),
+   clearing `_pending_oauth` in the same write.
+5. It issues a server-side `302` to `/`. No client-side JS is involved in
+   the callback at all — the page that loads calls `GET /api/session`
+   exactly as it would on any other load, and sees `supabase` as complete.
+   "Resuming" isn't a special case; it's just the normal restore path.
+6. Every subsequent Supabase call that needs the access token
+   (`/api/supabase/create-project`, `/api/supabase/project-status`,
+   `/api/supabase/connection-info`) stops taking `access_token` in its
+   request body and instead calls `read_frame(session_id, "supabase")` to
+   get it server-side — consistent with the "credential re-use" decision
+   in section 2.
+
+**Carry forward the outstanding connection-info diagnostic.**
+`supabase_client.py::get_connection_info`'s pooler-config lookup currently
+has a still-unresolved `TEMPORARY diagnostic` (a `print()` logging the
+`pool_mode`/`database_type` shapes seen when no session/PRIMARY entry
+matches — see the function's docstring and `ISSUES.md`). This refactor
+touches the endpoint that calls it (`/api/supabase/connection-info`), so
+the diagnostic must be carried forward as-is, not dropped as a side effect
+of moving `access_token` out of the request body — the mismatch it's
+chasing is still open. While touching this code, tag the diagnostic's log
+line with the session id (`session_id`, not any credential) so a future
+occurrence can be correlated to a specific wizard run instead of being an
+anonymous one-off in the logs. Actually root-causing the mismatch remains
+out of scope for this design (see section 6).
+
+### 3.5 Frontend changes
 
 - `sessionStorage` stops holding credentials entirely. It's reduced to
   pure UI/display state (theme, language, which frame is expanded) — the
@@ -185,7 +237,7 @@ instead of fabricating disconnected state.
   state in memory the way they always have during a single page view, they
   just no longer persist a raw credential to browser storage at all.
 
-### 3.5 Error handling
+### 3.6 Error handling
 
 - Missing/unknown/expired cookie anywhere → always "no session," never a
   distinct error. `GET /api/session` returns the fresh-visitor shape; an
@@ -201,7 +253,7 @@ instead of fabricating disconnected state.
   calling endpoint's structured "complete earlier steps first" response,
   never a silently-created orphan session.
 
-### 3.6 Secrets
+### 3.7 Secrets
 
 Two new operator secrets, documented in `onboarding/.env.example`
 (already added):
@@ -242,19 +294,36 @@ matches this project's existing preference against new background infra.
   back via `read_frame` is byte-for-byte identical, and the raw row content
   read directly from the DB fixture never equals the plaintext (guards
   against `update_frame` accidentally skipping encryption for some field).
+- `/oauth/supabase/callback` tests (fake `session_store` + fake
+  `supabase_client`): a matching `state` completes the exchange and clears
+  `_pending_oauth`; a mismatched or missing `state` falls back to the
+  "no session" shape rather than completing the exchange; a valid
+  completion redirects to `/` with no credential anywhere in the redirect
+  response.
 
 ## 6. Out of scope
 
 - The new final-step (sub-project 6) endpoint's own deploy logic — this
   design only specifies that it reads from the session store, not what it
-  does with the data.
-- Any change to how the GitHub App validation checklist or Supabase OAuth
-  flow themselves work — this design only changes where their *results*
-  get persisted, not the flows that produce them. The popup +
-  `BroadcastChannel` mechanism for the Supabase OAuth leg may become
-  unnecessary once cookies (shared across tabs within one browser) are the
-  session pointer instead of `sessionStorage` (per-tab) — that
-  simplification is a candidate follow-up, not part of this design.
+  does with the data. That includes Postgres schema creation for the
+  visitor's freshly-provisioned Supabase project: `bot/main.py`'s lifespan
+  already calls `store.init_pool()`, which runs `bot/queue/store.py`'s
+  `_SCHEMA` (`CREATE TABLE IF NOT EXISTS` for `tickets`, `runtime_config`,
+  `reviews`) unconditionally against whatever `DATABASE_URL` it's given, on
+  first boot. The wizard's job is only to wire the visitor's connection
+  string into their Render service's `DATABASE_URL` — bot self-provisions
+  its own schema the first time that instance starts. The wizard never
+  creates tables itself.
+- Any change to how the GitHub App validation checklist itself works —
+  this design only changes where its *results* get persisted, not the flow
+  that produces them (it already has no cross-domain redirect to worry
+  about, per the earlier manual-validation redesign). The Supabase OAuth
+  leg's redirect handling is addressed directly in section 3.4, not deferred.
+- Root-causing the `pool_mode`/`database_type` mismatch behind
+  `get_connection_info`'s outstanding diagnostic (section 3.4) — this
+  design only ensures the diagnostic survives the refactor and gains a
+  session id for correlation; actually finding and fixing the mismatch is
+  separate, already-tracked work (`ISSUES.md`).
 - Rotating `ONBOARDING_SESSION_ENCRYPTION_KEY` without invalidating every
   live session — out of scope; a rotation simply orphans in-flight
   sessions (acceptable given the short TTL), not a supported live-rotation
