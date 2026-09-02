@@ -442,9 +442,17 @@ async def process_next_due(now: datetime) -> StepResult:
             # couldn't post the notice; don't strand as terminal
             except Exception:  # noqa: BLE001
                 logger.exception("failed to post terminal failure notice for ticket %s", ticket.id)
+                # The first notice-post attempt happens at next_attempt ==
+                # dispatcher_max_failure_attempts (the original hard-stop), so
+                # this is the (next_attempt - dispatcher_max_failure_attempts + 1)-th
+                # posting attempt. Give up once that count reaches
+                # dispatcher_max_notice_post_attempts -- not dispatcher_max_notice_post_attempts
+                # tries *on top of* the hard-stop attempt, which is what a plain
+                # `+` here previously allowed (dispatcher_max_notice_post_attempts + 1 tries).
                 notice_post_ceiling = (
                     settings.dispatcher_max_failure_attempts
                     + settings.dispatcher_max_notice_post_attempts
+                    - 2
                 )
                 if next_attempt > notice_post_ceiling:
                     # The notice itself has now failed to post

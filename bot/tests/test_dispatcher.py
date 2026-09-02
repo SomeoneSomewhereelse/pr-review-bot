@@ -798,6 +798,47 @@ async def test_repeated_notice_post_failure_eventually_goes_terminal(monkeypatch
     assert result.action == "failed"
 
 
+async def test_notice_post_ceiling_makes_exactly_max_notice_post_attempts_tries(monkeypatch):
+    """dispatcher_max_notice_post_attempts=3 must mean exactly 3 notice-post
+    attempts, not dispatcher_max_notice_post_attempts + 1 (the off-by-one this
+    is a regression test for: notice_post_ceiling used to be
+    dispatcher_max_failure_attempts + dispatcher_max_notice_post_attempts,
+    which let one extra retry through)."""
+    monkeypatch.setattr(settings, "dispatcher_max_failure_attempts", 1)
+    monkeypatch.setattr(settings, "dispatcher_max_notice_post_attempts", 3)
+    monkeypatch.setattr(settings, "dispatcher_failure_base_backoff_seconds", 2.0)
+    monkeypatch.setattr(settings, "dispatcher_failure_max_backoff_seconds", 300.0)
+    monkeypatch.setattr(dispatcher, "_jitter", lambda: 0.0)
+    tid = _enqueue(pr=27)  # fresh -> overwrite path (upsert_comment)
+
+    post_attempts = []
+
+    def boom_post(repo, pr, body, comment_id=None):
+        post_attempts.append(1)
+        raise RuntimeError("github down")
+
+    monkeypatch.setattr(dispatcher.github_app, "upsert_comment", boom_post)
+
+    async def boom(repo, pr, comment_id=None):
+        raise RuntimeError("review outage")
+
+    monkeypatch.setattr(dispatcher, "attempt_review", boom)
+
+    now = NOW
+    for _ in range(10):
+        t = store.get_ticket(tid)
+        if t.status == "failed":
+            break
+        await dispatcher.process_next_due(now)
+        t = store.get_ticket(tid)
+        if t.status == "failed":
+            break
+        now = datetime.fromisoformat(t.not_before) + timedelta(seconds=1)
+
+    assert store.get_ticket(tid).status == "failed"
+    assert len(post_attempts) == 3
+
+
 async def test_daily_wall_defers_then_runs_after_reset(monkeypatch):
     _stub_comments(monkeypatch)
     tid = _enqueue(pr=4)
