@@ -553,9 +553,37 @@ Proactive findings, not incidents — nothing here actually happened. Format:
 - **Found during:** brainstorming session, 2026-08-28
 - **What:** sketch so far, captured before the brainstorm paused to redirect at authentication — a new expandable side menu on the dashboard page (`app/static/dashboard.html`) with two items: **Status** (today's existing content — stats, queue, reviews — moved under this item unchanged) and **Environment** (new). Environment holds two sections, same layout, visually distinct: one for Render's live environment variables (mostly secrets — API keys, `DATABASE_URL`, `GITHUB_WEBHOOK_SECRET`, `GCP_SERVICE_ACCOUNT_KEY` — fetched via `scripts/_render.py`'s existing paginated single-key Render API access, values never rendered raw per root `CLAUDE.md`'s secret-handling section, same "reduce to boolean/length/equality immediately" contract `env_vars()`'s own docstring already documents), and one for the `runtime_config` DB table's operational settings (provider/model overrides, key indices, cooldown tuning, usage caps, `review_draft_prs` — none of which are secrets; every one already has a `get_*`/`set_*` pair in `app/queue/store.py`, so this section is a thin UI over existing functions, not new data-access code). Section names not yet decided.
 - **Why it matters:** discovered mid-brainstorm that `app/dashboard.py`'s router (and all of `app/main.py`) has zero authentication — anyone who can reach the Render URL can already read today's dashboard stats, and would, with this feature shipped as-is, gain the ability to read and write live production secrets and reconfigure the running service (provider/model, active API-key slot) with no login of any kind. Building the feature before auth exists would ship a severe vulnerability, not a demo convenience.
-- **Status:** open — deliberately paused
+- **Status:** closed — implemented 2026-09-02
 - **Follow-up:** design and ship dashboard authentication first, as its own brainstorm/spec. Resume this feature's brainstorm on top of it once auth exists — naming the two Environment sections and working out the fetch/edit/write flow (especially for the Render-env-vars section) were not yet reached.
 - **Update (2026-08-28):** its stated prerequisite is done — dashboard authentication (`docs/superpowers/specs/2026-08-28-dashboard-authentication-design.md`, `docs/superpowers/plans/2026-08-28-dashboard-authentication.md`) is implemented, fixed up through a final-review fix wave, and merged: `GET /` and every `/api/*` route now require a signed session cookie (`app/auth.py`, gated in `app/main.py` via `require_session`), with a login page, a logout control, and 401-driven redirect-to-login on session expiry. This feature's brainstorm can now resume on top of it.
+- **Update (2026-09-02):** implemented and merged. Design:
+  `docs/superpowers/specs/2026-09-02-dashboard-environment-tab-design.md`.
+  Plan: `docs/superpowers/plans/2026-09-02-dashboard-environment-tab.md`.
+  The two Environment sections are named "Render environment variables" and
+  "Runtime configuration"; Render env vars are full CRUD (add/edit/delete,
+  masked-by-default with a per-row reveal toggle — a documented, scoped
+  exception to root `CLAUDE.md`'s secret-display rule) except for a fixed
+  `PROTECTED_ENV_KEYS` set that can never be deleted from the dashboard.
+
+### `bot/scripts/deploy.py --sync-env` and `bot/scripts/set_override.py` are now redundant with the dashboard Environment tab
+
+- **Found during:** `docs/superpowers/plans/2026-09-02-dashboard-environment-tab.md`
+- **What:** The dashboard's new Environment tab (`dashboard/environment.py`)
+  does live, from-the-browser what `deploy.py --sync-env` and
+  `set_override.py` do from the CLI: push Render env vars and edit
+  `runtime_config` overrides. `deploy.py`'s other checks (pricing,
+  provider-live, health, database, credential-live) are unrelated to
+  env-var/config editing and remain useful regardless.
+- **Why parked:** Retiring either script is a real deletion/migration task
+  (removing dead code paths, updating any doc/guide that still tells an
+  operator to run them, deciding whether any check-only functionality needs
+  to move somewhere else first) — out of scope for the plan that made them
+  redundant.
+- **Follow-up:** Decide whether to retire `--sync-env`/`set_override.py`
+  outright or keep them as a CLI fallback (e.g. for a fresh deploy before
+  the dashboard is reachable at all — `--sync-env` is what makes the very
+  first deploy's env vars non-empty). If retired, update
+  `guide/operations/overrides.md` and any other doc that references them.
 
 ---
 
