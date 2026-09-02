@@ -85,3 +85,32 @@ def test_supabase_oauth_client_secret_whitespace_only_value_normalizes_to_the_un
 def test_supabase_oauth_client_secret_surrounding_whitespace_is_stripped(monkeypatch):
     monkeypatch.setenv("SUPABASE_OAUTH_CLIENT_SECRET", "  sb_secret_sentinel\n")
     assert Settings().supabase_oauth_client_secret == "sb_secret_sentinel"
+
+
+def test_database_url_defaults_to_empty_string(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    assert Settings().database_url == ""
+
+
+def test_database_url_strips_whitespace(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "  postgresql://x  \n")
+    assert Settings().database_url == "postgresql://x"
+
+
+def test_session_encryption_key_defaults_to_empty_string(monkeypatch):
+    monkeypatch.delenv("ONBOARDING_SESSION_ENCRYPTION_KEY", raising=False)
+    assert Settings().onboarding_session_encryption_key == ""
+
+
+def test_session_encryption_key_reads_from_environment_unvalidated(monkeypatch):
+    """Format validity (a real Fernet key or not) is deliberately NOT
+    checked here -- see config.py's field docstring for why a pydantic-level
+    ValidationError would leak this secret's raw value. That check lives in
+    main.py's lifespan instead (test_onboarding_main.py)."""
+    monkeypatch.setenv("ONBOARDING_SESSION_ENCRYPTION_KEY", "not-a-fernet-key")
+    assert Settings().onboarding_session_encryption_key == "not-a-fernet-key"
+
+
+def test_session_encryption_key_whitespace_only_value_normalizes_to_the_unset_sentinel(monkeypatch):
+    monkeypatch.setenv("ONBOARDING_SESSION_ENCRYPTION_KEY", "   ")
+    assert Settings().onboarding_session_encryption_key == ""
