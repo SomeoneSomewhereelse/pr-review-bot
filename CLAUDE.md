@@ -152,6 +152,31 @@ which is why this section exists and is kept first in the file.
   as if it didn't happen. Log the incident in `ISSUES.md` using its existing
   format.
 
+### Scoped exception: the dashboard Environment tab
+
+`dashboard/environment.py`'s `GET /api/environment/render` is the one
+documented exception to "never display any byte of a secret value" in this
+file. It returns real Render env-var values (via `bot.render_client.env_vars()`)
+to the authenticated operator's own browser session, where
+`dashboard/static/dashboard.html` renders them masked by default with a
+per-row reveal toggle. This is deliberately narrower than it looks:
+
+- The value never leaves this one authenticated, session-cookie-gated
+  endpoint's response — never logged (see `dashboard/environment.py`'s own
+  INFO lines, which log key names and lengths only, never values), never
+  written to a git commit, PR, Artifact, or subagent prompt, never persisted
+  client-side beyond the page's own DOM (no `localStorage`).
+- Transport is unchanged HTTPS throughout, identical to every other
+  authenticated dashboard route.
+- This exception covers only this one endpoint and the page that renders
+  its response. It does not license printing a secret value anywhere else in
+  this codebase or in an agent's own shell commands — every other rule in
+  this section still applies at full strength everywhere else, including
+  elsewhere in `dashboard/` and `bot/`.
+
+See `docs/superpowers/specs/2026-09-02-dashboard-environment-tab-design.md`
+for the full design and the reasoning behind this carve-out.
+
 ## Project
 
 Full design lives in `bot/SPEC.md`; cost model in `bot/cost.md`. Deployed as a Docker
