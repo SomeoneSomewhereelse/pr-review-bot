@@ -290,6 +290,7 @@ async def test_validate_app_returns_the_full_checklist(monkeypatch):
             "app_id": 42,
             "private_key_b64": "cGVt",
             "expected_webhook_url": "https://my-service.onrender.com/webhook",
+            "webhook_secret": "s" * 20,
         },
     )
     assert resp.status_code == 200
@@ -304,6 +305,62 @@ async def test_validate_app_returns_the_full_checklist(monkeypatch):
         },
         "webhook": {"ok": True, "actual_url": "https://my-service.onrender.com/webhook"},
     }
+
+
+async def test_validate_app_persists_on_all_ok(monkeypatch):
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        return github_client.AppValidated(
+            permissions=[],
+            events=[],
+            installation=github_client.InstallationFound(
+                installation_id=100, account_login="octocat", repo_scope="all"
+            ),
+            webhook=github_client.WebhookCheck(ok=True, actual_url="https://x.example/webhook"),
+        )
+
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    client = await _client()
+    resp = await client.post(
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key_b64": "cGVt",
+            "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
+        },
+        cookies={"onboarding_session": session_id},
+    )
+    assert resp.json()["all_ok"] is True
+    assert fake.read_frame(session_id, "github_app") == {
+        "app_id": 42, "private_key_b64": "cGVt",
+        "webhook_secret": "s" * 20, "installation_id": 100,
+    }
+
+
+async def test_validate_app_does_not_persist_when_not_all_ok(monkeypatch):
+    async def fake_validate(app_id, private_key_b64, expected_webhook_url):
+        return github_client.AppValidated(
+            permissions=[],
+            events=[],
+            installation=github_client.InstallationNotFound(),
+            webhook=github_client.WebhookCheck(ok=False, actual_url=""),
+        )
+
+    monkeypatch.setattr(github_client, "validate_app", fake_validate)
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    client = await _client()
+    await client.post(
+        "/api/github/validate-app",
+        json={
+            "app_id": 42, "private_key_b64": "cGVt",
+            "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
+        },
+        cookies={"onboarding_session": session_id},
+    )
+    assert fake.read_frame(session_id, "github_app") is None
 
 
 async def test_validate_app_all_ok_is_false_when_anything_fails(monkeypatch):
@@ -324,6 +381,7 @@ async def test_validate_app_all_ok_is_false_when_anything_fails(monkeypatch):
         json={
             "app_id": 42, "private_key_b64": "cGVt",
             "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
         },
     )
     body = resp.json()
@@ -350,6 +408,7 @@ async def test_validate_app_reports_multiple_installations(monkeypatch):
         json={
             "app_id": 42, "private_key_b64": "cGVt",
             "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
         },
     )
     body = resp.json()
@@ -368,6 +427,7 @@ async def test_validate_app_reports_credentials_failure_reason(monkeypatch):
         json={
             "app_id": 42, "private_key_b64": "cGVt",
             "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
         },
     )
     assert resp.json() == {"valid": False, "reason": "unauthorized"}
@@ -381,6 +441,7 @@ async def test_validate_app_rejects_a_non_positive_app_id():
             json={
                 "app_id": bad, "private_key_b64": "cGVt",
                 "expected_webhook_url": "https://x.example/webhook",
+                "webhook_secret": "s" * 20,
             },
         )
         assert resp.status_code == 422
@@ -390,7 +451,12 @@ async def test_validate_app_rejects_a_malformed_webhook_url():
     client = await _client()
     resp = await client.post(
         "/api/github/validate-app",
-        json={"app_id": 42, "private_key_b64": "cGVt", "expected_webhook_url": "not-a-url"},
+        json={
+            "app_id": 42,
+            "private_key_b64": "cGVt",
+            "expected_webhook_url": "not-a-url",
+            "webhook_secret": "s" * 20,
+        },
     )
     assert resp.status_code == 422
 
@@ -405,6 +471,7 @@ async def test_validate_app_validation_error_never_echoes_the_private_key():
         json={
             "app_id": 42, "private_key": SENTINEL_PRIVATE_KEY,
             "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
         },
     )
     assert resp.status_code == 422
@@ -426,6 +493,7 @@ async def test_validate_app_response_never_echoes_the_private_key(monkeypatch):
         json={
             "app_id": 42, "private_key_b64": sentinel_key_b64,
             "expected_webhook_url": "https://x.example/webhook",
+            "webhook_secret": "s" * 20,
         },
     )
     assert sentinel_key_b64 not in resp.text
@@ -1094,34 +1162,10 @@ async def test_create_service_endpoint_with_no_session_fails_closed():
     assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
-async def test_github_push_render_vars_endpoint(monkeypatch):
-    captured = {}
-
-    async def fake_push_env_vars(api_key, service_id, values):
-        captured["values"] = values
-        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
-
-    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+async def test_github_push_render_vars_endpoint_is_gone():
     client = await _client()
-    resp = await client.post(
-        "/api/github/push-render-vars",
-        json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
-            "app_id": 123,
-            "private_key_b64": "cGVt",
-            "webhook_secret": "whsec",
-            "installation_id": 456,
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json()["valid"] is True
-    assert captured["values"] == {
-        "GITHUB_APP_ID": "123",
-        "GITHUB_APP_PRIVATE_KEY": "cGVt",
-        "GITHUB_WEBHOOK_SECRET": "whsec",
-        "GITHUB_APP_INSTALLATION_ID": "456",
-    }
+    resp = await client.post("/api/github/push-render-vars", json={})
+    assert resp.status_code == 404
 
 
 async def test_supabase_push_render_var_endpoint(monkeypatch):
@@ -1283,24 +1327,10 @@ async def test_dashboard_auth_push_render_vars_endpoint_is_gone():
     assert resp.status_code == 404
 
 
-async def test_push_render_vars_partial_failure_reports_pushed_keys(monkeypatch):
-    async def fake_push_env_vars(api_key, service_id, values):
-        return render_client.RenderEnvVarsPushFailed(reason="invalid_key", pushed=["GITHUB_APP_ID"])
-
-    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
-    client = await _client()
-    resp = await client.post(
-        "/api/github/push-render-vars",
-        json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
-            "app_id": 123,
-            "private_key_b64": "cGVt",
-            "webhook_secret": "whsec",
-            "installation_id": 456,
-        },
-    )
-    assert resp.json() == {"valid": False, "reason": "invalid_key", "pushed": ["GITHUB_APP_ID"]}
+# test_push_render_vars_partial_failure_reports_pushed_keys used to exercise
+# _push_result()'s partial-failure shape via the now-removed per-frame
+# push-render-vars endpoints. Re-added against /api/render/bulk-push-env-vars
+# once that endpoint exists (Task 11) -- _push_result() itself is unchanged.
 
 
 async def test_trigger_deploy_endpoint(monkeypatch):

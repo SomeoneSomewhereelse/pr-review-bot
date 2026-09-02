@@ -73,6 +73,10 @@ class GithubValidateAppRequest(BaseModel):
     expected_webhook_url: str = Field(
         min_length=1, max_length=2048, pattern=r"^https?://[^\s\"'<>\\]+$"
     )
+    # Generated client-side (never sent to GitHub, only used later as
+    # GITHUB_WEBHOOK_SECRET), so it rides along here purely for session
+    # storage -- validate_app()'s own logic never reads it.
+    webhook_secret: str = Field(min_length=1, max_length=512)
 
 
 class SupabaseExchangeCodeRequest(BaseModel):
@@ -165,13 +169,6 @@ class RenderServiceCreateRequest(BaseModel):
 class RenderPushEnvVarsRequest(BaseModel):
     render_api_key: str = Field(max_length=512)
     render_service_id: str = Field(min_length=1, max_length=64)
-
-
-class GithubPushRenderVarsRequest(RenderPushEnvVarsRequest):
-    app_id: int = Field(gt=0)
-    private_key_b64: str = Field(max_length=16384)
-    webhook_secret: str = Field(max_length=512)
-    installation_id: int = Field(gt=0)
 
 
 class SupabasePushRenderVarRequest(RenderPushEnvVarsRequest):
@@ -292,7 +289,7 @@ async def validate_render_key(
 
 
 @router.post("/api/github/validate-app")
-async def validate_github_app(payload: GithubValidateAppRequest) -> dict:
+async def validate_github_app(payload: GithubValidateAppRequest, request: Request) -> dict:
     result = await github_client.validate_app(
         payload.app_id, payload.private_key_b64, payload.expected_webhook_url
     )
@@ -307,12 +304,15 @@ async def validate_github_app(payload: GithubValidateAppRequest) -> dict:
             "repo_scope": result.installation.repo_scope,
         }
         installation_ok = True
+        installation_id = result.installation.installation_id
     elif isinstance(result.installation, github_client.MultipleInstallationsFound):
         installation = {"status": "multiple", "account_logins": result.installation.account_logins}
         installation_ok = False
+        installation_id = None
     else:
         installation = {"status": "none"}
         installation_ok = False
+        installation_id = None
 
     all_ok = (
         all(p.ok for p in result.permissions)
@@ -320,6 +320,24 @@ async def validate_github_app(payload: GithubValidateAppRequest) -> dict:
         and installation_ok
         and result.webhook.ok
     )
+    if all_ok:
+        # Best-effort: a directly-called endpoint with no session yet (e.g.
+        # a visitor re-validating before frame 1 is done) still gets a live
+        # checklist result -- the frontend's own frame-lock sequencing is
+        # what normally prevents reaching this frame without an earlier
+        # session existing.
+        session_id = _get_session_id(request)
+        if session_id is not None and session_store.get_session(session_id) is not None:
+            session_store.update_frame(
+                session_id,
+                "github_app",
+                {
+                    "app_id": payload.app_id,
+                    "private_key_b64": payload.private_key_b64,
+                    "webhook_secret": payload.webhook_secret,
+                    "installation_id": installation_id,
+                },
+            )
     return {
         "valid": True,
         "all_ok": all_ok,
@@ -474,21 +492,6 @@ def _push_result(result) -> dict:
     if isinstance(result, render_client.RenderEnvVarsPushed):
         return {"valid": True, "pushed": result.pushed}
     return {"valid": False, "reason": result.reason, "pushed": result.pushed}
-
-
-@router.post("/api/github/push-render-vars")
-async def push_github_render_vars(payload: GithubPushRenderVarsRequest) -> dict:
-    result = await render_client.push_env_vars(
-        payload.render_api_key,
-        payload.render_service_id,
-        {
-            "GITHUB_APP_ID": str(payload.app_id),
-            "GITHUB_APP_PRIVATE_KEY": payload.private_key_b64,
-            "GITHUB_WEBHOOK_SECRET": payload.webhook_secret,
-            "GITHUB_APP_INSTALLATION_ID": str(payload.installation_id),
-        },
-    )
-    return _push_result(result)
 
 
 @router.post("/api/supabase/push-render-var")
