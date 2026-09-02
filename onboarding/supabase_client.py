@@ -269,6 +269,15 @@ async def get_connection_info(
     router, which already holds db_pass server-side) assembles the final
     connection string itself from this non-secret shape.
 
+    Root-caused 2026-09-02 (was a standing TEMPORARY diagnostic before
+    this): for projects created after Supabase's pooler-config API change,
+    this endpoint lists only a "transaction" PRIMARY entry, no "session"
+    one. Session and transaction mode share the same pooler host/user —
+    Supavisor selects between them purely by port (5432 vs 6543; see
+    guide/setup/hosted/05-supabase.md) — so when no session entry is
+    listed, this falls back to the transaction entry's host/user/name with
+    the port forced to 5432 to still get session-mode semantics.
+
     `session_id` is used only to tag the diagnostic prints below for log
     correlation -- never logged or sent anywhere itself. It's not a
     credential."""
@@ -297,19 +306,29 @@ async def get_connection_info(
         return SupabaseApiFailed(reason="pooler_config_unavailable")
 
     try:
-        matched = next(
-            e
-            for e in entries
-            if e.get("pool_mode") == "session" and e.get("database_type") == "PRIMARY"
+        session_entry = next(
+            (
+                e
+                for e in entries
+                if e.get("pool_mode") == "session" and e.get("database_type") == "PRIMARY"
+            ),
+            None,
         )
+        matched = session_entry
+        if matched is None:
+            matched = next(
+                e
+                for e in entries
+                if e.get("pool_mode") == "transaction" and e.get("database_type") == "PRIMARY"
+            )
         db_user = str(matched["db_user"])
         db_host = str(matched["db_host"])
-        db_port = int(matched["db_port"])
         db_name = str(matched["db_name"])
+        db_port = int(matched["db_port"]) if session_entry is not None else 5432
     except (ValueError, KeyError, TypeError, StopIteration, AttributeError):
-        # TEMPORARY diagnostic (remove once the pool_mode/database_type
-        # mismatch this is chasing is found) — logs only the two label
-        # fields being matched on, never db_user/db_host/connection_string.
+        # Diagnostic for the case neither a session nor a transaction
+        # PRIMARY entry is present at all — logs only the two label fields
+        # being matched on, never db_user/db_host/connection_string.
         try:
             shapes = [(e.get("pool_mode"), e.get("database_type")) for e in entries]
         except (TypeError, AttributeError):

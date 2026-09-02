@@ -460,9 +460,32 @@ async def test_get_connection_info_never_returns_supabases_own_connection_string
     assert not hasattr(result, "connectionString")
 
 
-async def test_get_connection_info_no_session_mode_entry_is_pooler_config_unavailable():
+async def test_get_connection_info_falls_back_to_transaction_entry_with_port_forced_to_5432():
+    """As of 2026-09-02, Supabase's pooler-config API stopped listing a
+    distinct session-mode entry for newer projects -- only "transaction".
+    Session and transaction mode share the same pooler host/user, so the
+    fallback must reuse the transaction entry's host/user/name but force
+    port 5432 rather than trusting its (transaction-mode) port."""
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[_POOLER_ENTRIES[0]]))
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
+    assert result == supabase_client.SupabaseConnectionInfo(
+        db_user="postgres.abcdefghijklmnopqrst",
+        db_host="aws-0-us-east-1.pooler.supabase.com",
+        db_port=5432,
+        db_name="postgres",
+    )
+
+
+async def test_get_connection_info_no_primary_entry_at_all_is_pooler_config_unavailable():
+    with respx.mock:
+        respx.get(POOLER_URL).mock(
+            return_value=httpx.Response(
+                200, json=[{**_POOLER_ENTRIES[0], "database_type": "READ_REPLICA"}]
+            )
+        )
         result = await supabase_client.get_connection_info(
             "a", "abcdefghijklmnopqrst", session_id="s1"
         )

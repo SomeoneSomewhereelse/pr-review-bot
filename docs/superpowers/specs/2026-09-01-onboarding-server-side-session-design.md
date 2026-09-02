@@ -258,6 +258,7 @@ out of scope for this design (see section 6).
 Two new operator secrets, documented in `onboarding/.env.example`
 (already added):
 - `DATABASE_URL` — the new dedicated Postgres project's connection string.
+  **Must be the Session-mode pooler string** (`postgres.<ref>@aws-0-<region>.pooler.supabase.com:5432`), not the direct `db.<ref>.supabase.co:5432` host — Supabase's direct host is IPv6-only and Render's outbound networking is IPv4-only, so a direct-host `DATABASE_URL` fails startup with a `psycopg_pool` timeout. Same requirement `guide/setup/hosted/05-supabase.md` already documents for `bot`'s own `DATABASE_URL`; see `ISSUES.md`'s 2026-09-02 "Two real deploy blockers" entry for how this was found.
 - `ONBOARDING_SESSION_ENCRYPTION_KEY` — a Fernet key used to encrypt every
   credential value before it's written, and decrypt it in-process when
   needed. Root `CLAUDE.md`'s secret-handling rules apply to both exactly as
