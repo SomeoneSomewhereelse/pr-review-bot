@@ -62,12 +62,14 @@ import argparse
 import re
 import sys
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from bot import render_client as _render
 from bot.config import settings
 from bot.providers import active_model, pricing, registry
 from bot.queue import store
 from bot.scripts import _override
+from bot.scripts._prereqs import _looks_like_local_test_db
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,6 +127,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="show each provider's slots, active index, and active model (must be used alone)",
     )
     return parser
+
+
+def _refuse_local_test_db() -> bool:
+    """True (having already printed a refusal) if DATABASE_URL points at a
+    local/test Postgres. Same risk deploy.py's --sync-config-db guards
+    against (ISSUES.md Parked Issues): a shell that ran
+    `eval "$(uv run python -m bot.scripts.test_db)"` earlier has a throwaway
+    localhost:5433 URL sitting in os.environ, which Settings reads ahead of
+    any .env file -- this would silently write the override into that local
+    container while an operator believes production was updated."""
+    if not settings.database_url or not _looks_like_local_test_db(settings.database_url):
+        return False
+    host = urlsplit(settings.database_url).hostname or "?"
+    print(
+        f"refusing to write: DATABASE_URL points at {host}, a local/test Postgres -- "
+        "this would write the override into a database on this machine, not production. "
+        "This is almost certainly a shell where "
+        '`eval "$(uv run python -m bot.scripts.test_db)"` was run; `unset DATABASE_URL` '
+        "(or use a fresh shell) and re-run.",
+        file=sys.stderr,
+    )
+    return True
 
 
 def _print_inventory() -> int:
@@ -244,6 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         ):
             print("--clear must be used alone", file=sys.stderr)
             return 2
+        if _refuse_local_test_db():
+            return 2
         store.init_pool()
         store.set_provider_override(None, datetime.now(timezone.utc).isoformat())
         print("provider override cleared; falling back to LLM_PROVIDER")
@@ -302,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"index must be >= 0, got {args.index}", file=sys.stderr)
         return 2
 
+    if _refuse_local_test_db():
+        return 2
     store.init_pool()
 
     # A pure "clear the key-index override, leave the active provider

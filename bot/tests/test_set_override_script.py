@@ -22,7 +22,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @pytest.fixture(autouse=True)
-def _temp_db(db):
+def _temp_db(db, monkeypatch):
+    """The `db` fixture's URL is local-shaped by construction (a real
+    Postgres for tests to verify actual SQL against) -- exactly what
+    set_override.py's own local-DB guard exists to refuse. Bypass it here for
+    every ordinary test, without weakening the guard itself for the
+    operator-mistake scenario it protects against in production; the guard's
+    own refusal behavior is exercised directly below, without this fixture."""
+    monkeypatch.setattr(set_override, "_looks_like_local_test_db", lambda url: False)
     yield
 
 
@@ -403,3 +410,37 @@ def test_list_never_prints_a_credential_value(capsys, monkeypatch):
 def test_list_must_be_used_alone(capsys):
     assert set_override.main(["--list", "groq"]) == 2
     assert "--list must be used alone" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "local_url",
+    [
+        "postgresql://postgres:x@localhost:5433/postgres",
+        "postgresql://postgres:x@127.0.0.1:5432/postgres",
+        "postgresql://u:p@db.internal:5432/postgres",
+    ],
+)
+def test_refuses_a_local_test_database_url(monkeypatch, capsys, local_url):
+    """Same shape as deploy.py's --sync-config-db guard (ISSUES.md Parked
+    Issues) -- run from a shell where
+    `eval "$(uv run python -m bot.scripts.test_db)"` is still exported, this
+    would otherwise silently write the override into the throwaway local
+    container while an operator believes it reached production. This test
+    does NOT use the `_temp_db` autouse fixture's bypass or a real pool --
+    it asserts the guard fires before any DB access is even attempted."""
+    monkeypatch.undo()  # drop the module-scoped autouse patch for this test only
+    monkeypatch.setattr(settings, "database_url", local_url)
+
+    def _boom():
+        raise AssertionError("must not touch the database when refusing")
+
+    monkeypatch.setattr(store, "init_pool", _boom)
+    assert set_override.main(["groq"]) == 2
+    err = capsys.readouterr().err
+    assert "refusing to write" in err
+
+
+def test_still_accepts_a_real_remote_database_url(monkeypatch, capsys):
+    """The guard must not fire on a normal hosted DATABASE_URL."""
+    assert set_override.main(["groq"]) == 0
+    assert "refusing to write" not in capsys.readouterr().err
