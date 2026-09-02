@@ -7,17 +7,53 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 
-from onboarding import github_client, llm_client, render_client, supabase_client, uptimerobot_client
+from onboarding import (
+    github_client,
+    llm_client,
+    render_client,
+    session_store,
+    supabase_client,
+    uptimerobot_client,
+)
 from onboarding.config import settings
 
 router = APIRouter()
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+SESSION_COOKIE_NAME = "onboarding_session"
+
+# frame -> which of that frame's stored keys are safe to echo back to the
+# browser for restore-on-load badges. Never a credential value -- see root
+# CLAUDE.md's secret-handling section and this file's own module docstring.
+_DISPLAY_FIELDS = {
+    "render": ("owner_name", "service_url"),
+    "github_app": (),
+    "supabase": ("name",),
+    "llm_provider": ("provider", "model"),
+    "dashboard_auth": (),
+    "uptime_pinger": ("monitor_id",),
+}
+
+
+def _get_session_id(request: Request) -> str | None:
+    return request.cookies.get(SESSION_COOKIE_NAME)
+
+
+def _set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_id,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=int(session_store.SESSION_TTL.total_seconds()),
+    )
 
 
 class RenderKeyRequest(BaseModel):
@@ -208,6 +244,31 @@ async def index() -> HTMLResponse:
 @router.get(SUPABASE_OAUTH_CALLBACK_PATH, response_class=HTMLResponse)
 async def supabase_oauth_callback() -> HTMLResponse:
     return _render_index()
+
+
+@router.get("/api/session")
+async def get_session_state(request: Request) -> dict:
+    session_id = _get_session_id(request)
+    if session_id is None:
+        return {"frames": {}}
+    session = session_store.get_session(session_id)
+    if session is None:
+        return {"frames": {}}
+    frames = {}
+    for frame, data in session.frames.items():
+        display = {k: data[k] for k in _DISPLAY_FIELDS.get(frame, ()) if k in data}
+        frames[frame] = {"complete": True, "display": display}
+    return {"frames": frames}
+
+
+@router.post("/api/session/reset")
+async def reset_session(request: Request, response: Response) -> Response:
+    session_id = _get_session_id(request)
+    if session_id is not None:
+        session_store.delete_session(session_id)
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.status_code = 204
+    return response
 
 
 @router.post("/api/render/validate-key")

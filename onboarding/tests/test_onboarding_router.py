@@ -6,7 +6,14 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from onboarding import github_client, llm_client, render_client, supabase_client, uptimerobot_client
+from onboarding import (
+    github_client,
+    llm_client,
+    render_client,
+    session_store,
+    supabase_client,
+    uptimerobot_client,
+)
 from onboarding.config import settings
 from onboarding.main import app
 
@@ -19,6 +26,58 @@ SENTINEL_PRIVATE_KEY = (
 
 async def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+class _FakeSessionStore:
+    """An in-memory stand-in for session_store.py's public functions, used
+    via `_use_fake_session_store(monkeypatch)` below. Mirrors the real
+    module's contract (update_frame merges and fails closed against a
+    missing session id; create_session is the only way to mint one) without
+    touching Postgres -- session_store.py's own tests (against a real test
+    Postgres) are what verify the real implementation actually behaves this
+    way."""
+
+    def __init__(self):
+        self._sessions: dict[str, dict[str, dict]] = {}
+        self._next_id = 0
+
+    def create_session(self) -> str:
+        self._next_id += 1
+        session_id = f"fake-session-{self._next_id}"
+        self._sessions[session_id] = {}
+        return session_id
+
+    def get_session(self, session_id: str):
+        frames = self._sessions.get(session_id)
+        if frames is None:
+            return None
+        return session_store.SessionData(frames={k: dict(v) for k, v in frames.items()})
+
+    def update_frame(self, session_id: str, frame: str, data: dict):
+        if session_id not in self._sessions:
+            return session_store.SessionNotFound()
+        existing = self._sessions[session_id].get(frame, {})
+        self._sessions[session_id][frame] = {**existing, **data}
+        return None
+
+    def read_frame(self, session_id: str, frame: str):
+        frames = self._sessions.get(session_id)
+        if frames is None:
+            return None
+        return frames.get(frame)
+
+    def delete_session(self, session_id: str) -> None:
+        self._sessions.pop(session_id, None)
+
+
+def _use_fake_session_store(monkeypatch) -> _FakeSessionStore:
+    fake = _FakeSessionStore()
+    monkeypatch.setattr(session_store, "create_session", fake.create_session)
+    monkeypatch.setattr(session_store, "get_session", fake.get_session)
+    monkeypatch.setattr(session_store, "update_frame", fake.update_frame)
+    monkeypatch.setattr(session_store, "read_frame", fake.read_frame)
+    monkeypatch.setattr(session_store, "delete_session", fake.delete_session)
+    return fake
 
 
 async def test_index_serves_html():
@@ -117,6 +176,49 @@ async def test_supabase_oauth_callback_path_serves_the_same_page():
     assert resp.status_code == 200
     assert "window.ONBOARDING_BASE_URL = location.origin;" in resp.text
     assert resp.text == (await client.get("/")).text
+
+
+async def test_get_session_with_no_cookie_returns_empty_frames():
+    client = await _client()
+    resp = await client.get("/api/session")
+    assert resp.status_code == 200
+    assert resp.json() == {"frames": {}}
+
+
+async def test_get_session_with_unknown_cookie_returns_empty_frames(monkeypatch):
+    _use_fake_session_store(monkeypatch)
+    client = await _client()
+    resp = await client.get("/api/session", cookies={"onboarding_session": "bogus"})
+    assert resp.json() == {"frames": {}}
+
+
+async def test_get_session_reflects_display_fields_but_never_the_credential(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": SENTINEL_KEY, "owner_name": "alice"})
+    client = await _client()
+    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
+    body = resp.json()
+    assert body == {"frames": {"render": {"complete": True, "display": {"owner_name": "alice"}}}}
+    assert SENTINEL_KEY not in resp.text
+
+
+async def test_reset_session_deletes_the_row_and_clears_the_cookie(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    client = await _client()
+    resp = await client.post("/api/session/reset", cookies={"onboarding_session": session_id})
+    assert resp.status_code == 204
+    assert fake.get_session(session_id) is None
+    set_cookie = resp.headers.get("set-cookie", "")
+    assert "onboarding_session=" in set_cookie
+    assert 'Max-Age=0' in set_cookie or set_cookie.endswith('onboarding_session=""; Path=/')
+
+
+async def test_reset_session_with_no_cookie_is_a_noop_204():
+    client = await _client()
+    resp = await client.post("/api/session/reset")
+    assert resp.status_code == 204
 
 
 async def test_index_csp_no_longer_needs_a_github_form_action():
