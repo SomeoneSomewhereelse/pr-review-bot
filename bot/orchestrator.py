@@ -135,6 +135,18 @@ async def attempt_review(
         for name, outcome in zip(_SPECIALIST_NAMES, raw_results)
     ]
 
+    if all(r.status == "failed" for r in results):
+        # Every specialist failed (e.g. a misconfigured key-index override,
+        # or the provider itself is down) -- posting this as a "completed"
+        # review would finalize the ticket as done and bypass the
+        # retry/backoff/terminal-failure-notice machinery entirely, leaving
+        # a PR with a comment full of false "completed normally" rows and no
+        # further retry until the next push. Raising here routes this
+        # through the dispatcher's existing hard-failure handling instead,
+        # exactly like any other exception from this function.
+        errors = "; ".join(f"{r.name}: {r.error}" for r in results)
+        raise RuntimeError(f"all specialists failed: {errors}")
+
     total_tokens_in = sum(r.tokens_in for r in results)
     total_tokens_out = sum(r.tokens_out for r in results)
     total_elapsed_ms = int((time.monotonic() - started) * 1000)

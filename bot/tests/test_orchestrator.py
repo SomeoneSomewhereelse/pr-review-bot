@@ -119,6 +119,51 @@ async def test_run_review_survives_one_specialist_raising(monkeypatch):
     assert posted["comment_id_in"] is None   # run_review never threads a comment_id
 
 
+async def test_attempt_review_raises_when_every_specialist_fails(monkeypatch):
+    """If all three specialists fail (e.g. a misconfigured key-index override
+    makes factory._build raise for every one), the review must NOT be posted
+    as a successful comment or finalized as done -- it must propagate so the
+    dispatcher's existing retry/backoff/terminal-failure-notice machinery
+    handles it exactly like any other hard failure."""
+    import bot.orchestrator as orchestrator
+
+    monkeypatch.setattr(
+        orchestrator.github_app, "fetch_pr_diff",
+        lambda repo, pr: SimpleNamespace(text="raw diff text", repo_full_name=repo, draft=False),
+    )
+
+    posted = {}
+
+    def fake_upsert(repo, pr, body, comment_id=None):
+        posted["called"] = True
+        return SimpleNamespace(id=333)
+
+    monkeypatch.setattr(orchestrator.github_app, "upsert_comment", fake_upsert)
+
+    async def fake_security(annotated_diff):
+        raise ValueError("no credential configured for provider=groq index=0")
+
+    async def fake_performance(annotated_diff):
+        raise ValueError("no credential configured for provider=groq index=0")
+
+    async def fake_quality(annotated_diff):
+        raise ValueError("no credential configured for provider=groq index=0")
+
+    monkeypatch.setattr(orchestrator, "run_security_specialist", fake_security)
+    monkeypatch.setattr(orchestrator, "run_performance_specialist", fake_performance)
+    monkeypatch.setattr(orchestrator, "run_quality_specialist", fake_quality)
+    monkeypatch.setattr(settings, "llm_provider", "groq")
+
+    try:
+        await orchestrator.attempt_review("owner/repo", 1)
+        raised = False
+    except Exception:  # noqa: BLE001
+        raised = True
+
+    assert raised, "attempt_review must raise when every specialist failed"
+    assert "called" not in posted, "no comment must be posted for a total failure"
+
+
 async def test_run_review_reflects_active_model_per_provider(monkeypatch):
     import bot.orchestrator as orchestrator
 
