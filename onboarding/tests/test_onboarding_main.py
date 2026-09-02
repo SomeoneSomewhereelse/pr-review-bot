@@ -3,8 +3,10 @@ onboarding service (a separate FastAPI app from app/main.py)."""
 from __future__ import annotations
 
 import pytest
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 
+from onboarding import session_store
 from onboarding.config import settings
 from onboarding.main import app, lifespan
 
@@ -26,24 +28,75 @@ async def test_healthz_head_returns_ok():
     assert resp.status_code == 200
 
 
-async def test_lifespan_starts_with_everything_set(monkeypatch):
+@pytest.fixture(autouse=True)
+def _configure_everything_set(monkeypatch):
+    """Every lifespan test below starts from a fully-configured baseline and
+    monkeypatches away exactly the one thing it wants unset/malformed --
+    keeps each test focused on the one check it's exercising."""
     monkeypatch.setattr(settings, "supabase_oauth_client_id", "sentinel-client-id")
     monkeypatch.setattr(settings, "supabase_oauth_client_secret", "sentinel-client-secret")
+    monkeypatch.setattr(settings, "database_url", "postgresql://sentinel")
+    monkeypatch.setattr(
+        settings, "onboarding_session_encryption_key", Fernet.generate_key().decode()
+    )
+    monkeypatch.setattr(session_store, "init_pool", lambda: None)
+    monkeypatch.setattr(session_store, "close_pool", lambda: None)
+
+
+async def test_lifespan_starts_with_everything_set():
     async with lifespan(app):
         pass
 
 
 async def test_lifespan_refuses_to_start_without_supabase_client_id(monkeypatch):
     monkeypatch.setattr(settings, "supabase_oauth_client_id", "")
-    monkeypatch.setattr(settings, "supabase_oauth_client_secret", "sentinel-client-secret")
     with pytest.raises(RuntimeError, match="SUPABASE_OAUTH_CLIENT_ID"):
         async with lifespan(app):
             pass
 
 
 async def test_lifespan_refuses_to_start_without_supabase_client_secret(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_oauth_client_id", "sentinel-client-id")
     monkeypatch.setattr(settings, "supabase_oauth_client_secret", "")
     with pytest.raises(RuntimeError, match="SUPABASE_OAUTH_CLIENT_SECRET"):
         async with lifespan(app):
             pass
+
+
+async def test_lifespan_refuses_to_start_without_database_url(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "")
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        async with lifespan(app):
+            pass
+
+
+async def test_lifespan_refuses_to_start_without_session_encryption_key(monkeypatch):
+    monkeypatch.setattr(settings, "onboarding_session_encryption_key", "")
+    with pytest.raises(RuntimeError, match="ONBOARDING_SESSION_ENCRYPTION_KEY"):
+        async with lifespan(app):
+            pass
+
+
+async def test_lifespan_refuses_to_start_with_a_malformed_session_encryption_key(monkeypatch):
+    monkeypatch.setattr(settings, "onboarding_session_encryption_key", "not-a-fernet-key")
+    with pytest.raises(RuntimeError, match="not a valid Fernet key"):
+        async with lifespan(app):
+            pass
+
+
+async def test_lifespan_malformed_key_error_never_echoes_the_value(monkeypatch):
+    monkeypatch.setattr(
+        settings, "onboarding_session_encryption_key", "not-a-fernet-key-xyz-sentinel"
+    )
+    with pytest.raises(RuntimeError) as exc_info:
+        async with lifespan(app):
+            pass
+    assert "not-a-fernet-key-xyz-sentinel" not in str(exc_info.value)
+
+
+async def test_lifespan_calls_init_pool_and_close_pool(monkeypatch):
+    calls = []
+    monkeypatch.setattr(session_store, "init_pool", lambda: calls.append("init"))
+    monkeypatch.setattr(session_store, "close_pool", lambda: calls.append("close"))
+    async with lifespan(app):
+        assert calls == ["init"]
+    assert calls == ["init", "close"]
