@@ -612,6 +612,36 @@ def test_effective_cooldown_uses_a_configured_factor(monkeypatch):
     assert store.effective_cooldown(3) == 300.0  # 810 -> capped
 
 
+def test_init_pool_seeds_runtime_config_defaults_on_a_fresh_table(db_query):
+    """The `db` fixture already truncated runtime_config after its own
+    init_pool() call -- re-calling it here simulates a genuinely fresh
+    database (a first boot against a brand-new project), which is the case
+    this seeding exists for."""
+    store.init_pool()
+    row = db_query(
+        "SELECT cooldown_base_seconds, cooldown_max_seconds, cooldown_factor, "
+        "key_usage_token_cap, key_usage_reset_time_utc, review_draft_prs "
+        "FROM runtime_config WHERE id = 1"
+    )
+    assert row == [
+        (
+            settings.dispatcher_rereview_cooldown_seconds,
+            settings.dispatcher_rereview_cooldown_max_seconds,
+            settings.dispatcher_rereview_cooldown_factor,
+            settings.key_usage_token_cap,
+            settings.key_usage_reset_time_utc.isoformat(),
+            settings.review_draft_prs,
+        )
+    ]
+
+
+def test_init_pool_does_not_overwrite_an_existing_runtime_config_row(db_query):
+    store.set_cooldown_override(base=30.0, cap=600.0, factor=1.5, now=T0)
+    store.init_pool()
+    assert store.get_cooldown_overrides() == (30.0, 600.0, 1.5)
+    assert db_query("SELECT count(*) FROM runtime_config")[0][0] == 1
+
+
 def test_cooldown_overrides_default_to_none():
     assert store.get_cooldown_overrides() == (None, None, None)
 

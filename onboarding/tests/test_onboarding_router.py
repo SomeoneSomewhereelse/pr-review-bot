@@ -10,6 +10,7 @@ from onboarding import (
     github_client,
     llm_client,
     render_client,
+    router,
     session_store,
     supabase_client,
     uptimerobot_client,
@@ -1572,6 +1573,7 @@ async def test_bulk_push_assembles_every_frame_into_one_push_call(monkeypatch):
         "DASHBOARD_USERNAME": "admin",
         "DASHBOARD_PASSWORD": "pw123456",
         "DASHBOARD_SESSION_SECRET": "s" * 32,
+        **router._GENERIC_OPERATIONAL_ENV_DEFAULTS,
     }
 
 
@@ -1588,7 +1590,9 @@ async def test_bulk_push_omits_a_frame_that_was_never_completed(monkeypatch):
     monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
     client = await _client()
     await client.post("/api/render/bulk-push-env-vars", cookies={"onboarding_session": session_id})
-    assert captured["values"] == {}
+    # The generic operational-tuning defaults are always included, unlike
+    # every other key (which is gated on its frame being complete).
+    assert captured["values"] == router._GENERIC_OPERATIONAL_ENV_DEFAULTS
 
 
 async def test_bulk_push_with_no_session_fails_closed():

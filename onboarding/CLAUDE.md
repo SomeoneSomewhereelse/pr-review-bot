@@ -509,6 +509,31 @@ optional:**
   `render_client.push_env_vars`'s push-failure-handling behavior
   (partial-failure reporting via `_push_result`) is unchanged — only
   *when* it's called moved from per-frame to this one call site.
+- **The bulk push also always includes `_GENERIC_OPERATIONAL_ENV_DEFAULTS`**
+  (2026-09-02) — `bot/config.py`'s tuning-knob `OPERATIONAL_KEYS` that
+  `scripts/deploy.py --sync-env` pushes but no wizard frame has a field for
+  (dispatcher backoff/retry/sweep settings, `GCP_LOCATION`,
+  `LLM_REQUEST_TIMEOUT_SECONDS`). Unconditional, not gated on any frame:
+  these are hardcoded copies of `bot/config.py`'s own field defaults, not
+  visitor-submitted data. `GITHUB_TARGET_REPO` and `GCP_PROJECT` are
+  deliberately excluded rather than pushed as `""` — Render's API rejects an
+  empty env-var value outright, and both default genuinely blank — same
+  reasoning `scripts/deploy.py`'s `_OPTIONAL_EMPTY_ENV_KEYS` already
+  encodes. Keep this dict in sync with `bot/config.py` by hand; nothing
+  automated ties the two together (onboarding/ never imports bot/).
+- **The DB-synced operational keys (cooldown/usage-cap/`REVIEW_DRAFT_PRS`)
+  need no wizard-side push at all** (2026-09-02) — unlike the Render-env-var
+  knobs above, `bot/queue/store.py::init_pool()` now seeds the
+  `runtime_config` singleton row with `bot/config.py`'s own defaults itself,
+  the first time it runs against a table with no row yet (`ON CONFLICT (id)
+  DO NOTHING`, so it never overwrites an operator's own value). This is what
+  a freshly wizard-provisioned Supabase project gets on the bot's first
+  boot — no second service needs to open a connection to write into that
+  database's schema from the outside. See `ISSUES.md`'s 2026-09-02 "push
+  all optional env vars" entry for the reasoning and the ordering
+  constraint that ruled out doing this from the wizard directly (the table
+  doesn't exist until the bot's own first boot, which is after the wizard's
+  bulk push already ran).
 - **The created service's public URL is always derived from Render's
   returned `service.slug`, never the submitted `name`.** Render may
   normalize the name server-side; a create-service response was verified

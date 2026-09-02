@@ -175,6 +175,32 @@ _LLM_ENV_VAR_NAMES = {
     "vertex": ("GCP_SERVICE_ACCOUNT_KEY", "VERTEX_MODEL"),
 }
 
+# bot/config.py's OPERATIONAL_KEYS tuning knobs that scripts/deploy.py's
+# --sync-env pushes as Render env vars (its _GENERIC_OPERATIONAL_ENV_ATTRS),
+# with their bot/config.py Settings field defaults hardcoded here -- same
+# duplication-not-import pattern as _LLM_ENV_VAR_NAMES above (onboarding/
+# never imports bot/, per onboarding/CLAUDE.md). Render's API rejects an
+# empty env-var value outright (ISSUES.md 2026-08-17), so GCP_PROJECT and
+# GITHUB_TARGET_REPO -- the two of these twelve keys whose Settings default
+# is genuinely blank -- are deliberately excluded rather than pushed as "":
+# an operator who wants either set can still do so after the fact (Render
+# dashboard, or scripts/deploy.py --sync-env once .env.config names a repo).
+# Keep these in sync with bot/config.py's actual field defaults by hand --
+# there is no automated check tying the two together.
+_GENERIC_OPERATIONAL_ENV_DEFAULTS = {
+    "GCP_LOCATION": "us-central1",
+    "LLM_REQUEST_TIMEOUT_SECONDS": "45.0",
+    "DISPATCHER_IDLE_SLEEP_SECONDS": "1.0",
+    "DEFAULT_RETRY_AFTER_SECONDS": "60.0",
+    "DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS": "2.0",
+    "DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS": "300.0",
+    "DISPATCHER_MAX_FAILURE_ATTEMPTS": "5",
+    "DISPATCHER_MAX_NOTICE_POST_ATTEMPTS": "3",
+    "DISPATCHER_MIN_RETRY_AFTER_SECONDS": "1.0",
+    "DISPATCHER_BACKOFF_JITTER_SECONDS": "0.0",
+    "DISPATCHER_NOTICE_SWEEP_BATCH_SIZE": "20",
+}
+
 
 # Supabase's OAuth app registration matches redirect URIs exactly, so the
 # callback is a bare path: no query string to be normalised or dropped, and
@@ -733,6 +759,10 @@ async def bulk_push_render_env_vars(request: Request) -> dict:
         env_vars["DASHBOARD_USERNAME"] = dashboard_auth["username"]
         env_vars["DASHBOARD_PASSWORD"] = dashboard_auth["password"]
         env_vars["DASHBOARD_SESSION_SECRET"] = dashboard_auth["session_secret"]
+
+    # Always included, not gated on any frame: these are tuning defaults,
+    # not visitor-submitted credentials -- see _GENERIC_OPERATIONAL_ENV_DEFAULTS.
+    env_vars.update(_GENERIC_OPERATIONAL_ENV_DEFAULTS)
 
     result = await render_client.push_env_vars(
         render_frame["api_key"], render_frame["service_id"], env_vars

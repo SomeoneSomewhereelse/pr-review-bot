@@ -178,10 +178,56 @@ def init_pool() -> None:
     try:
         with _pool.connection() as conn:
             conn.execute(_SCHEMA)
+            _seed_runtime_config_defaults(conn)
     except PoolTimeout as exc:
         raise RuntimeError(
             _FIRST_CONNECT_HELP.format(timeout=_POOL_TIMEOUT_SECONDS)
         ) from exc
+
+
+def _seed_runtime_config_defaults(conn) -> None:
+    """Give the runtime_config singleton row (id=1) explicit default values on
+    first boot, so the row exists and reads back the same values effective_
+    config()/get_cooldown_overrides() etc. already fall back to when it's
+    missing -- this changes visibility (e.g. a future dashboard config view),
+    not runtime behavior, since every DB-synced getter already treats a
+    missing row identically to an all-NULL one.
+
+    ON CONFLICT (id) DO NOTHING, not a SELECT-then-INSERT: atomic (no race
+    with a concurrent seed) and, more importantly, never overwrites a row an
+    operator or scripts/deploy.py --sync-config-db already populated --
+    seeding only ever fills a genuinely empty table.
+
+    This is what lets the onboarding wizard's last frame skip a separate
+    config-sync step entirely (see docs/superpowers/specs/2026-09-01-
+    onboarding-server-side-session-design.md's bulk-push discussion) --
+    the bot now populates its own defaults the moment it first boots against
+    a fresh database, rather than requiring a second service to write into
+    this database's schema from the outside.
+
+    provider/*_key_index/*_model are deliberately left out (and therefore
+    NULL): those are live operator overrides (dashboard "switch active
+    provider/key/model without a redeploy"), not env-mirrored config with a
+    meaningful default to seed -- NULL is their correct steady state, not a
+    placeholder for one.
+    """
+    conn.execute(
+        "INSERT INTO runtime_config ("
+        "    id, updated_at, cooldown_base_seconds, cooldown_max_seconds,"
+        "    cooldown_factor, key_usage_token_cap, key_usage_reset_time_utc,"
+        "    review_draft_prs"
+        ") VALUES (1, %s, %s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (id) DO NOTHING",
+        (
+            datetime.now(timezone.utc).isoformat(),
+            settings.dispatcher_rereview_cooldown_seconds,
+            settings.dispatcher_rereview_cooldown_max_seconds,
+            settings.dispatcher_rereview_cooldown_factor,
+            settings.key_usage_token_cap,
+            settings.key_usage_reset_time_utc.isoformat(),
+            settings.review_draft_prs,
+        ),
+    )
 
 
 def close_pool() -> None:
