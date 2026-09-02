@@ -1082,6 +1082,30 @@ async def test_lock_frame_resets_render_deploy_section():
     assert 'if (id === "render-deploy") resetRenderDeploySection();' in body
 
 
+async def test_render_deploy_frame_stays_open_when_done():
+    """Unlike every other frame, render-deploy (the last one) must not
+    collapse on completion -- it's the only place the dashboard link lives,
+    and there's no next frame for the collapse to draw attention to."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert 'completeFrame("render-deploy", null, null, "deploy_done", true)' in body
+    # completeFrame's default (every other frame) must remain collapse-on-complete.
+    assert "function completeFrame(id, detailKey, detailValue, status, keepOpen)" in body
+    assert "if (!keepOpen) el.open = false;" in body
+
+
+async def test_restoring_a_completed_deploy_shows_the_dashboard_link():
+    """A reload after a completed deploy must re-show the done-section link,
+    not just mark the frame done with no visible way back to the dashboard."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("renderServiceState && renderServiceState.deployed")
+    fn_snippet = body[fn_start:fn_start + 500]
+    assert 'getElementById("render-deploy-done-section").style.display = "block"' in fn_snippet
+    assert 'getElementById("render-deploy-service-link")' in fn_snippet
+    assert "renderServiceState.service_url" in fn_snippet
+
+
 async def test_github_confirm_fetch_leaves_the_page_exactly_once():
     """github-app no longer pushes to Render incrementally -- validate-app
     persists server-side on success, and the final render-deploy frame's

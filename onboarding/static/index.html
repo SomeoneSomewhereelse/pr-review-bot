@@ -1013,10 +1013,10 @@
     FRAME_ORDER.slice(FRAME_ORDER.indexOf(id) + 1).forEach(lockFrame);
   }
 
-  function completeFrame(id, detailKey, detailValue, status) {
+  function completeFrame(id, detailKey, detailValue, status, keepOpen) {
     const el = frameEl(id);
     el.dataset.locked = "true";
-    el.open = false;
+    if (!keepOpen) el.open = false;
     setFrameStatus(id, status || "done", detailKey, detailValue);
     const next = nextFrame(id);
     if (next) unlockFrame(next);
@@ -2172,7 +2172,11 @@
       stored.deployed = true;
       sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(stored));
     }
-    completeFrame("render-deploy", null, null, "deploy_done");
+    // Unlike every other frame, this one stays open after completion: it's
+    // the last frame, so there's no next step to draw attention to, and the
+    // dashboard link just written above is the actual payoff -- collapsing
+    // it here would hide the one thing worth seeing at the end of the wizard.
+    completeFrame("render-deploy", null, null, "deploy_done", true);
   }
 
   function showRenderDeployTriggerAgain() {
@@ -2415,7 +2419,12 @@
     // mirror written just above already carries what it needs.
     const renderServiceState = readStoredRenderService();
     if (renderServiceState && renderServiceState.deployed) {
-      completeFrame("render-deploy", null, null, "deploy_done");
+      document.getElementById("render-deploy-polling-section").style.display = "none";
+      document.getElementById("render-deploy-done-section").style.display = "block";
+      const link = document.getElementById("render-deploy-service-link");
+      link.href = renderServiceState.service_url || "";
+      link.textContent = renderServiceState.service_url || "";
+      completeFrame("render-deploy", null, null, "deploy_done", true);
     } else if (renderServiceState && renderServiceState.pending_deploy_id) {
       document.getElementById("render-deploy-trigger-section").style.display = "none";
       document.getElementById("render-deploy-polling-section").style.display = "block";

@@ -521,6 +521,17 @@ optional:**
   reasoning `scripts/deploy.py`'s `_OPTIONAL_EMPTY_ENV_KEYS` already
   encodes. Keep this dict in sync with `bot/config.py` by hand; nothing
   automated ties the two together (onboarding/ never imports bot/).
+- **The final `render-deploy` frame stays open (doesn't collapse) once
+  done** (2026-09-02) — `completeFrame()` grew a 5th, optional `keepOpen`
+  parameter (every other call site omits it, keeping the default
+  collapse-on-complete behavior). The dashboard link (the service's live
+  URL, which routes to `dashboard/router.py`'s login-gated `GET /` once the
+  deploy is live) is the actual payoff of finishing the wizard; collapsing
+  the frame the instant it appears would hide it. Applies to both the live
+  completion path (`finishRenderDeploy()`) and the reload-resume path
+  (`restoreFromSession()`), which previously didn't even re-show the
+  done-section/link at all on a reload after a completed deploy — fixed
+  alongside this.
 - **The DB-synced operational keys (cooldown/usage-cap/`REVIEW_DRAFT_PRS`)
   need no wizard-side push at all** (2026-09-02) — unlike the Render-env-var
   knobs above, `bot/queue/store.py::init_pool()` now seeds the
