@@ -504,11 +504,19 @@ existing style.
 
 - [ ] **Step 2: Add the settings**
 
+**Correction found during execution:** a pydantic `field_validator` that
+raises on a malformed value is unsafe for this specific field. Pydantic's
+`ValidationError.__str__` embeds the rejected `input_value` verbatim
+regardless of the validator's own message — exactly the leak root
+`CLAUDE.md`'s secret-handling section warns about. `supabase_oauth_client_id`
+above gets away with this because it isn't a secret; this key is. So:
+only whitespace-normalize it here, unvalidated; format-validity is checked
+in Task 4's lifespan instead, via a plain `RuntimeError` with a hand-written
+message.
+
 In `onboarding/config.py`, add near the existing Supabase OAuth settings:
 
 ```python
-from cryptography.fernet import Fernet
-
 # ... inside class Settings ...
 
     # The wizard's own dedicated Postgres (never bot/'s queue DB, never a
@@ -517,8 +525,9 @@ from cryptography.fernet import Fernet
     database_url: str = ""
 
     # A Fernet key encrypting every credential value session_store.py
-    # writes. Validated at load time so a malformed value fails loudly at
-    # boot, not on the first session write mid-request.
+    # writes. Only whitespace-normalized here, deliberately NOT format-
+    # validated via a field_validator -- see the correction note above.
+    # Format validity is checked in main.py's lifespan instead.
     onboarding_session_encryption_key: str = ""
 
     @field_validator("database_url")
@@ -529,19 +538,7 @@ from cryptography.fernet import Fernet
     @field_validator("onboarding_session_encryption_key")
     @classmethod
     def _normalize_session_encryption_key(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            return ""
-        try:
-            Fernet(value.encode("ascii"))
-        except Exception as exc:
-            # Never include `value` in the message -- see root CLAUDE.md's
-            # secret-handling section on validation errors echoing rejected
-            # input.
-            raise ValueError(
-                "ONBOARDING_SESSION_ENCRYPTION_KEY must be a valid Fernet key"
-            ) from exc
-        return value
+        return value.strip()
 ```
 
 - [ ] **Step 3: Write/add tests**
@@ -553,29 +550,18 @@ def test_database_url_strips_whitespace(monkeypatch):
     assert Settings().database_url == "postgresql://x"
 
 
-def test_session_encryption_key_accepts_a_valid_fernet_key(monkeypatch):
-    from cryptography.fernet import Fernet
-    key = Fernet.generate_key().decode()
-    monkeypatch.setenv("ONBOARDING_SESSION_ENCRYPTION_KEY", key)
-    from onboarding.config import Settings
-    assert Settings().onboarding_session_encryption_key == key
-
-
-def test_session_encryption_key_rejects_a_malformed_value(monkeypatch):
+def test_session_encryption_key_reads_from_environment_unvalidated(monkeypatch):
+    """Format validity is deliberately not checked here -- see Task 4's
+    lifespan test for that."""
     monkeypatch.setenv("ONBOARDING_SESSION_ENCRYPTION_KEY", "not-a-fernet-key")
     from onboarding.config import Settings
-    import pytest
-    with pytest.raises(ValueError, match="valid Fernet key"):
-        Settings()
+    assert Settings().onboarding_session_encryption_key == "not-a-fernet-key"
 
 
-def test_session_encryption_key_validation_error_never_echoes_the_value(monkeypatch):
-    monkeypatch.setenv("ONBOARDING_SESSION_ENCRYPTION_KEY", "not-a-fernet-key-xyz")
+def test_session_encryption_key_whitespace_only_value_normalizes_to_the_unset_sentinel(monkeypatch):
+    monkeypatch.setenv("ONBOARDING_SESSION_ENCRYPTION_KEY", "   ")
     from onboarding.config import Settings
-    import pytest
-    with pytest.raises(ValueError) as exc_info:
-        Settings()
-    assert "not-a-fernet-key-xyz" not in str(exc_info.value)
+    assert Settings().onboarding_session_encryption_key == ""
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -626,10 +612,29 @@ async def lifespan(app: FastAPI):
             "start. Needed to encrypt every credential value the session "
             "store writes; see onboarding/.env.example."
         )
+    try:
+        Fernet(settings.onboarding_session_encryption_key.encode("ascii"))
+    except Exception:
+        # A plain, hand-written RuntimeError -- NOT a re-raise/chain of the
+        # underlying cryptography exception, and never includes the key
+        # itself. See config.py's field docstring: a pydantic-level
+        # ValidationError was rejected for this exact reason (it echoes
+        # input_value regardless of message), and chaining the raw
+        # exception here would risk the same class of leak if its own
+        # str() ever changes to include more context.
+        raise RuntimeError(
+            "ONBOARDING_SESSION_ENCRYPTION_KEY is not a valid Fernet key — "
+            "refusing to start. Generate one with: python -c \"from "
+            "cryptography.fernet import Fernet; print(Fernet.generate_key()"
+            '.decode())"'
+        ) from None
     session_store.init_pool()
     yield
     session_store.close_pool()
 ```
+
+`from cryptography.fernet import Fernet` needs importing in `main.py` for
+this check.
 
 Also update the module docstring at the top of `main.py` — it currently
 says "Stateless relay only — no database, no session store." That's no
@@ -657,6 +662,21 @@ def test_lifespan_raises_if_session_encryption_key_unset(monkeypatch):
     monkeypatch.setattr(settings, "onboarding_session_encryption_key", "")
     with pytest.raises(RuntimeError, match="ONBOARDING_SESSION_ENCRYPTION_KEY"):
         ...
+
+
+def test_lifespan_raises_if_session_encryption_key_malformed(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "postgresql://x")
+    monkeypatch.setattr(settings, "onboarding_session_encryption_key", "not-a-fernet-key")
+    with pytest.raises(RuntimeError, match="not a valid Fernet key"):
+        ...
+
+
+def test_lifespan_malformed_key_error_never_echoes_the_value(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "postgresql://x")
+    monkeypatch.setattr(settings, "onboarding_session_encryption_key", "not-a-fernet-key-xyz-sentinel")
+    with pytest.raises(RuntimeError) as exc_info:
+        ...
+    assert "not-a-fernet-key-xyz-sentinel" not in str(exc_info.value)
 
 
 def test_lifespan_calls_init_pool_and_close_pool(monkeypatch):
