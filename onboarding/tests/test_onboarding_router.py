@@ -14,7 +14,6 @@ from onboarding import (
     supabase_client,
     uptimerobot_client,
 )
-from onboarding.config import settings
 from onboarding.main import app
 
 SENTINEL_KEY = "rnd_SENTINEL_DO_NOT_LOG_9f3a"

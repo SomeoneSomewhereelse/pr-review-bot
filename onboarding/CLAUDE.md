@@ -5,16 +5,48 @@ the review engine in `bot/` — different process, different deploy, different
 threat model. Root `CLAUDE.md`'s secret-handling section still applies in
 full; the additions below are specific to what makes this service different.
 
-## The invariant this service exists to protect
+## The invariant this service now protects (2026-09-02, revised)
 
-This backend is a **stateless relay**. It must never gain a database, a
-session store, a cache, or any other place a visitor's credential could be
-written to disk or held past the lifetime of a single request. If a task
-here seems to need persistence, that is a signal to stop and reconsider the
-design, not to add a datastore — durable state for this wizard was a
-deliberate architectural choice to avoid (see
+This backend used to be a **stateless relay** — no database, no session
+store, no server-side credential persistence of any kind, by deliberate
+design (see
 `docs/superpowers/specs/2026-08-26-onboarding-wizard-render-frame-design.md`
-section 3), not an oversight to fix.
+section 3). That invariant was found fragile in practice: mobile browsers
+were observed destroying `sessionStorage` (and the browsing context holding
+it) mid-flow, most sharply during Supabase's OAuth redirect, resetting the
+whole wizard including earlier frames' already-validated credentials — see
+`ISSUES.md`. It was deliberately replaced, not patched around.
+
+**The service now holds a server-side session** (`onboarding/session_store.py`)
+in a **new, dedicated Postgres** — never `bot/`'s queue DB, never a visitor's
+own provisioned project — identified by an `HttpOnly`/`Secure`/`SameSite=Lax`
+cookie rather than anything tab-scoped. Every credential value is
+application-encrypted (Fernet, one opaque blob per frame) before it's
+written. See
+`docs/superpowers/specs/2026-09-01-onboarding-server-side-session-design.md`
+for the full design, including the fork-risk hardening on
+`session_store.update_frame()` (it requires an existing session and never
+upserts — `create_session()` is the only place a session id is ever minted).
+
+What this changes in practice:
+- A relay endpoint's *first* submission of a credential still comes from the
+  browser (the visitor pastes/uploads it), but the server now persists it
+  server-side on success and — for any later step that needs the same
+  credential again (e.g. the final deploy frame needing the GitHub key,
+  Supabase connection string, and Render key together) — reads it back from
+  the session instead of the browser resending it.
+- `GET /api/session` (called by the page's `restoreFromSession()` on every
+  load) is the source of truth for which frames are already done, not
+  `sessionStorage`. It maps session-store frame keys onto the wizard's UI
+  frame ids explicitly (not 1:1 — `render` backs three UI frames; `supabase`
+  has a genuine "OAuth done, project not yet created" in-between state) and
+  never echoes a raw credential back to the browser — only the same class of
+  non-secret display fields (an account/org/project name, a URL, an id) this
+  file already allowed relay responses to carry.
+- A visitor-facing "Start over" control (`POST /api/session/reset`) deletes
+  the session and clears the cookie — the explicit, deliberate way to clear
+  progress, replacing the implicit "just don't complete a frame" model a
+  stateless relay didn't need.
 
 ## Rules
 
@@ -57,13 +89,23 @@ section 3), not an oversight to fix.
   added to `router.py` gets this for free; the same router mounted on a
   *different* app (a test harness building its own `FastAPI()`, a future
   split-out service) would lose it silently.
-- **A visitor's credential goes to `sessionStorage`, never `localStorage`,**
-  on the browser side too — not just "no database" on the backend. This
-  page's own non-secret theme/language preferences legitimately use
-  `localStorage` (they should persist across tabs/sessions); a credential
-  must not, since `localStorage` persists past the tab closing. Any new
-  frame that holds a visitor secret client-side follows the render-key
-  frame's `STORAGE_KEYS` / `sessionStorage` pattern, not the theme/lang one.
+- **A visitor's credential never touches `localStorage`, on the browser
+  side too — not just "no database" on the backend.** This page's own
+  non-secret theme/language preferences legitimately use `localStorage`
+  (they should persist across tabs/sessions); a credential must not, since
+  `localStorage` persists past the tab closing. As of the 2026-09-02
+  server-side-session redesign, most credentials no longer touch
+  `sessionStorage` either — once a frame's endpoint validates a credential,
+  it's persisted server-side (`session_store.py`) and never needs to be
+  resent, so it never needs local storage at all (the Render API key and
+  GitHub App credentials are the clearest examples: `STORAGE_KEYS` has no
+  entry for either). Where a frame still keeps a local `sessionStorage`
+  mirror (`render-service`, `supabase`, `llm-provider`, `dashboard-auth`,
+  `uptime-pinger`), it holds only non-secret continuity/display state for
+  the current page view (a url, an id, a provider/model choice, a
+  `completed` flag) — never the credential value itself. A new frame that
+  needs to remember something locally follows that non-secret-only pattern,
+  not the pre-redesign one of mirroring the whole credential.
 - **Every credential-carrying `fetch()` on the page has its own
   `..._leaves_the_page_exactly_once` test in
   `tests/test_onboarding_page.py`,** each asserting
@@ -84,6 +126,9 @@ section 3), not an oversight to fix.
   invariant to the helper's indirection, not a loosening of it: the
   endpoint string must still appear exactly once as the call's own
   argument, wherever in the call chain that argument is spelled.
+  `callSupabaseRelay` itself no longer carries `access_token` at all (the
+  server reads it from the session cookie) — its callers now pass at most a
+  small non-secret payload (e.g. `organization_slug`), never a credential.
 
 ## What sub-project 2 (GitHub App automation) adds to these rules
 
@@ -193,73 +238,56 @@ section 3), not an oversight to fix.
   requested it. These two are set once by the operator (a one-time, manual
   Supabase OAuth-app registration; Supabase has no self-registration
   mechanism the way GitHub's App Manifest flow does) and never change per
-  visitor. `supabase_oauth_client_id` is also templated into the served
-  page as `window.SUPABASE_OAUTH_CLIENT_ID` — this is **not** a secret
-  exposure: a `client_id` is the public half of OAuth credentials by
-  design, and `client_secret` never leaves the backend.
-- **`exchange-oauth-code` and `refresh-access-token` are mint-and-return
-  exceptions**, same category as GitHub's manifest exchange: they return
-  tokens freshly issued to the visitor who just authorized. `create-project`
-  is a *different* kind of exception — on a business-rule rejection it
-  relays Supabase's own error `message` text verbatim rather than mapping
-  to a fixed reason enum, because guessing which specific rule Supabase
-  applied (e.g. the free-tier project cap) would require assuming exact
-  API wording this project could not verify without a live authenticated
-  call — see the design spec section 4 and `ISSUES.md`'s Design Gaps entry.
-- **`db_pass` is generated client-side by the browser, never minted by the
-  backend** — deliberately different from the GitHub frame's private-key
-  pattern. It's a value *we* choose (Supabase doesn't produce it for us the
-  way it produces a private key), so keeping it browser-originated avoids
-  growing the mint-and-return exception list for a value that doesn't need
-  it.
-- **The OAuth authorize leg opens in a popup (`window.open`), not a
-  same-tab redirect (2026-09-02).** A same-tab `location.href` redirect was
-  found to reset `sessionStorage` — including every earlier frame's
-  credentials, not just this frame's pending OAuth state — on at least one
-  mobile browser, where a lengthy trip to Supabase's consent screen let the
-  browser reclaim the tab's browsing context while it was away; per spec, a
-  recreated browsing context gets fresh, empty `sessionStorage` even though
-  the origin and URL are unchanged on return. See `ISSUES.md`.
-  **Cross-tab handoff uses `BroadcastChannel`, not `window.opener`/
-  `postMessage`** — a first attempt at this used `window.opener`, but
-  Supabase's own authorize/login pages send
-  `Cross-Origin-Opener-Policy: same-origin` (a deliberate, increasingly
-  common anti-tabnabbing default many OAuth providers use), which
-  permanently severs `window.opener` for the popup the moment it navigates
-  there. By the time the popup lands back on this app's own origin,
-  `window.opener` is `null` even though popup and opener are still
-  same-origin — confirmed live, see `ISSUES.md`. `handleSupabaseOauthCallback()`
-  instead tells "am I the popup" apart from "am I the tab that started this
-  flow" by checking for its OWN `sessionStorage`'s pending state: a popup is
-  a brand-new tab whose `sessionStorage` never had it (only the original
-  tab's `connectSupabase()` wrote it), so its absence is what identifies the
-  popup, not `window.opener`. The popup then hands `{code, state}` to
-  whichever tab is listening via a shared-name `BroadcastChannel`
-  (`SUPABASE_OAUTH_CHANNEL_NAME`) and closes — `BroadcastChannel` only needs
-  same origin, not an opener relationship, so it is unaffected by COOP. The
-  tab holding the pending state (which still has `pending.verifier` and
-  every other frame's state, untouched since it never navigated) does the
-  actual token exchange via `completeSupabaseOAuth()`. If `window.open` is
-  blocked or folded into a same-tab navigation by the browser,
-  `connectSupabase()` falls back to the original same-tab redirect (the
-  callback page then finds its own pending state and completes the exchange
-  itself, same as before popups existed) — do not remove that fallback path
-  assuming popups always work, and do not reintroduce a `window.opener`
-  check as the popup-detection mechanism.
+  visitor. Neither is templated into the served page (2026-09-02) — the
+  server builds the whole authorize URL itself now (see below), so the
+  browser never needs `client_id` at all, not even as the public half of an
+  OAuth pair.
+- **The OAuth authorize leg is a plain same-tab redirect again (2026-09-02,
+  superseding the popup + `BroadcastChannel` design below it briefly
+  replaced).** PKCE `state`/`verifier` generation moved server-side
+  (`POST /api/supabase/connect`, `router.py`), stored in the visitor's
+  session (`session_store.py`) under `supabase._pending_oauth`, keyed by
+  the `onboarding_session` cookie rather than anything tab-scoped. A cookie
+  is part of the browser's persistent cookie jar, not tied to a specific
+  browsing-context instance, so it survives the same mobile-browser
+  tab-reclamation that used to reset `sessionStorage` mid-redirect (see
+  `ISSUES.md` and the invariant section above) — this is what let the
+  popup/`BroadcastChannel` workaround be removed rather than kept as a
+  second layer of defense. `connectSupabase()` in
+  `onboarding/static/index.html` does nothing but POST `{name}` and
+  `location.href = body.authorize_url`; `GET /oauth/supabase/callback`
+  (`router.py`) completes the code exchange purely server-side and issues a
+  `302` back to `/` — **no client-side JS runs for the callback at all**.
+  Do not reintroduce a popup, `window.opener`/`postMessage`, or
+  `BroadcastChannel` for this leg; the cookie-based session is what makes
+  all of that unnecessary now.
+- **`db_pass` is generated server-side now (`create-project`,
+  `router.py`), not client-side** — this flipped in the same 2026-09-02
+  redesign. It never needs to leave the server: `create-project` mints it,
+  passes it directly to `supabase_client.create_project()`, and stores it
+  in the session for `connection-info` to assemble the final
+  `DATABASE_URL` with later. The browser never sees or generates it.
 - **`connection-info` never returns Supabase's own `connection_string`/
-  `connectionString` fields.** Whether they embed the real password or a
-  masked placeholder could not be verified from documentation during this
-  sub-project's brainstorm. The endpoint returns only the non-secret shape
-  (`db_user`, `db_host`, `db_port`, `db_name`); the browser, which already
-  holds `db_pass`, assembles the final connection string itself. A future
-  change that trusts Supabase's own connection-string field needs to
-  verify its password-masking behavior with a live call first.
-- **Token refresh is reactive, not proactive.** `callSupabaseRelay` in
-  `onboarding/static/index.html` retries exactly once, only after a real
-  `"unauthorized"` response — there is no client-side expiry-timer
-  tracking `expires_in`. Any new Supabase relay call should go through this
-  same helper rather than calling `fetch()` directly, to inherit the retry
-  behavior for free.
+  `connectionString` fields, nor `db_user`/`db_host`/`db_port`/`db_name`
+  individually (2026-09-02: tightened further — it used to return the
+  latter for the browser to assemble the URL from).** Since `db_pass`
+  already lives server-side, the endpoint assembles the full
+  `postgresql://` URL itself and stores it in the session
+  (`supabase.database_url`); its response to the browser is just
+  `{"valid": true}`. Whether Supabase's own `connection_string` field
+  embeds the real password or a masked placeholder still could not be
+  verified from documentation during this sub-project's original
+  brainstorm — that's still why this endpoint never reads it, not a new
+  reason.
+- **`create-project` and `list-organizations` read `access_token` from the
+  session (via `session_store.read_frame`), never from the request body**
+  — set by the OAuth callback above. `exchange-oauth-code` and
+  `refresh-access-token` as *client-facing* endpoints are gone entirely:
+  the callback owns the exchange, and there is no client-facing refresh
+  path since `access_token` never reaches the browser to need refreshing.
+  `supabase_client.refresh_access_token()` itself still exists (untested-
+  in-production, previously tested) — wiring an automatic refresh-on-401
+  into the session-backed calls is a reasonable follow-up, not yet done.
 - **The OAuth app is a resource shared across every visitor** — unlike
   every other credential in this service. This is a known, deliberately
   deferred risk; see `ISSUES.md`'s Design Gaps section before changing
@@ -362,15 +390,14 @@ section 3), not an oversight to fix.
   account. Do not "simplify" this frame's client onto v2 without
   re-verifying that live behavior first.
 - **This frame reads a `sessionStorage` key it does not write:
-  `onboarding.renderServiceUrl`.** Sub-project 6 (Render service creation,
-  not yet built as of this frame) is obligated to write the deployed
-  service's base URL there on its own completion — see
+  `onboarding.renderServiceUrl`.** The "Render service" frame (sub-project 6,
+  now built) writes the deployed service's base URL there on its own
+  completion — see
   `docs/superpowers/specs/2026-08-27-onboarding-uptimerobot-frame-design.md`
-  section 3's forward contract. Until sub-project 6 exists, frame 5's only
-  reachable state is the blocked message (`frame5_blocked_no_render_url`)
-  — this is expected, not a bug. If sub-project 6's actual output shape
-  ends up different from a bare base URL when it's built, reconcile against
-  that key name and format, not against a guess made here.
+  section 3's forward contract, and (as of 2026-09-02)
+  `restoreFromSession()`'s own write of this same key from
+  `GET /api/session`'s `render-service` display field on page load, so a
+  reload after that frame is done still has it available.
 - **Dedupe-before-create is load-bearing, not an optimization.** Every
   credential submission to this frame (including a "Change" resubmit)
   calls `GET /v3/monitors` before ever calling `POST /v3/monitors` — a
@@ -425,29 +452,29 @@ section 3), not an oversight to fix.
   they're split (see
   `docs/superpowers/specs/2026-08-27-onboarding-render-service-frame-design.md`
   section 3).
-- **Frames 2, 3, and 4 each push their own credential into the
-  already-created Render service the moment they validate, then clear the
-  raw value from their own `sessionStorage` record.** This is a
-  deliberate security property (shrinking a credential's browser-residency
-  window), not an optional optimization — do not defer a new frame's push
-  to "do it all at the end" without a fresh brainstorm justifying the
-  regression. One path is exempt by design, not by oversight: if the
-  Render-service frame was never completed, the push-and-clear step for
-  frames 2/3/4 is skipped entirely (no attempt, no clear — see the
-  push-failure-handling decision above), which means those credentials
-  sit in `sessionStorage` for the rest of the session in that specific
-  case. This is the documented, accepted tradeoff of "never gate a
-  frame's completion on Render being reachable," not a gap to close.
-- **A push failure never blocks the pushing frame's own completion.**
-  Pushing to Render is best-effort persistence; only the final "Finish &
-  Deploy" frame is genuinely blocked by a missing service. See design
-  spec section 2's push-failure-handling decision before changing this.
-- **Six new relay endpoints, one frame each** — never route two different
-  frames' pushes through one shared endpoint URL, even though the
-  underlying `render_client.push_env_vars` call is shared. A shared
-  endpoint would break the per-endpoint
-  `..._leaves_the_page_exactly_once` audit's page-wide `== 1` count
-  across multiple frames.
+- **Reversed 2026-09-02: no frame pushes its own credential to Render
+  incrementally anymore.** The original design here had frames 2/3/4 each
+  push-and-clear the moment they validated, as a deliberate
+  browser-residency-shrinking property. That property is moot now that
+  those credentials never sit in `sessionStorage` to begin with — they're
+  persisted server-side (`session_store.py`) on validation instead. The
+  four per-frame push endpoints (`github/push-render-vars`,
+  `supabase/push-render-var`, `llm/push-render-vars`,
+  `dashboard-auth/push-render-vars`) and their four frontend push
+  functions are **deleted, not deprecated** — do not resurrect this
+  pattern for a new frame.
+- **One bulk push instead: `POST /api/render/bulk-push-env-vars`**, called
+  by the final "Finish & Deploy" frame (`triggerRenderDeploy()`) right
+  before `trigger-deploy`. It reads every completed frame's data straight
+  from the session (`session_store.read_frame`, no request body at all)
+  and assembles the full env-var dict in one place — `router.py`'s
+  `bulk_push_render_env_vars()`. A frame whose session data is missing
+  (never completed) is simply omitted from the push, not an error; the
+  wizard's own sequential frame-lock already guarantees every frame is
+  done by the time this endpoint is reachable in normal use.
+  `render_client.push_env_vars`'s push-failure-handling behavior
+  (partial-failure reporting via `_push_result`) is unchanged — only
+  *when* it's called moved from per-frame to this one call site.
 - **The created service's public URL is always derived from Render's
   returned `service.slug`, never the submitted `name`.** Render may
   normalize the name server-side; a create-service response was verified
