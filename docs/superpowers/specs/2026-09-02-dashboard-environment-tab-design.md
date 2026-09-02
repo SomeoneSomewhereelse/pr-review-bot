@@ -46,14 +46,17 @@ unresolved.
 | Module placement | New `bot/render_client.py`, mirroring `onboarding/render_client.py`'s existing precedent (each deployable package gets its own thin Render API client rather than crossing package boundaries). `bot/scripts/_render.py`'s logic moves there. `deploy.py`/`set_override.py` import from `bot.render_client` instead of `bot.scripts._render`; the new `dashboard/environment.py` does not import from `bot/scripts/` at all — reusable pieces (the per-key push loop, deploy-trigger call, `_looks_like_local_test_db` guard) live in `bot/render_client.py` and are called by both `deploy.py` and the dashboard, not imported one from the other. |
 | Onboarding change | Frame 6's existing `push_env_var` loop (`onboarding/render_client.py`) also pushes `RENDER_API_KEY` itself into the newly created service, so the deployed bot service has the credential this feature needs at runtime. Flagged explicitly: this makes the deployed service hold the one credential that can rewrite its own env vars and trigger its own redeploys — previously `RENDER_API_KEY` never left the operator's machine. The dashboard's session-cookie auth is what stands between "authenticated operator" and "anyone who reaches the URL" once this ships. |
 | `deploy.py` future | Once this ships, `deploy.py --sync-env` and `set_override.py` are redundant with the dashboard doing the same job live. Not retired by this plan — logged as a follow-up in `ISSUES.md`'s Design Gaps for a later cleanup pass, since some of `deploy.py`'s checks (pricing, provider-live, health, database) are unrelated to env-var/config editing and stay useful regardless. |
+| Protected keys | A static `PROTECTED_ENV_KEYS` frozenset in `bot/render_client.py` — `DATABASE_URL`, `RENDER_API_KEY`, `DASHBOARD_USERNAME`, `DASHBOARD_PASSWORD`, `DASHBOARD_SESSION_SECRET`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_INSTALLATION_ID` — every var `bot/main.py`'s `lifespan()` either explicitly refuses to boot without, or implicitly hard-depends on, plus `RENDER_API_KEY` itself (deleting it would strand the Environment tab's own ability to fix anything else). The UI hides the delete control for these keys (edit stays available — rotation still works); `PATCH /api/environment/render` independently rejects any `deletes` entry naming a protected key, so the guard holds even if the API is called directly, not just through the rendered page. This is the concrete answer to "reduce the chance of a Render-console detour" — the harder version (bad-but-valid-looking edits) stays out of scope, same as the confirm-by-typing-the-key-name idea considered and dropped during brainstorming. |
 
 ## 3. Architecture
 
 ```
 bot/render_client.py          NEW — headers(), find_service_id(), env_vars(),
                                 push_env_var() (per-key loop, stop-at-first-
-                                failure), delete_env_var(), trigger_deploy()
-                                (fire-and-forget, no poll). Moved/adapted from
+                                failure), delete_env_var() (raises on a
+                                PROTECTED_ENV_KEYS member), trigger_deploy()
+                                (fire-and-forget, no poll), PROTECTED_ENV_KEYS
+                                frozenset. Moved/adapted from
                                 bot/scripts/_render.py + the push loop in
                                 bot/scripts/deploy.py::sync_env().
 bot/scripts/_render.py         REMOVED — superseded by bot/render_client.py
@@ -70,9 +73,11 @@ dashboard/environment.py       NEW — GET/PATCH /api/environment/render,
                                 GET/PATCH /api/environment/config
 dashboard/static/dashboard.html MODIFIED — side nav (Status / Environment),
                                 Environment panel: Render vars table
-                                (masked value, reveal toggle, edit, delete,
-                                add-new-key form, Save button) + runtime_config
-                                form (existing override fields)
+                                (masked value, reveal toggle, edit, delete
+                                except for PROTECTED_ENV_KEYS rows, which get
+                                no delete control, add-new-key form, Save
+                                button) + runtime_config form (existing
+                                override fields)
 dashboard/CLAUDE.md            MODIFIED — documents dashboard/environment.py's
                                 write access (breaks the current
                                 read-only-router statement), notes the
@@ -108,9 +113,12 @@ ISSUES.md                      MODIFIED — closes the parked Design Gaps
    `{"sets": {key: value, ...}, "deletes": [key, ...]}`.
 3. Backend loops: `push_env_var(service_id, key, value)` for each `sets`
    entry, `delete_env_var(service_id, key)` for each `deletes` entry, both
-   via `bot.render_client`. Stops at the first failure, same as
-   `push_env_var()` today; response reports which keys succeeded, which
-   failed and why, before the loop stopped.
+   via `bot.render_client`. A `deletes` entry naming a `PROTECTED_ENV_KEYS`
+   member is rejected up front — reported in `failed` with reason
+   `"protected"`, never attempted against Render — before the rest of the
+   loop runs. Otherwise stops at the first failure, same as `push_env_var()`
+   today; response reports which keys succeeded, which failed and why,
+   before the loop stopped.
 4. If at least one write succeeded: `trigger_deploy(service_id)` fires
    `POST .../deploys` and returns its `deploy_id` immediately — no poll.
    Logs one INFO line per successfully-applied key (name + new length, or
@@ -148,17 +156,21 @@ ISSUES.md                      MODIFIED — closes the parked Design Gaps
 - **`bot/tests/test_render_client.py`** (new): mocked `httpx` for
   `find_service_id`, `env_vars` (pagination, same page-2 scenario
   `_render.py`'s existing docstring documents), `push_env_var` (success,
-  stop-at-first-failure), `delete_env_var`, `trigger_deploy` (returns
-  immediately, does not poll). No live Render calls, ever — mirrors
+  stop-at-first-failure), `delete_env_var` (success, and — for every member
+  of `PROTECTED_ENV_KEYS` — raises without ever calling `httpx`), `trigger_deploy`
+  (returns immediately, does not poll). No live Render calls, ever — mirrors
   `onboarding/tests/test_onboarding_render_client.py`.
 - **`dashboard/tests/test_environment.py`** (new): route-level tests using
   the existing session-cookie test fixture from `dashboard/tests/test_auth.py`.
   Covers: unauthenticated requests rejected; a successful multi-key save
   reports all applied + fires one deploy trigger (mocked); a failing key
   mid-loop is reported in `failed` and does not block already-applied keys
-  from being reported as `applied`; `runtime_config` PATCH calls the correct
-  `set_*` per field; values are never present in any log line asserted
-  against (mirrors how `test_auth.py` never asserts on the raw password).
+  from being reported as `applied`; a `deletes` request naming a protected
+  key is rejected with reason `"protected"` and the mocked Render client is
+  never called for it, while any other keys in the same request still
+  apply; `runtime_config` PATCH calls the correct `set_*` per field; values
+  are never present in any log line asserted against (mirrors how
+  `test_auth.py` never asserts on the raw password).
 - **`bot/scripts/`'s existing tests** (`test_deploy_script.py`,
   `test_override_script.py` or equivalent): updated for the
   `bot.render_client` import path, behavior otherwise unchanged.
