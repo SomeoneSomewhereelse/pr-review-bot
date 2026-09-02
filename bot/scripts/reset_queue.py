@@ -79,12 +79,13 @@ def main(argv: list[str] | None = None) -> int:
         tickets_n = conn.execute("SELECT COUNT(*) AS n FROM tickets").fetchone()["n"]
         reviews_n = conn.execute("SELECT COUNT(*) AS n FROM reviews").fetchone()["n"]
 
+        print(_verify_render_reachability())
+
         if not args.yes:
             print(f"dry run -- would remove {tickets_n} ticket row(s), {reviews_n} review row(s)")
             print("re-run with --yes to actually truncate")
             return 0
 
-        print(_verify_render_reachability())
         conn.execute("TRUNCATE TABLE tickets, reviews RESTART IDENTITY")
 
     print(f"tickets: {tickets_n} row(s) removed")
