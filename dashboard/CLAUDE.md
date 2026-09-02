@@ -13,9 +13,19 @@ process as `bot/` (one Render service, one Dockerfile — see
 ## Layering
 
 - `dashboard/router.py` reads `bot.queue.store`, `bot.queue.dispatcher`, and
-  `bot.providers.base.KNOWN_PROVIDERS` directly — this is the one place
-  `dashboard` depends on `bot`'s internals, and it's read-only (never
+  `bot.providers.base.KNOWN_PROVIDERS` directly, and stays read-only (never
   enqueues, never mutates provider state).
+- `dashboard/environment.py` is the one place `dashboard` writes anything —
+  Render env vars (via `bot.render_client`) and `runtime_config` overrides
+  (via `bot.queue.store`'s existing `get_*`/`set_*` functions). Every value
+  it returns from `GET /api/environment/render` is a real Render secret
+  value, not reduced to a boolean/length — a documented, scoped exception to
+  root `CLAUDE.md`'s "never display a byte of a secret" rule (see that
+  file's Secret handling section and
+  `docs/superpowers/specs/2026-09-02-dashboard-environment-tab-design.md`).
+  The value only ever reaches the authenticated operator's own browser DOM
+  (masked by default, toggle-revealed client-side) — never logged, never
+  persisted beyond the response.
 - `dashboard/auth.py` reads only `bot.config.settings` (the three
   `DASHBOARD_*` credential fields) — no queue/provider access.
 - `bot/main.py` mounts `dashboard.router.router` and `dashboard.auth.router`

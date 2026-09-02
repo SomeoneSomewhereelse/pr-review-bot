@@ -13,6 +13,7 @@ from bot.queue import dispatcher, store
 from bot.webhook import router as webhook_router
 from dashboard.auth import SessionRequired, require_session
 from dashboard.auth import router as auth_router
+from dashboard.environment import router as environment_router
 from dashboard.router import router as dashboard_router
 
 # The root logger defaults to WARNING when nothing configures it, so every
@@ -110,6 +111,7 @@ async def _handle_session_required(request: Request, exc: SessionRequired) -> Re
 app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router, dependencies=[Depends(require_session)])
+app.include_router(environment_router, dependencies=[Depends(require_session)])
 
 
 @app.get("/healthz")
