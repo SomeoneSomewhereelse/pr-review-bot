@@ -498,7 +498,7 @@ def clear_visible_review(ticket_id: int) -> None:
         conn.execute("UPDATE tickets SET last_reviewed_at = NULL WHERE id = %s", (ticket_id,))
 
 
-def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> None:
+def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> Ticket | None:
     """Cancel a queued-but-not-yet-claimed ticket when its PR closes or
     merges, so it's never picked up and never wastes an LLM call / posts a
     stale comment. No-op if no ticket exists, or if it's already 'running'
@@ -507,14 +507,22 @@ def cancel_ticket(*, repo_full_name: str, pr_number: int, now: str) -> None:
     way to abort it mid-flight) or already terminal ('done'/'failed'/
     'cancelled'). A later `reopened` push revives it via enqueue_or_update's
     existing terminal-state re-arm branch -- 'cancelled' falls into the same
-    catch-all as 'done'/'failed'."""
+    catch-all as 'done'/'failed'.
+
+    Returns the cancelled ticket (pre-update field values except status/
+    updated_at), or None if nothing matched -- so a caller can tell whether a
+    schedule-notice footnote needs stripping from GitHub: a cancelled ticket
+    is never claimed again, so it's the caller's only chance (see
+    webhook.py's _CANCEL_ACTIONS handling)."""
     with _require_pool().connection() as conn:
-        conn.execute(
+        row = conn.execute(
             "UPDATE tickets SET status = 'cancelled', updated_at = %s "
             "WHERE repo_full_name = %s AND pr_number = %s "
-            "AND status IN ('pending', 'deferred', 'retrying')",
+            "AND status IN ('pending', 'deferred', 'retrying') "
+            "RETURNING *",
             (now, repo_full_name, pr_number),
-        )
+        ).fetchone()
+        return _row_to_ticket(row) if row else None
 
 
 def discard_skipped_ticket(ticket_id: int, now: str) -> None:

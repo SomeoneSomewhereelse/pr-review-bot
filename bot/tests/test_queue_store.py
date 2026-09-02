@@ -93,6 +93,21 @@ def test_cancel_ticket_cancels_a_pending_ticket():
     assert t.updated_at == T1
 
 
+def test_cancel_ticket_returns_the_cancelled_ticket():
+    """The return value is how webhook.py's cancel handler learns whether to
+    strip a live schedule-notice footnote from GitHub -- a cancelled ticket
+    is never claimed again, so it's the caller's only chance."""
+    tid = _enqueue()
+    cancelled = store.cancel_ticket(repo_full_name="owner/repo", pr_number=1, now=T1)
+    assert cancelled is not None
+    assert cancelled.id == tid
+    assert cancelled.status == "cancelled"
+
+
+def test_cancel_ticket_returns_none_when_no_ticket_matches():
+    assert store.cancel_ticket(repo_full_name="owner/repo", pr_number=999, now=T1) is None
+
+
 def test_cancel_ticket_cancels_a_deferred_ticket():
     tid = _enqueue()
     store.claim_next_due(now=T0)

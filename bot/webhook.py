@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Response
 
+from bot import github_app
 from bot.config import settings
 from bot.hmac_verify import verify_signature
 from bot.providers.active import active_provider
@@ -114,12 +115,28 @@ async def _handle_pull_request_payload(payload: dict) -> None:
 
     if action in _CANCEL_ACTIONS:
         logger.info("Cancelling ticket for %s#%s", repo_full_name, pr_number)
-        await asyncio.to_thread(
+        cancelled = await asyncio.to_thread(
             store.cancel_ticket,
             repo_full_name=repo_full_name,
             pr_number=pr_number,
             now=datetime.now(timezone.utc).isoformat(),
         )
+        # A cancelled ticket is never claimed again, so this is the only
+        # chance to strip a still-live schedule-notice footnote -- otherwise
+        # it sits on the closed/merged PR's comment forever (tickets_needing_
+        # notice/clear_notice only ever look at 'deferred' tickets, and this
+        # one just left that status). Cosmetic only; must not block on it.
+        if cancelled is not None and cancelled.notice_not_before is not None:
+            try:
+                await asyncio.to_thread(
+                    github_app.clear_schedule_notice,
+                    cancelled.repo_full_name, cancelled.pr_number, cancelled.comment_id,
+                )
+                await asyncio.to_thread(store.clear_notice, cancelled.id)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "failed to clear schedule notice for cancelled ticket %s", cancelled.id
+                )
         return
 
     head_sha = (pull_request.get("head") or {}).get("sha")

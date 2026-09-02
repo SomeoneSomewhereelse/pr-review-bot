@@ -272,6 +272,50 @@ async def test_closed_action_cancels_a_pending_ticket(db_query):
     ) == [("cancelled",)]
 
 
+async def test_closed_action_strips_a_live_schedule_notice_footnote(monkeypatch, db_query):
+    """A deferred ticket with a posted schedule-notice footnote (notice_not_
+    before set) must have that footnote stripped from GitHub when its PR
+    closes -- a cancelled ticket is never claimed again, so this is the only
+    chance (tickets_needing_notice/clear_notice only ever look at 'deferred'
+    tickets, and this one leaves that status on cancel)."""
+    ticket_id = store.enqueue_or_update(
+        repo_full_name="owner/repo", pr_number=11, head_sha="abc123", provider="groq",
+        now="2026-01-01T00:00:00+00:00",
+    )
+    store.set_comment_id(ticket_id, 4242)
+    store.mark_notice_posted(ticket_id, "2026-01-02T00:00:00+00:00")
+
+    cleared = []
+
+    def fake_clear(repo_full_name, pr_number, comment_id=None):
+        cleared.append((repo_full_name, pr_number, comment_id))
+        return None
+
+    monkeypatch.setattr(webhook.github_app, "clear_schedule_notice", fake_clear)
+
+    payload = {
+        "action": "closed",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 11, "head": {"sha": "abc123"}},
+    }
+    body = json.dumps(payload).encode()
+    async with await _client() as c:
+        response = await c.post(
+            "/webhook", content=body,
+            headers={
+                "X-Hub-Signature-256": _sign(body),
+                "X-GitHub-Delivery": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            },
+        )
+
+    assert response.status_code == 202
+    assert cleared == [("owner/repo", 11, 4242)]
+    assert db_query(
+        "SELECT status, notice_not_before FROM tickets "
+        "WHERE repo_full_name = 'owner/repo' AND pr_number = 11"
+    ) == [("cancelled", None)]
+
+
 async def test_closed_action_on_untracked_pr_is_a_noop():
     payload = {
         "action": "closed",
