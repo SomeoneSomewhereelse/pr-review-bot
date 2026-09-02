@@ -972,6 +972,22 @@ async def test_uptimerobot_monitor_created_reports_created_true(monkeypatch):
     assert resp.json() == {"valid": True, "created": True, "monitor_id": 42}
 
 
+async def test_uptimerobot_create_monitor_persists_to_session(monkeypatch):
+    async def fake_create(api_key, render_service_url):
+        return uptimerobot_client.UptimeRobotMonitorResult(created=True, monitor_id=99)
+
+    monkeypatch.setattr(uptimerobot_client, "create_or_reuse_monitor", fake_create)
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    client = await _client()
+    await client.post(
+        "/api/uptimerobot/create-monitor",
+        json={"api_key": SENTINEL_KEY, "render_service_url": "https://x.onrender.com"},
+        cookies={"onboarding_session": session_id},
+    )
+    assert fake.read_frame(session_id, "uptime_pinger") == {"monitor_id": 99}
+
+
 async def test_uptimerobot_monitor_reused_reports_created_false(monkeypatch):
     async def fake_create(api_key, render_service_url):
         return uptimerobot_client.UptimeRobotMonitorResult(created=False, monitor_id=42)
@@ -1201,73 +1217,53 @@ async def test_github_push_render_vars_endpoint_is_gone():
     assert resp.status_code == 404
 
 
-async def test_llm_push_render_vars_endpoint_gemini(monkeypatch):
-    captured = {}
-
-    async def fake_push_env_vars(api_key, service_id, values):
-        captured["values"] = values
-        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
-
-    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+async def test_confirm_llm_provider_persists_to_session(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
     client = await _client()
     resp = await client.post(
-        "/api/llm/push-render-vars",
+        "/api/llm/confirm",
         json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
             "provider": "gemini",
             "credential_value": "AIzaSy...",
             "model": "gemini-flash-latest",
         },
+        cookies={"onboarding_session": session_id},
     )
     assert resp.status_code == 200
-    assert captured["values"] == {
-        "LLM_PROVIDER": "gemini",
-        "GEMINI_API_KEY": "AIzaSy...",
-        "LLM_MODEL": "gemini-flash-latest",
+    assert resp.json() == {"valid": True}
+    assert fake.read_frame(session_id, "llm_provider") == {
+        "provider": "gemini",
+        "credential_value": "AIzaSy...",
+        "model": "gemini-flash-latest",
     }
 
 
-async def test_llm_push_render_vars_endpoint_vertex_uses_gcp_key_name(monkeypatch):
-    captured = {}
-
-    async def fake_push_env_vars(api_key, service_id, values):
-        captured["values"] = values
-        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
-
-    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+async def test_confirm_llm_provider_with_no_session_fails_closed():
     client = await _client()
     resp = await client.post(
-        "/api/llm/push-render-vars",
-        json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
-            "provider": "vertex",
-            "credential_value": "eyJ0eXBlIjoi...",
-            "model": "gemini-2.5-pro",
-        },
+        "/api/llm/confirm",
+        json={"provider": "gemini", "credential_value": "x", "model": "m"},
     )
-    assert resp.status_code == 200
-    assert captured["values"] == {
-        "LLM_PROVIDER": "vertex",
-        "GCP_SERVICE_ACCOUNT_KEY": "eyJ0eXBlIjoi...",
-        "VERTEX_MODEL": "gemini-2.5-pro",
-    }
+    assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
-async def test_llm_push_render_vars_endpoint_rejects_unknown_provider(monkeypatch):
+async def test_confirm_llm_provider_rejects_unknown_provider(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
     client = await _client()
     resp = await client.post(
-        "/api/llm/push-render-vars",
-        json={
-            "render_api_key": "rnd_x",
-            "render_service_id": "srv-1",
-            "provider": "openai",
-            "credential_value": "x",
-            "model": "y",
-        },
+        "/api/llm/confirm",
+        json={"provider": "openai", "credential_value": "x", "model": "y"},
+        cookies={"onboarding_session": session_id},
     )
     assert resp.status_code == 422
+
+
+async def test_llm_push_render_vars_endpoint_is_gone():
+    client = await _client()
+    resp = await client.post("/api/llm/push-render-vars", json={})
+    assert resp.status_code == 404
 
 
 async def test_confirm_dashboard_auth_persists_to_session(monkeypatch):

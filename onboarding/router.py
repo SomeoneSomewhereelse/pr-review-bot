@@ -144,7 +144,7 @@ class RenderPushEnvVarsRequest(BaseModel):
     render_service_id: str = Field(min_length=1, max_length=64)
 
 
-class LlmPushRenderVarsRequest(RenderPushEnvVarsRequest):
+class LlmConfirmRequest(BaseModel):
     provider: str = Field(pattern=r"^(gemini|groq|vertex)$")
     credential_value: str = Field(min_length=1, max_length=16384)
     model: str = Field(min_length=1, max_length=256)
@@ -485,12 +485,36 @@ async def list_vertex_models(payload: LlmVertexListModelsRequest) -> dict:
     return {"valid": False, "reason": result.reason}
 
 
+@router.post("/api/llm/confirm")
+async def confirm_llm_provider(payload: LlmConfirmRequest, request: Request) -> dict:
+    session_id = _get_session_id(request)
+    if session_id is None or session_store.get_session(session_id) is None:
+        return {"valid": False, "reason": "no_session"}
+    session_store.update_frame(
+        session_id,
+        "llm_provider",
+        {
+            "provider": payload.provider,
+            "credential_value": payload.credential_value,
+            "model": payload.model,
+        },
+    )
+    return {"valid": True}
+
+
 @router.post("/api/uptimerobot/create-monitor")
-async def create_uptimerobot_monitor(payload: UptimeRobotCreateMonitorRequest) -> dict:
+async def create_uptimerobot_monitor(
+    payload: UptimeRobotCreateMonitorRequest, request: Request
+) -> dict:
     result = await uptimerobot_client.create_or_reuse_monitor(
         payload.api_key, payload.render_service_url
     )
     if isinstance(result, uptimerobot_client.UptimeRobotMonitorResult):
+        session_id = _get_session_id(request)
+        if session_id is not None and session_store.get_session(session_id) is not None:
+            session_store.update_frame(
+                session_id, "uptime_pinger", {"monitor_id": result.monitor_id}
+            )
         return {"valid": True, "created": result.created, "monitor_id": result.monitor_id}
     return {"valid": False, "reason": result.reason}
 
@@ -532,21 +556,6 @@ def _push_result(result) -> dict:
     if isinstance(result, render_client.RenderEnvVarsPushed):
         return {"valid": True, "pushed": result.pushed}
     return {"valid": False, "reason": result.reason, "pushed": result.pushed}
-
-
-@router.post("/api/llm/push-render-vars")
-async def push_llm_render_vars(payload: LlmPushRenderVarsRequest) -> dict:
-    credential_var, model_var = _LLM_ENV_VAR_NAMES[payload.provider]
-    result = await render_client.push_env_vars(
-        payload.render_api_key,
-        payload.render_service_id,
-        {
-            "LLM_PROVIDER": payload.provider,
-            credential_var: payload.credential_value,
-            model_var: payload.model,
-        },
-    )
-    return _push_result(result)
 
 
 @router.post("/api/dashboard-auth/confirm")
