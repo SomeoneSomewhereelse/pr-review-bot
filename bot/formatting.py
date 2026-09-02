@@ -80,7 +80,7 @@ def _render_section(spec: SpecialistResult) -> str:
     if spec.status == "failed":
         return (
             f"### ❌ {spec.name} check failed\n"
-            f"> `{spec.error}` — other checks completed normally.\n"
+            f"> `{_escape_cell(spec.error)}` — other checks completed normally.\n"
         )
 
     if not spec.findings:

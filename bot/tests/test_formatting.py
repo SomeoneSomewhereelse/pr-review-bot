@@ -133,6 +133,38 @@ def test_format_comment_renders_failed_specialist_visibly():
     assert "DeadlineExceeded" in body
 
 
+def test_format_comment_escapes_a_failed_specialists_raw_error_text():
+    """format_failure's own docstring says failure sections never show raw
+    exception text -- _render_section's failed-status branch must escape
+    spec.error the same way every other cell is escaped, both so a stray `|`
+    or newline in the error can't break the Markdown table/inject a header,
+    and so a validation error that happened to echo secret material isn't
+    rendered verbatim into a public PR comment."""
+    result = ReviewResult(
+        pr_number=7,
+        provider="groq",
+        model="llama-3.3-70b-versatile",
+        results=[
+            SpecialistResult(
+                name="Security",
+                status="failed",
+                findings=[],
+                error="boom | fake col ```\n### Injected header",
+                elapsed_ms=500,
+            )
+        ],
+        total_elapsed_ms=500,
+        total_tokens_in=0,
+        total_tokens_out=0,
+        est_cost_usd=0.0,
+    )
+    body = format_comment(result)
+    assert "boom \\| fake col" in body
+    assert "```" not in body
+    assert "\n### Injected header" not in body
+    assert "boom" in body
+
+
 def test_format_comment_escapes_pipe_and_newline_in_finding_text():
     """A crafted finding (attacker-controlled via the PR diff) must not be able
     to inject extra Markdown table columns/rows via `|` or a newline."""
