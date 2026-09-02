@@ -22,7 +22,7 @@
 
 ## Unskipping the optional checks
 
-An optional check degrades to `SKIPPED` with a hint, never to a failure, when its operator-local key is unset. `RENDER_API_KEY` and `UPTIMEROBOT_API_KEY` are operator-local and are never set on the Render service; `DATABASE_URL` is both — the service needs it too, and `--sync-env` pushes it there.
+An optional check degrades to `SKIPPED` with a hint, never to a failure, when its operator-local key is unset. `RENDER_API_KEY` and `DATABASE_URL` are both operator-local AND pushed to the Render service by `--sync-env` (the service needs its own copy of `RENDER_API_KEY` too, for the dashboard's Environment tab); `UPTIMEROBOT_API_KEY` is operator-local only and never set on the Render service.
 
 - `RENDER_API_KEY` (Render → Account Settings → API Keys) enables `boot-creds-live`, `render-service`, `provider-live`, `api-key-live`, and `--sync-env`.
 - `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.

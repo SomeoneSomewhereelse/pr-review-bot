@@ -14,6 +14,7 @@
 - `GITHUB_APP_PRIVATE_KEY`
 - `GITHUB_TARGET_REPO`
 - `GITHUB_WEBHOOK_SECRET`
+- `RENDER_API_KEY`
 
 Plus `LLM_PROVIDER`, and `GITHUB_APP_INSTALLATION_ID` once it is set locally (it is optional, so an empty value is not an error).
 

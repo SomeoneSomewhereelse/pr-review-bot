@@ -29,6 +29,8 @@ services:
         sync: false
       - key: DASHBOARD_SESSION_SECRET
         sync: false
+      - key: RENDER_API_KEY
+        sync: false
       - key: GITHUB_TARGET_REPO
         sync: false
       - key: GITHUB_APP_INSTALLATION_ID

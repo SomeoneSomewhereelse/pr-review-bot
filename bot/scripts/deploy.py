@@ -63,6 +63,13 @@ _ALWAYS_SYNCED = (
     "DASHBOARD_USERNAME",
     "DASHBOARD_PASSWORD",
     "DASHBOARD_SESSION_SECRET",
+    # The deployed service now needs its own RENDER_API_KEY at runtime for
+    # dashboard/environment.py's Environment tab (docs/superpowers/specs/
+    # 2026-09-02-dashboard-environment-tab-design.md) -- previously only the
+    # onboarding wizard's bulk push included it, so a service provisioned via
+    # this CLI path instead of the wizard was silently missing it, with no
+    # check catching the gap.
+    "RENDER_API_KEY",
 )
 # GITHUB_TARGET_REPO empty is a valid, deliberate "track all repos" config
 # (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md), not a
@@ -999,6 +1006,7 @@ def _wanted_env() -> dict[str, str]:
         "DASHBOARD_USERNAME": settings.dashboard_username,
         "DASHBOARD_PASSWORD": settings.dashboard_password,
         "DASHBOARD_SESSION_SECRET": settings.dashboard_session_secret,
+        "RENDER_API_KEY": settings.render_api_key,
         "LLM_PROVIDER": settings.llm_provider,
     }
     entry = _PROVIDERS.get(settings.llm_provider)
