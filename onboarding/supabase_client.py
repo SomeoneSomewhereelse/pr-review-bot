@@ -259,15 +259,19 @@ class SupabaseConnectionInfo:
 
 
 async def get_connection_info(
-    access_token: str, ref: str
+    access_token: str, ref: str, session_id: str
 ) -> SupabaseConnectionInfo | SupabaseApiFailed:
     """GET /v1/projects/{ref}/config/database/pooler — selects the
     session-mode (port 5432) PRIMARY entry, matching the manual guide's
     existing "Session-mode pooler, not transaction mode" requirement.
     Deliberately never reads Supabase's own connection_string/
-    connectionString fields (see module docstring) — the caller (browser,
-    which already holds db_pass) assembles the final connection string
-    itself from this non-secret shape."""
+    connectionString fields (see module docstring) — the caller (the
+    router, which already holds db_pass server-side) assembles the final
+    connection string itself from this non-secret shape.
+
+    `session_id` is used only to tag the diagnostic prints below for log
+    correlation -- never logged or sent anywhere itself. It's not a
+    credential."""
     try:
         async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
             response = await client.get(
@@ -289,7 +293,7 @@ async def get_connection_info(
     try:
         entries = response.json()
     except ValueError:
-        print("[DEBUG connection-info] response body did not parse as JSON")
+        print(f"[DEBUG connection-info session={session_id}] response body did not parse as JSON")
         return SupabaseApiFailed(reason="pooler_config_unavailable")
 
     try:
@@ -310,7 +314,10 @@ async def get_connection_info(
             shapes = [(e.get("pool_mode"), e.get("database_type")) for e in entries]
         except (TypeError, AttributeError):
             shapes = f"entries was not a list of objects: {entries!r:.200}"
-        print(f"[DEBUG connection-info] no session/PRIMARY match; entries seen: {shapes}")
+        print(
+            f"[DEBUG connection-info session={session_id}] no session/PRIMARY match; "
+            f"entries seen: {shapes}"
+        )
         return SupabaseApiFailed(reason="pooler_config_unavailable")
     return SupabaseConnectionInfo(
         db_user=db_user, db_host=db_host, db_port=db_port, db_name=db_name

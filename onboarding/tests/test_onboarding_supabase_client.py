@@ -436,7 +436,9 @@ async def test_get_project_status_malformed_body_is_unreachable():
 async def test_get_connection_info_selects_the_session_mode_primary_entry():
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=_POOLER_ENTRIES))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseConnectionInfo(
         db_user="postgres.abcdefghijklmnopqrst",
         db_host="aws-0-us-east-1.pooler.supabase.com",
@@ -451,7 +453,9 @@ async def test_get_connection_info_never_returns_supabases_own_connection_string
     3 step 9) — the caller assembles the string itself from this shape."""
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=_POOLER_ENTRIES))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert not hasattr(result, "connection_string")
     assert not hasattr(result, "connectionString")
 
@@ -459,28 +463,36 @@ async def test_get_connection_info_never_returns_supabases_own_connection_string
 async def test_get_connection_info_no_session_mode_entry_is_pooler_config_unavailable():
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[_POOLER_ENTRIES[0]]))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")
 
 
 async def test_get_connection_info_empty_array_is_pooler_config_unavailable():
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[]))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")
 
 
 async def test_get_connection_info_unauthorized():
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(401))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseApiFailed(reason="unauthorized")
 
 
 async def test_get_connection_info_unreachable_on_5xx():
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(500))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
 
 
@@ -490,7 +502,9 @@ async def test_get_connection_info_malformed_entries_with_scalars_is_pooler_conf
     must be caught and degrade gracefully to pooler_config_unavailable."""
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[1, 2, 3]))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")
 
 
@@ -499,5 +513,7 @@ async def test_get_connection_info_malformed_entries_with_null_is_pooler_config_
     null raises AttributeError, which must be caught and degrade gracefully."""
     with respx.mock:
         respx.get(POOLER_URL).mock(return_value=httpx.Response(200, json=[None]))
-        result = await supabase_client.get_connection_info("a", "abcdefghijklmnopqrst")
+        result = await supabase_client.get_connection_info(
+            "a", "abcdefghijklmnopqrst", session_id="s1"
+        )
     assert result == supabase_client.SupabaseApiFailed(reason="pooler_config_unavailable")

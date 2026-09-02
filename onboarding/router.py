@@ -5,10 +5,14 @@ returns a verdict, never the credential it was given.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import secrets as _secrets
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 
 from onboarding import (
@@ -79,43 +83,12 @@ class GithubValidateAppRequest(BaseModel):
     webhook_secret: str = Field(min_length=1, max_length=512)
 
 
-class SupabaseExchangeCodeRequest(BaseModel):
-    # The browser sends back the exact redirect_uri it used on the authorize
-    # leg. OAuth requires the two to match byte-for-byte, and deriving them
-    # separately (browser from its own origin, server from a hand-set env
-    # var) is precisely how they drift apart — a trailing slash was enough to
-    # break this in practice. Supabase validates the value against the app's
-    # registered list regardless, so accepting it from the caller cannot
-    # redirect anything anywhere; the shape check is to avoid relaying
-    # arbitrary junk outbound.
-    code: str = Field(max_length=512)
-    code_verifier: str = Field(max_length=256)
-    redirect_uri: str = Field(min_length=1, max_length=2048, pattern=r"^https?://[^\s\"'<>\\]+$")
-
-
-class SupabaseRefreshTokenRequest(BaseModel):
-    refresh_token: str = Field(max_length=2048)
-
-
-class SupabaseListOrgsRequest(BaseModel):
-    access_token: str = Field(max_length=4096)
+class SupabaseConnectRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=256)
 
 
 class SupabaseCreateProjectRequest(BaseModel):
-    access_token: str = Field(max_length=4096)
     organization_slug: str = Field(min_length=1, max_length=64)
-    name: str = Field(max_length=256)
-    db_pass: str = Field(max_length=256)
-
-
-class SupabaseProjectStatusRequest(BaseModel):
-    access_token: str = Field(max_length=4096)
-    ref: str = Field(max_length=20, pattern=r"^[a-z]{20}$")
-
-
-class SupabaseConnectionInfoRequest(BaseModel):
-    access_token: str = Field(max_length=4096)
-    ref: str = Field(max_length=20, pattern=r"^[a-z]{20}$")
 
 
 class LlmGeminiListModelsRequest(BaseModel):
@@ -169,10 +142,6 @@ class RenderServiceCreateRequest(BaseModel):
 class RenderPushEnvVarsRequest(BaseModel):
     render_api_key: str = Field(max_length=512)
     render_service_id: str = Field(min_length=1, max_length=64)
-
-
-class SupabasePushRenderVarRequest(RenderPushEnvVarsRequest):
-    database_url: str = Field(min_length=1, max_length=2048)
 
 
 class LlmPushRenderVarsRequest(RenderPushEnvVarsRequest):
@@ -237,9 +206,45 @@ async def index() -> HTMLResponse:
     return _render_index()
 
 
-@router.get(SUPABASE_OAUTH_CALLBACK_PATH, response_class=HTMLResponse)
-async def supabase_oauth_callback() -> HTMLResponse:
-    return _render_index()
+@router.get(SUPABASE_OAUTH_CALLBACK_PATH)
+async def supabase_oauth_callback(request: Request):
+    """Completes the PKCE code exchange server-side and carries the pending
+    `name` forward, then redirects to `/` -- restoring the wizard's state
+    from here on is just the ordinary GET /api/session load, not a special
+    case. No client-side JS runs for this route at all. See
+    docs/superpowers/specs/2026-09-01-onboarding-server-side-session-design.md
+    section 3.4."""
+    session_id = _get_session_id(request)
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    pending = None
+    if session_id is not None:
+        supabase_frame = session_store.read_frame(session_id, "supabase")
+        pending = (supabase_frame or {}).get("_pending_oauth")
+    if session_id is None or pending is None or not code or pending.get("state") != state:
+        # No session, no pending OAuth, or a state mismatch (forged/replayed
+        # redirect) -- fall back to the ordinary "no session" page load
+        # rather than completing anything.
+        return RedirectResponse(url="/", status_code=302)
+
+    redirect_uri = f"{request.base_url}{SUPABASE_OAUTH_CALLBACK_PATH.lstrip('/')}"
+    token_result = await supabase_client.exchange_oauth_code(
+        code, pending["verifier"], redirect_uri
+    )
+    if not isinstance(token_result, supabase_client.SupabaseTokens):
+        return RedirectResponse(url="/", status_code=302)
+
+    session_store.update_frame(
+        session_id,
+        "supabase",
+        {
+            "access_token": token_result.access_token,
+            "refresh_token": token_result.refresh_token,
+            "name": pending["name"],
+            "_pending_oauth": None,
+        },
+    )
+    return RedirectResponse(url="/", status_code=302)
 
 
 @router.get("/api/session")
@@ -351,48 +356,71 @@ async def validate_github_app(payload: GithubValidateAppRequest, request: Reques
     }
 
 
-@router.post("/api/supabase/exchange-oauth-code")
-async def exchange_supabase_oauth_code(payload: SupabaseExchangeCodeRequest) -> dict:
-    result = await supabase_client.exchange_oauth_code(
-        payload.code, payload.code_verifier, payload.redirect_uri
+def _pkce_pair() -> tuple[str, str]:
+    verifier = base64.urlsafe_b64encode(_secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+@router.post("/api/supabase/connect")
+async def connect_supabase(payload: SupabaseConnectRequest, request: Request) -> dict:
+    session_id = _get_session_id(request)
+    if session_id is None or session_store.get_session(session_id) is None:
+        return {"valid": False, "reason": "no_session"}
+    state = _secrets.token_urlsafe(24)
+    verifier, challenge = _pkce_pair()
+    session_store.update_frame(
+        session_id,
+        "supabase",
+        {"_pending_oauth": {"state": state, "verifier": verifier, "name": payload.name}},
     )
-    if isinstance(result, supabase_client.SupabaseTokens):
-        return {
-            "valid": True,
-            "access_token": result.access_token,
-            "refresh_token": result.refresh_token,
-            "expires_in": result.expires_in,
-        }
-    return {"valid": False, "reason": result.reason}
-
-
-@router.post("/api/supabase/refresh-access-token")
-async def refresh_supabase_access_token(payload: SupabaseRefreshTokenRequest) -> dict:
-    result = await supabase_client.refresh_access_token(payload.refresh_token)
-    if isinstance(result, supabase_client.SupabaseTokens):
-        return {
-            "valid": True,
-            "access_token": result.access_token,
-            "refresh_token": result.refresh_token,
-            "expires_in": result.expires_in,
-        }
-    return {"valid": False, "reason": result.reason}
+    redirect_uri = f"{request.base_url}{SUPABASE_OAUTH_CALLBACK_PATH.lstrip('/')}"
+    params = {
+        "client_id": settings.supabase_oauth_client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    }
+    return {"valid": True, "authorize_url": f"https://api.supabase.com/v1/oauth/authorize?{urlencode(params)}"}
 
 
 @router.post("/api/supabase/list-organizations")
-async def list_supabase_organizations(payload: SupabaseListOrgsRequest) -> dict:
-    result = await supabase_client.list_organizations(payload.access_token)
+async def list_supabase_organizations(request: Request) -> dict:
+    session_id = _get_session_id(request)
+    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    if not supabase_frame or "access_token" not in supabase_frame:
+        return {"valid": False, "reason": "no_session"}
+    result = await supabase_client.list_organizations(supabase_frame["access_token"])
     if isinstance(result, supabase_client.SupabaseOrgsListed):
         return {"valid": True, "orgs": [{"slug": o.slug, "name": o.name} for o in result.orgs]}
     return {"valid": False, "reason": result.reason}
 
 
 @router.post("/api/supabase/create-project")
-async def create_supabase_project(payload: SupabaseCreateProjectRequest) -> dict:
+async def create_supabase_project(payload: SupabaseCreateProjectRequest, request: Request) -> dict:
+    session_id = _get_session_id(request)
+    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    if not supabase_frame or "access_token" not in supabase_frame or "name" not in supabase_frame:
+        return {"valid": False, "reason": "no_session"}
+    db_pass = _secrets.token_urlsafe(24)
     result = await supabase_client.create_project(
-        payload.access_token, payload.organization_slug, payload.name, payload.db_pass
+        supabase_frame["access_token"], payload.organization_slug, supabase_frame["name"], db_pass
     )
     if isinstance(result, supabase_client.SupabaseProjectCreated):
+        session_store.update_frame(
+            session_id,
+            "supabase",
+            {
+                "ref": result.ref,
+                "status": result.status,
+                "db_pass": db_pass,
+                "organization_slug": payload.organization_slug,
+            },
+        )
         return {"valid": True, "ref": result.ref, "status": result.status}
     if isinstance(result, supabase_client.SupabaseProjectRejected):
         return {"valid": False, "reason": "project_creation_rejected", "message": result.message}
@@ -400,24 +428,36 @@ async def create_supabase_project(payload: SupabaseCreateProjectRequest) -> dict
 
 
 @router.post("/api/supabase/project-status")
-async def get_supabase_project_status(payload: SupabaseProjectStatusRequest) -> dict:
-    result = await supabase_client.get_project_status(payload.access_token, payload.ref)
+async def get_supabase_project_status(request: Request) -> dict:
+    session_id = _get_session_id(request)
+    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    if not supabase_frame or "access_token" not in supabase_frame or "ref" not in supabase_frame:
+        return {"valid": False, "reason": "no_session"}
+    result = await supabase_client.get_project_status(
+        supabase_frame["access_token"], supabase_frame["ref"]
+    )
     if isinstance(result, supabase_client.SupabaseProjectStatus):
         return {"valid": True, "status": result.status}
     return {"valid": False, "reason": result.reason}
 
 
 @router.post("/api/supabase/connection-info")
-async def get_supabase_connection_info(payload: SupabaseConnectionInfoRequest) -> dict:
-    result = await supabase_client.get_connection_info(payload.access_token, payload.ref)
+async def get_supabase_connection_info(request: Request) -> dict:
+    session_id = _get_session_id(request)
+    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    required = ("access_token", "ref", "db_pass")
+    if not supabase_frame or not all(k in supabase_frame for k in required):
+        return {"valid": False, "reason": "no_session"}
+    result = await supabase_client.get_connection_info(
+        supabase_frame["access_token"], supabase_frame["ref"], session_id=session_id
+    )
     if isinstance(result, supabase_client.SupabaseConnectionInfo):
-        return {
-            "valid": True,
-            "db_user": result.db_user,
-            "db_host": result.db_host,
-            "db_port": result.db_port,
-            "db_name": result.db_name,
-        }
+        database_url = (
+            f"postgresql://{result.db_user}:{supabase_frame['db_pass']}"
+            f"@{result.db_host}:{result.db_port}/{result.db_name}"
+        )
+        session_store.update_frame(session_id, "supabase", {"database_url": database_url})
+        return {"valid": True}
     return {"valid": False, "reason": result.reason}
 
 
@@ -492,14 +532,6 @@ def _push_result(result) -> dict:
     if isinstance(result, render_client.RenderEnvVarsPushed):
         return {"valid": True, "pushed": result.pushed}
     return {"valid": False, "reason": result.reason, "pushed": result.pushed}
-
-
-@router.post("/api/supabase/push-render-var")
-async def push_supabase_render_var(payload: SupabasePushRenderVarRequest) -> dict:
-    result = await render_client.push_env_vars(
-        payload.render_api_key, payload.render_service_id, {"DATABASE_URL": payload.database_url}
-    )
-    return _push_result(result)
 
 
 @router.post("/api/llm/push-render-vars")
