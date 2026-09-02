@@ -566,7 +566,7 @@ def _missing_runtime_config_columns() -> list[str] | None:
             row[0]
             for row in conn.execute(
                 "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'runtime_config'"
+                "WHERE table_schema = 'public' AND table_name = 'runtime_config'"
             ).fetchall()
         }
     return [name for name, _ in store.RUNTIME_CONFIG_COLUMNS if name not in live]

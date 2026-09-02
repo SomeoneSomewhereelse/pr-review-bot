@@ -1048,6 +1048,36 @@ def test_runtime_config_schema_reports_an_absent_table_distinctly(
     assert "ALTER TABLE" not in result.detail
 
 
+@pytest.fixture
+def _runtime_config_shadowed_by_another_schema(db, db_exec):
+    """A same-named `runtime_config` table in a non-public schema, WITH the
+    column the public one is missing. Regression fixture for the
+    table_schema gap: the live-columns query used to filter on table_name
+    alone, so this other schema's columns could mask a genuinely missing
+    public column. Drops the shadow schema afterward; the public table's
+    review_draft_prs column is restored by the caller's own
+    _runtime_config_missing_review_draft_prs fixture."""
+    db_exec("CREATE SCHEMA IF NOT EXISTS shadow")
+    db_exec("CREATE TABLE shadow.runtime_config (review_draft_prs BOOLEAN)")
+    yield
+    db_exec("DROP SCHEMA shadow CASCADE")
+
+
+def test_runtime_config_schema_ignores_a_same_named_table_in_another_schema(
+    _runtime_config_missing_review_draft_prs,
+    _runtime_config_shadowed_by_another_schema,
+    db_url,
+    monkeypatch,
+):
+    """review_draft_prs is missing from public.runtime_config but present on
+    shadow.runtime_config -- the check must still report it missing (schema-
+    qualified), not be masked by the other schema's column of the same name."""
+    monkeypatch.setattr(settings, "database_url", db_url)
+    result = deploy.check_runtime_config_schema()
+    assert result.status == "FAIL"
+    assert "review_draft_prs" in result.detail
+
+
 RENDER_SERVICES = "https://api.render.com/v1/services"
 
 
