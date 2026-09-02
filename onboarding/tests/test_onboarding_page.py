@@ -1154,6 +1154,25 @@ async def test_render_service_frame_precedes_the_github_app_frame():
     assert order.index('"render-service"') < order.index('"github-app"')
 
 
+async def test_every_getelementbyid_target_exists_in_the_markup():
+    """A stale getElementById("...") reference throws at runtime (unlike
+    every other check in this file, which is a content-substring check, not
+    JS execution) -- one such reference (github-app-name-input, left behind
+    by the manual-GitHub-App-flow redesign) was in applyLanguage(), meaning
+    EVERY page load threw before restoreFromSession() or the theme/reset
+    listeners ever ran, silently. This is a blanket regression guard: every
+    literal getElementById("<id>") call anywhere in the script must have a
+    matching id="<id>" (or id='<id>') somewhere in the document."""
+    import re
+
+    client = await _client()
+    body = (await client.get("/")).text
+    requested_ids = set(re.findall(r'getElementById\("([^"]+)"\)', body))
+    present_ids = set(re.findall(r'id="([^"]+)"', body)) | set(re.findall(r"id='([^']+)'", body))
+    missing = requested_ids - present_ids
+    assert not missing, f"getElementById() targets with no matching id= in the markup: {missing}"
+
+
 async def test_webhook_patch_flow_is_fully_removed():
     """Endpoint, client call, retry UI and its strings all go together --
     a leftover half of this flow is worse than either whole."""

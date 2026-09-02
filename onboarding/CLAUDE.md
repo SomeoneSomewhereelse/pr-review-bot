@@ -53,6 +53,35 @@ What this changes in practice:
   progress, replacing the implicit "just don't complete a frame" model a
   stateless relay didn't need.
 
+**Two implementation details found missing during a 2026-09-02 correctness
+review, fixed the same day (see `ISSUES.md`) — both load-bearing, not
+optional:**
+- **Every `router.py` endpoint calls `session_store.py` through the
+  `_get_session`/`_read_frame`/`_update_frame`/`_create_session`/
+  `_delete_session` wrapper functions at the top of `router.py`, never the
+  `session_store.*` functions directly.** They exist solely to run the sync,
+  real-Postgres-calling `session_store.py` functions via `asyncio.to_thread`
+  — calling `session_store.py` directly from an `async def` endpoint blocks
+  the single event loop for every other concurrent request for the duration
+  of that DB round-trip. A new endpoint that needs the session store uses
+  these wrappers, not a fresh direct call.
+- **`update_frame(..., replace=True)` fully discards a frame's existing
+  content instead of merging — used only by the two endpoints that
+  represent "start this frame over" (`validate-key`, `connect`).** A plain
+  merge on a resubmitted Render key or a Supabase reconnect would leave the
+  *previous* account/project's `service_id`/`ref`/`database_url` sitting in
+  the session, which `GET /api/session`'s completeness check (keyed off a
+  field's mere presence) could then report as still-done for the wrong
+  account. Every endpoint's own docstring/comment says which one it is; a
+  new "start over" endpoint for a different frame should use `replace=True`
+  too, not assume a plain merge is always safe. Also check every
+  `update_frame()`/`_update_frame()` call's return value for
+  `SessionNotFound` and report `{"valid": false, "reason": "no_session"}`
+  rather than silently reporting success when the write didn't happen — the
+  one deliberate exception is `trigger-deploy`'s own write (see its inline
+  comment): a real, non-idempotent external side effect already happened by
+  that point, so failing the response would only invite a duplicate deploy.
+
 ## Rules
 
 - **Never log a visitor-supplied credential**, in full or truncated — same

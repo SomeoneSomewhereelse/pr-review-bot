@@ -52,10 +52,10 @@ class _FakeSessionStore:
             return None
         return session_store.SessionData(frames={k: dict(v) for k, v in frames.items()})
 
-    def update_frame(self, session_id: str, frame: str, data: dict):
+    def update_frame(self, session_id: str, frame: str, data: dict, *, replace: bool = False):
         if session_id not in self._sessions:
             return session_store.SessionNotFound()
-        existing = self._sessions[session_id].get(frame, {})
+        existing = {} if replace else self._sessions[session_id].get(frame, {})
         self._sessions[session_id][frame] = {**existing, **data}
         return None
 
@@ -125,6 +125,29 @@ async def test_valid_key_creates_a_session_and_sets_the_cookie(monkeypatch):
     assert "onboarding_session=" in resp.headers.get("set-cookie", "")
 
 
+async def test_valid_key_reports_failure_if_the_session_write_is_lost(monkeypatch):
+    """An unpersisted "success" isn't real (design spec section 3.6) -- if
+    update_frame can't find the session it was just told exists (a race
+    with e.g. a concurrent reset), the endpoint must not still claim
+    success even though the external Render check passed."""
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    monkeypatch.setattr(
+        session_store, "update_frame", lambda *a, **k: session_store.SessionNotFound()
+    )
+
+    async def fake_validate_key(api_key: str):
+        return render_client.RenderKeyValid(owner_name="Ada Lovelace")
+
+    monkeypatch.setattr(render_client, "validate_key", fake_validate_key)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/validate-key", json={"api_key": SENTINEL_KEY},
+        cookies={"onboarding_session": session_id},
+    )
+    assert resp.json() == {"valid": False, "reason": "no_session"}
+
+
 async def test_valid_key_reuses_an_existing_session_cookie(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
@@ -140,6 +163,31 @@ async def test_valid_key_reuses_an_existing_session_cookie(monkeypatch):
     )
     assert "set-cookie" not in resp.headers
     assert fake.read_frame(session_id, "render")["owner_name"] == "Ada Lovelace"
+
+
+async def test_valid_key_resubmission_discards_the_previous_render_services_data(monkeypatch):
+    """A "Change"-triggered resubmission of the Render key must not leave a
+    previous service_id/service_url behind -- it may belong to a different
+    Render account under the old key."""
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(
+        session_id, "render",
+        {"api_key": "rnd_old", "owner_name": "Old Owner", "service_id": "srv-old", "service_url": "https://old.onrender.com"},
+    )
+
+    async def fake_validate_key(api_key: str):
+        return render_client.RenderKeyValid(owner_name="New Owner")
+
+    monkeypatch.setattr(render_client, "validate_key", fake_validate_key)
+    client = await _client()
+    await client.post(
+        "/api/render/validate-key", json={"api_key": "rnd_new"},
+        cookies={"onboarding_session": session_id},
+    )
+    assert fake.read_frame(session_id, "render") == {
+        "api_key": "rnd_new", "owner_name": "New Owner",
+    }
 
 
 async def test_invalid_key_reports_the_reason(monkeypatch):
@@ -298,6 +346,31 @@ async def test_connect_supabase_stores_pending_oauth_and_returns_authorize_url(m
     assert body["authorize_url"].startswith("https://api.supabase.com/v1/oauth/authorize?")
     pending = fake.read_frame(session_id, "supabase")["_pending_oauth"]
     assert pending["state"] and pending["verifier"] and pending["name"] == "myproj"
+
+
+async def test_connect_supabase_discards_a_previous_projects_data(monkeypatch):
+    """A "Change"-triggered reconnect must not leave the OLD project's ref/
+    database_url behind: GET /api/session's completeness check keys off
+    database_url's mere presence, so a stale one would report the frame as
+    already-done for the wrong project if the visitor reloads mid-reconnect."""
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(
+        session_id, "supabase",
+        {
+            "access_token": "old-tok", "name": "old-proj", "ref": "x" * 20,
+            "db_pass": "old-pass", "database_url": "postgresql://old",
+        },
+    )
+    client = await _client()
+    await client.post(
+        "/api/supabase/connect", json={"name": "new-proj"},
+        cookies={"onboarding_session": session_id},
+    )
+    stored = fake.read_frame(session_id, "supabase")
+    assert "ref" not in stored
+    assert "database_url" not in stored
+    assert "access_token" not in stored
 
 
 async def test_connect_supabase_with_no_session_fails_closed():
@@ -572,11 +645,38 @@ async def test_get_session_reports_supabase_authorized_but_not_yet_created(monke
     }
 
 
-async def test_get_session_reports_supabase_complete_once_project_created(monkeypatch):
+async def test_get_session_reports_supabase_provisioning_once_project_created(monkeypatch):
+    """ref alone (project created) is NOT complete -- database_url is what
+    the final deploy step actually needs, and that's written later by
+    connection-info. A session with ref but no database_url must report a
+    resumable "provisioning" state, not complete, so a reload mid-wait
+    doesn't unlock the next frame with nothing for bulk-push to find."""
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
     fake.update_frame(
         session_id, "supabase", {"access_token": "tok", "name": "myproj", "ref": "x" * 20}
+    )
+    client = await _client()
+    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
+    assert resp.json()["frames"]["supabase"] == {
+        "complete": False,
+        "provisioning": True,
+        "display": {"ref": "x" * 20, "name": "myproj"},
+    }
+
+
+async def test_get_session_reports_supabase_complete_once_database_url_present(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(
+        session_id,
+        "supabase",
+        {
+            "access_token": "tok",
+            "name": "myproj",
+            "ref": "x" * 20,
+            "database_url": "postgresql://u:p@h:5432/d",
+        },
     )
     client = await _client()
     resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
@@ -1026,7 +1126,9 @@ async def test_uptimerobot_create_monitor_persists_to_session(monkeypatch):
         json={"api_key": SENTINEL_KEY, "render_service_url": "https://x.onrender.com"},
         cookies={"onboarding_session": session_id},
     )
-    assert fake.read_frame(session_id, "uptime_pinger") == {"monitor_id": 99}
+    assert fake.read_frame(session_id, "uptime_pinger") == {
+        "api_key": SENTINEL_KEY, "monitor_id": 99,
+    }
 
 
 async def test_uptimerobot_monitor_reused_reports_created_false(monkeypatch):
@@ -1138,6 +1240,10 @@ async def test_uptimerobot_render_url_is_stripped_before_the_client_sees_it(monk
 
 
 async def test_uptimerobot_delete_monitor_reports_valid_true(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "uptime_pinger", {"api_key": SENTINEL_KEY, "monitor_id": 42})
+
     async def fake_delete(api_key, monitor_id):
         assert api_key == SENTINEL_KEY
         assert monitor_id == 42
@@ -1146,56 +1252,49 @@ async def test_uptimerobot_delete_monitor_reports_valid_true(monkeypatch):
     monkeypatch.setattr(uptimerobot_client, "delete_monitor", fake_delete)
     client = await _client()
     resp = await client.post(
-        "/api/uptimerobot/delete-monitor",
-        json={"api_key": SENTINEL_KEY, "monitor_id": 42},
+        "/api/uptimerobot/delete-monitor", cookies={"onboarding_session": session_id}
     )
     assert resp.status_code == 200
     assert resp.json() == {"valid": True}
 
 
 async def test_uptimerobot_delete_monitor_failure_reports_the_reason(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "uptime_pinger", {"api_key": SENTINEL_KEY, "monitor_id": 42})
+
     async def fake_delete(api_key, monitor_id):
         return uptimerobot_client.UptimeRobotApiFailed(reason="unauthorized")
 
     monkeypatch.setattr(uptimerobot_client, "delete_monitor", fake_delete)
     client = await _client()
     resp = await client.post(
-        "/api/uptimerobot/delete-monitor",
-        json={"api_key": SENTINEL_KEY, "monitor_id": 42},
+        "/api/uptimerobot/delete-monitor", cookies={"onboarding_session": session_id}
     )
     assert resp.status_code == 200
     assert resp.json() == {"valid": False, "reason": "unauthorized"}
 
 
-async def test_uptimerobot_delete_monitor_never_echoes_the_submitted_key(monkeypatch):
+async def test_uptimerobot_delete_monitor_never_echoes_the_key(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "uptime_pinger", {"api_key": SENTINEL_KEY, "monitor_id": 42})
+
     async def fake_delete(api_key, monitor_id):
         return uptimerobot_client.UptimeRobotApiFailed(reason="unauthorized")
 
     monkeypatch.setattr(uptimerobot_client, "delete_monitor", fake_delete)
     client = await _client()
     resp = await client.post(
-        "/api/uptimerobot/delete-monitor",
-        json={"api_key": SENTINEL_KEY, "monitor_id": 42},
+        "/api/uptimerobot/delete-monitor", cookies={"onboarding_session": session_id}
     )
     assert SENTINEL_KEY not in resp.text
 
 
-async def test_uptimerobot_delete_monitor_rejects_non_positive_id():
+async def test_uptimerobot_delete_monitor_with_no_session_fails_closed():
     client = await _client()
-    resp = await client.post(
-        "/api/uptimerobot/delete-monitor",
-        json={"api_key": SENTINEL_KEY, "monitor_id": 0},
-    )
-    assert resp.status_code == 422
-
-
-async def test_uptimerobot_delete_monitor_rejects_empty_key():
-    client = await _client()
-    resp = await client.post(
-        "/api/uptimerobot/delete-monitor",
-        json={"api_key": "", "monitor_id": 42},
-    )
-    assert resp.status_code == 422
+    resp = await client.post("/api/uptimerobot/delete-monitor")
+    assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
 async def test_create_service_endpoint_returns_id_and_url(monkeypatch):

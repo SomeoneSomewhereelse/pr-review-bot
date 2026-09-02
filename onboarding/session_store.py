@@ -165,11 +165,24 @@ class SessionNotFound:
     pass
 
 
-def update_frame(session_id: str, frame: str, data: dict) -> SessionNotFound | None:
+def update_frame(
+    session_id: str, frame: str, data: dict, *, replace: bool = False
+) -> SessionNotFound | None:
     """Shallow-merges `data` into the session's existing dict for `frame`
     (creating that frame's entry on its first write), then re-encrypts the
     whole frame as one blob. Requires an existing, non-expired session --
     see create_session()'s docstring for why this must never upsert.
+
+    `replace=True` discards the frame's existing content entirely instead
+    of merging -- for the specific endpoints that represent "start this
+    frame over" (re-submitting the Render key, starting a new Supabase
+    OAuth flow), where leaving old fields around is actively wrong, not
+    just stale: e.g. resubmitting a different Render API key must not
+    leave a previous `service_id`/`service_url` behind for a service that
+    may belong to a different Render account, and starting a fresh
+    Supabase OAuth flow must not leave a previous `ref`/`database_url`
+    around that GET /api/session could report as "complete" before the
+    new flow finishes.
 
     Not fully race-safe against two concurrent updates to the SAME frame
     (read-then-write, not a single atomic statement) -- acceptable given
@@ -181,13 +194,19 @@ def update_frame(session_id: str, frame: str, data: dict) -> SessionNotFound | N
     existing = get_session(session_id)
     if existing is None:
         return SessionNotFound()
-    merged = {**existing.frames.get(frame, {}), **data}
+    merged = data if replace else {**existing.frames.get(frame, {}), **data}
     token = _encrypt_frame(merged)
     with _require_pool().connection() as conn:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE wizard_sessions SET frame_data = frame_data || %s::jsonb WHERE id = %s",
             (Jsonb({frame: token}), session_id),
         )
+        # The session could have been deleted (TTL expiry sweep, or an
+        # explicit reset in another tab) in the gap between the read above
+        # and this UPDATE -- a zero-row UPDATE silently wrote nothing, and
+        # must not be reported as success.
+        if cur.rowcount == 0:
+            return SessionNotFound()
     return None
 
 

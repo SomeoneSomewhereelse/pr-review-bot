@@ -81,6 +81,36 @@ def test_update_frame_against_a_deleted_session_does_not_resurrect_it():
     assert session_store.get_session(session_id) is None
 
 
+def test_update_frame_replace_discards_the_frames_existing_content():
+    session_id = session_store.create_session()
+    session_store.update_frame(session_id, "render", {"api_key": "rnd_old", "service_id": "srv-1"})
+    session_store.update_frame(session_id, "render", {"api_key": "rnd_new"}, replace=True)
+    assert session_store.read_frame(session_id, "render") == {"api_key": "rnd_new"}
+
+
+def test_update_frame_replace_does_not_clobber_a_different_frame():
+    session_id = session_store.create_session()
+    session_store.update_frame(session_id, "render", {"api_key": "rnd_x"})
+    session_store.update_frame(session_id, "github_app", {"app_id": 1})
+    session_store.update_frame(session_id, "render", {"api_key": "rnd_y"}, replace=True)
+    assert session_store.read_frame(session_id, "github_app") == {"app_id": 1}
+
+
+def test_update_frame_returns_session_not_found_when_the_update_affects_zero_rows(monkeypatch):
+    """Simulates the narrower race window inside update_frame itself: its
+    own internal get_session() succeeds, but the row is gone by the time
+    its UPDATE runs (deleted by something else in that gap -- a TTL sweep,
+    a concurrent reset). The UPDATE then genuinely affects 0 rows, which
+    must be reported as SessionNotFound, not silently treated as success --
+    a zero-row UPDATE is not a write that happened."""
+    session_id = session_store.create_session()
+    stale_view = session_store.get_session(session_id)
+    session_store.delete_session(session_id)
+    monkeypatch.setattr(session_store, "get_session", lambda sid: stale_view)
+    result = session_store.update_frame(session_id, "render", {"api_key": "x"})
+    assert isinstance(result, session_store.SessionNotFound)
+
+
 def test_read_frame_returns_none_for_a_frame_never_written():
     session_id = session_store.create_session()
     assert session_store.read_frame(session_id, "render") is None

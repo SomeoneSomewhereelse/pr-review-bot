@@ -795,7 +795,6 @@
       el.textContent = t(el.getAttribute("data-i18n"));
     });
     document.getElementById("render-key-input").placeholder = t("frame1_placeholder");
-    document.getElementById("github-app-name-input").placeholder = t("frame2_name_placeholder");
     document.getElementById("supabase-project-name-input").placeholder = t("frame3_name_placeholder");
     document.getElementById("themePopupTitle").textContent = t("theme_popup_title");
     document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
@@ -1026,25 +1025,14 @@
   // Best-effort cleanup for an UptimeRobot monitor left watching a Render
   // service URL that's about to stop existing. Only render-key and
   // render-service changes can invalidate render-service's URL (every
-  // other frame's "Change" leaves it alone) -- called from beginChange
-  // BEFORE relockDownstreamOf runs, since that clears the uptime-pinger
-  // frame's own sessionStorage record (including this monitor_id) as part
-  // of locking it. Reads synchronously before its first await, so the call
-  // site doesn't need to await this itself for the read to be safe.
+  // other frame's "Change" leaves it alone) -- called from beginChange.
+  // Session-backed (no body): the UptimeRobot API key lives server-side
+  // now, not in sessionStorage, so there's nothing local left to gate this
+  // on -- the endpoint itself reports back if there's no session record to
+  // clean up.
   async function cleanupOrphanedUptimeMonitor() {
-    let stored;
     try {
-      stored = JSON.parse(sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"]) || "null");
-    } catch (err) {
-      return;
-    }
-    if (!stored || !stored.api_key || !stored.monitor_id) return;
-    try {
-      const resp = await fetch("/api/uptimerobot/delete-monitor", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({api_key: stored.api_key, monitor_id: stored.monitor_id}),
-      });
+      const resp = await fetch("/api/uptimerobot/delete-monitor", {method: "POST"});
       const body = await resp.json();
       if (!body.valid) {
         console.warn("UptimeRobot monitor cleanup failed:", "/api/uptimerobot/delete-monitor", "reason:", body.reason);
@@ -1415,7 +1403,9 @@
       return;
     }
     if (body.valid) {
-      sessionStorage.setItem(STORAGE_KEYS["uptime-pinger"], JSON.stringify({api_key: key, monitor_id: body.monitor_id}));
+      // Non-secret continuity only -- the API key is persisted server-side
+      // by /api/uptimerobot/create-monitor on success, never mirrored here.
+      sessionStorage.setItem(STORAGE_KEYS["uptime-pinger"], JSON.stringify({monitor_id: body.monitor_id}));
       input.value = "";
       completeFrame("uptime-pinger", body.created ? "monitor_created_detail" : "monitor_reused_detail", null);
     } else {
@@ -2354,10 +2344,19 @@
     }
     if (frames["render-service"]) {
       const {service_id: serviceId, service_url: serviceUrl} = frames["render-service"].display;
+      // Merge onto whatever's already in the local mirror rather than
+      // replacing it outright -- on an ordinary same-tab reload (as
+      // opposed to the mobile tab-discard case this whole restore path
+      // exists for), sessionStorage already has this frame's own
+      // `deployed`/`pending_deploy_id` fields from earlier in the same
+      // browsing session; overwriting unconditionally would discard
+      // render-deploy's resumable state on every normal reload, not just
+      // the tab-discard one.
       try {
+        const existing = readStoredRenderService() || {};
         sessionStorage.setItem(
           STORAGE_KEYS["render-service"],
-          JSON.stringify({service_id: serviceId, service_url: serviceUrl}),
+          JSON.stringify({...existing, service_id: serviceId, service_url: serviceUrl}),
         );
         sessionStorage.setItem(RENDER_SERVICE_URL_KEY, serviceUrl);
       } catch (err) {
@@ -2375,6 +2374,23 @@
     const supabaseFrame = frames["supabase"];
     if (supabaseFrame && supabaseFrame.complete) {
       completeFrame("supabase", "project_prefix", supabaseFrame.display.name);
+    } else if (supabaseFrame && supabaseFrame.provisioning) {
+      // Project created, but connection-info hasn't completed yet --
+      // resume the provisioning poll where it left off. The local mirror
+      // needs {ref} for pollUntilReady()/fetchSupabaseConnectionInfo()'s
+      // own readStoredSupabase() checks, and {name} for the eventual
+      // completeFrame() call.
+      try {
+        sessionStorage.setItem(
+          STORAGE_KEYS["supabase"],
+          JSON.stringify({ref: supabaseFrame.display.ref, name: supabaseFrame.display.name}),
+        );
+      } catch (err) {
+        // best-effort -- falls through to showing the frame as ready to
+        // provision again if the mirror can't be written.
+      }
+      showSupabaseProvisioning();
+      pollUntilReady(Date.now(), supabasePollGeneration);
     } else if (supabaseFrame && supabaseFrame.authorized) {
       // Returned from Supabase's consent screen (a full page redirect, so
       // this is always a fresh script load) but hasn't picked an

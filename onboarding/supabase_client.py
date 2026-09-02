@@ -313,7 +313,17 @@ async def get_connection_info(
         try:
             shapes = [(e.get("pool_mode"), e.get("database_type")) for e in entries]
         except (TypeError, AttributeError):
-            shapes = f"entries was not a list of objects: {entries!r:.200}"
+            # Never repr `entries` itself here -- if the response shape is
+            # a single object rather than a list (exactly the kind of
+            # mismatch this diagnostic exists to catch), it may carry
+            # db_host/connection_string/other credential-adjacent fields.
+            # A type name and, for a dict, its key names only (values
+            # discarded) is the safe presence-check shape this project's
+            # secret-handling rules require.
+            if isinstance(entries, dict):
+                shapes = f"entries was a single dict with keys: {sorted(entries)}"
+            else:
+                shapes = f"entries was not a list of objects: {type(entries).__name__}"
         print(
             f"[DEBUG connection-info session={session_id}] no session/PRIMARY match; "
             f"entries seen: {shapes}"

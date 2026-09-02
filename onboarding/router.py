@@ -5,6 +5,7 @@ returns a verdict, never the credential it was given.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import secrets as _secrets
@@ -48,6 +49,36 @@ def _set_session_cookie(response: Response, session_id: str) -> None:
     )
 
 
+# session_store.py's functions are sync (real Postgres calls) -- every
+# endpoint below awaits them through these thin asyncio.to_thread wrappers
+# rather than calling them directly, so a request's DB round-trips never
+# block the event loop for every other concurrent request. Looked up via
+# `session_store.<name>` at call time (not captured at import time), so
+# these stay correct under tests that monkeypatch the module's functions.
+async def _create_session() -> str:
+    return await asyncio.to_thread(session_store.create_session)
+
+
+async def _get_session(session_id: str) -> session_store.SessionData | None:
+    return await asyncio.to_thread(session_store.get_session, session_id)
+
+
+async def _read_frame(session_id: str, frame: str) -> dict | None:
+    return await asyncio.to_thread(session_store.read_frame, session_id, frame)
+
+
+async def _update_frame(
+    session_id: str, frame: str, data: dict, *, replace: bool = False
+) -> session_store.SessionNotFound | None:
+    return await asyncio.to_thread(
+        session_store.update_frame, session_id, frame, data, replace=replace
+    )
+
+
+async def _delete_session(session_id: str) -> None:
+    await asyncio.to_thread(session_store.delete_session, session_id)
+
+
 class RenderKeyRequest(BaseModel):
     api_key: str = Field(max_length=512)
 
@@ -89,11 +120,6 @@ class LlmGroqListModelsRequest(BaseModel):
 
 class LlmVertexListModelsRequest(BaseModel):
     service_account_key_b64: str = Field(min_length=1, max_length=16384)
-
-
-class UptimeRobotDeleteMonitorRequest(BaseModel):
-    api_key: str = Field(min_length=1, max_length=512)
-    monitor_id: int = Field(gt=0)
 
 
 class UptimeRobotCreateMonitorRequest(BaseModel):
@@ -193,7 +219,7 @@ async def supabase_oauth_callback(request: Request):
     state = request.query_params.get("state")
     pending = None
     if session_id is not None:
-        supabase_frame = session_store.read_frame(session_id, "supabase")
+        supabase_frame = (await _read_frame(session_id, "supabase"))
         pending = (supabase_frame or {}).get("_pending_oauth")
     if session_id is None or pending is None or not code or pending.get("state") != state:
         # No session, no pending OAuth, or a state mismatch (forged/replayed
@@ -208,7 +234,7 @@ async def supabase_oauth_callback(request: Request):
     if not isinstance(token_result, supabase_client.SupabaseTokens):
         return RedirectResponse(url="/", status_code=302)
 
-    session_store.update_frame(
+    await _update_frame(
         session_id,
         "supabase",
         {
@@ -233,7 +259,7 @@ async def get_session_state(request: Request) -> dict:
     session_id = _get_session_id(request)
     if session_id is None:
         return {"frames": {}}
-    session = session_store.get_session(session_id)
+    session = (await _get_session(session_id))
     if session is None:
         return {"frames": {}}
     data = session.frames
@@ -265,8 +291,18 @@ async def get_session_state(request: Request) -> dict:
         frames["github-app"] = {"complete": True, "display": {}}
 
     supabase = data.get("supabase")
-    if supabase and "ref" in supabase:
+    if supabase and "database_url" in supabase:
         frames["supabase"] = {"complete": True, "display": {"name": supabase.get("name")}}
+    elif supabase and "ref" in supabase:
+        # Project created, but connection-info hasn't run yet (e.g. a
+        # reload during the ~2 minute provisioning wait) -- resume
+        # polling, don't report complete without a DATABASE_URL for the
+        # final deploy step to find.
+        frames["supabase"] = {
+            "complete": False,
+            "provisioning": True,
+            "display": {"ref": supabase.get("ref"), "name": supabase.get("name")},
+        }
     elif supabase and "access_token" in supabase:
         # Authorized but the project hasn't been created yet (visitor
         # returned from Supabase's consent screen but the page reloaded
@@ -293,7 +329,7 @@ async def get_session_state(request: Request) -> dict:
 async def reset_session(request: Request, response: Response) -> Response:
     session_id = _get_session_id(request)
     if session_id is not None:
-        session_store.delete_session(session_id)
+        (await _delete_session(session_id))
     response.delete_cookie(SESSION_COOKIE_NAME)
     response.status_code = 204
     return response
@@ -310,12 +346,26 @@ async def validate_render_key(
         # existing session and fails closed instead (session_store.py's
         # update_frame() enforces this at the storage layer too).
         session_id = _get_session_id(request)
-        if session_id is None or session_store.get_session(session_id) is None:
-            session_id = session_store.create_session()
+        if session_id is None or (await _get_session(session_id)) is None:
+            session_id = (await _create_session())
             _set_session_cookie(response, session_id)
-        session_store.update_frame(
-            session_id, "render", {"api_key": payload.api_key, "owner_name": result.owner_name}
+        # replace=True: a resubmitted Render key (via the "Change" flow)
+        # must discard any previous service_id/service_url/
+        # pending_deploy_id -- those belong to whatever Render account the
+        # OLD key authenticated as, and may not even exist under the new
+        # one. A plain merge would leave them behind for GET /api/session
+        # to report as still complete.
+        write_result = await _update_frame(
+            session_id,
+            "render",
+            {"api_key": payload.api_key, "owner_name": result.owner_name},
+            replace=True,
         )
+        if isinstance(write_result, session_store.SessionNotFound):
+            # The session was created microseconds ago -- only reachable if
+            # something else (a concurrent reset) deleted it in that gap.
+            # An unpersisted "success" isn't real (design spec section 3.6).
+            return {"valid": False, "reason": "no_session"}
         return {"valid": True, "owner_name": result.owner_name}
     return {"valid": False, "reason": result.reason}
 
@@ -359,8 +409,8 @@ async def validate_github_app(payload: GithubValidateAppRequest, request: Reques
         # what normally prevents reaching this frame without an earlier
         # session existing.
         session_id = _get_session_id(request)
-        if session_id is not None and session_store.get_session(session_id) is not None:
-            session_store.update_frame(
+        if session_id is not None and (await _get_session(session_id)) is not None:
+            await _update_frame(
                 session_id,
                 "github_app",
                 {
@@ -394,15 +444,24 @@ def _pkce_pair() -> tuple[str, str]:
 @router.post("/api/supabase/connect")
 async def connect_supabase(payload: SupabaseConnectRequest, request: Request) -> dict:
     session_id = _get_session_id(request)
-    if session_id is None or session_store.get_session(session_id) is None:
+    if session_id is None or (await _get_session(session_id)) is None:
         return {"valid": False, "reason": "no_session"}
     state = _secrets.token_urlsafe(24)
     verifier, challenge = _pkce_pair()
-    session_store.update_frame(
+    # replace=True: starting a new OAuth flow (whether the visitor's first
+    # attempt or a "Change" re-connect) must discard any previous access
+    # token/ref/db_pass/database_url outright. A plain merge would leave a
+    # PREVIOUS project's database_url in the session -- reachable if the
+    # visitor reloads mid-reconnect, since GET /api/session's completeness
+    # check keys off database_url's mere presence, not its recency.
+    write_result = await _update_frame(
         session_id,
         "supabase",
         {"_pending_oauth": {"state": state, "verifier": verifier, "name": payload.name}},
+        replace=True,
     )
+    if isinstance(write_result, session_store.SessionNotFound):
+        return {"valid": False, "reason": "no_session"}
     redirect_uri = f"{request.base_url}{SUPABASE_OAUTH_CALLBACK_PATH.lstrip('/')}"
     params = {
         "client_id": settings.supabase_oauth_client_id,
@@ -418,7 +477,7 @@ async def connect_supabase(payload: SupabaseConnectRequest, request: Request) ->
 @router.post("/api/supabase/list-organizations")
 async def list_supabase_organizations(request: Request) -> dict:
     session_id = _get_session_id(request)
-    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    supabase_frame = session_id and (await _read_frame(session_id, "supabase"))
     if not supabase_frame or "access_token" not in supabase_frame:
         return {"valid": False, "reason": "no_session"}
     result = await supabase_client.list_organizations(supabase_frame["access_token"])
@@ -430,7 +489,7 @@ async def list_supabase_organizations(request: Request) -> dict:
 @router.post("/api/supabase/create-project")
 async def create_supabase_project(payload: SupabaseCreateProjectRequest, request: Request) -> dict:
     session_id = _get_session_id(request)
-    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    supabase_frame = session_id and (await _read_frame(session_id, "supabase"))
     if not supabase_frame or "access_token" not in supabase_frame or "name" not in supabase_frame:
         return {"valid": False, "reason": "no_session"}
     db_pass = _secrets.token_urlsafe(24)
@@ -438,7 +497,7 @@ async def create_supabase_project(payload: SupabaseCreateProjectRequest, request
         supabase_frame["access_token"], payload.organization_slug, supabase_frame["name"], db_pass
     )
     if isinstance(result, supabase_client.SupabaseProjectCreated):
-        session_store.update_frame(
+        write_result = await _update_frame(
             session_id,
             "supabase",
             {
@@ -448,6 +507,12 @@ async def create_supabase_project(payload: SupabaseCreateProjectRequest, request
                 "organization_slug": payload.organization_slug,
             },
         )
+        if isinstance(write_result, session_store.SessionNotFound):
+            # The project WAS created in Supabase -- this only leaves the
+            # session unable to find it again (ref/db_pass lost), not the
+            # visitor's Supabase account in a bad state. Reporting failure
+            # here is about this wizard's own bookkeeping, not Supabase's.
+            return {"valid": False, "reason": "no_session"}
         return {
             "valid": True,
             "ref": result.ref,
@@ -462,7 +527,7 @@ async def create_supabase_project(payload: SupabaseCreateProjectRequest, request
 @router.post("/api/supabase/project-status")
 async def get_supabase_project_status(request: Request) -> dict:
     session_id = _get_session_id(request)
-    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    supabase_frame = session_id and (await _read_frame(session_id, "supabase"))
     if not supabase_frame or "access_token" not in supabase_frame or "ref" not in supabase_frame:
         return {"valid": False, "reason": "no_session"}
     result = await supabase_client.get_project_status(
@@ -476,7 +541,7 @@ async def get_supabase_project_status(request: Request) -> dict:
 @router.post("/api/supabase/connection-info")
 async def get_supabase_connection_info(request: Request) -> dict:
     session_id = _get_session_id(request)
-    supabase_frame = session_id and session_store.read_frame(session_id, "supabase")
+    supabase_frame = session_id and (await _read_frame(session_id, "supabase"))
     required = ("access_token", "ref", "db_pass")
     if not supabase_frame or not all(k in supabase_frame for k in required):
         return {"valid": False, "reason": "no_session"}
@@ -488,7 +553,9 @@ async def get_supabase_connection_info(request: Request) -> dict:
             f"postgresql://{result.db_user}:{supabase_frame['db_pass']}"
             f"@{result.db_host}:{result.db_port}/{result.db_name}"
         )
-        session_store.update_frame(session_id, "supabase", {"database_url": database_url})
+        write_result = await _update_frame(session_id, "supabase", {"database_url": database_url})
+        if isinstance(write_result, session_store.SessionNotFound):
+            return {"valid": False, "reason": "no_session"}
         return {"valid": True}
     return {"valid": False, "reason": result.reason}
 
@@ -520,9 +587,9 @@ async def list_vertex_models(payload: LlmVertexListModelsRequest) -> dict:
 @router.post("/api/llm/confirm")
 async def confirm_llm_provider(payload: LlmConfirmRequest, request: Request) -> dict:
     session_id = _get_session_id(request)
-    if session_id is None or session_store.get_session(session_id) is None:
+    if session_id is None or (await _get_session(session_id)) is None:
         return {"valid": False, "reason": "no_session"}
-    session_store.update_frame(
+    write_result = await _update_frame(
         session_id,
         "llm_provider",
         {
@@ -531,6 +598,8 @@ async def confirm_llm_provider(payload: LlmConfirmRequest, request: Request) -> 
             "model": payload.model,
         },
     )
+    if isinstance(write_result, session_store.SessionNotFound):
+        return {"valid": False, "reason": "no_session"}
     return {"valid": True}
 
 
@@ -543,21 +612,31 @@ async def create_uptimerobot_monitor(
     )
     if isinstance(result, uptimerobot_client.UptimeRobotMonitorResult):
         session_id = _get_session_id(request)
-        if session_id is not None and session_store.get_session(session_id) is not None:
-            session_store.update_frame(
-                session_id, "uptime_pinger", {"monitor_id": result.monitor_id}
+        if session_id is not None and (await _get_session(session_id)) is not None:
+            await _update_frame(
+                session_id,
+                "uptime_pinger",
+                {"api_key": payload.api_key, "monitor_id": result.monitor_id},
             )
         return {"valid": True, "created": result.created, "monitor_id": result.monitor_id}
     return {"valid": False, "reason": result.reason}
 
 
 @router.post("/api/uptimerobot/delete-monitor")
-async def delete_uptimerobot_monitor(payload: UptimeRobotDeleteMonitorRequest) -> dict:
+async def delete_uptimerobot_monitor(request: Request) -> dict:
     """Best-effort cleanup, called when an earlier frame change (render-key
     or render-service) invalidates a monitor a visitor already created for
     the old service URL -- see onboarding/static/index.html's
-    cleanupOrphanedUptimeMonitor()."""
-    result = await uptimerobot_client.delete_monitor(payload.api_key, payload.monitor_id)
+    cleanupOrphanedUptimeMonitor(). Session-backed like every other
+    post-redesign endpoint -- the UptimeRobot API key is never resent from
+    the browser."""
+    session_id = _get_session_id(request)
+    uptime_frame = session_id and (await _read_frame(session_id, "uptime_pinger"))
+    if not uptime_frame or "api_key" not in uptime_frame or "monitor_id" not in uptime_frame:
+        return {"valid": False, "reason": "no_session"}
+    result = await uptimerobot_client.delete_monitor(
+        uptime_frame["api_key"], uptime_frame["monitor_id"]
+    )
     if isinstance(result, uptimerobot_client.UptimeRobotMonitorDeleted):
         return {"valid": True}
     return {"valid": False, "reason": result.reason}
@@ -566,18 +645,24 @@ async def delete_uptimerobot_monitor(payload: UptimeRobotDeleteMonitorRequest) -
 @router.post("/api/render/create-service")
 async def create_render_service(payload: RenderServiceCreateRequest, request: Request) -> dict:
     session_id = _get_session_id(request)
-    render_frame = session_id and session_store.read_frame(session_id, "render")
+    render_frame = session_id and (await _read_frame(session_id, "render"))
     if not render_frame or "api_key" not in render_frame:
         return {"valid": False, "reason": "no_session"}
     result = await render_client.create_service(
         render_frame["api_key"], payload.repo_url, payload.name
     )
     if isinstance(result, render_client.RenderServiceCreated):
-        session_store.update_frame(
+        write_result = await _update_frame(
             session_id,
             "render",
             {"service_id": result.service_id, "service_url": result.service_url},
         )
+        if isinstance(write_result, session_store.SessionNotFound):
+            # The Render service WAS created -- this only leaves the
+            # session unable to find it again, not a dangling external
+            # resource the visitor doesn't know about (its URL/id are in
+            # this response either way).
+            return {"valid": False, "reason": "no_session"}
         return {"valid": True, "service_id": result.service_id, "service_url": result.service_url}
     if result.message:
         return {"valid": False, "reason": result.reason, "message": result.message}
@@ -596,9 +681,9 @@ async def confirm_dashboard_auth(payload: DashboardAuthConfirmRequest, request: 
     # chosen, never checked against anything else. This endpoint's only job
     # is persisting it to the session for the final bulk push.
     session_id = _get_session_id(request)
-    if session_id is None or session_store.get_session(session_id) is None:
+    if session_id is None or (await _get_session(session_id)) is None:
         return {"valid": False, "reason": "no_session"}
-    session_store.update_frame(
+    write_result = await _update_frame(
         session_id, "dashboard_auth",
         {
             "username": payload.username,
@@ -606,6 +691,8 @@ async def confirm_dashboard_auth(payload: DashboardAuthConfirmRequest, request: 
             "session_secret": payload.session_secret,
         },
     )
+    if isinstance(write_result, session_store.SessionNotFound):
+        return {"valid": False, "reason": "no_session"}
     return {"valid": True}
 
 
@@ -617,31 +704,31 @@ async def bulk_push_render_env_vars(request: Request) -> dict:
     per the decision made alongside this redesign, no earlier frame pushes
     to Render incrementally anymore."""
     session_id = _get_session_id(request)
-    render_frame = session_id and session_store.read_frame(session_id, "render")
+    render_frame = session_id and (await _read_frame(session_id, "render"))
     if not render_frame or "api_key" not in render_frame or "service_id" not in render_frame:
         return {"valid": False, "reason": "no_session"}
 
     env_vars: dict[str, str] = {}
 
-    github_app = session_store.read_frame(session_id, "github_app")
+    github_app = (await _read_frame(session_id, "github_app"))
     if github_app:
         env_vars["GITHUB_APP_ID"] = str(github_app["app_id"])
         env_vars["GITHUB_APP_PRIVATE_KEY"] = github_app["private_key_b64"]
         env_vars["GITHUB_WEBHOOK_SECRET"] = github_app["webhook_secret"]
         env_vars["GITHUB_APP_INSTALLATION_ID"] = str(github_app["installation_id"])
 
-    supabase = session_store.read_frame(session_id, "supabase")
+    supabase = (await _read_frame(session_id, "supabase"))
     if supabase and "database_url" in supabase:
         env_vars["DATABASE_URL"] = supabase["database_url"]
 
-    llm_provider = session_store.read_frame(session_id, "llm_provider")
+    llm_provider = (await _read_frame(session_id, "llm_provider"))
     if llm_provider:
         credential_var, model_var = _LLM_ENV_VAR_NAMES[llm_provider["provider"]]
         env_vars["LLM_PROVIDER"] = llm_provider["provider"]
         env_vars[credential_var] = llm_provider["credential_value"]
         env_vars[model_var] = llm_provider["model"]
 
-    dashboard_auth = session_store.read_frame(session_id, "dashboard_auth")
+    dashboard_auth = (await _read_frame(session_id, "dashboard_auth"))
     if dashboard_auth:
         env_vars["DASHBOARD_USERNAME"] = dashboard_auth["username"]
         env_vars["DASHBOARD_PASSWORD"] = dashboard_auth["password"]
@@ -656,12 +743,20 @@ async def bulk_push_render_env_vars(request: Request) -> dict:
 @router.post("/api/render/trigger-deploy")
 async def trigger_render_deploy(request: Request) -> dict:
     session_id = _get_session_id(request)
-    render_frame = session_id and session_store.read_frame(session_id, "render")
+    render_frame = session_id and (await _read_frame(session_id, "render"))
     if not render_frame or "api_key" not in render_frame or "service_id" not in render_frame:
         return {"valid": False, "reason": "no_session"}
     result = await render_client.trigger_deploy(render_frame["api_key"], render_frame["service_id"])
     if isinstance(result, render_client.RenderDeployTriggered):
-        session_store.update_frame(session_id, "render", {"pending_deploy_id": result.deploy_id})
+        # Deliberately does NOT report failure on a lost write here, unlike
+        # every other endpoint in this file: the deploy has already been
+        # triggered as a real, non-idempotent external side effect (unlike
+        # every check `bulk_push_render_env_vars`/earlier steps make, which
+        # are cheap to retry) -- reporting failure would invite the visitor
+        # to retry and trigger a second deploy. `deploy_id` is still
+        # returned either way; a lost write here only costs the ability to
+        # resume polling after a reload, not correctness.
+        await _update_frame(session_id, "render", {"pending_deploy_id": result.deploy_id})
         return {"valid": True, "deploy_id": result.deploy_id}
     return {"valid": False, "reason": result.reason}
 
@@ -669,7 +764,7 @@ async def trigger_render_deploy(request: Request) -> dict:
 @router.post("/api/render/deploy-status")
 async def get_render_deploy_status(request: Request) -> dict:
     session_id = _get_session_id(request)
-    render_frame = session_id and session_store.read_frame(session_id, "render")
+    render_frame = session_id and (await _read_frame(session_id, "render"))
     required = ("api_key", "service_id", "pending_deploy_id")
     if not render_frame or not all(k in render_frame for k in required):
         return {"valid": False, "reason": "no_session"}
