@@ -532,6 +532,38 @@ optional:**
   (`restoreFromSession()`), which previously didn't even re-show the
   done-section/link at all on a reload after a completed deploy — fixed
   alongside this.
+- **`relockDownstreamOf(id)` relocks by real dependency, not by page
+  position** (2026-09-02) — `FRAME_DEPENDENTS` is a precomputed-transitive-
+  closure map naming which frames' already-submitted data actually goes
+  stale when a given frame's data changes (e.g. `render-service`'s
+  `service_url` feeds `github-app`'s webhook-URL check and
+  `uptime-pinger`'s monitor, so changing it relocks both; `llm-provider`
+  feeds nothing but the final bulk push, so changing it relocks only
+  `render-deploy`). Replaces the old "relock everything positioned after
+  `id` in `FRAME_ORDER`" rule, which forced redoing frames — e.g.
+  `uptime-pinger` after an `llm-provider` change — that read none of the
+  changed frame's data. Because `render-deploy` is frequently *not* the
+  next positional frame after the one just resubmitted anymore,
+  `completeFrame()` also gained `maybeUnlockRenderDeployAfterRedo()`: once
+  `render-deploy` has completed at least once (`renderDeployCompletedOnce`
+  — never true during the wizard's first pass, so first-time visitors still
+  must reach `render-deploy` via `uptime-pinger` as before), any frame
+  whose dependents include `render-deploy` re-checks whether every real
+  prerequisite (`RENDER_DEPLOY_PREREQS` — everything `bulk_push_render_env_
+  vars` actually reads; deliberately excludes `uptime-pinger`) is done, and
+  unlocks it directly if so. `completeFrame()`'s own `unlockFrame(next)`
+  call is now also guarded on `next` actually being `"locked"` — otherwise
+  a redo's positional "next frame" (which may be an untouched, already-
+  `"done"` frame) would get wrongly reopened and reset to "Not started".
+  `lockFrame("render-deploy")` additionally clears the `deployed`/
+  `pending_deploy_id` flags from `render-service`'s own storage blob (the
+  only place they live — "render-deploy" has no `STORAGE_KEYS` entry of its
+  own), so a reload mid-redo shows the frame's initial pre-deploy state
+  instead of resurrecting the previous deploy's live URL.
+- **`unlockFrame()` now auto-opens the `<details>`, and `render-deploy`
+  shows `"deploying…"` while a triggered deploy is in flight** (2026-09-02)
+  — a newly-reachable frame previously became clickable but stayed
+  visually collapsed, with no cue a new step was ready.
 - **The DB-synced operational keys (cooldown/usage-cap/`REVIEW_DRAFT_PRS`)
   need no wizard-side push at all** (2026-09-02) — unlike the Render-env-var
   knobs above, `bot/queue/store.py::init_pool()` now seeds the

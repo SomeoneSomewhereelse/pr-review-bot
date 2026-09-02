@@ -134,7 +134,9 @@
   details.frame[data-status="checking"] .frame-badge,
   details.frame[data-status="checking"] .frame-detail,
   details.frame[data-status="provisioning"] .frame-badge,
-  details.frame[data-status="provisioning"] .frame-detail { color: var(--accent); }
+  details.frame[data-status="provisioning"] .frame-detail,
+  details.frame[data-status="deploying"] .frame-badge,
+  details.frame[data-status="deploying"] .frame-detail { color: var(--accent); }
   .frame-change {
     display: none;
     background: var(--surface-2);
@@ -519,6 +521,7 @@
       badge_locked: "Locked", badge_ready: "Not started",
       badge_error: "Error", badge_done: "✓ Validated",
       badge_checking: "Checking…",
+      badge_deploying: "Deploying…",
       badge_deploy_done: "✓ Live",
       err_empty_key: "Paste your Render API key first.",
       err_invalid_key: "That key was rejected by Render. Double-check it and try again.",
@@ -665,6 +668,7 @@
       badge_locked: "נעול", badge_ready: "טרם התחיל",
       badge_error: "שגיאה", badge_done: "✓ אומת",
       badge_checking: "בודק…",
+      badge_deploying: "פורס…",
       badge_deploy_done: "✓ פעיל",
       err_empty_key: "הדביקו קודם את מפתח ה-API של Render.",
       err_invalid_key: "המפתח נדחה על ידי Render. בדקו אותו שוב ונסו שנית.",
@@ -993,7 +997,26 @@
     if (id === "supabase") resetSupabaseConnectSection();
     if (id === "llm-provider") resetLlmProviderSection();
     if (id === "uptime-pinger") resetUptimePingerSection();
-    if (id === "render-deploy") resetRenderDeploySection();
+    if (id === "render-deploy") {
+      resetRenderDeploySection();
+      // deployed/pending_deploy_id live inside render-service's own storage
+      // blob (see finishRenderDeploy/triggerRenderDeploy), not a
+      // "render-deploy" key of their own -- STORAGE_KEYS has no entry for
+      // this frame, so the generic removeItem above never touches them.
+      // Without this, a reload after locking this frame (e.g. right after
+      // changing llm-provider, before redeploying) would have
+      // restoreFromSession() resurrect the OLD deploy's live-URL/polling
+      // state from the still-present flags, even though a fresh redeploy is
+      // actually required. service_id/service_url are left alone -- they're
+      // still valid; only render-service's own lockFrame call (a separate,
+      // rarer case) should ever clear those.
+      const renderServiceState = readStoredRenderService();
+      if (renderServiceState) {
+        delete renderServiceState.deployed;
+        delete renderServiceState.pending_deploy_id;
+        sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(renderServiceState));
+      }
+    }
     if (id === "render-service") {
       sessionStorage.removeItem(RENDER_SERVICE_URL_KEY);
       document.getElementById("render-service-submit").disabled = false;
@@ -1003,14 +1026,83 @@
   function unlockFrame(id) {
     const el = frameEl(id);
     el.dataset.locked = "false";
+    el.open = true;
     setFrameStatus(id, "ready");
     if (id === "uptime-pinger") refreshUptimePingerBlockedState();
     if (id === "render-service") prefillRenderServiceDefaults();
     if (id === "github-app") renderGithubAppInstructions();
   }
 
+  // Structural dependency graph -- NOT wizard display order -- naming which
+  // frames' already-submitted data becomes stale when a given frame's data
+  // changes. Precomputed transitive closure (render-key's entry already
+  // includes everything render-service's own entry lists), so
+  // relockDownstreamOf is a plain lookup, not a graph walk.
+  //
+  //  - render-key's api_key is used to create/look up the Render service
+  //    (render-service) and to push env vars / trigger a deploy
+  //    (render-deploy) -- a different key likely means a different Render
+  //    account, so both are invalidated.
+  //  - render-service's service_id/service_url are consumed by github-app
+  //    (the webhook URL the visitor pastes into GitHub) and uptime-pinger
+  //    (the URL the monitor watches), plus render-deploy (needs service_id).
+  //  - dashboard-auth/github-app/supabase/llm-provider each only feed the
+  //    final bulk env-var push (bulk_push_render_env_vars) -- nothing else
+  //    reads their data, so changing one only invalidates render-deploy.
+  //    This is the concrete case that motivated this map over the old
+  //    "everything positioned after id" rule: llm-provider sits before
+  //    uptime-pinger on the page, but uptime-pinger doesn't consume
+  //    anything llm-provider produces, so changing the LLM provider must
+  //    not force the visitor to redo the uptime monitor too.
+  //  - uptime-pinger's own data (the UptimeRobot monitor) is never part of
+  //    the Render env-var push and nothing downstream reads it -- changing
+  //    it invalidates nothing else, not even render-deploy.
+  const FRAME_DEPENDENTS = {
+    "render-key": ["render-service", "github-app", "uptime-pinger", "render-deploy"],
+    "render-service": ["github-app", "uptime-pinger", "render-deploy"],
+    "dashboard-auth": ["render-deploy"],
+    "github-app": ["render-deploy"],
+    "supabase": ["render-deploy"],
+    "llm-provider": ["render-deploy"],
+    "uptime-pinger": [],
+    "render-deploy": [],
+  };
+
   function relockDownstreamOf(id) {
-    FRAME_ORDER.slice(FRAME_ORDER.indexOf(id) + 1).forEach(lockFrame);
+    (FRAME_DEPENDENTS[id] || []).forEach(lockFrame);
+  }
+
+  // Everything the final bulk env-var push (bulk_push_render_env_vars)
+  // actually reads from the session -- deliberately excludes uptime-pinger,
+  // which contributes nothing to that push (see FRAME_DEPENDENTS above).
+  const RENDER_DEPLOY_PREREQS = [
+    "render-key", "render-service", "dashboard-auth", "github-app", "supabase", "llm-provider",
+  ];
+
+  // Set once render-deploy completes for the first time (finishRenderDeploy,
+  // or restoreFromSession() resuming an already-deployed session) -- gates
+  // maybeUnlockRenderDeployAfterRedo below so it only ever acts on a REDO,
+  // never the wizard's first pass. On a first pass, render-deploy must stay
+  // gated behind uptime-pinger's own completion (the plain nextFrame chain
+  // below already does that) -- an early per-prereq unlock would let a
+  // first-time visitor reach "Deploy" while uptime-pinger, sitting earlier
+  // on the page, is still unfilled.
+  let renderDeployCompletedOnce = false;
+
+  // After the wizard has completed once, changing an earlier frame relocks
+  // only its real dependents (FRAME_DEPENDENTS), which can leave
+  // render-deploy locked with no frame between the one just resubmitted and
+  // it in FRAME_ORDER (e.g. resubmitting llm-provider -- its next positional
+  // frame is uptime-pinger, not render-deploy). This re-checks readiness
+  // directly instead of relying on positional order: once every real
+  // prerequisite is done again, render-deploy unlocks regardless of where
+  // it sits in the page.
+  function maybeUnlockRenderDeployAfterRedo(completedId) {
+    if (!renderDeployCompletedOnce) return;
+    if (!(FRAME_DEPENDENTS[completedId] || []).includes("render-deploy")) return;
+    if (frameEl("render-deploy").dataset.locked !== "true") return;
+    if (!RENDER_DEPLOY_PREREQS.every((pid) => frameState[pid].status === "done")) return;
+    unlockFrame("render-deploy");
   }
 
   function completeFrame(id, detailKey, detailValue, status, keepOpen) {
@@ -1018,8 +1110,16 @@
     el.dataset.locked = "true";
     if (!keepOpen) el.open = false;
     setFrameStatus(id, status || "done", detailKey, detailValue);
+    // Only unlock the next positional frame if it's genuinely blocked
+    // ("locked" -- never yet reached, or relocked by this redo). On a redo,
+    // the next frame in FRAME_ORDER is often one that was never relocked at
+    // all (relockDownstreamOf now only relocks real dependents, not
+    // everything positioned after id) and must be left exactly as it was --
+    // re-unlocking an already-"done" frame would wrongly reopen it and
+    // reset its badge to "Not started".
     const next = nextFrame(id);
-    if (next) unlockFrame(next);
+    if (next && frameState[next].status === "locked") unlockFrame(next);
+    if (id !== "render-deploy") maybeUnlockRenderDeployAfterRedo(id);
   }
 
   // Best-effort cleanup for an UptimeRobot monitor left watching a Render
@@ -2126,6 +2226,7 @@
     document.getElementById("render-deploy-polling-section").style.display = "none";
     document.getElementById("render-deploy-done-section").style.display = "none";
     document.getElementById("render-deploy-check-again-submit").style.display = "none";
+    document.getElementById("render-deploy-check-again-submit").disabled = false;
     document.getElementById("render-deploy-trigger-submit").disabled = false;
     document.getElementById("render-deploy-error").textContent = "";
     currentRenderDeployErrorKey = null;
@@ -2177,6 +2278,7 @@
     // dashboard link just written above is the actual payoff -- collapsing
     // it here would hide the one thing worth seeing at the end of the wizard.
     completeFrame("render-deploy", null, null, "deploy_done", true);
+    renderDeployCompletedOnce = true;
   }
 
   function showRenderDeployTriggerAgain() {
@@ -2233,13 +2335,16 @@
     if (!stored || !stored.service_id || !stored.pending_deploy_id) return;
     document.getElementById("render-deploy-error").textContent = "";
     currentRenderDeployErrorKey = null;
+    const checkAgainBtn = document.getElementById("render-deploy-check-again-submit");
+    checkAgainBtn.disabled = true;
     const generation = renderDeployPollGeneration;
     const body = await fetchRenderDeployStatus();
     if (generation !== renderDeployPollGeneration) return;
     const outcome = handleRenderDeployStatusResult(body);
     if (outcome === "pending") {
       renderDeployError("err_render_deploy_timeout");
-      document.getElementById("render-deploy-check-again-submit").style.display = "inline-block";
+      checkAgainBtn.style.display = "inline-block";
+      checkAgainBtn.disabled = false;
     }
   }
 
@@ -2297,6 +2402,7 @@
     sessionStorage.setItem(STORAGE_KEYS["render-service"], JSON.stringify(stored));
     document.getElementById("render-deploy-trigger-section").style.display = "none";
     document.getElementById("render-deploy-polling-section").style.display = "block";
+    setFrameStatus("render-deploy", "deploying");
     pollRenderDeployStatus(Date.now(), renderDeployPollGeneration);
   }
 
@@ -2425,9 +2531,11 @@
       link.href = renderServiceState.service_url || "";
       link.textContent = renderServiceState.service_url || "";
       completeFrame("render-deploy", null, null, "deploy_done", true);
+      renderDeployCompletedOnce = true;
     } else if (renderServiceState && renderServiceState.pending_deploy_id) {
       document.getElementById("render-deploy-trigger-section").style.display = "none";
       document.getElementById("render-deploy-polling-section").style.display = "block";
+      setFrameStatus("render-deploy", "deploying");
       pollRenderDeployStatus(Date.now(), renderDeployPollGeneration);
     }
   }

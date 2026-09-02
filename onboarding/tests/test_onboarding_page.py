@@ -103,7 +103,17 @@ async def test_completing_a_frame_unlocks_the_next_one():
     client = await _client()
     body = (await client.get("/")).text
     assert "function completeFrame" in body
-    assert "if (next) unlockFrame(next);" in body
+    assert 'if (next && frameState[next].status === "locked") unlockFrame(next);' in body
+
+
+async def test_unlocking_a_frame_opens_it():
+    """A newly-reachable frame must auto-expand, not just become clickable —
+    otherwise the visitor has no visual cue that a new step is ready."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function unlockFrame")
+    fn_body = body[fn_start : fn_start + 300]
+    assert "el.open = true;" in fn_body
 
 
 async def test_done_frames_show_an_explicit_change_control():
@@ -113,13 +123,39 @@ async def test_done_frames_show_an_explicit_change_control():
     assert "function beginChange" in body
 
 
-async def test_changing_a_frame_relocks_every_later_frame():
-    """A resubmission must invalidate whatever later frames already did,
-    not just this frame's own value — design doc section 6."""
+async def test_changing_a_frame_relocks_only_its_real_dependents():
+    """relockDownstreamOf is dependency-driven, not "everything positioned
+    after id" — changing llm-provider must not force redoing uptime-pinger,
+    which reads none of llm-provider's data."""
     client = await _client()
     body = (await client.get("/")).text
     assert "function relockDownstreamOf" in body
     assert "relockDownstreamOf(id)" in body
+    assert (
+        '"render-key": ["render-service", "github-app", "uptime-pinger", "render-deploy"]'
+        in body
+    )
+    assert '"render-service": ["github-app", "uptime-pinger", "render-deploy"]' in body
+    assert '"dashboard-auth": ["render-deploy"]' in body
+    assert '"github-app": ["render-deploy"]' in body
+    assert '"supabase": ["render-deploy"]' in body
+    assert '"llm-provider": ["render-deploy"]' in body
+    assert '"uptime-pinger": []' in body
+
+
+async def test_a_redo_of_a_leaf_frame_can_unlock_render_deploy_without_uptime_pinger():
+    """The concrete scenario from the request this refactor addresses: a
+    visitor who only changes the LLM provider + API key must be able to
+    redeploy from the last frame without also redoing the uptime monitor."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert "function maybeUnlockRenderDeployAfterRedo" in body
+    assert '"render-key", "render-service", "dashboard-auth", "github-app", "supabase",' in body
+    assert '"llm-provider",' in body
+    assert "let renderDeployCompletedOnce = false;" in body
+    assert "renderDeployCompletedOnce = true;" in body
+    # Called from completeFrame for every frame except render-deploy itself.
+    assert 'if (id !== "render-deploy") maybeUnlockRenderDeployAfterRedo(id);' in body
 
 
 async def test_submitted_key_is_cleared_from_the_input_after_success():
@@ -1079,7 +1115,34 @@ async def test_begin_change_render_service_clears_its_own_stale_state():
 async def test_lock_frame_resets_render_deploy_section():
     client = await _client()
     body = (await client.get("/")).text
-    assert 'if (id === "render-deploy") resetRenderDeploySection();' in body
+    fn_start = body.index("function lockFrame")
+    fn_body = body[fn_start : body.index("\n  function unlockFrame", fn_start)]
+    assert "resetRenderDeploySection();" in fn_body
+
+
+async def test_lock_frame_clears_stale_deploy_progress_flags():
+    """deployed/pending_deploy_id live inside render-service's own storage
+    blob, which has no STORAGE_KEYS entry of its own for "render-deploy" --
+    without this, a reload after locking render-deploy (e.g. right after
+    changing llm-provider) would resurrect the OLD deploy's live-URL/polling
+    state instead of the fresh "ready to redeploy" state."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("function lockFrame")
+    fn_body = body[fn_start : body.index("\n  function unlockFrame", fn_start)]
+    assert "delete renderServiceState.deployed;" in fn_body
+    assert "delete renderServiceState.pending_deploy_id;" in fn_body
+
+
+async def test_triggering_deploy_sets_a_deploying_status():
+    """The badge must read "Deploying…", not stay on "Not started", while a
+    triggered deploy is in flight — both the live-trigger path and the
+    reload-resume-while-pending path."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert body.count('setFrameStatus("render-deploy", "deploying");') == 2
+    for lang_block_marker in ("badge_deploying: \"Deploying…\"", "badge_deploying: \"פורס…\""):
+        assert lang_block_marker in body
 
 
 async def test_render_deploy_frame_stays_open_when_done():
@@ -1092,6 +1155,15 @@ async def test_render_deploy_frame_stays_open_when_done():
     # completeFrame's default (every other frame) must remain collapse-on-complete.
     assert "function completeFrame(id, detailKey, detailValue, status, keepOpen)" in body
     assert "if (!keepOpen) el.open = false;" in body
+
+
+async def test_check_again_button_disables_itself_while_in_flight():
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function checkRenderDeployStatusOnce")
+    fn_body = body[fn_start : body.index("\n  async function triggerRenderDeploy", fn_start)]
+    assert "checkAgainBtn.disabled = true;" in fn_body
+    assert "checkAgainBtn.disabled = false;" in fn_body
 
 
 async def test_restoring_a_completed_deploy_shows_the_dashboard_link():
