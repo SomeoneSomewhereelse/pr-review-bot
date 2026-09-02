@@ -24,6 +24,17 @@ def _looks_like_local_test_db(url: str) -> bool:
     return host in _LOCAL_TEST_DB_HOSTS or host.endswith(".internal")
 
 
+def _close_onboarding_pool() -> None:
+    """Best-effort close of onboarding.session_store's pool -- a no-op if
+    onboarding_db was never requested this session/worker (the module may
+    not even be importable in a worker that never touched onboarding/)."""
+    try:
+        import onboarding.session_store as onboarding_store
+    except ImportError:
+        return
+    onboarding_store.close_pool()
+
+
 @pytest.fixture(scope="session")
 def db_url() -> str:
     env_url = os.environ.get("DATABASE_URL")
@@ -41,9 +52,12 @@ def db_url() -> str:
             )
         yield env_url
         # Matches the testcontainers branch below: whichever pool the `db`
-        # fixture built against this session's db_url gets closed exactly
-        # once, here, rather than per-test -- see `db`'s docstring.
+        # (and onboarding_db) fixture built against this session's db_url
+        # gets closed exactly once, here, rather than per-test -- see
+        # `db`'s docstring. _close_onboarding_pool() is a no-op if
+        # onboarding_db was never requested this session.
         store.close_pool()
+        _close_onboarding_pool()
         return
     from testcontainers.community.postgres import PostgresContainer
 
@@ -58,6 +72,7 @@ def db_url() -> str:
         # docker.errors.DockerException, before this code path ever ran.
         yield pg.get_connection_url(driver=None)
         store.close_pool()
+        _close_onboarding_pool()
 
 
 @pytest.fixture
@@ -87,6 +102,32 @@ def db(db_url, monkeypatch):
     store.init_pool()
     with store._require_pool().connection() as conn:
         conn.execute("TRUNCATE tickets, runtime_config, reviews RESTART IDENTITY")
+    yield
+
+
+@pytest.fixture
+def onboarding_db(db_url, monkeypatch):
+    """onboarding/'s own counterpart to `db` above -- points
+    onboarding.session_store at the same test Postgres and truncates its
+    one table (wizard_sessions) instead of bot/'s queue tables. Lives here,
+    not in a separate onboarding/tests/conftest.py, because a second file
+    named conftest.py collides in Python's bare-module-name import cache
+    with this one once both are collected in the same pytest session (no
+    package has __init__.py in this repo) -- tests/test_conftest_guards.py
+    and tests/test_conftest_db_marker_hook.py's own `from conftest import
+    ...` picked up the wrong module and failed to import when this was
+    tried as a separate file.
+
+    Same not-closed-per-test reasoning as `db` above: db_url's own fixture
+    closes this pool exactly once, at session/worker end
+    (_close_onboarding_pool())."""
+    import onboarding.session_store as onboarding_store
+    from onboarding.config import settings as onboarding_settings
+
+    monkeypatch.setattr(onboarding_settings, "database_url", db_url)
+    onboarding_store.init_pool()
+    with onboarding_store._require_pool().connection() as conn:
+        conn.execute("TRUNCATE wizard_sessions")
     yield
 
 
