@@ -139,11 +139,6 @@ class RenderServiceCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=64)
 
 
-class RenderPushEnvVarsRequest(BaseModel):
-    render_api_key: str = Field(max_length=512)
-    render_service_id: str = Field(min_length=1, max_length=64)
-
-
 class LlmConfirmRequest(BaseModel):
     provider: str = Field(pattern=r"^(gemini|groq|vertex)$")
     credential_value: str = Field(min_length=1, max_length=16384)
@@ -154,17 +149,6 @@ class DashboardAuthConfirmRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=8, max_length=256)
     session_secret: str = Field(min_length=32, max_length=256)
-
-
-class RenderTriggerDeployRequest(BaseModel):
-    api_key: str = Field(max_length=512)
-    service_id: str = Field(min_length=1, max_length=64)
-
-
-class RenderDeployStatusRequest(BaseModel):
-    api_key: str = Field(max_length=512)
-    service_id: str = Field(min_length=1, max_length=64)
-    deploy_id: str = Field(min_length=1, max_length=64)
 
 
 # Paired comment with app/providers/registry.py::PROVIDERS -- onboarding/
@@ -577,18 +561,72 @@ async def confirm_dashboard_auth(payload: DashboardAuthConfirmRequest, request: 
     return {"valid": True}
 
 
+@router.post("/api/render/bulk-push-env-vars")
+async def bulk_push_render_env_vars(request: Request) -> dict:
+    """Replaces the four now-removed per-frame push-render-vars endpoints:
+    assembles every completed frame's env vars from the session and pushes
+    them to Render in one call, from the final ("render-deploy") frame --
+    per the decision made alongside this redesign, no earlier frame pushes
+    to Render incrementally anymore."""
+    session_id = _get_session_id(request)
+    render_frame = session_id and session_store.read_frame(session_id, "render")
+    if not render_frame or "api_key" not in render_frame or "service_id" not in render_frame:
+        return {"valid": False, "reason": "no_session"}
+
+    env_vars: dict[str, str] = {}
+
+    github_app = session_store.read_frame(session_id, "github_app")
+    if github_app:
+        env_vars["GITHUB_APP_ID"] = str(github_app["app_id"])
+        env_vars["GITHUB_APP_PRIVATE_KEY"] = github_app["private_key_b64"]
+        env_vars["GITHUB_WEBHOOK_SECRET"] = github_app["webhook_secret"]
+        env_vars["GITHUB_APP_INSTALLATION_ID"] = str(github_app["installation_id"])
+
+    supabase = session_store.read_frame(session_id, "supabase")
+    if supabase and "database_url" in supabase:
+        env_vars["DATABASE_URL"] = supabase["database_url"]
+
+    llm_provider = session_store.read_frame(session_id, "llm_provider")
+    if llm_provider:
+        credential_var, model_var = _LLM_ENV_VAR_NAMES[llm_provider["provider"]]
+        env_vars["LLM_PROVIDER"] = llm_provider["provider"]
+        env_vars[credential_var] = llm_provider["credential_value"]
+        env_vars[model_var] = llm_provider["model"]
+
+    dashboard_auth = session_store.read_frame(session_id, "dashboard_auth")
+    if dashboard_auth:
+        env_vars["DASHBOARD_USERNAME"] = dashboard_auth["username"]
+        env_vars["DASHBOARD_PASSWORD"] = dashboard_auth["password"]
+        env_vars["DASHBOARD_SESSION_SECRET"] = dashboard_auth["session_secret"]
+
+    result = await render_client.push_env_vars(
+        render_frame["api_key"], render_frame["service_id"], env_vars
+    )
+    return _push_result(result)
+
+
 @router.post("/api/render/trigger-deploy")
-async def trigger_render_deploy(payload: RenderTriggerDeployRequest) -> dict:
-    result = await render_client.trigger_deploy(payload.api_key, payload.service_id)
+async def trigger_render_deploy(request: Request) -> dict:
+    session_id = _get_session_id(request)
+    render_frame = session_id and session_store.read_frame(session_id, "render")
+    if not render_frame or "api_key" not in render_frame or "service_id" not in render_frame:
+        return {"valid": False, "reason": "no_session"}
+    result = await render_client.trigger_deploy(render_frame["api_key"], render_frame["service_id"])
     if isinstance(result, render_client.RenderDeployTriggered):
+        session_store.update_frame(session_id, "render", {"pending_deploy_id": result.deploy_id})
         return {"valid": True, "deploy_id": result.deploy_id}
     return {"valid": False, "reason": result.reason}
 
 
 @router.post("/api/render/deploy-status")
-async def get_render_deploy_status(payload: RenderDeployStatusRequest) -> dict:
+async def get_render_deploy_status(request: Request) -> dict:
+    session_id = _get_session_id(request)
+    render_frame = session_id and session_store.read_frame(session_id, "render")
+    required = ("api_key", "service_id", "pending_deploy_id")
+    if not render_frame or not all(k in render_frame for k in required):
+        return {"valid": False, "reason": "no_session"}
     result = await render_client.poll_deploy_status(
-        payload.api_key, payload.service_id, payload.deploy_id
+        render_frame["api_key"], render_frame["service_id"], render_frame["pending_deploy_id"]
     )
     if isinstance(result, render_client.RenderDeployStatus):
         return {"valid": True, "status": result.status}

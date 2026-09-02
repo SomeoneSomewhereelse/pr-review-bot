@@ -1342,25 +1342,136 @@ async def test_dashboard_auth_push_render_vars_endpoint_is_gone():
 
 
 async def test_trigger_deploy_endpoint(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x", "service_id": "srv-1"})
+
     async def fake_trigger_deploy(api_key, service_id):
+        assert (api_key, service_id) == ("rnd_x", "srv-1")
         return render_client.RenderDeployTriggered(deploy_id="dep-1")
 
     monkeypatch.setattr(render_client, "trigger_deploy", fake_trigger_deploy)
     client = await _client()
     resp = await client.post(
-        "/api/render/trigger-deploy", json={"api_key": "rnd_x", "service_id": "srv-1"}
+        "/api/render/trigger-deploy", cookies={"onboarding_session": session_id}
     )
     assert resp.json() == {"valid": True, "deploy_id": "dep-1"}
+    assert fake.read_frame(session_id, "render")["pending_deploy_id"] == "dep-1"
+
+
+async def test_trigger_deploy_endpoint_with_no_session_fails_closed():
+    client = await _client()
+    resp = await client.post("/api/render/trigger-deploy")
+    assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
 async def test_deploy_status_endpoint(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(
+        session_id, "render",
+        {"api_key": "rnd_x", "service_id": "srv-1", "pending_deploy_id": "dep-1"},
+    )
+
     async def fake_poll_deploy_status(api_key, service_id, deploy_id):
+        assert (api_key, service_id, deploy_id) == ("rnd_x", "srv-1", "dep-1")
         return render_client.RenderDeployStatus(status="live")
 
     monkeypatch.setattr(render_client, "poll_deploy_status", fake_poll_deploy_status)
     client = await _client()
     resp = await client.post(
-        "/api/render/deploy-status",
-        json={"api_key": "rnd_x", "service_id": "srv-1", "deploy_id": "dep-1"},
+        "/api/render/deploy-status", cookies={"onboarding_session": session_id}
     )
     assert resp.json() == {"valid": True, "status": "live"}
+
+
+async def test_deploy_status_endpoint_with_no_session_fails_closed():
+    client = await _client()
+    resp = await client.post("/api/render/deploy-status")
+    assert resp.json() == {"valid": False, "reason": "no_session"}
+
+
+async def test_bulk_push_assembles_every_frame_into_one_push_call(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x", "service_id": "srv-1"})
+    fake.update_frame(
+        session_id, "github_app",
+        {"app_id": 1, "private_key_b64": "pk", "webhook_secret": "wh", "installation_id": 42},
+    )
+    fake.update_frame(session_id, "supabase", {"database_url": "postgresql://x"})
+    fake.update_frame(
+        session_id, "llm_provider",
+        {"provider": "gemini", "credential_value": "AIza-x", "model": "gemini-flash-latest"},
+    )
+    fake.update_frame(
+        session_id, "dashboard_auth",
+        {"username": "admin", "password": "pw123456", "session_secret": "s" * 32},
+    )
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/bulk-push-env-vars", cookies={"onboarding_session": session_id}
+    )
+    assert resp.json()["valid"] is True
+    assert captured["values"] == {
+        "GITHUB_APP_ID": "1",
+        "GITHUB_APP_PRIVATE_KEY": "pk",
+        "GITHUB_WEBHOOK_SECRET": "wh",
+        "GITHUB_APP_INSTALLATION_ID": "42",
+        "DATABASE_URL": "postgresql://x",
+        "LLM_PROVIDER": "gemini",
+        "GEMINI_API_KEY": "AIza-x",
+        "LLM_MODEL": "gemini-flash-latest",
+        "DASHBOARD_USERNAME": "admin",
+        "DASHBOARD_PASSWORD": "pw123456",
+        "DASHBOARD_SESSION_SECRET": "s" * 32,
+    }
+
+
+async def test_bulk_push_omits_a_frame_that_was_never_completed(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x", "service_id": "srv-1"})
+    captured = {}
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        captured["values"] = values
+        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    await client.post("/api/render/bulk-push-env-vars", cookies={"onboarding_session": session_id})
+    assert captured["values"] == {}
+
+
+async def test_bulk_push_with_no_session_fails_closed():
+    client = await _client()
+    resp = await client.post("/api/render/bulk-push-env-vars")
+    assert resp.json() == {"valid": False, "reason": "no_session"}
+
+
+async def test_bulk_push_partial_failure_reports_pushed_keys(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x", "service_id": "srv-1"})
+    fake.update_frame(
+        session_id, "github_app",
+        {"app_id": 1, "private_key_b64": "pk", "webhook_secret": "wh", "installation_id": 42},
+    )
+
+    async def fake_push_env_vars(api_key, service_id, values):
+        return render_client.RenderEnvVarsPushFailed(reason="invalid_key", pushed=["GITHUB_APP_ID"])
+
+    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
+    client = await _client()
+    resp = await client.post(
+        "/api/render/bulk-push-env-vars", cookies={"onboarding_session": session_id}
+    )
+    assert resp.json() == {"valid": False, "reason": "invalid_key", "pushed": ["GITHUB_APP_ID"]}
