@@ -15,4 +15,9 @@ def verify_signature(raw_body: bytes, signature_header: str | None, secret: str)
 
     expected_digest = signature_header.removeprefix("sha256=")
     computed_digest = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(computed_digest, expected_digest)
+    # Compare as bytes, not str: hmac.compare_digest raises TypeError on a
+    # non-ASCII str argument, and expected_digest is attacker-controlled
+    # (straight from the request header) -- a crafted non-ASCII signature
+    # must fail closed with False (-> 401), not crash the request with an
+    # unhandled TypeError (-> 500).
+    return hmac.compare_digest(computed_digest.encode(), expected_digest.encode())

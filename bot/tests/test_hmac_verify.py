@@ -39,3 +39,12 @@ def test_verify_signature_malformed_header():
     body = b'{"action": "opened"}'
     assert verify_signature(body, "not-a-valid-header", SECRET) is False
     assert verify_signature(body, "sha1=deadbeef", SECRET) is False
+
+
+def test_verify_signature_non_ascii_digest_fails_closed():
+    """hmac.compare_digest raises TypeError on a non-ASCII str argument --
+    the header is attacker-controlled straight off the request, so a crafted
+    non-ASCII signature must return False (-> 401), not crash with an
+    unhandled TypeError (-> 500)."""
+    body = b'{"action": "opened"}'
+    assert verify_signature(body, "sha256=cafédeadbeef", SECRET) is False
