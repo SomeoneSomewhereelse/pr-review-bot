@@ -342,9 +342,9 @@ async def process_next_due(now: datetime) -> StepResult:
     # That is why the whole computation — bucket, query, comparison, reset
     # instant — sits inside one try, and why nothing outside it is read.
     cap_reset_at: datetime | None = None
-    token_cap, reset_time = usage_cap_config.effective_caps()
-    if token_cap is not None:
-        try:
+    try:
+        token_cap, reset_time = usage_cap_config.effective_caps()
+        if token_cap is not None:
             bucket_start = store.usage_bucket_start(now, reset_time)
             tokens = await asyncio.to_thread(
                 store.get_key_usage,
@@ -354,9 +354,9 @@ async def process_next_due(now: datetime) -> StepResult:
             )
             if tokens >= token_cap:
                 cap_reset_at = bucket_start + timedelta(hours=24)
-        except Exception:  # noqa: BLE001
-            logger.exception("failed to check key usage cap; proceeding without it")
-            cap_reset_at = None
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to check key usage cap; proceeding without it")
+        cap_reset_at = None
 
     if cap_reset_at is not None:
         await asyncio.to_thread(

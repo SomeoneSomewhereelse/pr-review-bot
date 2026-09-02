@@ -1481,6 +1481,28 @@ async def test_usage_check_failure_fails_open_and_runs_the_review(monkeypatch, d
     assert (await dispatcher.process_next_due(NOW)).action == "ran"
 
 
+async def test_effective_caps_failure_fails_open_and_runs_the_review(monkeypatch):
+    """Same fail-open posture as test_usage_check_failure_fails_open_and_runs_
+    the_review above, but for usage_cap_config.effective_caps() itself
+    raising -- it must be inside the same try as the rest of the cap
+    computation (dispatcher.py's own comment says "the whole computation ...
+    sits inside one try"), not read before it."""
+    _stub_comments(monkeypatch)
+    _enqueue(pr=99)
+
+    def boom():
+        raise RuntimeError("cache exploded")
+
+    monkeypatch.setattr(dispatcher.usage_cap_config, "effective_caps", boom)
+
+    async def fake_attempt(repo, pr, comment_id=None):
+        return orchestrator.ReviewCompleted(review=type("R", (), {})())
+
+    monkeypatch.setattr(dispatcher, "attempt_review", fake_attempt)
+
+    assert (await dispatcher.process_next_due(NOW)).action == "ran"
+
+
 async def test_capped_ticket_with_a_visible_review_gets_no_placeholder(monkeypatch, db_exec):
     """A good review already on the PR is preserved; the notice sweep shows
     the schedule footnote instead (same rule as every other deferral)."""
