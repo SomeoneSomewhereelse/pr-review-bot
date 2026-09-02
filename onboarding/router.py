@@ -736,6 +736,14 @@ async def bulk_push_render_env_vars(request: Request) -> dict:
 
     env_vars: dict[str, str] = {}
 
+    # The deployed bot service needs its own RENDER_API_KEY to power the
+    # dashboard's Environment tab (docs/superpowers/specs/
+    # 2026-09-02-dashboard-environment-tab-design.md) -- previously this
+    # credential never left the visitor's browser/onboarding session.
+    # render_frame["api_key"] is guaranteed present by this function's own
+    # guard clause above.
+    env_vars["RENDER_API_KEY"] = render_frame["api_key"]
+
     github_app = (await _read_frame(session_id, "github_app"))
     if github_app:
         env_vars["GITHUB_APP_ID"] = str(github_app["app_id"])

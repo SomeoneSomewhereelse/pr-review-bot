@@ -1562,6 +1562,7 @@ async def test_bulk_push_assembles_every_frame_into_one_push_call(monkeypatch):
     )
     assert resp.json()["valid"] is True
     assert captured["values"] == {
+        "RENDER_API_KEY": "rnd_x",
         "GITHUB_APP_ID": "1",
         "GITHUB_APP_PRIVATE_KEY": "pk",
         "GITHUB_WEBHOOK_SECRET": "wh",
@@ -1592,7 +1593,13 @@ async def test_bulk_push_omits_a_frame_that_was_never_completed(monkeypatch):
     await client.post("/api/render/bulk-push-env-vars", cookies={"onboarding_session": session_id})
     # The generic operational-tuning defaults are always included, unlike
     # every other key (which is gated on its frame being complete).
-    assert captured["values"] == router._GENERIC_OPERATIONAL_ENV_DEFAULTS
+    # RENDER_API_KEY is read from the render frame itself, which this
+    # endpoint's own guard clause already requires to be present -- so it
+    # is never actually omitted the way other frames' keys are.
+    assert captured["values"] == {
+        "RENDER_API_KEY": "rnd_x",
+        **router._GENERIC_OPERATIONAL_ENV_DEFAULTS,
+    }
 
 
 async def test_bulk_push_with_no_session_fails_closed():
