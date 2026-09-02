@@ -366,7 +366,7 @@ async def test_create_project_generates_db_pass_server_side(monkeypatch):
         cookies={"onboarding_session": session_id},
     )
     body = resp.json()
-    assert body == {"valid": True, "ref": "x" * 20, "status": "INACTIVE"}
+    assert body == {"valid": True, "ref": "x" * 20, "status": "INACTIVE", "name": "pr-review-bot"}
     assert "db_pass" not in body
     access_token, organization_slug, name, db_pass = captured["args"]
     assert (access_token, organization_slug, name) == ("a", "org-one", "pr-review-bot")
@@ -557,7 +557,8 @@ async def test_get_session_reports_render_key_and_render_service_separately(monk
     body = resp.json()["frames"]
     assert body["render-key"]["complete"] is True
     assert body["render-service"] == {
-        "complete": True, "display": {"service_url": "https://x.onrender.com"},
+        "complete": True,
+        "display": {"service_id": "srv-1", "service_url": "https://x.onrender.com"},
     }
 
 
@@ -860,13 +861,13 @@ async def test_set_webhook_url_endpoint_is_gone():
     assert resp.status_code == 404
 
 
-async def test_index_serves_configured_supabase_oauth_client_id(monkeypatch):
-    monkeypatch.setattr(
-        settings, "supabase_oauth_client_id", "66666666-6666-4666-8666-666666666666"
-    )
+async def test_index_never_templates_the_supabase_oauth_client_id():
+    """/api/supabase/connect builds the whole authorize URL (client_id
+    included) server-side now -- the browser never needs to know it, so
+    the page must not template it in at all anymore."""
     client = await _client()
     resp = await client.get("/")
-    assert 'window.SUPABASE_OAUTH_CLIENT_ID = "66666666-6666-4666-8666-666666666666";' in resp.text
+    assert "SUPABASE_OAUTH_CLIENT_ID" not in resp.text
     assert "__SUPABASE_OAUTH_CLIENT_ID__" not in resp.text
 
 

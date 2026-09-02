@@ -159,9 +159,11 @@ SUPABASE_OAUTH_CALLBACK_PATH = "/oauth/supabase/callback"
 
 
 def _render_index() -> HTMLResponse:
-    html = _INDEX_HTML.replace("__SUPABASE_OAUTH_CLIENT_ID__", settings.supabase_oauth_client_id)
+    # No client_id templating anymore -- /api/supabase/connect builds the
+    # whole authorize URL (client_id included) server-side now, so the
+    # browser never needs to know it.
     return HTMLResponse(
-        html,
+        _INDEX_HTML,
         headers={
             "Content-Security-Policy": (
                 "default-src 'none'; style-src 'unsafe-inline'; "
@@ -245,7 +247,16 @@ async def get_session_state(request: Request) -> dict:
         }
     if render and "service_id" in render:
         frames["render-service"] = {
-            "complete": True, "display": {"service_url": render.get("service_url")}
+            "complete": True,
+            # service_id isn't a credential (an identifier for the
+            # visitor's own Render service, like installation_id is for
+            # GitHub) -- the frontend's local render-service mirror needs
+            # it to gate later actions (trigger-deploy, bulk-push) the same
+            # way it does right after an in-page completion.
+            "display": {
+                "service_id": render.get("service_id"),
+                "service_url": render.get("service_url"),
+            },
         }
 
     if data.get("dashboard_auth"):
@@ -438,7 +449,12 @@ async def create_supabase_project(payload: SupabaseCreateProjectRequest, request
                 "organization_slug": payload.organization_slug,
             },
         )
-        return {"valid": True, "ref": result.ref, "status": result.status}
+        return {
+            "valid": True,
+            "ref": result.ref,
+            "status": result.status,
+            "name": supabase_frame["name"],
+        }
     if isinstance(result, supabase_client.SupabaseProjectRejected):
         return {"valid": False, "reason": "project_creation_rejected", "message": result.message}
     return {"valid": False, "reason": result.reason}

@@ -89,17 +89,14 @@ async def test_validate_github_app_leaves_the_page_exactly_once():
     assert body.count('fetch("/api/github/validate-app"') == 1
 
 
-async def test_render_key_never_persists_to_local_storage():
-    """localStorage persists across browser sessions/tabs; sessionStorage
-    does not, and only the latter is acceptable for a visitor credential.
-    This checks the credential's own storage key, not a blanket ban on
-    localStorage — Task 5 legitimately uses localStorage for non-secret
-    theme/language preferences elsewhere on this same page."""
+async def test_render_key_never_persists_client_side_at_all():
+    """The Render API key is validated once (frame 1, the wizard's session
+    entry point) and persisted server-side by /api/render/validate-key --
+    it never needs to be resent, so it never touches sessionStorage OR
+    localStorage on the client at all anymore."""
     client = await _client()
     body = (await client.get("/")).text
-    assert 'sessionStorage.setItem(STORAGE_KEYS["render-key"], key)' in body
-    assert 'localStorage.setItem(STORAGE_KEYS["render-key"]' not in body
-    assert 'localStorage.getItem(STORAGE_KEYS["render-key"]' not in body
+    assert 'STORAGE_KEYS["render-key"]' not in body
 
 
 async def test_completing_a_frame_unlocks_the_next_one():
@@ -192,9 +189,7 @@ async def test_page_offers_no_route_to_github_app_creation_either():
     frame_markup = body[frame_start : body.index("</details>", frame_start)]
     assert "github.com" not in frame_markup
     js_block = body[
-        body.index("function resetGithubAppSetupSection") : body.index(
-            "async function pushGithubAppToRenderService"
-        )
+        body.index("function resetGithubAppSetupSection") : body.index("function base64UrlEncode")
     ]
     assert "github.com" not in js_block
 
@@ -293,7 +288,6 @@ async def test_frame2_has_a_reset_path_wired_into_lock_and_change():
         body.index("function beginChange") : body.index("async function validateRenderKey")
     ]
     assert "resetGithubAppSetupSection()" in change_body
-    assert 'sessionStorage.removeItem(STORAGE_KEYS["github-app"])' in change_body
 
 
 async def test_validate_github_app_refuses_without_a_render_service_url():
@@ -313,9 +307,10 @@ async def test_validate_github_app_refuses_without_a_render_service_url():
     assert 'githubAppError("err_github_no_render_service");' in validate_fn
 
 
-async def test_validate_github_app_runs_every_check_before_pushing():
-    """all_ok gates the push-and-clear step -- a partial pass must not push
-    stale/incomplete credentials to Render."""
+async def test_validate_github_app_only_completes_the_frame_when_all_ok():
+    """all_ok gates completion -- a partial pass must not complete the
+    frame (the server itself also refuses to persist a not-all_ok result,
+    see test_onboarding_router.py::test_validate_app_does_not_persist_when_not_all_ok)."""
     client = await _client()
     body = (await client.get("/")).text
     validate_fn = body[
@@ -324,7 +319,7 @@ async def test_validate_github_app_runs_every_check_before_pushing():
         )
     ]
     assert "if (!body.all_ok)" in validate_fn
-    assert validate_fn.index("if (!body.all_ok)") < validate_fn.index("finishGithubAppSetup")
+    assert validate_fn.index("if (!body.all_ok)") < validate_fn.index('completeFrame("github-app"')
 
 
 async def test_webhook_secret_is_generated_client_side_not_pasted_back():
@@ -333,29 +328,6 @@ async def test_webhook_secret_is_generated_client_side_not_pasted_back():
     assert "function ensureGithubAppWebhookSecret" in body
     assert 'id="github-app-webhook-secret"' in body
     assert 'id="github-app-webhook-secret-input"' not in body
-
-
-async def test_stored_github_app_credentials_are_parsed_defensively():
-    """A corrupted sessionStorage value (extension, devtools, an older
-    version of this page) must not throw out of the DOMContentLoaded handler
-    and take every later listener with it — same failure mode, and same
-    defensive shape, as readStoredLang/readStoredTheme."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "function readStoredGithubApp" in body
-    # Exactly one parse of this key on the whole page — the guarded one
-    # inside the helper. Any other call site must go through the helper.
-    assert body.count('JSON.parse(sessionStorage.getItem(STORAGE_KEYS["github-app"])') == 1
-    helper_body = body[body.index("function readStoredGithubApp") :]
-    helper_body = helper_body[: helper_body.index("\n  }")]
-    assert "try {" in helper_body
-    assert "catch" in helper_body
-
-
-async def test_oauth_code_leaves_the_page_exactly_once():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/exchange-oauth-code"') == 1
 
 
 async def test_list_organizations_leaves_the_page_exactly_once():
@@ -375,12 +347,6 @@ async def test_create_project_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
     assert body.count('callSupabaseRelay("/api/supabase/create-project"') == 1
-
-
-async def test_refresh_access_token_leaves_the_page_exactly_once():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/refresh-access-token"') == 1
 
 
 async def test_frame3_has_a_name_input_and_connect_button():
@@ -413,158 +379,11 @@ async def test_frame3_strings_present_in_both_languages():
     assert body.count("connect_supabase_button:") == 2  # STRINGS.en + STRINGS.he
 
 
-async def test_oauth_callback_is_routed_by_path_not_a_query_flag():
-    """Supabase matches registered redirect URIs exactly, and a query string
-    is the part most likely to be normalised away or mis-registered -- one
-    trailing-slash difference was enough to break this (see ISSUES.md). The
-    callback is a bare path, and the same URI is relayed to the exchange so
-    the two OAuth legs cannot disagree."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "async function handleSupabaseOauthCallback" in body
-    assert "supabase_step" not in body
-    assert (
-        "window.SUPABASE_OAUTH_REDIRECT_URI = "
-        "`${location.origin}/oauth/supabase/callback`;"
-    ) in body
-    assert 'location.pathname !== "/oauth/supabase/callback"' in body
-    assert "redirect_uri: window.SUPABASE_OAUTH_REDIRECT_URI," in body
-
-
-async def test_pkce_challenge_uses_sha256():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert 'crypto.subtle.digest("SHA-256"' in body
-    assert "code_challenge_method" in body
-
-
-async def test_generated_db_password_is_alphanumeric_only():
-    """The generated password must never need percent-encoding, sidestepping
-    the manual guide's existing footgun entirely."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "function generateDbPassword" in body
-    assert "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789" in body
-
-
 async def test_reactive_refresh_helper_present():
     client = await _client()
     body = (await client.get("/")).text
     assert "async function callSupabaseRelay" in body
     assert '"unauthorized"' in body
-
-
-async def test_connect_supabase_guards_crypto_failures():
-    """generatePkcePair() calls crypto.subtle.digest, the page's only Web
-    Crypto call outside random-byte generation — insecure context or an
-    unsupported API would throw there. Unlike every fetch() elsewhere in
-    this file (each wrapped in try/catch, routed through supabaseError),
-    an uncaught throw here would leave "Connect Supabase" silently doing
-    nothing with no visible error state. This asserts the guard exists,
-    rather than simulating a crypto.subtle failure — this file's tests are
-    content-substring checks against served HTML/JS, not a JS execution
-    harness (see module docstring)."""
-    client = await _client()
-    body = (await client.get("/")).text
-    fn_body = body[
-        body.index("async function connectSupabase") : body.index(
-            "async function handleSupabaseOauthCallback"
-        )
-    ]
-    assert "try {" in fn_body
-    assert "catch (err) {" in fn_body
-    assert "generatePkcePair()" in fn_body
-    # The catch must actually surface a visible error, not swallow it.
-    catch_body = fn_body[fn_body.index("catch (err) {") :]
-    assert "supabaseError(" in catch_body
-
-
-async def test_connect_supabase_opens_a_popup_with_a_same_tab_fallback():
-    """A same-tab redirect risks a mobile browser reclaiming this tab's
-    browsing context while it's away on Supabase's consent screen, which
-    resets sessionStorage (frames 1-4's credentials included) even though
-    the origin and URL are unchanged on return (see ISSUES.md). A popup
-    keeps this tab's sessionStorage untouched -- but must still fall back
-    to today's flow if the popup is blocked."""
-    client = await _client()
-    body = (await client.get("/")).text
-    fn_body = body[
-        body.index("async function connectSupabase") : body.index(
-            "async function completeSupabaseOAuth"
-        )
-    ]
-    assert 'const popup = window.open(authorizeUrl, "_blank");' in fn_body
-    fallback_body = fn_body[fn_body.index("if (!popup) {") :]
-    fallback_body = fallback_body[: fallback_body.index("supabaseOauthPopup = popup;")]
-    assert "location.href = authorizeUrl;" in fallback_body
-    # Only the fallback branch does a same-tab redirect -- the normal path
-    # must not also navigate this tab away.
-    assert fn_body.count("location.href = authorizeUrl;") == 1
-
-
-async def test_popup_forwards_result_over_broadcast_channel_and_closes():
-    """The popup does no work itself -- window.opener is unreliable (many
-    OAuth providers, Supabase included, sever it via Cross-Origin-Opener-Policy
-    once the popup navigates to their login/consent page -- see ISSUES.md),
-    so the popup is identified by the ABSENCE of its own pending state, not
-    by window.opener, and hands the result to whichever tab is listening on
-    BroadcastChannel before closing."""
-    client = await _client()
-    body = (await client.get("/")).text
-    fn_body = body[
-        body.index("async function handleSupabaseOauthCallback") : body.index(
-            "  async function fetchSupabaseOrganizations"
-        )
-    ]
-    # No functional reliance on window.opener anywhere -- only mentioned, if
-    # at all, in a comment explaining why it was rejected.
-    assert "window.opener." not in fn_body
-    assert "window.opener &&" not in fn_body
-    popup_body = fn_body[fn_body.index("No pending state here") :]
-    assert "new BroadcastChannel(SUPABASE_OAUTH_CHANNEL_NAME)" in popup_body
-    assert "channel.postMessage({type: \"supabase-oauth-result\", code, state});" in popup_body
-    assert "window.close();" in popup_body
-    assert popup_body.index("postMessage") < popup_body.index("window.close();")
-    # With pending state present in this tab, the exchange still completes
-    # here -- the popup-blocked fallback, or a direct reload/bookmark of the
-    # callback URL.
-    assert "if (pending) {" in fn_body
-    assert "await completeSupabaseOAuth(code, state);" in fn_body
-
-
-async def test_broadcast_channel_message_handler_checks_the_message_type():
-    client = await _client()
-    body = (await client.get("/")).text
-    fn_body = body[
-        body.index("function handleSupabaseOauthChannelMessage") : body.index(
-            "async function connectSupabase"
-        )
-    ]
-    assert 'if (!event.data || event.data.type !== "supabase-oauth-result") return;' in fn_body
-    assert "completeSupabaseOAuth(code, state);" in fn_body
-
-
-async def test_abandoned_popup_reenables_the_connect_button():
-    """A visitor who closes the popup without finishing (changed their mind,
-    or the flow failed silently) must not be left with a permanently
-    disabled "Connect Supabase" button."""
-    client = await _client()
-    body = (await client.get("/")).text
-    fn_body = body[
-        body.index("async function connectSupabase") : body.index(
-            "async function completeSupabaseOAuth"
-        )
-    ]
-    assert "supabaseOauthPopupWatcher = setInterval(() => {" in fn_body
-    assert "if (popup.closed) {" in fn_body
-    assert "cleanupSupabaseOauthPopup();" in fn_body
-    cleanup_body = body[
-        body.index("function cleanupSupabaseOauthPopup") : body.index(
-            "function handleSupabaseOauthChannelMessage"
-        )
-    ]
-    assert 'document.getElementById("supabase-connect-submit").disabled = false;' in cleanup_body
-    assert "supabaseOauthChannel.close();" in cleanup_body
 
 
 async def test_project_status_leaves_the_page_exactly_once():
@@ -603,19 +422,6 @@ async def test_target_status_is_active_healthy_and_init_failed_is_terminal():
     assert '"INIT_FAILED"' in body
 
 
-async def test_connection_string_assembled_client_side_from_non_secret_shape():
-    """The backend never returns Supabase's own connection_string field
-    (spec section 3 step 9) — the browser builds it from db_user/db_host/
-    db_port/db_name (returned) plus db_pass (already held)."""
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "function fetchSupabaseConnectionInfo" in body
-    assert (
-        "postgresql://${body.db_user}:${stored.db_pass}@${body.db_host}:${body.db_port}/${body.db_name}"
-        in body
-    )
-
-
 async def test_supabase_credential_never_persists_to_local_storage():
     client = await _client()
     body = (await client.get("/")).text
@@ -648,12 +454,13 @@ async def test_stored_supabase_credentials_are_parsed_defensively():
 
 
 async def test_terminal_supabase_errors_reset_the_connect_section():
-    """INIT_FAILED (from handleProjectStatusResult), an exhausted-refresh
-    unauthorized (from callSupabaseRelay's callers, via
-    supabaseErrorForReason), and project_creation_rejected are dead ends --
-    resetSupabaseConnectSection() must run before the error is shown so
-    "Connect Supabase" is back on screen to restart the flow, not just
-    fold into the existing error-clearing convention."""
+    """INIT_FAILED (from handleProjectStatusResult), an "unauthorized" or
+    "no_session" server response (the server-side session's stored token is
+    dead, or there's no session record at all), and
+    project_creation_rejected are dead ends -- resetSupabaseConnectSection()
+    must run before the error is shown so "Connect Supabase" is back on
+    screen to restart the flow, not just fold into the existing
+    error-clearing convention."""
     client = await _client()
     body = (await client.get("/")).text
 
@@ -666,14 +473,19 @@ async def test_terminal_supabase_errors_reset_the_connect_section():
     reason_fn_start = body.index("function supabaseErrorForReason")
     reason_fn_body = body[reason_fn_start : body.index("async function callSupabaseRelay")]
 
-    rejected_branch = reason_fn_body[: reason_fn_body.index('if (reason === "unauthorized")')]
+    rejected_branch = reason_fn_body[
+        : reason_fn_body.index('if (reason === "unauthorized" || reason === "no_session")')
+    ]
     assert "resetSupabaseConnectSection()" in rejected_branch
     assert rejected_branch.index("resetSupabaseConnectSection()") < rejected_branch.index(
         'document.getElementById("supabase-error").textContent = message;'
     )
 
-    unauthorized_branch = reason_fn_body[reason_fn_body.index('if (reason === "unauthorized")') :]
+    unauthorized_branch = reason_fn_body[
+        reason_fn_body.index('if (reason === "unauthorized" || reason === "no_session")') :
+    ]
     assert "resetSupabaseConnectSection();" in unauthorized_branch.split("const key = {")[0]
+    assert 'no_session: "err_no_session"' in unauthorized_branch.split("const key = {")[1]
 
 
 async def test_org_picker_opens_the_frame_and_updates_its_badge():
@@ -701,38 +513,6 @@ async def test_org_picker_opens_the_frame_and_updates_its_badge():
     assert "showSupabaseOrgPicker();" in fetch_orgs_body
 
 
-async def test_relay_callers_re_read_storage_after_the_await_before_writing_back():
-    """A stale pre-await snapshot must not clobber tokens callSupabaseRelay
-    refreshed mid-call: the read that feeds the final sessionStorage.setItem
-    must happen after the callSupabaseRelay await, not before."""
-    client = await _client()
-    body = (await client.get("/")).text
-
-    kickoff_body = body[
-        body.index("async function kickOffProjectCreation") : body.index(
-            "function showSupabaseProvisioning"
-        )
-    ]
-    await_pos = kickoff_body.index("await callSupabaseRelay(")
-    reread_pos = kickoff_body.index("stored = readStoredSupabase() || stored;")
-    write_pos = kickoff_body.index(
-        'sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));'
-    )
-    assert await_pos < reread_pos < write_pos
-
-    conn_info_body = body[
-        body.index("async function fetchSupabaseConnectionInfo") : body.index(
-            "function restoreFromSession"
-        )
-    ]
-    await_pos = conn_info_body.index("await callSupabaseRelay(")
-    reread_pos = conn_info_body.index("stored = readStoredSupabase() || stored;")
-    write_pos = conn_info_body.index(
-        'sessionStorage.setItem(STORAGE_KEYS["supabase"], JSON.stringify(stored));'
-    )
-    assert await_pos < reread_pos < write_pos
-
-
 async def test_connection_info_missing_local_state_shows_an_error_not_a_silent_stall():
     """Polling already reported "ready" and stopped by this point -- a bare
     return here used to leave the frame stuck at "Provisioning..." forever
@@ -744,43 +524,6 @@ async def test_connection_info_missing_local_state_shows_an_error_not_a_silent_s
     guard_body = fn_body[: fn_body.index("const body = await callSupabaseRelay(")]
     assert "return;" in guard_body
     assert 'supabaseError("err_supabase_callback_invalid");' in guard_body
-
-
-async def test_refresh_does_not_overwrite_a_valid_refresh_token_with_a_missing_one():
-    """Supabase's OAuth schema does not guarantee refresh_token on every
-    refresh response (SupabaseTokens.refresh_token: str | None) -- an
-    unconditional overwrite would clobber a still-valid refresh token with
-    null/undefined, permanently disabling future refreshes."""
-    client = await _client()
-    body = (await client.get("/")).text
-    relay_start = body.index("async function callSupabaseRelay")
-    relay_body = body[relay_start : body.index("async function connectSupabase")]
-    assert "stored.access_token = refreshBody.access_token;" in relay_body
-    assert "if (refreshBody.refresh_token) {" in relay_body
-    assert "stored.refresh_token = refreshBody.refresh_token;" in relay_body
-    # The unconditional overwrite this replaces must be gone.
-    assert relay_body.count("stored.refresh_token = refreshBody.refresh_token;") == 1
-    guard_pos = relay_body.index("if (refreshBody.refresh_token) {")
-    assign_pos = relay_body.index("stored.refresh_token = refreshBody.refresh_token;")
-    close_brace_pos = relay_body.index("}", assign_pos)
-    assert guard_pos < assign_pos < close_brace_pos
-
-
-async def test_supabase_oauth_callback_storage_write_is_guarded():
-    """A sessionStorage.setItem failure (quota/blocked) must route through
-    supabaseError(...) like every other step in this function, not become
-    an unhandled rejection with the freshly-exchanged tokens lost."""
-    client = await _client()
-    body = (await client.get("/")).text
-    fn_start = body.index("async function completeSupabaseOAuth")
-    fn_body = body[fn_start : body.index("async function fetchSupabaseOrganizations")]
-    setitem_pos = fn_body.index('sessionStorage.setItem(STORAGE_KEYS["supabase"]')
-    try_pos = fn_body.rindex("try {", 0, setitem_pos)
-    catch_pos = fn_body.index("} catch (err) {", setitem_pos)
-    assert try_pos < setitem_pos < catch_pos
-    catch_body = fn_body[catch_pos : fn_body.index("await fetchSupabaseOrganizations();")]
-    assert "supabaseError(" in catch_body
-    assert body.count("err_supabase_storage_failed:") == 2  # STRINGS.en + STRINGS.he
 
 
 async def test_frame4_has_a_three_way_provider_selector():
@@ -1076,9 +819,9 @@ async def test_frame5_has_a_reset_path_wired_into_lock_and_change():
 async def test_restore_from_session_completes_uptime_pinger_frame():
     client = await _client()
     body = (await client.get("/")).text
-    fn_start = body.index("function restoreFromSession")
+    fn_start = body.index("async function restoreFromSession")
     fn_body = body[fn_start : body.index("function guardLockedFrames")]
-    assert 'sessionStorage.getItem(STORAGE_KEYS["uptime-pinger"])' in fn_body
+    assert 'frames["uptime-pinger"]' in fn_body
     assert 'completeFrame("uptime-pinger"' in fn_body
 
 
@@ -1280,10 +1023,11 @@ async def test_dashboard_auth_storage_key_present():
     assert '"dashboard-auth": "onboarding.dashboardAuth"' in body
 
 
-async def test_dashboard_auth_push_render_vars_fetch_leaves_the_page_exactly_once():
+async def test_dashboard_auth_confirm_fetch_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/dashboard-auth/push-render-vars"') == 1
+    assert body.count('fetch("/api/dashboard-auth/confirm"') == 1
+    assert "push-render-vars" not in body
 
 
 async def test_dashboard_auth_never_persists_raw_credentials():
@@ -1338,58 +1082,64 @@ async def test_lock_frame_resets_render_deploy_section():
     assert 'if (id === "render-deploy") resetRenderDeploySection();' in body
 
 
-async def test_github_push_render_vars_fetch_leaves_the_page_exactly_once():
+async def test_github_confirm_fetch_leaves_the_page_exactly_once():
+    """github-app no longer pushes to Render incrementally -- validate-app
+    persists server-side on success, and the final render-deploy frame's
+    bulk-push endpoint sends everything to Render in one call."""
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/github/push-render-vars"') == 1
+    assert body.count('fetch("/api/github/validate-app"') == 1
+    assert "github/push-render-vars" not in body
 
 
-async def test_supabase_push_render_var_fetch_leaves_the_page_exactly_once():
+async def test_llm_confirm_fetch_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/supabase/push-render-var"') == 1
+    assert body.count('fetch("/api/llm/confirm"') == 1
+    assert "llm/push-render-vars" not in body
 
 
-async def test_llm_push_render_vars_fetch_leaves_the_page_exactly_once():
+async def test_no_per_frame_push_to_render_remains():
+    """The four incremental push-render-vars endpoints (github, supabase,
+    llm, dashboard-auth) were replaced by one bulk push from the final
+    render-deploy frame -- none of the four call sites, or their helper
+    functions, should exist anywhere on the page anymore."""
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('fetch("/api/llm/push-render-vars"') == 1
+    for endpoint in (
+        "/api/github/push-render-vars",
+        "/api/supabase/push-render-var",
+        "/api/llm/push-render-vars",
+        "/api/dashboard-auth/push-render-vars",
+    ):
+        assert endpoint not in body
+    for fn in (
+        "pushGithubAppToRenderService",
+        "pushSupabaseToRenderService",
+        "pushLlmProviderToRenderService",
+        "pushDashboardAuthToRenderService",
+    ):
+        assert fn not in body
 
 
-async def test_github_push_helper_clears_secret_fields_not_account_login():
+async def test_render_deploy_bulk_pushes_before_triggering():
     client = await _client()
     body = (await client.get("/")).text
-    assert "delete stored.private_key_b64;" in body
-    assert "delete stored.webhook_secret;" in body
-    assert "delete stored.account_login" not in body
-
-
-async def test_supabase_push_helper_clears_connection_string():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "delete stored.connection_string;" in body
+    fn_start = body.index("async function triggerRenderDeploy")
+    fn_body = body[fn_start : body.index("async function fetchSupabaseConnectionInfo")]
+    assert 'fetch("/api/render/bulk-push-env-vars"' in fn_body
+    assert 'fetch("/api/render/trigger-deploy"' in fn_body
+    assert fn_body.index('fetch("/api/render/bulk-push-env-vars"') < fn_body.index(
+        'fetch("/api/render/trigger-deploy"'
+    )
 
 
 async def test_supabase_restore_uses_completed_flag_not_connection_string():
     client = await _client()
     body = (await client.get("/")).text
-    assert "supabaseState.completed" in body
-    assert "supabaseState.connection_string" not in body
-
-
-async def test_llm_push_helper_clears_credential_fields():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert "delete stored.api_key;" in body
-    assert "delete stored.gcp_service_account_key_b64;" in body
-
-
-async def test_push_helpers_skip_entirely_without_a_render_service():
-    client = await _client()
-    body = (await client.get("/")).text
-    assert (
-        body.count("if (!renderService || !renderService.service_id || !renderApiKey) return;") == 4
-    )
+    assert "supabaseState.completed" not in body  # old field, gone
+    assert "supabaseFrame.complete" in body
+    assert "connection_string" not in body
 
 
 async def test_render_service_frame_precedes_the_github_app_frame():
