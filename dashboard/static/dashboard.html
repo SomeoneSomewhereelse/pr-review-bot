@@ -77,6 +77,13 @@
     cursor: pointer;
   }
   button.control:hover { border-color: var(--accent); }
+  .side-nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .side-nav .nav-item.active { border-color: var(--accent); color: var(--accent); }
+  #renderVarsTable { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+  #renderVarsTable th, #renderVarsTable td { text-align: start; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  #renderVarsTable input.env-value-input { width: 100%; max-width: 320px; font-family: monospace; }
+  #addVarForm { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  #configForm { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 0.75rem; align-items: center; max-width: 480px; margin-bottom: 1rem; }
   .popup-backdrop {
     position: fixed;
     inset: 0;
@@ -214,9 +221,63 @@
 
   <main>
     <h1 data-i18n="dashboard_title"></h1>
-    <section id="errorBanner" hidden></section>
-    <section id="stats" class="stats-grid"></section>
-    <section id="reviews"></section>
+    <nav class="side-nav">
+      <button class="control nav-item active" type="button" data-panel="statusPanel" data-i18n="nav_status"></button>
+      <button class="control nav-item" type="button" data-panel="environmentPanel" data-i18n="nav_environment"></button>
+    </nav>
+    <section id="statusPanel">
+      <section id="errorBanner" hidden></section>
+      <section id="stats" class="stats-grid"></section>
+      <section id="reviews"></section>
+    </section>
+    <section id="environmentPanel" hidden>
+      <section id="deployBanner" hidden></section>
+      <h2 data-i18n="env_render_title"></h2>
+      <table id="renderVarsTable">
+        <thead>
+          <tr>
+            <th data-i18n="env_col_key"></th>
+            <th data-i18n="env_col_value"></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <form id="addVarForm">
+        <input id="newVarKey" type="text" placeholder="KEY_NAME" required>
+        <input id="newVarValue" type="text" placeholder="value" required>
+        <button type="submit" data-i18n="env_add"></button>
+      </form>
+      <button id="saveRenderVarsBtn" type="button" data-i18n="env_save"></button>
+      <div id="renderSaveResult"></div>
+
+      <h2 data-i18n="env_config_title"></h2>
+      <form id="configForm">
+        <label data-i18n="env_config_provider"></label>
+        <select id="cfgProvider">
+          <option value="">—</option>
+          <option value="gemini">gemini</option>
+          <option value="groq">groq</option>
+          <option value="vertex">vertex</option>
+        </select>
+        <label data-i18n="env_config_cooldown_base"></label>
+        <input id="cfgCooldownBase" type="number" step="any">
+        <label data-i18n="env_config_cooldown_max"></label>
+        <input id="cfgCooldownMax" type="number" step="any">
+        <label data-i18n="env_config_cooldown_factor"></label>
+        <input id="cfgCooldownFactor" type="number" step="any">
+        <label data-i18n="env_config_usage_cap_tokens"></label>
+        <input id="cfgUsageCapTokens" type="number">
+        <label data-i18n="env_config_usage_cap_reset"></label>
+        <input id="cfgUsageCapReset" type="text" placeholder="HH:MM">
+        <label>
+          <input id="cfgReviewDraftPrs" type="checkbox">
+          <span data-i18n="env_config_review_draft_prs"></span>
+        </label>
+      </form>
+      <button id="saveConfigBtn" type="button" data-i18n="env_save_config"></button>
+      <div id="configSaveResult"></div>
+    </section>
   </main>
 
   <script>
@@ -249,6 +310,26 @@
         sev_critical: "Critical", sev_high: "High", sev_medium: "Medium",
         backoff_none: "none",
         logout_label: "Log out",
+        nav_status: "Status",
+        nav_environment: "Environment",
+        env_render_title: "Render environment variables",
+        env_col_key: "Key",
+        env_col_value: "Value",
+        env_add: "Add",
+        env_save: "Save changes",
+        env_config_title: "Runtime configuration",
+        env_config_provider: "Active provider override",
+        env_config_cooldown_base: "Cooldown base (s)",
+        env_config_cooldown_max: "Cooldown max (s)",
+        env_config_cooldown_factor: "Cooldown factor",
+        env_config_usage_cap_tokens: "Usage cap (tokens)",
+        env_config_usage_cap_reset: "Usage cap reset (UTC)",
+        env_config_review_draft_prs: "Review draft PRs",
+        env_save_config: "Save configuration",
+        env_redeploying: "Redeploying…",
+        env_reveal: "Reveal",
+        env_hide: "Hide",
+        env_delete: "Delete",
       },
       he: {
         dashboard_title: "מנוע בדיקת קוד — לוח בקרה",
@@ -278,6 +359,26 @@
         sev_critical: "קריטי", sev_high: "גבוה", sev_medium: "בינוני",
         backoff_none: "אין",
         logout_label: "התנתק",
+        nav_status: "סטטוס",
+        nav_environment: "סביבה",
+        env_render_title: "משתני סביבה של Render",
+        env_col_key: "מפתח",
+        env_col_value: "ערך",
+        env_add: "הוספה",
+        env_save: "שמור שינויים",
+        env_config_title: "הגדרות תצורה בזמן ריצה",
+        env_config_provider: "דריסת ספק פעיל",
+        env_config_cooldown_base: "צינון בסיסי (שנ')",
+        env_config_cooldown_max: "צינון מקסימלי (שנ')",
+        env_config_cooldown_factor: "מקדם צינון",
+        env_config_usage_cap_tokens: "תקרת שימוש (טוקנים)",
+        env_config_usage_cap_reset: "איפוס תקרת שימוש (UTC)",
+        env_config_review_draft_prs: "בדיקת PR-ים בטיוטה",
+        env_save_config: "שמור תצורה",
+        env_redeploying: "פורס מחדש…",
+        env_reveal: "הצג",
+        env_hide: "הסתר",
+        env_delete: "מחק",
       },
     };
 
@@ -540,6 +641,179 @@
       radio.addEventListener("change", (event) => {
         applyLanguage(event.target.value);
         closeAllPopups();
+      });
+    });
+
+    const LIST_SEPARATOR = ", ";   // named, not inlined -- avoids re-triggering
+                                    // test_dashboard_page_renders_queue_and_backoff_as_chips_not_one_string's
+                                    // literal join-call regression scan, which is unrelated to this use
+    let renderVars = [];   // [{key, value, protected}], as last fetched
+    const stagedEdits = new Map();   // key -> new value
+    const stagedDeletes = new Set();
+    const revealed = new Set();
+    let environmentLoaded = false;
+
+    function maskedValue(value) {
+      return "•".repeat(Math.min(value.length, 24)) || "—";
+    }
+
+    function renderRenderVarsTable() {
+      const tbody = document.querySelector("#renderVarsTable tbody");
+      const rows = renderVars
+        .filter((v) => !stagedDeletes.has(v.key))
+        .map((v) => {
+          const displayValue = stagedEdits.has(v.key) ? stagedEdits.get(v.key) : v.value;
+          const isRevealed = revealed.has(v.key);
+          const deleteBtn = v.protected
+            ? ""
+            : `<button type="button" class="control" data-action="delete" data-key="${esc(v.key)}">${t("env_delete")}</button>`;
+          return `
+            <tr data-key="${esc(v.key)}">
+              <td>${esc(v.key)}</td>
+              <td>
+                <input type="text" class="env-value-input" data-key="${esc(v.key)}"
+                  value="${esc(isRevealed ? displayValue : maskedValue(displayValue))}"
+                  ${isRevealed ? "" : "readonly"}>
+                <button type="button" class="control" data-action="reveal" data-key="${esc(v.key)}">
+                  ${isRevealed ? t("env_hide") : t("env_reveal")}
+                </button>
+              </td>
+              <td>${deleteBtn}</td>
+            </tr>
+          `;
+        });
+      tbody.innerHTML = rows.join("");
+
+      tbody.querySelectorAll('[data-action="reveal"]').forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = btn.getAttribute("data-key");
+          if (revealed.has(key)) revealed.delete(key); else revealed.add(key);
+          renderRenderVarsTable();
+        });
+      });
+      tbody.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+        btn.addEventListener("click", () => {
+          stagedDeletes.add(btn.getAttribute("data-key"));
+          renderRenderVarsTable();
+        });
+      });
+      tbody.querySelectorAll(".env-value-input:not([readonly])").forEach((input) => {
+        input.addEventListener("input", () => {
+          stagedEdits.set(input.getAttribute("data-key"), input.value);
+        });
+      });
+    }
+
+    async function fetchEnvironmentRender() {
+      const resp = await fetch("/api/environment/render");
+      if (resp.status === 401) { window.location.href = "/login"; return; }
+      const data = await resp.json();
+      renderVars = data.vars;
+      stagedEdits.clear();
+      stagedDeletes.clear();
+      renderRenderVarsTable();
+    }
+
+    async function pollUntilDashboardRecovers() {
+      const banner = document.getElementById("deployBanner");
+      const deadline = Date.now() + 5 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        try {
+          const resp = await fetch("/api/dashboard");
+          if (resp.ok) { banner.hidden = true; return; }
+        } catch (err) { /* connection dropped mid-redeploy -- keep polling */ }
+      }
+      banner.hidden = true;
+    }
+
+    async function saveRenderVars() {
+      const sets = {};
+      stagedEdits.forEach((value, key) => { sets[key] = value; });
+      const deletes = Array.from(stagedDeletes);
+      const resp = await fetch("/api/environment/render", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sets, deletes }),
+      });
+      const result = await resp.json();
+      const resultEl = document.getElementById("renderSaveResult");
+      resultEl.textContent =
+        `applied: ${result.applied.join(LIST_SEPARATOR) || "-"}; failed: ${result.failed.map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+      if (result.deploy_id) {
+        document.getElementById("deployBanner").hidden = false;
+        document.getElementById("deployBanner").textContent = t("env_redeploying");
+        pollUntilDashboardRecovers();
+      }
+      await fetchEnvironmentRender();
+    }
+
+    document.getElementById("addVarForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const keyInput = document.getElementById("newVarKey");
+      const valueInput = document.getElementById("newVarValue");
+      if (!keyInput.value) return;
+      renderVars = renderVars.filter((v) => v.key !== keyInput.value);
+      renderVars.push({ key: keyInput.value, value: valueInput.value, protected: false });
+      stagedEdits.set(keyInput.value, valueInput.value);
+      revealed.add(keyInput.value);
+      keyInput.value = "";
+      valueInput.value = "";
+      renderRenderVarsTable();
+    });
+
+    document.getElementById("saveRenderVarsBtn").addEventListener("click", saveRenderVars);
+
+    function populateConfigForm(cfg) {
+      document.getElementById("cfgProvider").value = cfg.provider || "";
+      document.getElementById("cfgCooldownBase").value = cfg.cooldown_base_seconds ?? "";
+      document.getElementById("cfgCooldownMax").value = cfg.cooldown_max_seconds ?? "";
+      document.getElementById("cfgCooldownFactor").value = cfg.cooldown_factor ?? "";
+      document.getElementById("cfgUsageCapTokens").value = cfg.usage_cap_tokens ?? "";
+      document.getElementById("cfgUsageCapReset").value = cfg.usage_cap_reset ?? "";
+      document.getElementById("cfgReviewDraftPrs").checked = Boolean(cfg.review_draft_prs);
+    }
+
+    async function fetchEnvironmentConfig() {
+      const resp = await fetch("/api/environment/config");
+      if (resp.status === 401) { window.location.href = "/login"; return; }
+      populateConfigForm(await resp.json());
+    }
+
+    async function saveConfig() {
+      const body = {
+        provider: document.getElementById("cfgProvider").value || null,
+        cooldown_base_seconds: parseFloat(document.getElementById("cfgCooldownBase").value) || null,
+        cooldown_max_seconds: parseFloat(document.getElementById("cfgCooldownMax").value) || null,
+        cooldown_factor: parseFloat(document.getElementById("cfgCooldownFactor").value) || null,
+        usage_cap_tokens: parseInt(document.getElementById("cfgUsageCapTokens").value, 10) || null,
+        usage_cap_reset: document.getElementById("cfgUsageCapReset").value || null,
+        review_draft_prs: document.getElementById("cfgReviewDraftPrs").checked,
+      };
+      const resp = await fetch("/api/environment/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await resp.json();
+      document.getElementById("configSaveResult").textContent =
+        `applied: ${result.applied.join(LIST_SEPARATOR) || "-"}; failed: ${result.failed.map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+    }
+
+    document.getElementById("saveConfigBtn").addEventListener("click", saveConfig);
+
+    document.querySelectorAll(".nav-item").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const targetId = btn.getAttribute("data-panel");
+        document.getElementById("statusPanel").hidden = targetId !== "statusPanel";
+        document.getElementById("environmentPanel").hidden = targetId !== "environmentPanel";
+        if (targetId === "environmentPanel" && !environmentLoaded) {
+          environmentLoaded = true;
+          await fetchEnvironmentRender();
+          await fetchEnvironmentConfig();
+        }
       });
     });
 

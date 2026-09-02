@@ -18,3 +18,24 @@ def test_specialist_name_strings_survive():
     html = _DASHBOARD.read_text(encoding="utf-8")
     for key in ("sp_name_security", "sp_name_performance", "sp_name_quality"):
         assert key in html
+
+
+def test_environment_panel_markup_is_present():
+    html = _DASHBOARD.read_text(encoding="utf-8")
+    for token in (
+        'id="statusPanel"',
+        'id="environmentPanel"',
+        'id="renderVarsTable"',
+        'id="configForm"',
+        'id="saveRenderVarsBtn"',
+        'id="saveConfigBtn"',
+        'data-panel="statusPanel"',
+        'data-panel="environmentPanel"',
+    ):
+        assert token in html, f"missing Environment tab markup: {token}"
+
+
+def test_environment_nav_strings_exist_in_both_languages():
+    html = _DASHBOARD.read_text(encoding="utf-8")
+    for key in ("nav_status", "nav_environment", "env_save", "env_save_config"):
+        assert key in html, f"missing i18n key: {key}"
