@@ -6,6 +6,7 @@ dashboard/environment.py."""
 from __future__ import annotations
 
 import httpx
+import pytest
 import respx
 
 from bot import render_client as _render
@@ -95,3 +96,64 @@ def test_env_vars_stops_after_a_short_page(monkeypatch):
         result = _render.env_vars("srv-1")
     assert result == {"A": "1"}
     assert route.call_count == 1
+
+
+def test_push_env_var_puts_the_single_key_endpoint(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    with respx.mock:
+        route = respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/FOO").mock(
+            return_value=httpx.Response(200, json={"envVar": {"key": "FOO", "value": "bar"}})
+        )
+        _render.push_env_var("srv-1", "FOO", "bar")
+    assert route.called
+    assert route.calls[0].request.content == b'{"value":"bar"}'
+
+
+def test_push_env_var_raises_on_a_render_error(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    with respx.mock:
+        respx.put(f"{RENDER_SERVICES}/srv-1/env-vars/FOO").mock(
+            return_value=httpx.Response(400, json={"message": "bad"})
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            _render.push_env_var("srv-1", "FOO", "bar")
+
+
+def test_delete_env_var_deletes_the_single_key_endpoint(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    with respx.mock:
+        route = respx.delete(f"{RENDER_SERVICES}/srv-1/env-vars/FOO").mock(
+            return_value=httpx.Response(204)
+        )
+        _render.delete_env_var("srv-1", "FOO")
+    assert route.called
+
+
+def test_delete_env_var_raises_on_a_render_error(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    with respx.mock:
+        respx.delete(f"{RENDER_SERVICES}/srv-1/env-vars/FOO").mock(
+            return_value=httpx.Response(500)
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            _render.delete_env_var("srv-1", "FOO")
+
+
+def test_delete_env_var_refuses_every_protected_key_without_calling_render(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    for key in _render.PROTECTED_ENV_KEYS:
+        with respx.mock:
+            # No route registered at all -- respx raises if any HTTP call
+            # is attempted, proving the function never reaches out to Render.
+            with pytest.raises(_render.ProtectedEnvKeyError):
+                _render.delete_env_var("srv-1", key)
+
+
+def test_trigger_deploy_returns_the_deploy_id_without_polling(monkeypatch):
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    with respx.mock:
+        respx.post(f"{RENDER_SERVICES}/srv-1/deploys").mock(
+            return_value=httpx.Response(201, json={"deploy": {"id": "dep-1", "status": "queued"}})
+        )
+        deploy_id = _render.trigger_deploy("srv-1")
+    assert deploy_id == "dep-1"

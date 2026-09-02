@@ -81,3 +81,74 @@ def env_vars(service_id: str) -> dict[str, str]:
         if len(page) < _ENV_VARS_PAGE_LIMIT:
             return current
         params = {"limit": _ENV_VARS_PAGE_LIMIT, "cursor": page[-1]["cursor"]}
+
+
+# Every var bot/main.py's lifespan() either explicitly refuses to boot
+# without, or implicitly hard-depends on (DATABASE_URL for store.init_pool(),
+# GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY for the installation-id verification
+# call), plus RENDER_API_KEY itself -- deleting it would strand this feature's
+# own ability to fix anything else. Never deletable via push_env_var/
+# delete_env_var's caller, dashboard/environment.py -- see
+# docs/superpowers/specs/2026-09-02-dashboard-environment-tab-design.md.
+PROTECTED_ENV_KEYS = frozenset(
+    {
+        "DATABASE_URL",
+        "RENDER_API_KEY",
+        "DASHBOARD_USERNAME",
+        "DASHBOARD_PASSWORD",
+        "DASHBOARD_SESSION_SECRET",
+        "GITHUB_WEBHOOK_SECRET",
+        "GITHUB_APP_ID",
+        "GITHUB_APP_PRIVATE_KEY",
+        "GITHUB_APP_INSTALLATION_ID",
+    }
+)
+
+
+class ProtectedEnvKeyError(Exception):
+    """Raised by delete_env_var() for a PROTECTED_ENV_KEYS member -- the
+    caller (dashboard/environment.py) reports this as a per-key "protected"
+    failure rather than attempting the delete."""
+
+
+def push_env_var(service_id: str, key: str, value: str) -> None:
+    """Single-key PUT -- never the bulk endpoint (PUT /env-vars, plural,
+    silently replaces the whole list). Raises on failure; the caller decides
+    how to report it -- see dashboard/environment.py's per-key loop."""
+    resp = httpx.put(
+        f"{RENDER_API}/services/{service_id}/env-vars/{key}",
+        headers=headers(),
+        json={"value": value},
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+
+
+def delete_env_var(service_id: str, key: str) -> None:
+    """Single-key DELETE. Refuses outright for a PROTECTED_ENV_KEYS member --
+    never even issues the HTTP request."""
+    if key in PROTECTED_ENV_KEYS:
+        raise ProtectedEnvKeyError(key)
+    resp = httpx.delete(
+        f"{RENDER_API}/services/{service_id}/env-vars/{key}",
+        headers=headers(),
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+
+
+def trigger_deploy(service_id: str) -> str:
+    """Fire-and-forget: POST the deploy trigger and return its id
+    immediately -- no polling. Unlike bot/scripts/deploy.py's own
+    _trigger_and_wait (which blocks until "live" for the CLI's benefit), a
+    caller running inside the very service being redeployed cannot safely
+    block on that -- the container may be torn down mid-poll once the new
+    one passes its health check."""
+    resp = httpx.post(
+        f"{RENDER_API}/services/{service_id}/deploys",
+        headers=headers(),
+        json={},
+        timeout=HTTP_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return unwrap(resp.json(), "deploy")["id"]
