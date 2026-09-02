@@ -27,6 +27,11 @@ written. See
 for the full design, including the fork-risk hardening on
 `session_store.update_frame()` (it requires an existing session and never
 upserts — `create_session()` is the only place a session id is ever minted).
+A session's TTL is `session_store.SESSION_TTL` (4 hours as of this writing —
+check the constant itself, not this number, if it matters), swept lazily
+(no cron): a lookup past its `expires_at` is deleted and treated identically
+to a missing session, and `create_session()` sweeps expired rows before
+inserting.
 
 What this changes in practice:
 - A relay endpoint's *first* submission of a credential still comes from the

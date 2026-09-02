@@ -33,7 +33,6 @@ _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 SESSION_COOKIE_NAME = "onboarding_session"
 
 
-
 def _get_session_id(request: Request) -> str | None:
     return request.cookies.get(SESSION_COOKIE_NAME)
 
