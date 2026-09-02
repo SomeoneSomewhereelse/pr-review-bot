@@ -531,15 +531,56 @@ async def test_get_session_with_unknown_cookie_returns_empty_frames(monkeypatch)
     assert resp.json() == {"frames": {}}
 
 
-async def test_get_session_reflects_display_fields_but_never_the_credential(monkeypatch):
+async def test_get_session_reflects_render_key_display_but_never_the_credential(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
     fake.update_frame(session_id, "render", {"api_key": SENTINEL_KEY, "owner_name": "alice"})
     client = await _client()
     resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
     body = resp.json()
-    assert body == {"frames": {"render": {"complete": True, "display": {"owner_name": "alice"}}}}
+    assert body == {
+        "frames": {"render-key": {"complete": True, "display": {"owner_name": "alice"}}}
+    }
     assert SENTINEL_KEY not in resp.text
+
+
+async def test_get_session_reports_render_key_and_render_service_separately(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "render", {"api_key": "rnd_x", "owner_name": "alice"})
+    client = await _client()
+    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
+    assert "render-service" not in resp.json()["frames"]
+
+    fake.update_frame(session_id, "render", {"service_id": "srv-1", "service_url": "https://x.onrender.com"})
+    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
+    body = resp.json()["frames"]
+    assert body["render-key"]["complete"] is True
+    assert body["render-service"] == {
+        "complete": True, "display": {"service_url": "https://x.onrender.com"},
+    }
+
+
+async def test_get_session_reports_supabase_authorized_but_not_yet_created(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(session_id, "supabase", {"access_token": "tok", "name": "myproj"})
+    client = await _client()
+    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
+    assert resp.json()["frames"]["supabase"] == {
+        "complete": False, "authorized": True, "display": {},
+    }
+
+
+async def test_get_session_reports_supabase_complete_once_project_created(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+    fake.update_frame(
+        session_id, "supabase", {"access_token": "tok", "name": "myproj", "ref": "x" * 20}
+    )
+    client = await _client()
+    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
+    assert resp.json()["frames"]["supabase"] == {"complete": True, "display": {"name": "myproj"}}
 
 
 async def test_reset_session_deletes_the_row_and_clears_the_cookie(monkeypatch):

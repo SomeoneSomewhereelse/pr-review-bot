@@ -32,17 +32,6 @@ _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
 
 SESSION_COOKIE_NAME = "onboarding_session"
 
-# frame -> which of that frame's stored keys are safe to echo back to the
-# browser for restore-on-load badges. Never a credential value -- see root
-# CLAUDE.md's secret-handling section and this file's own module docstring.
-_DISPLAY_FIELDS = {
-    "render": ("owner_name", "service_url"),
-    "github_app": (),
-    "supabase": ("name",),
-    "llm_provider": ("provider", "model"),
-    "dashboard_auth": (),
-    "uptime_pinger": ("monitor_id",),
-}
 
 
 def _get_session_id(request: Request) -> str | None:
@@ -233,16 +222,60 @@ async def supabase_oauth_callback(request: Request):
 
 @router.get("/api/session")
 async def get_session_state(request: Request) -> dict:
+    """Maps session_store's backend frame_data keys onto the wizard's UI
+    frame ids -- not a 1:1 pass-through, since "render" backs three
+    distinct UI frames (render-key, render-service, render-deploy's
+    pending_deploy_id) and "supabase" has a genuine in-between state
+    (OAuth done, project not yet created) that isn't just "locked" or
+    "complete". Never echoes a credential value -- see root CLAUDE.md's
+    secret-handling section and this file's own module docstring."""
     session_id = _get_session_id(request)
     if session_id is None:
         return {"frames": {}}
     session = session_store.get_session(session_id)
     if session is None:
         return {"frames": {}}
-    frames = {}
-    for frame, data in session.frames.items():
-        display = {k: data[k] for k in _DISPLAY_FIELDS.get(frame, ()) if k in data}
-        frames[frame] = {"complete": True, "display": display}
+    data = session.frames
+    frames: dict[str, dict] = {}
+
+    render = data.get("render")
+    if render and "api_key" in render:
+        frames["render-key"] = {
+            "complete": True, "display": {"owner_name": render.get("owner_name")}
+        }
+    if render and "service_id" in render:
+        frames["render-service"] = {
+            "complete": True, "display": {"service_url": render.get("service_url")}
+        }
+
+    if data.get("dashboard_auth"):
+        frames["dashboard-auth"] = {"complete": True, "display": {}}
+
+    if data.get("github_app"):
+        frames["github-app"] = {"complete": True, "display": {}}
+
+    supabase = data.get("supabase")
+    if supabase and "ref" in supabase:
+        frames["supabase"] = {"complete": True, "display": {"name": supabase.get("name")}}
+    elif supabase and "access_token" in supabase:
+        # Authorized but the project hasn't been created yet (visitor
+        # returned from Supabase's consent screen but the page reloaded
+        # before they picked an org) -- not locked, not complete either.
+        frames["supabase"] = {"complete": False, "authorized": True, "display": {}}
+
+    llm_provider = data.get("llm_provider")
+    if llm_provider:
+        frames["llm-provider"] = {
+            "complete": True,
+            "display": {
+                "provider": llm_provider.get("provider"),
+                "model": llm_provider.get("model"),
+            },
+        }
+
+    if data.get("uptime_pinger"):
+        frames["uptime-pinger"] = {"complete": True, "display": {}}
+
     return {"frames": frames}
 
 
