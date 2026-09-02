@@ -1,11 +1,14 @@
-"""Shared Render API access for scripts/deploy.py (including its
-sync_config_db() reachability check) and scripts/_override.py (used by
-scripts/set_override.py).
+"""Shared Render API access. Used by:
+- bot/scripts/deploy.py, bot/scripts/set_override.py (via bot/scripts/_override.py),
+  bot/scripts/reset_queue.py -- as CLI/operator support code.
+- dashboard/environment.py -- as production runtime code (the dashboard's
+  Environment tab). This is why this module lives in bot/, not
+  bot/scripts/: bot/scripts/ is operator-CLI-only, and dashboard/environment.py
+  must not import from it. See docs/superpowers/specs/
+  2026-09-02-dashboard-environment-tab-design.md.
 
-Not a CLI entry point -- support code for the scripts/ CLIs. Consolidates
-what was previously duplicated Render-fetch logic (service lookup, env-var
-fetch) across the two scripts; see
-docs/superpowers/specs/2026-08-10-render-access-consolidation-design.md.
+Consolidates what was previously duplicated Render-fetch logic across
+scripts; see docs/superpowers/specs/2026-08-10-render-access-consolidation-design.md.
 """
 
 from __future__ import annotations
@@ -46,18 +49,20 @@ def env_vars(service_id: str) -> dict[str, str]:
 
     Callers must reduce a returned value to a boolean or an equality result
     immediately -- never store it beyond that computation, print it, or pass
-    it to anything that might log it. See CLAUDE.md's "no secret is ever
-    logged" and docs/superpowers/specs/
-    2026-08-10-provider-live-credential-verification-design.md section 6.
+    it to anything that might log it -- UNLESS the caller is
+    dashboard/environment.py's GET /api/environment/render, the one
+    documented, scoped exception to that rule (root CLAUDE.md's Secret
+    handling section). See CLAUDE.md's "no secret is ever logged" and
+    docs/superpowers/specs/2026-08-10-provider-live-credential-verification-design.md
+    section 6.
 
     Render paginates this endpoint (cursor-based, each item carries its own
     "cursor" field) -- a service with more vars than one page silently
     dropped everything past the first page here until this loop was added,
-    which made every caller (sync_env's drift detection, and the
-    boot-creds-live/provider-live/api-key-live checks) blind to any var
-    that happened to land on page 2+. Confirmed live: this project's Render
-    service carries 29 vars against a 20-per-page default, with
-    DATABASE_URL and GCP_SERVICE_ACCOUNT_KEY both on page 2.
+    which made every caller blind to any var that happened to land on page
+    2+. Confirmed live: this project's Render service carries 29 vars
+    against a 20-per-page default, with DATABASE_URL and
+    GCP_SERVICE_ACCOUNT_KEY both on page 2.
     """
     current: dict[str, str] = {}
     params: dict[str, int | str] = {"limit": _ENV_VARS_PAGE_LIMIT}

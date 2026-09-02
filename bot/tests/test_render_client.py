@@ -1,14 +1,15 @@
-"""Direct unit tests for scripts/_render.py, the shared Render API access
-module used by scripts/deploy.py directly, and by scripts/set_override.py
-via scripts/_override.py."""
+"""Direct unit tests for bot/render_client.py, the shared Render API access
+module used by bot/scripts/deploy.py, bot/scripts/set_override.py (via
+bot/scripts/_override.py), bot/scripts/reset_queue.py, and
+dashboard/environment.py."""
 
 from __future__ import annotations
 
 import httpx
 import respx
 
+from bot import render_client as _render
 from bot.config import settings
-from bot.scripts import _render
 
 RENDER_SERVICES = "https://api.render.com/v1/services"
 

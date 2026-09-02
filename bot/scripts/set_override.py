@@ -63,10 +63,11 @@ import re
 import sys
 from datetime import datetime, timezone
 
+from bot import render_client as _render
 from bot.config import settings
 from bot.providers import active_model, pricing, registry
 from bot.queue import store
-from bot.scripts import _override, _render
+from bot.scripts import _override
 
 
 def build_parser() -> argparse.ArgumentParser:

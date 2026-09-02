@@ -20,9 +20,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from bot import render_client as _render
 from bot.config import settings
 from bot.queue import store
-from bot.scripts import _render
 
 
 def _verify_render_reachability() -> str:

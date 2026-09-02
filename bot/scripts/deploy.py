@@ -31,10 +31,11 @@ import psycopg
 from github import GithubException
 
 from bot import github_app
+from bot import render_client as _render
 from bot.config import settings
 from bot.providers import pricing, registry
 from bot.queue import store
-from bot.scripts import _override, _render
+from bot.scripts import _override
 from bot.scripts._prereqs import _looks_like_local_test_db
 
 _NAME_WIDTH = 18
