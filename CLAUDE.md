@@ -204,6 +204,16 @@ when working under `bot/`.
   ruff (`uv run ruff check .`), and fix whatever either finds.** Never push
   with a red suite or an unresolved lint error, and never skip either check
   because a change "looks" too small to affect them.
+- **After merging to `main` locally, always build the deploy image**
+  (`docker build -f bot/Dockerfile .` from the repo root) and confirm it
+  builds and boots (`docker run --rm <image> python -c "import bot.main"`
+  or equivalent) before pushing/deploying. `pytest`/`ruff` run against the
+  full workspace venv, not the `--package bot`-only sync the image actually
+  uses, so a workspace-boundary dependency gap (e.g. a dep declared in
+  `dashboard/pyproject.toml` but needed at `bot` import time, only synced
+  under `--package bot`) passes both checks and still crashes on deploy —
+  this is exactly how the 2026-09-03 `python-multipart` deploy crash slipped
+  through. A green test suite does not substitute for this.
 
 ## Substitutions from the brief (and why)
 
