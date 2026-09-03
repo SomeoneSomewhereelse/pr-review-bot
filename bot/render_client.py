@@ -13,9 +13,13 @@ scripts; see docs/superpowers/specs/2026-08-10-render-access-consolidation-desig
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from bot.config import settings
+
+logger = logging.getLogger(__name__)
 
 RENDER_API = "https://api.render.com/v1"
 HTTP_TIMEOUT = 10.0
@@ -37,10 +41,22 @@ def unwrap(item: dict, key: str) -> dict:
 def find_service_id() -> str | None:
     resp = httpx.get(f"{RENDER_API}/services", headers=headers(), timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
-    for item in resp.json():
+    body = resp.json()
+    names = []
+    for item in body:
         service = unwrap(item, "service")
+        names.append(service.get("name"))
         if service.get("name") == settings.render_service_name:
             return service.get("id")
+    # Service names are not secret -- logging them (and the configured
+    # target) is what makes a silent "not found" diagnosable at all; this
+    # is the one log line that would have made the 2026-09-03
+    # RENDER_SERVICE_NAME incident traceable from logs instead of requiring
+    # a live API key handed over for ad hoc diagnosis.
+    logger.warning(
+        "render_client.find_service_id: no service named %r among %d returned (%r)",
+        settings.render_service_name, len(body), names,
+    )
     return None
 
 
