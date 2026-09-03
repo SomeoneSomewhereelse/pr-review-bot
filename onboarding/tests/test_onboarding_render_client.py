@@ -127,7 +127,9 @@ async def test_create_service_returns_id_and_slug_derived_url():
             SENTINEL_KEY, "https://github.com/x/y", "my-name"
         )
     assert result == render_client.RenderServiceCreated(
-        service_id="srv-abc123", service_url="https://pr-review-bot-a1b2c3d4.onrender.com"
+        service_id="srv-abc123",
+        service_url="https://pr-review-bot-a1b2c3d4.onrender.com",
+        name="pr-review-bot-a1b2c3d4",
     )
 
 

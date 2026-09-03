@@ -78,6 +78,7 @@ _DEPLOY_FAILED_STATUSES = {
 class RenderServiceCreated:
     service_id: str
     service_url: str
+    name: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,9 +169,18 @@ async def create_service(api_key: str, repo_url: str, name: str) -> RenderServic
         service = body.get("service") or body
         service_id = service["id"]
         slug = service["slug"]
+        # Read back Render's own stored name rather than trust the submitted
+        # `name` unchanged -- Render may normalize it server-side (same
+        # reason service_url above is built from the response's own `slug`,
+        # never from the submitted name). This is what dashboard/environment.py's
+        # find_service_id() later matches services by, so a mismatch here
+        # silently empties the deployed dashboard's whole Environment tab.
+        service_name = service["name"]
     except (ValueError, KeyError, TypeError):
         return RenderServiceCreationFailed(reason="render_unreachable")
-    return RenderServiceCreated(service_id=service_id, service_url=f"https://{slug}.onrender.com")
+    return RenderServiceCreated(
+        service_id=service_id, service_url=f"https://{slug}.onrender.com", name=service_name
+    )
 
 
 @dataclasses.dataclass(frozen=True)

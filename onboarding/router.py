@@ -681,7 +681,11 @@ async def create_render_service(payload: RenderServiceCreateRequest, request: Re
         write_result = await _update_frame(
             session_id,
             "render",
-            {"service_id": result.service_id, "service_url": result.service_url},
+            {
+                "service_id": result.service_id,
+                "service_url": result.service_url,
+                "name": result.name,
+            },
         )
         if isinstance(write_result, session_store.SessionNotFound):
             # The Render service WAS created -- this only leaves the
@@ -743,6 +747,17 @@ async def bulk_push_render_env_vars(request: Request) -> dict:
     # render_frame["api_key"] is guaranteed present by this function's own
     # guard clause above.
     env_vars["RENDER_API_KEY"] = render_frame["api_key"]
+
+    # dashboard/environment.py's find_service_id() (and every bot/scripts/
+    # entry point) locates this service by matching its name -- never synced
+    # via bot/scripts/deploy.py's own --sync-env (circular there: that script
+    # needs the name to find the service in the first place). No such
+    # circularity here -- create_render_service already captured Render's
+    # own (possibly-normalized) name alongside service_id, so it's safe to
+    # push. Guarded on presence for a session whose "render" frame predates
+    # this field.
+    if "name" in render_frame:
+        env_vars["RENDER_SERVICE_NAME"] = render_frame["name"]
 
     github_app = (await _read_frame(session_id, "github_app"))
     if github_app:
