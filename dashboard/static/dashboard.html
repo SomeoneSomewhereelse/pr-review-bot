@@ -248,6 +248,26 @@
         <input id="newVarValue" type="text" placeholder="value" required>
         <button type="submit" data-i18n="env_add"></button>
       </form>
+      <select id="guidedSetupSelect">
+        <option value="" data-i18n="env_guided_setup"></option>
+        <option value="gemini" data-i18n="env_guided_gemini"></option>
+        <option value="groq" data-i18n="env_guided_groq"></option>
+        <option value="vertex" data-i18n="env_guided_vertex"></option>
+        <option value="github_app" data-i18n="env_guided_github_app"></option>
+      </select>
+      <dialog id="guidedModal">
+        <div id="guidedModalBody"></div>
+        <button type="button" id="guidedValidateBtn" data-i18n="env_guided_validate"></button>
+        <button type="button" id="guidedApplyBtn" data-i18n="env_guided_apply" disabled></button>
+        <button type="button" id="guidedCancelBtn" data-i18n="env_guided_cancel"></button>
+        <div id="guidedModalResult"></div>
+      </dialog>
+      <dialog id="deleteConfirmModal">
+        <div data-i18n="env_delete_confirm_title"></div>
+        <ul id="deleteConfirmList"></ul>
+        <button type="button" id="deleteConfirmOkBtn" data-i18n="env_delete_confirm_ok"></button>
+        <button type="button" id="deleteConfirmCancelBtn" data-i18n="env_guided_cancel"></button>
+      </dialog>
       <button id="saveRenderVarsBtn" type="button" data-i18n="env_save"></button>
       <div id="renderSaveResult"></div>
 
@@ -260,6 +280,7 @@
           <option value="groq">groq</option>
           <option value="vertex">vertex</option>
         </select>
+        <div id="providerModelRows"></div>
         <label data-i18n="env_config_cooldown_base"></label>
         <input id="cfgCooldownBase" type="number" step="any">
         <label data-i18n="env_config_cooldown_max"></label>
@@ -330,6 +351,27 @@
         env_reveal: "Reveal",
         env_hide: "Hide",
         env_delete: "Delete",
+        env_config_model: "Model",
+        env_config_key_slot: "Key slot",
+        env_refresh_models: "Refresh models",
+        env_validating: "Checking…",
+        env_valid: "✓ valid",
+        env_invalid: "✗ invalid",
+        env_fix_before_save: "Fix invalid fields before saving.",
+        env_guided_setup: "Guided setup…",
+        env_guided_gemini: "Gemini key",
+        env_guided_groq: "Groq key",
+        env_guided_vertex: "Vertex service account",
+        env_guided_github_app: "GitHub App",
+        env_guided_validate: "Validate",
+        env_guided_apply: "Apply",
+        env_guided_cancel: "Cancel",
+        env_guided_project_conflict: "GCP_PROJECT is set to {current}, this key belongs to {new}.",
+        env_guided_keep_project: "Keep GCP_PROJECT",
+        env_guided_clear_project: "Clear GCP_PROJECT (use key's project)",
+        env_guided_installation_label: "Installation ID (auto-discovered)",
+        env_delete_confirm_title: "This will also clear:",
+        env_delete_confirm_ok: "Delete anyway",
       },
       he: {
         dashboard_title: "מנוע בדיקת קוד — לוח בקרה",
@@ -379,6 +421,27 @@
         env_reveal: "הצג",
         env_hide: "הסתר",
         env_delete: "מחק",
+        env_config_model: "מודל",
+        env_config_key_slot: "חריץ מפתח",
+        env_refresh_models: "רענן מודלים",
+        env_validating: "בודק…",
+        env_valid: "✓ תקין",
+        env_invalid: "✗ לא תקין",
+        env_fix_before_save: "תקן שדות לא תקינים לפני השמירה.",
+        env_guided_setup: "התקנה מודרכת…",
+        env_guided_gemini: "מפתח Gemini",
+        env_guided_groq: "מפתח Groq",
+        env_guided_vertex: "חשבון שירות Vertex",
+        env_guided_github_app: "אפליקציית GitHub",
+        env_guided_validate: "אמת",
+        env_guided_apply: "החל",
+        env_guided_cancel: "ביטול",
+        env_guided_project_conflict: "GCP_PROJECT מוגדר ל-{current}, המפתח הזה שייך ל-{new}.",
+        env_guided_keep_project: "השאר GCP_PROJECT",
+        env_guided_clear_project: "נקה GCP_PROJECT (השתמש בפרויקט של המפתח)",
+        env_guided_installation_label: "מזהה התקנה (זוהה אוטומטית)",
+        env_delete_confirm_title: "פעולה זו תנקה גם:",
+        env_delete_confirm_ok: "מחק בכל זאת",
       },
     };
 
@@ -692,15 +755,39 @@
         });
       });
       tbody.querySelectorAll('[data-action="delete"]').forEach((btn) => {
-        btn.addEventListener("click", () => {
-          stagedDeletes.add(btn.getAttribute("data-key"));
-          renderRenderVarsTable();
+        btn.addEventListener("click", async () => {
+          const key = btn.getAttribute("data-key");
+          const resp = await fetch(`/api/environment/render/${key}`, { method: "DELETE" });
+          if (resp.status === 409) {
+            const data = await resp.json();
+            document.getElementById("deleteConfirmList").innerHTML =
+              data.dependents.map((d) => `<li>${esc(d)}</li>`).join("");
+            const modal = document.getElementById("deleteConfirmModal");
+            modal.dataset.key = key;
+            modal.showModal();
+            return;
+          }
+          await fetchEnvironmentRender();
+          await fetchEnvironmentConfig();
         });
       });
       tbody.querySelectorAll(".env-value-input:not([readonly])").forEach((input) => {
         input.addEventListener("input", () => {
           stagedEdits.set(input.getAttribute("data-key"), input.value);
         });
+        const key = input.getAttribute("data-key");
+        if (key === "GCP_PROJECT" || key === "GCP_LOCATION") {
+          input.addEventListener("blur", async () => {
+            const resp = await fetch(`/api/environment/validate/${key}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ value: input.value }),
+            });
+            const result = await resp.json();
+            if (result.ok) { invalidFields.delete(key); } else { invalidFields.add(key); }
+            updateSaveGuards();
+          });
+        }
       });
     }
 
@@ -709,9 +796,11 @@
       if (resp.status === 401) { window.location.href = "/login"; return; }
       const data = await resp.json();
       renderVars = data.vars;
+      currentAvailableKeySlots = data.available_key_slots || currentAvailableKeySlots;
       stagedEdits.clear();
       stagedDeletes.clear();
       renderRenderVarsTable();
+      renderProviderModelRows();
     }
 
     async function pollUntilDashboardRecovers() {
@@ -728,6 +817,10 @@
     }
 
     async function saveRenderVars() {
+      if (invalidFields.size > 0) {
+        document.getElementById("renderSaveResult").textContent = t("env_fix_before_save");
+        return;
+      }
       const sets = {};
       stagedEdits.forEach((value, key) => { sets[key] = value; });
       const deletes = Array.from(stagedDeletes);
@@ -748,6 +841,136 @@
       await fetchEnvironmentRender();
     }
 
+    let guidedValidatedPayload = null;
+
+    function guidedModalBodyFor(family) {
+      if (family === "gemini" || family === "groq") {
+        return `<input type="password" id="guidedApiKey" placeholder="API key">`;
+      }
+      if (family === "vertex") {
+        return `<input type="file" id="guidedCredentialFile" accept=".json">`;
+      }
+      return `
+        <input type="text" id="guidedAppId" placeholder="App ID">
+        <input type="file" id="guidedCredentialFile" accept=".pem">
+      `;
+    }
+
+    document.getElementById("guidedSetupSelect").addEventListener("change", (event) => {
+      const family = event.target.value;
+      if (!family) return;
+      guidedValidatedPayload = null;
+      document.getElementById("guidedApplyBtn").disabled = true;
+      document.getElementById("guidedModalResult").textContent = "";
+      document.getElementById("guidedModalBody").innerHTML = guidedModalBodyFor(family);
+      document.getElementById("guidedModal").dataset.family = family;
+      document.getElementById("guidedModal").showModal();
+    });
+
+    document.getElementById("guidedValidateBtn").addEventListener("click", async () => {
+      const family = document.getElementById("guidedModal").dataset.family;
+      const formData = new FormData();
+      if (family === "gemini" || family === "groq") {
+        formData.append("api_key", document.getElementById("guidedApiKey").value);
+      } else if (family === "vertex") {
+        formData.append("credential_file", document.getElementById("guidedCredentialFile").files[0]);
+      } else {
+        formData.append("app_id", document.getElementById("guidedAppId").value);
+        formData.append("credential_file", document.getElementById("guidedCredentialFile").files[0]);
+      }
+      const resp = await fetch(`/api/environment/credential/${family}/validate`, {
+        method: "POST",
+        body: formData,
+      });
+      const result = await resp.json();
+      const resultEl = document.getElementById("guidedModalResult");
+      if (!result.ok) {
+        resultEl.textContent = `${t("env_invalid")}: ${result.error}`;
+        document.getElementById("guidedApplyBtn").disabled = true;
+        return;
+      }
+      guidedValidatedPayload = { family, result, raw: formData };
+      let extra = "";
+      if (family !== "github_app") {
+        const options = (result.models || []).map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+        extra += `<label>${t("env_config_model")}</label><select id="guidedModelSelect">${options}</select>`;
+      }
+      if (result.conflicts && result.conflicts.length > 0) {
+        const c = result.conflicts[0];
+        extra += `<p>${t("env_guided_project_conflict").replace("{current}", esc(c.current)).replace("{new}", esc(c.new))}</p>`;
+        extra += `
+          <label><input type="radio" name="projectChoice" value="keep" checked> ${t("env_guided_keep_project")}</label>
+          <label><input type="radio" name="projectChoice" value="clear"> ${t("env_guided_clear_project")}</label>
+        `;
+      }
+      if (family === "github_app") {
+        extra += `<label>${t("env_guided_installation_label")}</label><span>${result.installation_id}</span>`;
+      }
+      document.getElementById("guidedModalBody").insertAdjacentHTML("beforeend", extra);
+      resultEl.textContent = t("env_valid");
+      document.getElementById("guidedApplyBtn").disabled = false;
+    });
+
+    document.getElementById("guidedApplyBtn").addEventListener("click", async () => {
+      if (!guidedValidatedPayload) return;
+      const { family, result } = guidedValidatedPayload;
+      let body;
+      if (family === "github_app") {
+        const fileText = await guidedValidatedPayload.raw.get("credential_file").text();
+        body = {
+          app_id: document.getElementById("guidedAppId").value,
+          private_key_b64: btoa(fileText),
+          installation_id: result.installation_id,
+        };
+      } else {
+        const model = document.getElementById("guidedModelSelect").value;
+        let credential;
+        if (family === "vertex") {
+          const fileText = await guidedValidatedPayload.raw.get("credential_file").text();
+          credential = { service_account_b64: btoa(fileText) };
+        } else {
+          credential = { api_key: guidedValidatedPayload.raw.get("api_key") };
+        }
+        const clearChoice = document.querySelector('input[name="projectChoice"]:checked');
+        body = {
+          slot: 0,
+          credential,
+          model,
+          clear_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
+        };
+      }
+      const resp = await fetch(`/api/environment/credential/${family}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result2 = await resp.json();
+      document.getElementById("guidedModalResult").textContent =
+        `applied: ${result2.applied.join(LIST_SEPARATOR) || "-"}; failed: ${(result2.failed || []).map((f) => `${f.key} (${f.error})`).join(LIST_SEPARATOR) || "-"}`;
+      document.getElementById("guidedModal").close();
+      document.getElementById("guidedSetupSelect").value = "";
+      await fetchEnvironmentRender();
+      await fetchEnvironmentConfig();
+    });
+
+    document.getElementById("guidedCancelBtn").addEventListener("click", () => {
+      document.getElementById("guidedModal").close();
+      document.getElementById("guidedSetupSelect").value = "";
+    });
+
+    document.getElementById("deleteConfirmOkBtn").addEventListener("click", async () => {
+      const modal = document.getElementById("deleteConfirmModal");
+      const key = modal.dataset.key;
+      await fetch(`/api/environment/render/${key}?confirm=true`, { method: "DELETE" });
+      modal.close();
+      await fetchEnvironmentRender();
+      await fetchEnvironmentConfig();
+    });
+
+    document.getElementById("deleteConfirmCancelBtn").addEventListener("click", () => {
+      document.getElementById("deleteConfirmModal").close();
+    });
+
     document.getElementById("addVarForm").addEventListener("submit", (event) => {
       event.preventDefault();
       const keyInput = document.getElementById("newVarKey");
@@ -764,6 +987,97 @@
 
     document.getElementById("saveRenderVarsBtn").addEventListener("click", saveRenderVars);
 
+    const LLM_PROVIDERS = ["gemini", "groq", "vertex"];
+    const MODEL_VAR_FOR_PROVIDER = { gemini: "LLM_MODEL", groq: "GROQ_MODEL", vertex: "VERTEX_MODEL" };
+    let currentConfig = { model: {}, key_index: {} };
+    let currentAvailableKeySlots = { gemini: [], groq: [], vertex: [] };
+    const invalidFields = new Set();
+
+    function updateSaveGuards() {
+      const disabled = invalidFields.size > 0;
+      document.getElementById("saveRenderVarsBtn").disabled = disabled;
+      document.getElementById("saveConfigBtn").disabled = disabled;
+    }
+
+    function renderProviderModelRows() {
+      const container = document.getElementById("providerModelRows");
+      container.innerHTML = LLM_PROVIDERS.map((provider) => {
+        const slots = currentAvailableKeySlots[provider] || [];
+        const currentSlot = currentConfig.key_index[provider] ?? "";
+        const currentModel = currentConfig.model[provider] || "";
+        const slotOptions = slots
+          .map((s) => `<option value="${s}" ${String(s) === String(currentSlot) ? "selected" : ""}>${s}</option>`)
+          .join("");
+        return `
+          <label>${esc(provider)} ${t("env_config_key_slot")}</label>
+          <select data-provider="${provider}" class="cfg-key-slot">
+            <option value="">—</option>
+            ${slotOptions}
+          </select>
+          <label>${esc(provider)} ${t("env_config_model")}</label>
+          <span>
+            <input type="text" class="cfg-model" data-provider="${provider}" value="${esc(currentModel)}">
+            <button type="button" class="control cfg-refresh-models" data-provider="${provider}">${t("env_refresh_models")}</button>
+            <span class="cfg-model-status" data-provider="${provider}"></span>
+          </span>
+        `;
+      }).join("");
+
+      container.querySelectorAll(".cfg-refresh-models").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const provider = btn.getAttribute("data-provider");
+          const statusEl = container.querySelector(`.cfg-model-status[data-provider="${provider}"]`);
+          statusEl.textContent = t("env_validating");
+          const resp = await fetch(`/api/environment/credential/${provider}/models`);
+          const data = await resp.json();
+          if (!data.ok) {
+            statusEl.textContent = `${t("env_invalid")} (${data.error})`;
+            return;
+          }
+          statusEl.textContent = "";
+          const input = container.querySelector(`.cfg-model[data-provider="${provider}"]`);
+          const datalistId = `models-${provider}`;
+          let datalist = document.getElementById(datalistId);
+          if (!datalist) {
+            datalist = document.createElement("datalist");
+            datalist.id = datalistId;
+            document.body.appendChild(datalist);
+            input.setAttribute("list", datalistId);
+          }
+          datalist.innerHTML = (data.models || []).map((m) => `<option value="${esc(m)}">`).join("");
+        });
+      });
+
+      container.querySelectorAll(".cfg-model").forEach((input) => {
+        input.addEventListener("blur", async () => {
+          const provider = input.getAttribute("data-provider");
+          const varName = MODEL_VAR_FOR_PROVIDER[provider];
+          const statusEl = container.querySelector(`.cfg-model-status[data-provider="${provider}"]`);
+          if (!input.value) {
+            statusEl.textContent = "";
+            invalidFields.delete(varName);
+            updateSaveGuards();
+            return;
+          }
+          statusEl.textContent = t("env_validating");
+          const resp = await fetch(`/api/environment/validate/${varName}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value: input.value }),
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            statusEl.textContent = t("env_valid");
+            invalidFields.delete(varName);
+          } else {
+            statusEl.textContent = `${t("env_invalid")} (${result.error})`;
+            invalidFields.add(varName);
+          }
+          updateSaveGuards();
+        });
+      });
+    }
+
     function populateConfigForm(cfg) {
       document.getElementById("cfgProvider").value = cfg.provider || "";
       document.getElementById("cfgCooldownBase").value = cfg.cooldown_base_seconds ?? "";
@@ -772,6 +1086,8 @@
       document.getElementById("cfgUsageCapTokens").value = cfg.usage_cap_tokens ?? "";
       document.getElementById("cfgUsageCapReset").value = cfg.usage_cap_reset ?? "";
       document.getElementById("cfgReviewDraftPrs").checked = Boolean(cfg.review_draft_prs);
+      currentConfig = { model: cfg.model || {}, key_index: cfg.key_index || {} };
+      renderProviderModelRows();
     }
 
     async function fetchEnvironmentConfig() {
@@ -781,6 +1097,10 @@
     }
 
     async function saveConfig() {
+      if (invalidFields.size > 0) {
+        document.getElementById("configSaveResult").textContent = t("env_fix_before_save");
+        return;
+      }
       const body = {
         provider: document.getElementById("cfgProvider").value || null,
         cooldown_base_seconds: parseFloat(document.getElementById("cfgCooldownBase").value) || null,
@@ -789,7 +1109,17 @@
         usage_cap_tokens: parseInt(document.getElementById("cfgUsageCapTokens").value, 10) || null,
         usage_cap_reset: document.getElementById("cfgUsageCapReset").value || null,
         review_draft_prs: document.getElementById("cfgReviewDraftPrs").checked,
+        model: {},
+        key_index: {},
       };
+      document.querySelectorAll(".cfg-model").forEach((input) => {
+        const provider = input.getAttribute("data-provider");
+        if (input.value) body.model[provider] = input.value;
+      });
+      document.querySelectorAll(".cfg-key-slot").forEach((select) => {
+        const provider = select.getAttribute("data-provider");
+        if (select.value !== "") body.key_index[provider] = parseInt(select.value, 10);
+      });
       const resp = await fetch("/api/environment/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
