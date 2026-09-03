@@ -1648,6 +1648,12 @@
 
   function toggleDashboardAuthPasswordVisibility() {
     setDashboardAuthPasswordVisibility(!dashboardAuthPasswordVisible);
+    // Clicking the toggle moves focus to the button itself -- return it to
+    // the password field so typing can continue without an extra click,
+    // caret at the end rather than wherever focus() alone would leave it.
+    const input = document.getElementById("dashboard-auth-password-input");
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
   }
 
   function fillGeneratedDashboardAuthPassword() {
