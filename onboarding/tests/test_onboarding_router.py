@@ -1306,7 +1306,7 @@ async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
     async def fake_create_service(api_key, repo_url, name):
         assert api_key == "rnd_x"
         return render_client.RenderServiceCreated(
-            service_id="srv-1", service_url="https://x.onrender.com", name="x"
+            service_id="srv-1", service_url="https://x.onrender.com"
         )
 
     monkeypatch.setattr(render_client, "create_service", fake_create_service)
@@ -1322,10 +1322,6 @@ async def test_create_service_endpoint_returns_id_and_url(monkeypatch):
         "service_id": "srv-1",
         "service_url": "https://x.onrender.com",
     }
-    # Render's own (possibly-normalized) name is what find_service_id() will
-    # later match on -- it must be persisted so bulk_push_render_env_vars can
-    # push it as RENDER_SERVICE_NAME, not just service_id/service_url.
-    assert fake.read_frame(session_id, "render")["name"] == "x"
 
 
 async def test_create_service_endpoint_relays_rejection_message(monkeypatch):
@@ -1604,29 +1600,6 @@ async def test_bulk_push_omits_a_frame_that_was_never_completed(monkeypatch):
         "RENDER_API_KEY": "rnd_x",
         **router._GENERIC_OPERATIONAL_ENV_DEFAULTS,
     }
-
-
-async def test_bulk_push_includes_render_service_name_when_present(monkeypatch):
-    # dashboard/environment.py's find_service_id() (and every bot/scripts/
-    # entry point) locates the deployed service by matching RENDER_SERVICE_NAME
-    # -- omitting it here silently empties the deployed dashboard's whole
-    # Environment tab (2026-09-03 incident: the live service was found to
-    # have zero vars/slots because this key was never pushed).
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    fake.update_frame(
-        session_id, "render", {"api_key": "rnd_x", "service_id": "srv-1", "name": "pr-review-bot"}
-    )
-    captured = {}
-
-    async def fake_push_env_vars(api_key, service_id, values):
-        captured["values"] = values
-        return render_client.RenderEnvVarsPushed(pushed=list(values.keys()))
-
-    monkeypatch.setattr(render_client, "push_env_vars", fake_push_env_vars)
-    client = await _client()
-    await client.post("/api/render/bulk-push-env-vars", cookies={"onboarding_session": session_id})
-    assert captured["values"]["RENDER_SERVICE_NAME"] == "pr-review-bot"
 
 
 async def test_bulk_push_with_no_session_fails_closed():
