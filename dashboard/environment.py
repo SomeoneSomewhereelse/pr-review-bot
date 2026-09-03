@@ -56,6 +56,68 @@ class EnvironmentRenderPatch(BaseModel):
     deletes: list[str] = []
 
 
+_DIRECT_EDIT_VARS = {
+    "LLM_MODEL": "gemini",
+    "GROQ_MODEL": "groq",
+    "VERTEX_MODEL": "vertex",
+    "GCP_PROJECT": "vertex",
+    "GCP_LOCATION": "vertex",
+}
+
+
+class ValidateVarRequest(BaseModel):
+    value: str
+
+
+def _validate_model_var(provider: str, candidate: str) -> dict:
+    if provider == "vertex":
+        slot = store.get_all_key_index_overrides().get("vertex", 0)
+        info = vertex_credentials.resolve_service_account_info(slot)
+        result = catalog.list_vertex_models(info)
+    else:
+        slot = store.get_all_key_index_overrides().get(provider, 0)
+        _, api_key = credentials.resolve(provider, slot)
+        if not api_key:
+            return {"ok": False, "error": "no_credential_configured", "models": None}
+        result = (
+            catalog.list_gemini_models(api_key)
+            if provider == "gemini"
+            else catalog.list_groq_models(api_key)
+        )
+    if not result.ok:
+        return {"ok": False, "error": result.error, "models": None}
+    if candidate not in (result.models or []):
+        return {"ok": False, "error": "not_in_catalog", "models": result.models}
+    return {"ok": True, "error": None, "models": result.models}
+
+
+def _validate_gcp_var(var: str, candidate: str) -> dict:
+    slot = store.get_all_key_index_overrides().get("vertex", 0)
+    info = vertex_credentials.resolve_service_account_info(slot)
+    kwargs = (
+        {"project_override": candidate}
+        if var == "GCP_PROJECT"
+        else {"location_override": candidate}
+    )
+    result = catalog.list_vertex_models(info, **kwargs)
+    return {"ok": result.ok, "error": result.error, "models": None}
+
+
+def _validate_var(var: str, candidate: str) -> dict:
+    provider = _DIRECT_EDIT_VARS[var]
+    if var in ("GCP_PROJECT", "GCP_LOCATION"):
+        return _validate_gcp_var(var, candidate)
+    return _validate_model_var(provider, candidate)
+
+
+@router.post("/api/environment/validate/{var}")
+async def validate_var(var: str, payload: ValidateVarRequest) -> JSONResponse:
+    if var not in _DIRECT_EDIT_VARS:
+        raise HTTPException(status_code=404, detail="not a directly-validatable var")
+    result = await asyncio.to_thread(_validate_var, var, payload.value)
+    return JSONResponse(result)
+
+
 def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
     service_id = render_client.find_service_id()
     if service_id is None:
@@ -87,6 +149,11 @@ def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
     for key, value in payload.sets.items():
         if stopped:
             break
+        if key in _DIRECT_EDIT_VARS:
+            check = _validate_var(key, value)
+            if not check["ok"]:
+                failed.append({"key": key, "error": "failed_validation"})
+                continue
         try:
             render_client.push_env_var(service_id, key, value)
         except Exception as exc:  # noqa: BLE001

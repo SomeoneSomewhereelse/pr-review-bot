@@ -278,3 +278,113 @@ async def test_credential_models_refresh_vertex_resolves_service_account_info(mo
     resp = await client.get("/api/environment/credential/vertex/models")
     assert resp.status_code == 200
     assert resp.json()["models"] == ["gemini-2.5-flash"]
+
+
+async def test_validate_model_var_ok_when_in_catalog(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(credentials, "resolve", lambda provider, index: ("X", "key"))
+    monkeypatch.setattr(
+        catalog,
+        "list_gemini_models",
+        lambda api_key: catalog.CatalogResult(ok=True, models=["gemini-flash-latest"], error=None),
+    )
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/validate/LLM_MODEL", json={"value": "gemini-flash-latest"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["error"] is None
+
+
+async def test_validate_model_var_invalid_when_not_in_catalog(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(credentials, "resolve", lambda provider, index: ("X", "key"))
+    monkeypatch.setattr(
+        catalog,
+        "list_gemini_models",
+        lambda api_key: catalog.CatalogResult(ok=True, models=["gemini-flash-latest"], error=None),
+    )
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/validate/LLM_MODEL", json={"value": "not-a-real-model"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "not_in_catalog"
+
+
+async def test_validate_model_var_no_credential_configured(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(credentials, "resolve", lambda provider, index: ("X", ""))
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/validate/GROQ_MODEL", json={"value": "llama-3.3-70b-versatile"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["error"] == "no_credential_configured"
+
+
+async def test_validate_gcp_project_substitutes_project_override(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "old-proj"}
+    )
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        assert project_override == "new-proj"
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.post("/api/environment/validate/GCP_PROJECT", json={"value": "new-proj"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+async def test_validate_gcp_location_substitutes_location_override(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+
+    def _list_vertex(info, project_override=None, location_override=None):
+        assert location_override == "europe-west1"
+        return catalog.CatalogResult(ok=True, models=[], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/validate/GCP_LOCATION", json={"value": "europe-west1"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+async def test_validate_unknown_var_rejected():
+    client = await _client()
+    resp = await client.post("/api/environment/validate/RANDOM_VAR", json={"value": "x"})
+    assert resp.status_code == 404
+
+
+async def test_patch_render_rejects_model_not_in_catalog_but_applies_other_keys(monkeypatch):
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "push_env_var", lambda *a, **k: None)
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(credentials, "resolve", lambda provider, index: ("X", "key"))
+    monkeypatch.setattr(
+        catalog,
+        "list_gemini_models",
+        lambda api_key: catalog.CatalogResult(ok=True, models=["gemini-flash-latest"], error=None),
+    )
+    client = await _client()
+    resp = await client.patch(
+        "/api/environment/render",
+        json={"sets": {"LLM_MODEL": "bogus-model", "OTHER_KEY": "fine"}, "deletes": []},
+    )
+    result = resp.json()
+    assert {"key": "LLM_MODEL", "error": "failed_validation"} in result["failed"]
+    assert "OTHER_KEY" in result["applied"]
