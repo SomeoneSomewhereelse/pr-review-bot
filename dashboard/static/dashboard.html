@@ -715,6 +715,12 @@
     const stagedDeletes = new Set();
     const revealed = new Set();
     let environmentLoaded = false;
+    // Mirrors dashboard/environment.py's _DIRECT_EDIT_VARS -- vars that get
+    // blur-time validation wherever they're edited, including directly in
+    // the render-vars table (not just the config panel's model inputs).
+    const DIRECT_EDIT_VARS = new Set([
+      "LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL", "GCP_PROJECT", "GCP_LOCATION",
+    ]);
 
     function maskedValue(value) {
       return "•".repeat(Math.min(value.length, 24)) || "—";
@@ -776,7 +782,7 @@
           stagedEdits.set(input.getAttribute("data-key"), input.value);
         });
         const key = input.getAttribute("data-key");
-        if (key === "GCP_PROJECT" || key === "GCP_LOCATION") {
+        if (DIRECT_EDIT_VARS.has(key)) {
           input.addEventListener("blur", async () => {
             const resp = await fetch(`/api/environment/validate/${key}`, {
               method: "POST",
@@ -784,7 +790,7 @@
               body: JSON.stringify({ value: input.value }),
             });
             const result = await resp.json();
-            if (result.ok) { invalidFields.delete(key); } else { invalidFields.add(key); }
+            if (result.ok) { invalidRenderFields.delete(key); } else { invalidRenderFields.add(key); }
             updateSaveGuards();
           });
         }
@@ -799,8 +805,9 @@
       currentAvailableKeySlots = data.available_key_slots || currentAvailableKeySlots;
       stagedEdits.clear();
       stagedDeletes.clear();
+      invalidRenderFields.clear();
+      updateSaveGuards();
       renderRenderVarsTable();
-      renderProviderModelRows();
     }
 
     async function pollUntilDashboardRecovers() {
@@ -817,7 +824,7 @@
     }
 
     async function saveRenderVars() {
-      if (invalidFields.size > 0) {
+      if (invalidRenderFields.size > 0) {
         document.getElementById("renderSaveResult").textContent = t("env_fix_before_save");
         return;
       }
@@ -839,16 +846,42 @@
         pollUntilDashboardRecovers();
       }
       await fetchEnvironmentRender();
+      await fetchEnvironmentConfig();
     }
 
     let guidedValidatedPayload = null;
 
+    function arrayBufferToBase64(buffer) {
+      // btoa() only accepts Latin1 -- a service-account JSON or PEM could in
+      // principle contain a byte outside that range (e.g. a non-ASCII
+      // comment), which would throw InvalidCharacterError and silently make
+      // Apply do nothing. Build the base64 string from raw bytes instead.
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 1) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    function guidedSlotSelectFor(family) {
+      const used = currentAvailableKeySlots[family] || [];
+      let defaultSlot = 0;
+      for (let i = 0; i < 5; i += 1) {
+        if (!used.includes(i)) { defaultSlot = i; break; }
+      }
+      const options = [0, 1, 2, 3, 4]
+        .map((i) => `<option value="${i}" ${i === defaultSlot ? "selected" : ""}>${i}${used.includes(i) ? " *" : ""}</option>`)
+        .join("");
+      return `<label>${t("env_config_key_slot")}</label><select id="guidedSlotSelect">${options}</select>`;
+    }
+
     function guidedModalBodyFor(family) {
       if (family === "gemini" || family === "groq") {
-        return `<input type="password" id="guidedApiKey" placeholder="API key">`;
+        return `<input type="password" id="guidedApiKey" placeholder="API key">${guidedSlotSelectFor(family)}`;
       }
       if (family === "vertex") {
-        return `<input type="file" id="guidedCredentialFile" accept=".json">`;
+        return `<input type="file" id="guidedCredentialFile" accept=".json">${guidedSlotSelectFor(family)}`;
       }
       return `
         <input type="text" id="guidedAppId" placeholder="App ID">
@@ -916,24 +949,25 @@
       const { family, result } = guidedValidatedPayload;
       let body;
       if (family === "github_app") {
-        const fileText = await guidedValidatedPayload.raw.get("credential_file").text();
+        const fileBuffer = await guidedValidatedPayload.raw.get("credential_file").arrayBuffer();
         body = {
           app_id: document.getElementById("guidedAppId").value,
-          private_key_b64: btoa(fileText),
+          private_key_b64: arrayBufferToBase64(fileBuffer),
           installation_id: result.installation_id,
         };
       } else {
         const model = document.getElementById("guidedModelSelect").value;
+        const slot = parseInt(document.getElementById("guidedSlotSelect").value, 10);
         let credential;
         if (family === "vertex") {
-          const fileText = await guidedValidatedPayload.raw.get("credential_file").text();
-          credential = { service_account_b64: btoa(fileText) };
+          const fileBuffer = await guidedValidatedPayload.raw.get("credential_file").arrayBuffer();
+          credential = { service_account_b64: arrayBufferToBase64(fileBuffer) };
         } else {
           credential = { api_key: guidedValidatedPayload.raw.get("api_key") };
         }
         const clearChoice = document.querySelector('input[name="projectChoice"]:checked');
         body = {
-          slot: 0,
+          slot,
           credential,
           model,
           clear_gcp_project: Boolean(clearChoice && clearChoice.value === "clear"),
@@ -991,12 +1025,17 @@
     const MODEL_VAR_FOR_PROVIDER = { gemini: "LLM_MODEL", groq: "GROQ_MODEL", vertex: "VERTEX_MODEL" };
     let currentConfig = { model: {}, key_index: {} };
     let currentAvailableKeySlots = { gemini: [], groq: [], vertex: [] };
-    const invalidFields = new Set();
+    // Scoped separately so an invalid GCP_PROJECT/GCP_LOCATION/model field
+    // edited directly in the render-vars table only blocks the render-vars
+    // Save button, and an invalid model field in the config panel only
+    // blocks the config Save button -- neither should block unrelated edits
+    // (e.g. a cooldown-tuning change) in the other section.
+    const invalidRenderFields = new Set();
+    const invalidConfigFields = new Set();
 
     function updateSaveGuards() {
-      const disabled = invalidFields.size > 0;
-      document.getElementById("saveRenderVarsBtn").disabled = disabled;
-      document.getElementById("saveConfigBtn").disabled = disabled;
+      document.getElementById("saveRenderVarsBtn").disabled = invalidRenderFields.size > 0;
+      document.getElementById("saveConfigBtn").disabled = invalidConfigFields.size > 0;
     }
 
     function renderProviderModelRows() {
@@ -1055,7 +1094,7 @@
           const statusEl = container.querySelector(`.cfg-model-status[data-provider="${provider}"]`);
           if (!input.value) {
             statusEl.textContent = "";
-            invalidFields.delete(varName);
+            invalidConfigFields.delete(varName);
             updateSaveGuards();
             return;
           }
@@ -1068,10 +1107,10 @@
           const result = await resp.json();
           if (result.ok) {
             statusEl.textContent = t("env_valid");
-            invalidFields.delete(varName);
+            invalidConfigFields.delete(varName);
           } else {
             statusEl.textContent = `${t("env_invalid")} (${result.error})`;
-            invalidFields.add(varName);
+            invalidConfigFields.add(varName);
           }
           updateSaveGuards();
         });
@@ -1087,6 +1126,8 @@
       document.getElementById("cfgUsageCapReset").value = cfg.usage_cap_reset ?? "";
       document.getElementById("cfgReviewDraftPrs").checked = Boolean(cfg.review_draft_prs);
       currentConfig = { model: cfg.model || {}, key_index: cfg.key_index || {} };
+      invalidConfigFields.clear();
+      updateSaveGuards();
       renderProviderModelRows();
     }
 
@@ -1097,7 +1138,7 @@
     }
 
     async function saveConfig() {
-      if (invalidFields.size > 0) {
+      if (invalidConfigFields.size > 0) {
         document.getElementById("configSaveResult").textContent = t("env_fix_before_save");
         return;
       }
@@ -1112,13 +1153,17 @@
         model: {},
         key_index: {},
       };
+      // Always set every provider's field (never conditional on truthiness)
+      // so blanking a model input or resetting a key-slot select to "—"
+      // actually clears the override server-side, instead of the field
+      // being silently omitted and the stale override left in place.
       document.querySelectorAll(".cfg-model").forEach((input) => {
         const provider = input.getAttribute("data-provider");
-        if (input.value) body.model[provider] = input.value;
+        body.model[provider] = input.value || null;
       });
       document.querySelectorAll(".cfg-key-slot").forEach((select) => {
         const provider = select.getAttribute("data-provider");
-        if (select.value !== "") body.key_index[provider] = parseInt(select.value, 10);
+        body.key_index[provider] = select.value !== "" ? parseInt(select.value, 10) : null;
       });
       const resp = await fetch("/api/environment/config", {
         method: "PATCH",
