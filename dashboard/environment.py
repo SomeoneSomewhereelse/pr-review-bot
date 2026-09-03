@@ -9,29 +9,39 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from bot import render_client
-from bot.providers import registry
+from bot.config_deps import credential_slot_vars
+from bot.providers import catalog, credentials, registry, vertex_credentials
 from bot.queue import store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_LLM_PROVIDER_FAMILIES = ("gemini", "groq", "vertex")
+
 
 def _build_render_payload() -> dict:
     service_id = render_client.find_service_id()
     if service_id is None:
-        return {"vars": []}
+        return {"vars": [], "available_key_slots": {p: [] for p in _LLM_PROVIDER_FAMILIES}}
     values = render_client.env_vars(service_id)
+    available_key_slots = {
+        provider: [
+            i for i, var in enumerate(credential_slot_vars(provider)) if var in values
+        ]
+        for provider in _LLM_PROVIDER_FAMILIES
+    }
     return {
         "vars": [
             {"key": key, "value": value, "protected": key in render_client.PROTECTED_ENV_KEYS}
             for key, value in values.items()
-        ]
+        ],
+        "available_key_slots": available_key_slots,
     }
 
 
@@ -121,6 +131,44 @@ def _build_config_payload() -> dict:
 @router.get("/api/environment/config")
 async def get_environment_config() -> JSONResponse:
     payload = await asyncio.to_thread(_build_config_payload)
+    return JSONResponse(payload)
+
+
+def _resolve_current_credential(provider: str, slot: int | None) -> tuple[bool, str]:
+    """Resolve the currently-stored credential for `provider`+`slot`.
+
+    Returns (has_credential, value) -- a raw API key for gemini/groq. Not
+    used for vertex, which resolves via vertex_credentials instead.
+    """
+    if slot is None:
+        slot = store.get_all_key_index_overrides().get(provider, 0)
+    _, value = credentials.resolve(provider, slot)
+    return bool(value), value
+
+
+def _fetch_models_for_provider(provider: str, slot: int | None) -> dict:
+    if provider == "vertex":
+        if slot is None:
+            slot = store.get_all_key_index_overrides().get("vertex", 0)
+        info = vertex_credentials.resolve_service_account_info(slot)
+        result = catalog.list_vertex_models(info)
+    else:
+        has_credential, api_key = _resolve_current_credential(provider, slot)
+        if not has_credential:
+            return {"ok": False, "models": None, "error": "no_credential_configured"}
+        result = (
+            catalog.list_gemini_models(api_key)
+            if provider == "gemini"
+            else catalog.list_groq_models(api_key)
+        )
+    return {"ok": result.ok, "models": result.models, "error": result.error}
+
+
+@router.get("/api/environment/credential/{family}/models")
+async def get_credential_models(family: str, slot: int | None = None) -> JSONResponse:
+    if family not in _LLM_PROVIDER_FAMILIES:
+        raise HTTPException(status_code=404, detail="not an LLM provider family")
+    payload = await asyncio.to_thread(_fetch_models_for_provider, family, slot)
     return JSONResponse(payload)
 
 

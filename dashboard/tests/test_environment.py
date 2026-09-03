@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from bot import render_client
 from bot.main import app
+from bot.providers import catalog, credentials, vertex_credentials
 from bot.queue import store
 from dashboard import auth
 
@@ -37,7 +38,8 @@ async def test_get_render_env_vars_returns_key_and_value(monkeypatch):
     client = await _client()
     resp = await client.get("/api/environment/render")
     assert resp.status_code == 200
-    assert resp.json() == {"vars": [{"key": "FOO", "value": "bar", "protected": False}]}
+    body = resp.json()
+    assert body["vars"] == [{"key": "FOO", "value": "bar", "protected": False}]
 
 
 async def test_get_render_env_vars_marks_protected_keys(monkeypatch):
@@ -47,9 +49,9 @@ async def test_get_render_env_vars_marks_protected_keys(monkeypatch):
     )
     client = await _client()
     resp = await client.get("/api/environment/render")
-    assert resp.json() == {
-        "vars": [{"key": "DATABASE_URL", "value": "postgres://x", "protected": True}]
-    }
+    assert resp.json()["vars"] == [
+        {"key": "DATABASE_URL", "value": "postgres://x", "protected": True}
+    ]
 
 
 async def test_patch_render_env_vars_applies_sets_and_fires_one_deploy(monkeypatch):
@@ -177,3 +179,102 @@ async def test_patch_environment_config_rejects_an_unknown_top_level_provider():
     body = resp.json()
     assert body["applied"] == []
     assert body["failed"] == [{"key": "provider", "error": "unknown_provider"}]
+
+
+async def test_render_payload_includes_available_key_slots(monkeypatch):
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(
+        render_client,
+        "env_vars",
+        lambda service_id: {
+            "GEMINI_API_KEY": "x",
+            "GEMINI_API_KEY_2": "y",
+            "GROQ_API_KEY_1": "z",
+            "DATABASE_URL": "postgres://...",
+        },
+    )
+    client = await _client()
+    resp = await client.get("/api/environment/render")
+    assert resp.status_code == 200
+    slots = resp.json()["available_key_slots"]
+    assert slots["gemini"] == [0, 2]
+    assert slots["groq"] == [1]
+    assert slots["vertex"] == []
+
+
+async def test_render_payload_available_key_slots_empty_when_no_service(monkeypatch):
+    monkeypatch.setattr(render_client, "find_service_id", lambda: None)
+    client = await _client()
+    resp = await client.get("/api/environment/render")
+    assert resp.json()["available_key_slots"] == {"gemini": [], "groq": [], "vertex": []}
+
+
+async def test_credential_models_refresh_resolves_current_slot(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
+
+    def _resolve(provider, index):
+        assert (provider, index) == ("gemini", 2)
+        return ("GEMINI_API_KEY_2", "resolved-key")
+
+    monkeypatch.setattr(credentials, "resolve", _resolve)
+
+    def _list_models(api_key):
+        assert api_key == "resolved-key"
+        return catalog.CatalogResult(ok=True, models=["gemini-flash-latest"], error=None)
+
+    monkeypatch.setattr(catalog, "list_gemini_models", _list_models)
+
+    client = await _client()
+    resp = await client.get("/api/environment/credential/gemini/models")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "models": ["gemini-flash-latest"], "error": None}
+
+
+async def test_credential_models_refresh_explicit_slot_overrides_current(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 0})
+
+    def _resolve(provider, index):
+        assert index == 3
+        return ("GEMINI_API_KEY_3", "key-3")
+
+    monkeypatch.setattr(credentials, "resolve", _resolve)
+    monkeypatch.setattr(
+        catalog,
+        "list_gemini_models",
+        lambda api_key: catalog.CatalogResult(ok=True, models=["m"], error=None),
+    )
+    client = await _client()
+    resp = await client.get("/api/environment/credential/gemini/models?slot=3")
+    assert resp.status_code == 200
+
+
+async def test_credential_models_refresh_no_credential_configured(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(credentials, "resolve", lambda provider, index: ("X", ""))
+    client = await _client()
+    resp = await client.get("/api/environment/credential/gemini/models")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": False, "models": None, "error": "no_credential_configured"}
+
+
+async def test_credential_models_refresh_rejects_github_app_family():
+    client = await _client()
+    resp = await client.get("/api/environment/credential/github_app/models")
+    assert resp.status_code == 404
+
+
+async def test_credential_models_refresh_vertex_resolves_service_account_info(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"vertex": 0})
+    monkeypatch.setattr(
+        vertex_credentials, "resolve_service_account_info", lambda index: {"project_id": "proj-a"}
+    )
+
+    def _list_vertex(info):
+        assert info == {"project_id": "proj-a"}
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    client = await _client()
+    resp = await client.get("/api/environment/credential/vertex/models")
+    assert resp.status_code == 200
+    assert resp.json()["models"] == ["gemini-2.5-flash"]
