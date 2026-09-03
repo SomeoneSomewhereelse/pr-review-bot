@@ -71,6 +71,26 @@ def test_dependents_of_returns_none_for_non_credential_var():
     assert dependents_of("GCP_PROJECT", key_index_overrides={}, provider_override=None) is None
 
 
+def test_dependents_of_does_not_flag_provider_for_an_inactive_spare_slot():
+    """Regression test: deleting a spare, unused slot for the active
+    provider must not report the provider override as a dependent -- only
+    deleting the slot actually in use should."""
+    dependents = dependents_of(
+        "GEMINI_API_KEY_3", key_index_overrides={"gemini": 0}, provider_override="gemini"
+    )
+    assert dependents.key_index_override is False
+    assert dependents.provider_override is False
+    assert dependents.any() is False
+
+
+def test_dependents_of_flags_provider_when_deleting_the_actually_active_slot():
+    dependents = dependents_of(
+        "GEMINI_API_KEY_2", key_index_overrides={"gemini": 2}, provider_override="gemini"
+    )
+    assert dependents.key_index_override is True
+    assert dependents.provider_override is True
+
+
 def test_conflicts_for_flags_project_mismatch():
     conflicts = conflicts_for("vertex", "new-project", "old-project")
     assert conflicts == [{"var": "GCP_PROJECT", "current": "old-project", "new": "new-project"}]

@@ -102,9 +102,18 @@ def dependents_of(
         index = slot_index_for_var(family, var)
         if index is None:
             continue
+        # A key_index override absent means slot 0 is the active default
+        # (matches bot/providers/key_index.py's own fallback) -- so deleting
+        # slot 0 with no override present IS deleting the active slot.
+        active_slot = key_index_overrides.get(family, 0)
+        is_active_slot = active_slot == index
         return DeleteDependents(
             key_index_override=key_index_overrides.get(family) == index,
-            provider_override=provider_override == family,
+            # Only deactivate the provider if the slot actually being
+            # deleted is the one currently in use -- deleting an unused
+            # spare slot must not silently switch the bot off a provider
+            # that was never depending on that slot in the first place.
+            provider_override=(provider_override == family and is_active_slot),
         )
     return None
 
