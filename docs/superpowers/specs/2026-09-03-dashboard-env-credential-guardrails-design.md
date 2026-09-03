@@ -66,6 +66,7 @@ operator pick a model from what it actually supports."
 | Model picker scope | All three LLM providers get a model field in the config UI simultaneously (not gated behind "whichever is active"), matching that `runtime_config` already stores a model per provider independently of which is active. |
 | Key-slot picker | Included in this design (not deferred) — the operator can see and pick which credential slot is active per provider, discovered from which `slot_env_name(provider, i)` keys exist in the fetched Render var list (key names only, no values touched). |
 | Changing model on an already-set provider | A dedicated "refresh models" action per LLM provider (not routed through the credential add/replace modal) — resolves the already-stored credential server-side via the existing `bot/providers/credentials.py::resolve`/`vertex_credentials.resolve_service_account_info`, and calls the same `catalog.list_*_models`. No upload/paste needed; keeps the guided modal's meaning as strictly "add or replace a credential." |
+| Validating `GCP_PROJECT`/`GCP_LOCATION`/model vars edited directly | Automatic, not a manual button — fires on blur (inline pass/fail, informational only) and again, authoritatively, server-side on every `PATCH` touching one of these vars (rejects that var into `failed`, other keys in the same request still apply). Client-side Save is additionally blocked with no network call if a field is currently flagged invalid from its last blur-check. See section 6a. |
 
 ## 3. Credential families
 
@@ -99,10 +100,14 @@ recomputing and displaying it, no prompt.
 ```
 bot/providers/catalog.py       NEW — list_gemini_models(api_key),
                                 list_groq_models(api_key),
-                                list_vertex_models(service_account_info | None)
+                                list_vertex_models(service_account_info | None,
+                                project_override=None, location_override=None)
                                 -> CatalogResult{ok, models, error}. One
-                                deliberate live listing call each. Written
-                                from scratch (structurally similar to
+                                deliberate live listing call each. The
+                                override params exist solely to support
+                                section 6a's substitution-based validation
+                                without writing anything. Written from
+                                scratch (structurally similar to
                                 onboarding/llm_client.py, not imported from
                                 it).
 bot/config_deps.py             NEW — CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS,
@@ -115,10 +120,13 @@ bot/config_deps.py             NEW — CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS
 bot/github_app.py              UNCHANGED — existing discover_installation_id_for_app /
                                 discover_and_verify_installation_id reused
                                 directly by the new validate endpoint.
-dashboard/environment.py       MODIFIED — three new routes (section 5): the
-                                guided validate/apply pair, and a
+dashboard/environment.py       MODIFIED — four new routes (section 5): the
+                                guided validate/apply pair, a
                                 GET .../models refresh route for an
-                                already-set provider; plus the existing
+                                already-set provider, and
+                                POST /api/environment/validate/{var} for
+                                the five directly-editable soft-dep/model
+                                vars (section 6a); plus the existing
                                 DELETE /api/environment/render/{key} gains
                                 dependent-computation for LLM credential
                                 slots (none of which are in
@@ -135,7 +143,12 @@ dashboard/static/dashboard.html MODIFIED — Add button gains a "guided setup"
                                 opens the same modal pre-filled to "replace";
                                 per-provider model + key-slot selects added
                                 to the runtime_config panel, fed by the
-                                guided modal's picks.
+                                guided modal's picks; the five directly-
+                                editable soft-dep/model fields wire a
+                                blur handler to POST /api/environment/validate/{var}
+                                (inline pass/fail indicator) and track
+                                per-field valid/invalid state to disable
+                                Save while any is flagged invalid.
 bot/tests/test_catalog.py      NEW — mocked SDK clients per provider, no
                                 live calls.
 bot/tests/test_config_deps.py  NEW — pure-function tests for dependents_of
@@ -154,6 +167,7 @@ dashboard/tests/test_environment.py MODIFIED — new tests for the two
 | `DELETE /api/environment/render/{key}` | session | `?confirm=true` optional | Unchanged shape; for an LLM provider credential slot (the only `CREDENTIAL_FAMILIES` members not in `PROTECTED_ENV_KEYS`) with dependents and no `confirm=true`, returns `409 {"dependents": [str]}` instead of deleting; with `confirm=true` (or no dependents), deletes the var and cascade-deletes the listed `runtime_config` entries |
 | `GET /api/environment/render` | session | — | Unchanged `{"vars": [...]}`, plus `"available_key_slots": {provider: [int]}` computed from which `slot_env_name` keys exist |
 | `GET /api/environment/credential/{family}/models?slot=N` | session | `slot` optional, defaults to that provider's current `key_index` override | `{"ok": bool, "models": [str] \| null, "error": str \| null}` — LLM providers only (`gemini`/`groq`/`vertex`); resolves the already-stored credential for that slot and re-runs the same live catalog call, no upload needed |
+| `POST /api/environment/validate/{var}` | session | `{"value": str}` | `{"ok": bool, "error": str \| null, "models": [str] \| null}` — `var` is one of `GCP_PROJECT`/`GCP_LOCATION`/`LLM_MODEL`/`GROQ_MODEL`/`VERTEX_MODEL`; resolves the matching provider's stored credential and substitutes `value` into the same live-call path, writes nothing (section 6a) |
 
 `error` values on `/validate` failure are structural only —
 `unauthorized`/`forbidden`/`rate_limited`/`provider_unreachable`/`invalid_service_account_json`
@@ -225,6 +239,51 @@ The runtime_config panel's key-slot `<select>` (populated from
 `key_index` field directly for a plain switch between already-configured
 slots — again no credential change, no guided modal.
 
+## 6a. Validating soft-dep/model vars edited outside the guided flow
+
+`GCP_PROJECT`, `GCP_LOCATION`, `LLM_MODEL`, `GROQ_MODEL`, and `VERTEX_MODEL`
+can still be edited as plain free-form fields (unchanged from today), but
+every edit to one of these five is now validated automatically at two
+points, reusing the same underlying check — no separate "Validate" button:
+
+1. **On blur** (the field loses focus): the frontend fires
+   `POST /api/environment/validate/{var}` with `{"value": <candidate>}`.
+   - For a model var: resolves that provider's currently-stored credential
+     (same resolution as the `.../models` refresh route), re-runs
+     `catalog.list_*_models`, checks `value` is in the result.
+   - For `GCP_PROJECT`/`GCP_LOCATION`: resolves the current Vertex
+     credential and builds the same client the real adapter would
+     (`bot/factory.py`'s construction path), substituting `value` for
+     whichever of project/location is being checked, then makes the one
+     live listing call. `bot/providers/catalog.py::list_vertex_models`
+     gains two optional params, `project_override`/`location_override`, to
+     support this substitution without writing anything.
+   - Response: `{"ok": bool, "error": str | null}` (model vars also
+     include `"models": [str]` for potential inline suggestions). Shown
+     inline as a pass/fail indicator next to the field. Purely
+     informational at this point — nothing is written or blocked yet.
+2. **On Save**: the frontend refuses to submit `PATCH /api/environment/render`
+   (or `/config` for model vars) at all if any of these five fields is
+   currently flagged invalid from its last blur-check — no network call is
+   made, the operator is pointed at the failing field(s) instead. This is
+   a client-side convenience, not the enforcement boundary.
+3. **Server-side, on the same PATCH**: authoritative regardless of client
+   state (covers a paste-then-save without ever blurring the field, stale
+   client-side validation state, or a direct API call bypassing the UI) —
+   the backend re-runs the identical check on every one of these five vars
+   present in the request body before applying it. A failing var is
+   reported in `failed` with the same structural error shape as elsewhere
+   in this design; other, unrelated keys in the same request still apply,
+   matching this project's standing "partial failure is always visible"
+   convention.
+
+This closes the "Out of scope" gap from the original draft (see section
+8) without introducing a separate manual validation action, and without
+making the plain edit form request a credential upload — only vars already
+covered by an existing family's stored credential can be validated this
+way; a var with no resolvable credential yet (e.g. the provider was never
+set up) simply reports `{"ok": false, "error": "no_credential_configured"}`.
+
 ## 7. Testing strategy
 
 - **`bot/tests/test_catalog.py`**: mocked `genai`/`groq` SDK clients for
@@ -238,21 +297,23 @@ slots — again no credential change, no guided modal.
   failure, the `GCP_PROJECT` conflict prompt path, the GitHub App
   installation-mismatch path; the `.../models` refresh route (resolves the
   stored credential for the given/defaulted slot, returns live models,
-  never accepts an uploaded credential); delete route returns `409` with
-  dependents when unconfirmed and cascades correctly when confirmed;
-  protected-key delete still refused exactly as before (regression check);
-  no secret value ever asserted against in a log line.
+  never accepts an uploaded credential); the `.../validate/{var}` route
+  for each of the five vars — success, failure, and
+  `no_credential_configured` when the provider was never set up; a `PATCH`
+  containing an invalid value for one of these vars reports it in `failed`
+  while unrelated keys in the same request still apply; delete route
+  returns `409` with dependents when unconfirmed and cascades correctly
+  when confirmed; protected-key delete still refused exactly as before
+  (regression check); no secret value ever asserted against in a log line.
 - **Manual pass**: guided add/replace for at least one LLM provider and
-  GitHub App, and one cascade-delete confirmation, driven through the
+  GitHub App, one cascade-delete confirmation, and the blur-validate →
+  Save-blocked-while-invalid → server-side-rejects-if-forced sequence for
+  at least one of the five directly-editable vars, driven through the
   actual dashboard UI before calling this done — UI flows aren't caught by
   type-checking or route tests alone.
 
 ## 8. Out of scope
 
-- **Editing `GCP_LOCATION`/`GCP_PROJECT`/model vars outside the guided
-  flow** — direct free-form edits to these vars remain simple text edits,
-  unchanged; guardrail logic triggers specifically on credential
-  add/replace/delete, not on every touch of a soft-dep var.
 - **Multi-installation GitHub Apps** — `MultipleInstallationsFound` is a
   validation failure, not a picker; this project's model is one App, one
   installation, matching the onboarding wizard's existing assumption.
