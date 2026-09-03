@@ -9,14 +9,17 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
+import jwt
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from bot import config_deps, github_app, render_client
-from bot.config_deps import CREDENTIAL_FAMILIES, credential_slot_vars
+from bot.config import settings
+from bot.config_deps import CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS, credential_slot_vars
 from bot.providers import catalog, credentials, registry, vertex_credentials
 from bot.providers.registry import slot_env_name
 from bot.queue import store
@@ -72,10 +75,33 @@ class ValidateVarRequest(BaseModel):
     value: str
 
 
+def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
+    """Resolve the Vertex service-account info for `slot`, never raising.
+
+    Returns (info, error). A non-None `error` is a structural code and
+    `info` is always None in that case. `info is None` with no error means
+    "no explicit key -- fall through to implicit ADC", mirroring
+    bot/providers/factory.py's own definition of "configured": a missing key
+    is only a problem when GCP_PROJECT isn't set either, since without
+    either there is nothing for ADC to resolve against.
+    """
+    try:
+        info = vertex_credentials.resolve_service_account_info(slot)
+    except ValueError:
+        # Covers json.JSONDecodeError, binascii.Error, and UnicodeDecodeError
+        # too -- all are ValueError subclasses.
+        return None, "invalid_service_account_json"
+    if info is None and not settings.gcp_project:
+        return None, "no_credential_configured"
+    return info, None
+
+
 def _validate_model_var(provider: str, candidate: str) -> dict:
     if provider == "vertex":
         slot = store.get_all_key_index_overrides().get("vertex", 0)
-        info = vertex_credentials.resolve_service_account_info(slot)
+        info, error = _safe_resolve_vertex_info(slot)
+        if error:
+            return {"ok": False, "error": error, "models": None}
         result = catalog.list_vertex_models(info)
     else:
         slot = store.get_all_key_index_overrides().get(provider, 0)
@@ -96,7 +122,9 @@ def _validate_model_var(provider: str, candidate: str) -> dict:
 
 def _validate_gcp_var(var: str, candidate: str) -> dict:
     slot = store.get_all_key_index_overrides().get("vertex", 0)
-    info = vertex_credentials.resolve_service_account_info(slot)
+    info, error = _safe_resolve_vertex_info(slot)
+    if error:
+        return {"ok": False, "error": error, "models": None}
     kwargs = (
         {"project_override": candidate}
         if var == "GCP_PROJECT"
@@ -149,8 +177,14 @@ def _validate_vertex_credential(raw_bytes: bytes) -> dict:
             "installation_id": None,
             "conflicts": [],
         }
-    result = catalog.list_vertex_models(info)
-    project_id = info.get("project_id") if result.ok else None
+    project_id = info.get("project_id") if isinstance(info, dict) else None
+    # Validate the uploaded key against ITS OWN project, not whatever
+    # GCP_PROJECT currently happens to be set to -- a replacement key for a
+    # different (but perfectly valid) project must not be rejected just
+    # because the old GCP_PROJECT override hasn't been updated yet. The
+    # mismatch itself is surfaced separately below, as a conflict prompt
+    # rather than a validation failure.
+    result = catalog.list_vertex_models(info, project_override=project_id)
     conflicts: list[dict] = []
     if result.ok and project_id:
         service_id = render_client.find_service_id()
@@ -162,13 +196,36 @@ def _validate_vertex_credential(raw_bytes: bytes) -> dict:
         "ok": result.ok,
         "error": result.error,
         "models": result.models,
-        "project_id": project_id,
+        "project_id": project_id if result.ok else None,
         "installation_id": None,
         "conflicts": conflicts,
     }
 
 
+_GITHUB_STATUS_RE = re.compile(r"failed with (\d+)")
+
+
+def _classify_github_runtime_error(exc: RuntimeError) -> str:
+    message = str(exc)
+    if "multiple installations" in message:
+        return "multiple_installations"
+    match = _GITHUB_STATUS_RE.search(message)
+    status = int(match.group(1)) if match else None
+    if status is not None and status >= 500:
+        return "github_unreachable"
+    return "unauthorized"
+
+
 def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
+    if not raw_bytes:
+        return {
+            "ok": False,
+            "error": "invalid_key",
+            "models": None,
+            "project_id": None,
+            "installation_id": None,
+            "conflicts": [],
+        }
     private_key_b64 = base64.b64encode(raw_bytes).decode()
     empty = {
         "ok": False,
@@ -183,10 +240,13 @@ def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
     except github_app.AppNotInstalledError:
         return {**empty, "error": "installation_not_found"}
     except RuntimeError as exc:
-        error = "multiple_installations" if "multiple installations" in str(exc) else "unauthorized"
-        return {**empty, "error": error}
-    except ValueError:
+        return {**empty, "error": _classify_github_runtime_error(exc)}
+    except (ValueError, AssertionError, jwt.exceptions.PyJWTError):
         return {**empty, "error": "invalid_key"}
+    except Exception:  # noqa: BLE001 -- transport-level failures (DNS, connection
+        # refused) aren't GithubException and would otherwise 500
+        logger.exception("environment: github app validation failed unexpectedly")
+        return {**empty, "error": "github_unreachable"}
     return {
         "ok": True,
         "error": None,
@@ -201,7 +261,7 @@ def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
 async def validate_credential(
     family: str,
     api_key: str | None = Form(None),
-    app_id: str | None = Form(None),
+    app_id: int | None = Form(None),
     credential_file: UploadFile | None = File(None),
 ) -> JSONResponse:
     if family not in CREDENTIAL_FAMILIES:
@@ -217,17 +277,15 @@ async def validate_credential(
         raw_bytes = await credential_file.read()
         payload = await asyncio.to_thread(_validate_vertex_credential, raw_bytes)
     else:  # github_app
-        if not app_id or credential_file is None:
+        if app_id is None or credential_file is None:
             raise HTTPException(status_code=422, detail="app_id and credential_file are required")
         raw_bytes = await credential_file.read()
-        payload = await asyncio.to_thread(
-            _validate_github_app_credential, int(app_id), raw_bytes
-        )
+        payload = await asyncio.to_thread(_validate_github_app_credential, app_id, raw_bytes)
     return JSONResponse(payload)
 
 
 class ApplyLlmCredentialRequest(BaseModel):
-    slot: int = 0
+    slot: int = Field(default=0, ge=0, lt=MAX_CREDENTIAL_SLOTS)
     credential: dict[str, str]
     model: str
     clear_gcp_project: bool = False
@@ -265,6 +323,18 @@ def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> di
             applied.append("GCP_PROJECT")
         except Exception as exc:  # noqa: BLE001
             failed.append({"key": "GCP_PROJECT", "error": type(exc).__name__})
+    if model_var in applied:
+        # Keep the runtime_config model override in sync with the env var
+        # just pushed -- active_model() reads the DB override FIRST, so
+        # without this a guided-setup model pick could be silently
+        # shadowed by a stale override from an earlier plain config-panel
+        # edit, even though the new env var was applied successfully.
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            store.set_model_override(family, payload.model, now)
+            applied.append(f"model.{family}")
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"key": f"model.{family}", "error": type(exc).__name__})
     if applied:
         try:
             render_client.trigger_deploy(service_id)
@@ -301,11 +371,23 @@ def _apply_github_app_credential(payload: ApplyGithubAppRequest) -> dict:
 async def apply_credential(family: str, payload: dict) -> JSONResponse:
     if family not in ("gemini", "groq", "vertex", "github_app"):
         raise HTTPException(status_code=404, detail="unknown credential family")
+    try:
+        if family == "github_app":
+            req = ApplyGithubAppRequest.model_validate(payload)
+        else:
+            req = ApplyLlmCredentialRequest.model_validate(payload)
+    except ValidationError:
+        # Never surface exc itself: pydantic embeds the full rejected
+        # input_value (here, the credential/private key) in its message --
+        # this must stay structural, per root CLAUDE.md's rule on
+        # secret-bearing validation errors. FastAPI's own 422 handling only
+        # covers a RequestValidationError raised by its dependency layer,
+        # not one raised inside a handler body like this, so it must be
+        # caught explicitly here.
+        raise HTTPException(status_code=422, detail="invalid credential payload") from None
     if family == "github_app":
-        req = ApplyGithubAppRequest.model_validate(payload)
         result = await asyncio.to_thread(_apply_github_app_credential, req)
     else:
-        req = ApplyLlmCredentialRequest.model_validate(payload)
         result = await asyncio.to_thread(_apply_llm_credential, family, req)
     return JSONResponse(result)
 
@@ -323,12 +405,30 @@ def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
     failed: list[dict] = []
     stopped = False
 
+    key_index_overrides = None
+    provider_override_value = None
     for key in payload.deletes:
         if stopped:
             break
         if key in render_client.PROTECTED_ENV_KEYS:
             failed.append({"key": key, "error": "protected"})
             continue
+        if any(config_deps.slot_index_for_var(f, key) is not None for f in _LLM_PROVIDER_FAMILIES):
+            # A credential slot with dependent runtime_config state must go
+            # through DELETE /api/environment/render/{key}'s confirm flow --
+            # this bulk path has no per-key confirmation step, so it can only
+            # ever delete a slot that is already dependency-free.
+            if key_index_overrides is None:
+                key_index_overrides = store.get_all_key_index_overrides()
+                provider_override_value = store.get_provider_override()
+            dependents = config_deps.dependents_of(
+                key,
+                key_index_overrides=key_index_overrides,
+                provider_override=provider_override_value,
+            )
+            if dependents is not None and dependents.any():
+                failed.append({"key": key, "error": "has_dependents"})
+                continue
         try:
             render_client.delete_env_var(service_id, key)
         except Exception as exc:  # noqa: BLE001
@@ -342,7 +442,12 @@ def _apply_render_patch(payload: EnvironmentRenderPatch) -> dict:
         if stopped:
             break
         if key in _DIRECT_EDIT_VARS:
-            check = _validate_var(key, value)
+            try:
+                check = _validate_var(key, value)
+            except Exception:  # noqa: BLE001 -- a resolution failure is still a validation failure
+                logger.exception("environment: validation of %s raised unexpectedly", key)
+                failed.append({"key": key, "error": "failed_validation"})
+                continue
             if not check["ok"]:
                 failed.append({"key": key, "error": "failed_validation"})
                 continue
@@ -409,7 +514,9 @@ def _fetch_models_for_provider(provider: str, slot: int | None) -> dict:
     if provider == "vertex":
         if slot is None:
             slot = store.get_all_key_index_overrides().get("vertex", 0)
-        info = vertex_credentials.resolve_service_account_info(slot)
+        info, error = _safe_resolve_vertex_info(slot)
+        if error:
+            return {"ok": False, "models": None, "error": error}
         result = catalog.list_vertex_models(info)
     else:
         has_credential, api_key = _resolve_current_credential(provider, slot)
@@ -499,6 +606,9 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
         if provider not in registry.PROVIDERS:
             failed.append({"key": f"key_index.{provider}", "error": "unknown_provider"})
             continue
+        if index is not None and not (0 <= index < MAX_CREDENTIAL_SLOTS):
+            failed.append({"key": f"key_index.{provider}", "error": "invalid_slot"})
+            continue
         try:
             store.set_key_index_override(provider, index, now)
             applied.append(f"key_index.{provider}")
@@ -566,6 +676,7 @@ def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
                 store.set_key_index_override(family, None, now)
             if dependents.provider_override:
                 store.set_provider_override(None, now)
+            break
 
     deploy_id = None
     try:
