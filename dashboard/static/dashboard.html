@@ -56,6 +56,43 @@
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
+  /* Baseline reset for every form control -- browsers default input/select/
+     textarea/button/dialog to a UA-supplied white background + black text
+     that ignores the page's color scheme entirely, which is what made every
+     control glow white against the dark theme. */
+  input, select, textarea, button {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.6rem;
+  }
+  input[type="checkbox"], input[type="radio"] {
+    width: auto;
+    padding: 0;
+    accent-color: var(--accent);
+  }
+  input[readonly] { opacity: 0.7; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  dialog {
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem 1.5rem;
+    max-width: min(90vw, 420px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+  dialog > * { margin-top: 0.6rem; }
+  dialog > *:first-child { margin-top: 0; }
   header.topbar {
     display: flex;
     flex-wrap: wrap;
@@ -68,22 +105,62 @@
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
     border-radius: 999px;
     padding: 0.4rem 0.9rem;
     font-size: 0.9rem;
-    cursor: pointer;
   }
-  button.control:hover { border-color: var(--accent); }
   .side-nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
   .side-nav .nav-item.active { border-color: var(--accent); color: var(--accent); }
-  #renderVarsTable { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-  #renderVarsTable th, #renderVarsTable td { text-align: start; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
-  #renderVarsTable input.env-value-input { width: 100%; max-width: 320px; font-family: monospace; }
-  #addVarForm { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-  #configForm { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 0.75rem; align-items: center; max-width: 480px; margin-bottom: 1rem; }
+  .env-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 1rem 1.25rem 1.25rem;
+    margin-bottom: 1.5rem;
+    max-width: 900px;
+  }
+  .env-section h2 { margin: 0 0 0.85rem; font-size: 1.05rem; }
+  #renderVarsTable { width: 100%; border-collapse: collapse; margin-bottom: 1rem; table-layout: fixed; }
+  #renderVarsTable th, #renderVarsTable td { text-align: start; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  #renderVarsTable th:first-child, #renderVarsTable td:first-child { width: 30%; word-break: break-word; }
+  #renderVarsTable th:last-child, #renderVarsTable td:last-child { width: 5.5rem; }
+  .env-value-cell { display: flex; align-items: center; gap: 0.5rem; }
+  #renderVarsTable input.env-value-input { flex: 1 1 auto; min-width: 0; font-family: monospace; }
+  #addVarForm { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
+  #addVarForm input { flex: 1 1 160px; min-width: 0; }
+  .env-controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+  #configForm {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.6rem 0.75rem;
+    align-items: center;
+    max-width: 620px;
+  }
+  #configForm > * { min-width: 0; }
+  .provider-model-grid {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: var(--surface-2);
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.75rem;
+  }
+  .provider-model-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.6rem;
+  }
+  .provider-model-row .provider-name {
+    font-weight: 600;
+    text-transform: capitalize;
+    min-width: 4.5rem;
+  }
+  .provider-model-row label { color: var(--text-muted); font-size: 0.85rem; }
+  .provider-model-row .cfg-key-slot { width: 4.5rem; flex: 0 0 auto; }
+  .provider-model-row .cfg-model { flex: 1 1 180px; min-width: 0; }
+  .provider-model-row .cfg-model-status { font-size: 0.85rem; color: var(--text-muted); }
   .popup-backdrop {
     position: fixed;
     inset: 0;
@@ -170,6 +247,36 @@
     .review-row .field { display: flex; justify-content: space-between; width: 100%; }
     .review-row .field .field-label { color: var(--text-muted); }
   }
+  /* Below this width, #renderVarsTable's 3 fixed-width columns (key 30%,
+     actions 5.5rem) squeeze the value cell's input+button flex row to
+     near-zero width --
+     the input becomes effectively invisible, not just cramped. Same
+     stacked-card technique .review-row already uses above: rows become
+     self-labeled blocks instead of table columns. */
+  @media (max-width: 640px) {
+    #renderVarsTable { table-layout: auto; }
+    #renderVarsTable thead { display: none; }
+    #renderVarsTable, #renderVarsTable tbody, #renderVarsTable tr, #renderVarsTable td {
+      display: block;
+      width: auto;
+    }
+    #renderVarsTable tr {
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      padding: 0.5rem 0.65rem;
+      margin-bottom: 0.6rem;
+    }
+    #renderVarsTable td { border-bottom: none; padding: 0.25rem 0; }
+    #renderVarsTable td:empty { display: none; }
+    #renderVarsTable td:first-child { font-weight: 600; word-break: break-word; }
+    .env-value-cell { flex-wrap: wrap; }
+    #renderVarsTable input.env-value-input { flex: 1 1 100%; }
+    /* #configForm's label/input pairs are separate grid items; collapsing
+       to one column stacks each pair (label above its field) instead of
+       squeezing every input into whatever's left after the widest label
+       (e.g. "Usage cap reset (UTC)") claims the fixed max-content column. */
+    #configForm { grid-template-columns: 1fr; }
+  }
   .review-row .chevron {
     position: absolute;
     top: 0.75rem;
@@ -232,72 +339,78 @@
     </section>
     <section id="environmentPanel" hidden>
       <section id="deployBanner" hidden></section>
-      <h2 data-i18n="env_render_title"></h2>
-      <table id="renderVarsTable">
-        <thead>
-          <tr>
-            <th data-i18n="env_col_key"></th>
-            <th data-i18n="env_col_value"></th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-      <form id="addVarForm">
-        <input id="newVarKey" type="text" placeholder="KEY_NAME" required>
-        <input id="newVarValue" type="text" placeholder="value" required>
-        <button type="submit" data-i18n="env_add"></button>
-      </form>
-      <select id="guidedSetupSelect">
-        <option value="" data-i18n="env_guided_setup"></option>
-        <option value="gemini" data-i18n="env_guided_gemini"></option>
-        <option value="groq" data-i18n="env_guided_groq"></option>
-        <option value="vertex" data-i18n="env_guided_vertex"></option>
-        <option value="github_app" data-i18n="env_guided_github_app"></option>
-      </select>
-      <dialog id="guidedModal">
-        <div id="guidedModalBody"></div>
-        <button type="button" id="guidedValidateBtn" data-i18n="env_guided_validate"></button>
-        <button type="button" id="guidedApplyBtn" data-i18n="env_guided_apply" disabled></button>
-        <button type="button" id="guidedCancelBtn" data-i18n="env_guided_cancel"></button>
-        <div id="guidedModalResult"></div>
-      </dialog>
-      <dialog id="deleteConfirmModal">
-        <div data-i18n="env_delete_confirm_title"></div>
-        <ul id="deleteConfirmList"></ul>
-        <button type="button" id="deleteConfirmOkBtn" data-i18n="env_delete_confirm_ok"></button>
-        <button type="button" id="deleteConfirmCancelBtn" data-i18n="env_guided_cancel"></button>
-      </dialog>
-      <button id="saveRenderVarsBtn" type="button" data-i18n="env_save"></button>
-      <div id="renderSaveResult"></div>
+      <section class="env-section">
+        <h2 data-i18n="env_render_title"></h2>
+        <table id="renderVarsTable">
+          <thead>
+            <tr>
+              <th data-i18n="env_col_key"></th>
+              <th data-i18n="env_col_value"></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <form id="addVarForm">
+          <input id="newVarKey" type="text" placeholder="KEY_NAME" required>
+          <input id="newVarValue" type="text" placeholder="value" required>
+          <button type="submit" data-i18n="env_add"></button>
+        </form>
+        <div class="env-controls-row">
+          <select id="guidedSetupSelect">
+            <option value="" data-i18n="env_guided_setup"></option>
+            <option value="gemini" data-i18n="env_guided_gemini"></option>
+            <option value="groq" data-i18n="env_guided_groq"></option>
+            <option value="vertex" data-i18n="env_guided_vertex"></option>
+            <option value="github_app" data-i18n="env_guided_github_app"></option>
+          </select>
+          <button id="saveRenderVarsBtn" type="button" class="control" data-i18n="env_save"></button>
+        </div>
+        <div id="renderSaveResult"></div>
+        <dialog id="guidedModal">
+          <div id="guidedModalBody"></div>
+          <button type="button" id="guidedValidateBtn" data-i18n="env_guided_validate"></button>
+          <button type="button" id="guidedApplyBtn" data-i18n="env_guided_apply" disabled></button>
+          <button type="button" id="guidedCancelBtn" data-i18n="env_guided_cancel"></button>
+          <div id="guidedModalResult"></div>
+        </dialog>
+        <dialog id="deleteConfirmModal">
+          <div data-i18n="env_delete_confirm_title"></div>
+          <ul id="deleteConfirmList"></ul>
+          <button type="button" id="deleteConfirmOkBtn" data-i18n="env_delete_confirm_ok"></button>
+          <button type="button" id="deleteConfirmCancelBtn" data-i18n="env_guided_cancel"></button>
+        </dialog>
+      </section>
 
-      <h2 data-i18n="env_config_title"></h2>
-      <form id="configForm">
-        <label data-i18n="env_config_provider"></label>
-        <select id="cfgProvider">
-          <option value="">—</option>
-          <option value="gemini">gemini</option>
-          <option value="groq">groq</option>
-          <option value="vertex">vertex</option>
-        </select>
-        <div id="providerModelRows"></div>
-        <label data-i18n="env_config_cooldown_base"></label>
-        <input id="cfgCooldownBase" type="number" step="any">
-        <label data-i18n="env_config_cooldown_max"></label>
-        <input id="cfgCooldownMax" type="number" step="any">
-        <label data-i18n="env_config_cooldown_factor"></label>
-        <input id="cfgCooldownFactor" type="number" step="any">
-        <label data-i18n="env_config_usage_cap_tokens"></label>
-        <input id="cfgUsageCapTokens" type="number">
-        <label data-i18n="env_config_usage_cap_reset"></label>
-        <input id="cfgUsageCapReset" type="text" placeholder="HH:MM">
-        <label>
-          <input id="cfgReviewDraftPrs" type="checkbox">
-          <span data-i18n="env_config_review_draft_prs"></span>
-        </label>
-      </form>
-      <button id="saveConfigBtn" type="button" data-i18n="env_save_config"></button>
-      <div id="configSaveResult"></div>
+      <section class="env-section">
+        <h2 data-i18n="env_config_title"></h2>
+        <form id="configForm">
+          <label data-i18n="env_config_provider"></label>
+          <select id="cfgProvider">
+            <option value="">—</option>
+            <option value="gemini">gemini</option>
+            <option value="groq">groq</option>
+            <option value="vertex">vertex</option>
+          </select>
+          <div id="providerModelRows" class="provider-model-grid"></div>
+          <label data-i18n="env_config_cooldown_base"></label>
+          <input id="cfgCooldownBase" type="number" step="any">
+          <label data-i18n="env_config_cooldown_max"></label>
+          <input id="cfgCooldownMax" type="number" step="any">
+          <label data-i18n="env_config_cooldown_factor"></label>
+          <input id="cfgCooldownFactor" type="number" step="any">
+          <label data-i18n="env_config_usage_cap_tokens"></label>
+          <input id="cfgUsageCapTokens" type="number">
+          <label data-i18n="env_config_usage_cap_reset"></label>
+          <input id="cfgUsageCapReset" type="text" placeholder="HH:MM">
+          <label>
+            <input id="cfgReviewDraftPrs" type="checkbox">
+            <span data-i18n="env_config_review_draft_prs"></span>
+          </label>
+        </form>
+        <button id="saveConfigBtn" type="button" class="control" data-i18n="env_save_config"></button>
+        <div id="configSaveResult"></div>
+      </section>
     </section>
   </main>
 
@@ -740,12 +853,14 @@
             <tr data-key="${esc(v.key)}">
               <td>${esc(v.key)}</td>
               <td>
-                <input type="text" class="env-value-input" data-key="${esc(v.key)}"
-                  value="${esc(isRevealed ? displayValue : maskedValue(displayValue))}"
-                  ${isRevealed ? "" : "readonly"}>
-                <button type="button" class="control" data-action="reveal" data-key="${esc(v.key)}">
-                  ${isRevealed ? t("env_hide") : t("env_reveal")}
-                </button>
+                <div class="env-value-cell">
+                  <input type="text" class="env-value-input" data-key="${esc(v.key)}"
+                    value="${esc(isRevealed ? displayValue : maskedValue(displayValue))}"
+                    ${isRevealed ? "" : "readonly"}>
+                  <button type="button" class="control" data-action="reveal" data-key="${esc(v.key)}">
+                    ${isRevealed ? t("env_hide") : t("env_reveal")}
+                  </button>
+                </div>
               </td>
               <td>${deleteBtn}</td>
             </tr>
@@ -1048,17 +1163,18 @@
           .map((s) => `<option value="${s}" ${String(s) === String(currentSlot) ? "selected" : ""}>${s}</option>`)
           .join("");
         return `
-          <label>${esc(provider)} ${t("env_config_key_slot")}</label>
-          <select data-provider="${provider}" class="cfg-key-slot">
-            <option value="">—</option>
-            ${slotOptions}
-          </select>
-          <label>${esc(provider)} ${t("env_config_model")}</label>
-          <span>
+          <div class="provider-model-row" data-provider="${provider}">
+            <span class="provider-name">${esc(provider)}</span>
+            <label>${t("env_config_key_slot")}</label>
+            <select data-provider="${provider}" class="cfg-key-slot">
+              <option value="">—</option>
+              ${slotOptions}
+            </select>
+            <label>${t("env_config_model")}</label>
             <input type="text" class="cfg-model" data-provider="${provider}" value="${esc(currentModel)}">
             <button type="button" class="control cfg-refresh-models" data-provider="${provider}">${t("env_refresh_models")}</button>
             <span class="cfg-model-status" data-provider="${provider}"></span>
-          </span>
+          </div>
         `;
       }).join("");
 

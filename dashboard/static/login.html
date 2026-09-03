@@ -120,6 +120,32 @@
     color: var(--text);
     font-size: 0.95rem;
   }
+  /* Password input with the reveal control sitting inside it -- mirrors
+     onboarding/static/index.html's .password-field pattern. Logical
+     properties (inset-inline-end / padding-inline-end) put the control on
+     the correct side automatically under the Hebrew RTL direction. */
+  .password-field { position: relative; }
+  .password-field input { padding-inline-end: 2.75rem; }
+  .password-toggle {
+    position: absolute;
+    inset-inline-end: 0.35rem;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    min-height: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .password-toggle:hover { color: var(--text); }
+  .password-toggle svg { width: 1.15rem; height: 1.15rem; display: block; }
+  .password-toggle svg[hidden] { display: none; }
   .remember-row {
     display: flex;
     align-items: center;
@@ -178,7 +204,21 @@
         </div>
         <div class="field-group">
           <label class="field-label" for="passwordInput" data-i18n="password_label"></label>
-          <input type="password" id="passwordInput" name="password" autocomplete="current-password" required>
+          <div class="password-field">
+            <input type="password" id="passwordInput" name="password" autocomplete="current-password" required>
+            <button id="passwordToggleBtn" class="password-toggle" type="button">
+              <svg id="passwordEyeOpen" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg id="passwordEyeClosed" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="remember-row">
           <input type="checkbox" id="rememberInput" name="remember">
@@ -198,6 +238,8 @@
         password_label: "Password",
         remember_label: "Remember me",
         submit_label: "Sign in",
+        show_password_button: "Show",
+        hide_password_button: "Hide",
         error_invalid_credentials: "Incorrect username or password.",
         error_network: "Could not reach the server. Check your connection and try again.",
         theme_light: "Light",
@@ -212,6 +254,8 @@
         password_label: "סיסמה",
         remember_label: "זכור אותי",
         submit_label: "התחבר",
+        show_password_button: "הצג",
+        hide_password_button: "הסתר",
         error_invalid_credentials: "שם משתמש או סיסמה שגויים.",
         error_network: "לא ניתן היה להתחבר לשרת. בדקו את החיבור ונסו שוב.",
         theme_light: "בהיר",
@@ -267,7 +311,29 @@
       document.getElementById("langPopupTitle").textContent = t("lang_popup_title");
       document.querySelector(`input[name="lang"][value="${lang}"]`).checked = true;
       applyTheme(currentTheme);
+      setPasswordVisibility(passwordVisible); // refreshes the toggle's aria-label/title in the new language
     }
+
+    let passwordVisible = false;
+
+    function setPasswordVisibility(visible) {
+      passwordVisible = visible;
+      document.getElementById("passwordInput").type = visible ? "text" : "password";
+      // The control is an icon, so its label lives in aria-label/title rather
+      // than in text -- the strings stay translated, just not rendered.
+      const toggle = document.getElementById("passwordToggleBtn");
+      const label = t(visible ? "hide_password_button" : "show_password_button");
+      toggle.setAttribute("aria-label", label);
+      toggle.setAttribute("title", label);
+      toggle.setAttribute("aria-pressed", visible ? "true" : "false");
+      // Eye = "reveal it", crossed-out eye = "hide it again".
+      document.getElementById("passwordEyeOpen").hidden = visible;
+      document.getElementById("passwordEyeClosed").hidden = !visible;
+    }
+
+    document.getElementById("passwordToggleBtn").addEventListener("click", () => {
+      setPasswordVisibility(!passwordVisible);
+    });
 
     function positionPopup(popup, anchorBtn) {
       const margin = 8;
