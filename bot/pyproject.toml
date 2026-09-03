@@ -19,6 +19,7 @@ dependencies = [
     "google-auth>=2.35",
     "pyjwt>=2.13",
     "requests>=2.32",
+    "python-multipart>=0.0.20",
 ]
 
 [tool.uv]

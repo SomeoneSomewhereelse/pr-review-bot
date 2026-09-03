@@ -96,6 +96,7 @@ dependencies = [
     { name = "pygithub" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "requests" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -115,6 +116,7 @@ requires-dist = [
     { name = "pygithub", specifier = ">=2.4" },
     { name = "pyjwt", specifier = ">=2.13" },
     { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "requests", specifier = ">=2.32" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
