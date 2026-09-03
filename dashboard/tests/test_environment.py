@@ -531,3 +531,64 @@ async def test_patch_render_rejects_model_not_in_catalog_but_applies_other_keys(
     result = resp.json()
     assert {"key": "LLM_MODEL", "error": "failed_validation"} in result["failed"]
     assert "OTHER_KEY" in result["applied"]
+
+
+async def test_delete_non_dependent_slot_succeeds_immediately(monkeypatch):
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "delete_env_var", lambda *a, **k: None)
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    client = await _client()
+    resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2")
+    assert resp.status_code == 200
+    assert resp.json()["applied"] == ["GEMINI_API_KEY_2"]
+
+
+async def test_delete_dependent_slot_without_confirm_returns_409(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
+    monkeypatch.setattr(store, "get_provider_override", lambda: None)
+    client = await _client()
+    resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2")
+    assert resp.status_code == 409
+    assert resp.json()["dependents"] == ["key_index override"]
+
+
+async def test_delete_active_provider_credential_without_confirm_returns_409(monkeypatch):
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {})
+    monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+    client = await _client()
+    resp = await client.delete("/api/environment/render/GEMINI_API_KEY")
+    assert resp.status_code == 409
+    assert resp.json()["dependents"] == ["active provider override"]
+
+
+async def test_confirmed_delete_cascades_runtime_config(monkeypatch):
+    cleared = {}
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "delete_env_var", lambda *a, **k: None)
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    monkeypatch.setattr(store, "get_all_key_index_overrides", lambda: {"gemini": 2})
+    monkeypatch.setattr(store, "get_provider_override", lambda: "gemini")
+
+    def _set_key_index(provider, index, now):
+        cleared["key_index"] = (provider, index)
+
+    def _set_provider(provider, now):
+        cleared["provider"] = provider
+
+    monkeypatch.setattr(store, "set_key_index_override", _set_key_index)
+    monkeypatch.setattr(store, "set_provider_override", _set_provider)
+    client = await _client()
+    resp = await client.delete("/api/environment/render/GEMINI_API_KEY_2?confirm=true")
+    assert resp.status_code == 200
+    assert resp.json()["applied"] == ["GEMINI_API_KEY_2"]
+    assert cleared["key_index"] == ("gemini", None)
+    assert cleared["provider"] is None
+
+
+async def test_protected_key_delete_still_refused():
+    client = await _client()
+    resp = await client.delete("/api/environment/render/DATABASE_URL?confirm=true")
+    assert resp.status_code == 200
+    assert resp.json()["failed"] == [{"key": "DATABASE_URL", "error": "protected"}]

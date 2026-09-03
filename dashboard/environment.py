@@ -522,3 +522,61 @@ def _apply_config_patch(payload: EnvironmentConfigPatch) -> dict:
 async def patch_environment_config(payload: EnvironmentConfigPatch) -> JSONResponse:
     result = await asyncio.to_thread(_apply_config_patch, payload)
     return JSONResponse(result)
+
+
+def _cascade_delete(key: str, confirm: bool) -> tuple[int, dict]:
+    if key in render_client.PROTECTED_ENV_KEYS:
+        return 200, {
+            "applied": [],
+            "failed": [{"key": key, "error": "protected"}],
+            "deploy_id": None,
+        }
+
+    key_index_overrides = store.get_all_key_index_overrides()
+    provider_override = store.get_provider_override()
+    dependents = config_deps.dependents_of(
+        key, key_index_overrides=key_index_overrides, provider_override=provider_override
+    )
+
+    if dependents is not None and dependents.any() and not confirm:
+        return 409, {"dependents": dependents.labels()}
+
+    service_id = render_client.find_service_id()
+    if service_id is None:
+        return 200, {
+            "applied": [],
+            "failed": [{"key": key, "error": "service_not_found"}],
+            "deploy_id": None,
+        }
+    try:
+        render_client.delete_env_var(service_id, key)
+    except Exception as exc:  # noqa: BLE001
+        return 200, {
+            "applied": [],
+            "failed": [{"key": key, "error": type(exc).__name__}],
+            "deploy_id": None,
+        }
+
+    now = datetime.now(timezone.utc).isoformat()
+    if dependents is not None:
+        for family in _LLM_PROVIDER_FAMILIES:
+            if config_deps.slot_index_for_var(family, key) is None:
+                continue
+            if dependents.key_index_override:
+                store.set_key_index_override(family, None, now)
+            if dependents.provider_override:
+                store.set_provider_override(None, now)
+
+    deploy_id = None
+    try:
+        deploy_id = render_client.trigger_deploy(service_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("environment: failed to trigger deploy after cascade delete of %s", key)
+    logger.info("environment: deleted %s (cascade)", key)
+    return 200, {"applied": [key], "failed": [], "deploy_id": deploy_id}
+
+
+@router.delete("/api/environment/render/{key}")
+async def delete_render_env_var(key: str, confirm: bool = False) -> JSONResponse:
+    status_code, payload = await asyncio.to_thread(_cascade_delete, key, confirm)
+    return JSONResponse(payload, status_code=status_code)
