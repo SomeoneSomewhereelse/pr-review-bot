@@ -6,16 +6,19 @@ stays read-only (see dashboard/CLAUDE.md). See docs/superpowers/specs/
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from bot import render_client
-from bot.config_deps import credential_slot_vars
+from bot import config_deps, github_app, render_client
+from bot.config_deps import CREDENTIAL_FAMILIES, credential_slot_vars
 from bot.providers import catalog, credentials, registry, vertex_credentials
+from bot.providers.registry import slot_env_name
 from bot.queue import store
 
 logger = logging.getLogger(__name__)
@@ -115,6 +118,195 @@ async def validate_var(var: str, payload: ValidateVarRequest) -> JSONResponse:
     if var not in _DIRECT_EDIT_VARS:
         raise HTTPException(status_code=404, detail="not a directly-validatable var")
     result = await asyncio.to_thread(_validate_var, var, payload.value)
+    return JSONResponse(result)
+
+
+def _validate_llm_credential(family: str, api_key: str) -> dict:
+    result = (
+        catalog.list_gemini_models(api_key)
+        if family == "gemini"
+        else catalog.list_groq_models(api_key)
+    )
+    return {
+        "ok": result.ok,
+        "error": result.error,
+        "models": result.models,
+        "project_id": None,
+        "installation_id": None,
+        "conflicts": [],
+    }
+
+
+def _validate_vertex_credential(raw_bytes: bytes) -> dict:
+    try:
+        info = json.loads(raw_bytes.decode())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {
+            "ok": False,
+            "error": "invalid_service_account_json",
+            "models": None,
+            "project_id": None,
+            "installation_id": None,
+            "conflicts": [],
+        }
+    result = catalog.list_vertex_models(info)
+    project_id = info.get("project_id") if result.ok else None
+    conflicts: list[dict] = []
+    if result.ok and project_id:
+        service_id = render_client.find_service_id()
+        current_project = (
+            render_client.env_vars(service_id).get("GCP_PROJECT") if service_id else None
+        )
+        conflicts = config_deps.conflicts_for("vertex", project_id, current_project)
+    return {
+        "ok": result.ok,
+        "error": result.error,
+        "models": result.models,
+        "project_id": project_id,
+        "installation_id": None,
+        "conflicts": conflicts,
+    }
+
+
+def _validate_github_app_credential(app_id: int, raw_bytes: bytes) -> dict:
+    private_key_b64 = base64.b64encode(raw_bytes).decode()
+    empty = {
+        "ok": False,
+        "models": None,
+        "project_id": None,
+        "installation_id": None,
+        "conflicts": [],
+    }
+    try:
+        gh_client = github_app._app_jwt_client_for(app_id, private_key_b64)
+        installation_id = github_app.discover_installation_id_for_app(client=gh_client)
+    except github_app.AppNotInstalledError:
+        return {**empty, "error": "installation_not_found"}
+    except RuntimeError as exc:
+        error = "multiple_installations" if "multiple installations" in str(exc) else "unauthorized"
+        return {**empty, "error": error}
+    except ValueError:
+        return {**empty, "error": "invalid_key"}
+    return {
+        "ok": True,
+        "error": None,
+        "models": None,
+        "project_id": None,
+        "installation_id": installation_id,
+        "conflicts": [],
+    }
+
+
+@router.post("/api/environment/credential/{family}/validate")
+async def validate_credential(
+    family: str,
+    api_key: str | None = Form(None),
+    app_id: str | None = Form(None),
+    credential_file: UploadFile | None = File(None),
+) -> JSONResponse:
+    if family not in CREDENTIAL_FAMILIES:
+        raise HTTPException(status_code=404, detail="unknown credential family")
+
+    if family in ("gemini", "groq"):
+        if not api_key:
+            raise HTTPException(status_code=422, detail="api_key is required")
+        payload = await asyncio.to_thread(_validate_llm_credential, family, api_key)
+    elif family == "vertex":
+        if credential_file is None:
+            raise HTTPException(status_code=422, detail="credential_file is required")
+        raw_bytes = await credential_file.read()
+        payload = await asyncio.to_thread(_validate_vertex_credential, raw_bytes)
+    else:  # github_app
+        if not app_id or credential_file is None:
+            raise HTTPException(status_code=422, detail="app_id and credential_file are required")
+        raw_bytes = await credential_file.read()
+        payload = await asyncio.to_thread(
+            _validate_github_app_credential, int(app_id), raw_bytes
+        )
+    return JSONResponse(payload)
+
+
+class ApplyLlmCredentialRequest(BaseModel):
+    slot: int = 0
+    credential: dict[str, str]
+    model: str
+    clear_gcp_project: bool = False
+
+
+class ApplyGithubAppRequest(BaseModel):
+    app_id: str
+    private_key_b64: str
+    installation_id: int
+
+
+def _apply_llm_credential(family: str, payload: ApplyLlmCredentialRequest) -> dict:
+    service_id = render_client.find_service_id()
+    if service_id is None:
+        return {"applied": [], "failed": [{"key": "*", "error": "service_not_found"}]}
+
+    credential_var = slot_env_name(family, payload.slot)
+    model_var = CREDENTIAL_FAMILIES[family]["model"]
+    credential_value = (
+        payload.credential.get("service_account_b64", "")
+        if family == "vertex"
+        else payload.credential.get("api_key", "")
+    )
+    applied: list[str] = []
+    failed: list[dict] = []
+    for key, value in ((credential_var, credential_value), (model_var, payload.model)):
+        try:
+            render_client.push_env_var(service_id, key, value)
+            applied.append(key)
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"key": key, "error": type(exc).__name__})
+    if family == "vertex" and payload.clear_gcp_project:
+        try:
+            render_client.delete_env_var(service_id, "GCP_PROJECT")
+            applied.append("GCP_PROJECT")
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"key": "GCP_PROJECT", "error": type(exc).__name__})
+    if applied:
+        try:
+            render_client.trigger_deploy(service_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("environment: failed to trigger deploy after guided apply")
+    return {"applied": applied, "failed": failed}
+
+
+def _apply_github_app_credential(payload: ApplyGithubAppRequest) -> dict:
+    service_id = render_client.find_service_id()
+    if service_id is None:
+        return {"applied": [], "failed": [{"key": "*", "error": "service_not_found"}]}
+    applied: list[str] = []
+    failed: list[dict] = []
+    for key, value in (
+        ("GITHUB_APP_ID", payload.app_id),
+        ("GITHUB_APP_PRIVATE_KEY", payload.private_key_b64),
+        ("GITHUB_APP_INSTALLATION_ID", str(payload.installation_id)),
+    ):
+        try:
+            render_client.push_env_var(service_id, key, value)
+            applied.append(key)
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"key": key, "error": type(exc).__name__})
+    if applied:
+        try:
+            render_client.trigger_deploy(service_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("environment: failed to trigger deploy after guided apply")
+    return {"applied": applied, "failed": failed}
+
+
+@router.post("/api/environment/credential/{family}/apply")
+async def apply_credential(family: str, payload: dict) -> JSONResponse:
+    if family not in ("gemini", "groq", "vertex", "github_app"):
+        raise HTTPException(status_code=404, detail="unknown credential family")
+    if family == "github_app":
+        req = ApplyGithubAppRequest.model_validate(payload)
+        result = await asyncio.to_thread(_apply_github_app_credential, req)
+    else:
+        req = ApplyLlmCredentialRequest.model_validate(payload)
+        result = await asyncio.to_thread(_apply_llm_credential, family, req)
     return JSONResponse(result)
 
 

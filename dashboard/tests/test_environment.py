@@ -3,9 +3,11 @@ and runtime_config endpoints. Route-level, using the same authenticated
 AsyncClient pattern dashboard/tests/test_dashboard_page.py already uses."""
 from __future__ import annotations
 
+import io
+
 from httpx import ASGITransport, AsyncClient
 
-from bot import render_client
+from bot import github_app, render_client
 from bot.main import app
 from bot.providers import catalog, credentials, vertex_credentials
 from bot.queue import store
@@ -179,6 +181,147 @@ async def test_patch_environment_config_rejects_an_unknown_top_level_provider():
     body = resp.json()
     assert body["applied"] == []
     assert body["failed"] == [{"key": "provider", "error": "unknown_provider"}]
+
+
+async def test_guided_gemini_validate_success(monkeypatch):
+    def _list_models(api_key):
+        assert api_key == "the-key"
+        return catalog.CatalogResult(ok=True, models=["gemini-flash-latest"], error=None)
+
+    monkeypatch.setattr(catalog, "list_gemini_models", _list_models)
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/gemini/validate", data={"api_key": "the-key"}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["models"] == ["gemini-flash-latest"]
+    assert body["conflicts"] == []
+
+
+async def test_guided_gemini_validate_failure_is_structural(monkeypatch):
+    monkeypatch.setattr(
+        catalog,
+        "list_gemini_models",
+        lambda api_key: catalog.CatalogResult(ok=False, models=None, error="unauthorized"),
+    )
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/gemini/validate", data={"api_key": "bad-key"}
+    )
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"] == "unauthorized"
+
+
+async def test_guided_vertex_validate_uploads_file_and_flags_project_conflict(monkeypatch):
+    key_json = b'{"project_id": "new-proj", "token_uri": "https://oauth2.googleapis.com/token"}'
+
+    def _list_vertex(info):
+        assert info == {
+            "project_id": "new-proj",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+        return catalog.CatalogResult(ok=True, models=["gemini-2.5-flash"], error=None)
+
+    monkeypatch.setattr(catalog, "list_vertex_models", _list_vertex)
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    monkeypatch.setattr(render_client, "env_vars", lambda service_id: {"GCP_PROJECT": "old-proj"})
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/vertex/validate",
+        files={"credential_file": ("key.json", io.BytesIO(key_json), "application/json")},
+    )
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["project_id"] == "new-proj"
+    assert body["conflicts"] == [{"var": "GCP_PROJECT", "current": "old-proj", "new": "new-proj"}]
+
+
+async def test_guided_github_app_validate_success_shows_installation_id(monkeypatch):
+    monkeypatch.setattr(
+        github_app, "_app_jwt_client_for", lambda app_id, private_key_b64: "fake-client"
+    )
+
+    def _discover(client):
+        assert client == "fake-client"
+        return 4242
+
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", _discover)
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/github_app/validate",
+        data={"app_id": "123"},
+        files={"credential_file": ("app.pem", io.BytesIO(b"fake-pem"), "application/x-pem-file")},
+    )
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["installation_id"] == 4242
+
+
+async def test_guided_github_app_validate_no_installation_is_structural_error(monkeypatch):
+    monkeypatch.setattr(
+        github_app, "_app_jwt_client_for", lambda app_id, private_key_b64: "fake-client"
+    )
+
+    def _raise(client):
+        raise github_app.AppNotInstalledError("no installation")
+
+    monkeypatch.setattr(github_app, "discover_installation_id_for_app", _raise)
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/github_app/validate",
+        data={"app_id": "123"},
+        files={"credential_file": ("app.pem", io.BytesIO(b"fake-pem"), "application/x-pem-file")},
+    )
+    assert resp.json()["error"] == "installation_not_found"
+
+
+async def test_guided_gemini_apply_writes_credential_and_model(monkeypatch):
+    applied = {}
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    def _push(service_id, key, value):
+        applied[key] = value
+
+    monkeypatch.setattr(render_client, "push_env_var", _push)
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/gemini/apply",
+        json={"slot": 0, "credential": {"api_key": "the-key"}, "model": "gemini-flash-latest"},
+    )
+    assert resp.status_code == 200
+    result = resp.json()
+    assert "GEMINI_API_KEY" in result["applied"]
+    assert "LLM_MODEL" in result["applied"]
+    assert applied["GEMINI_API_KEY"] == "the-key"
+    assert applied["LLM_MODEL"] == "gemini-flash-latest"
+
+
+async def test_guided_github_app_apply_writes_id_key_and_installation(monkeypatch):
+    applied = {}
+    monkeypatch.setattr(render_client, "find_service_id", lambda: "srv-1")
+    def _push(service_id, key, value):
+        applied[key] = value
+
+    monkeypatch.setattr(render_client, "push_env_var", _push)
+    monkeypatch.setattr(render_client, "trigger_deploy", lambda service_id: "dep-1")
+    client = await _client()
+    resp = await client.post(
+        "/api/environment/credential/github_app/apply",
+        json={"app_id": "123", "private_key_b64": "cGVt", "installation_id": 4242},
+    )
+    assert resp.status_code == 200
+    result = resp.json()
+    assert applied["GITHUB_APP_ID"] == "123"
+    assert applied["GITHUB_APP_PRIVATE_KEY"] == "cGVt"
+    assert applied["GITHUB_APP_INSTALLATION_ID"] == "4242"
+    assert set(result["applied"]) == {
+        "GITHUB_APP_ID",
+        "GITHUB_APP_PRIVATE_KEY",
+        "GITHUB_APP_INSTALLATION_ID",
+    }
 
 
 async def test_render_payload_includes_available_key_slots(monkeypatch):

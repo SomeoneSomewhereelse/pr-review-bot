@@ -7,6 +7,7 @@ dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.9",
     "pyjwt>=2.13",
+    "python-multipart>=0.0.20",
 ]
 
 [tool.uv]
