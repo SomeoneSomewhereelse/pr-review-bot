@@ -41,6 +41,34 @@ def test_find_service_id_returns_none_when_no_service_matches(monkeypatch):
         assert _render.find_service_id() is None
 
 
+def test_find_service_id_prefers_renders_own_reserved_service_id(monkeypatch):
+    # RENDER_SERVICE_ID is Render's own auto-injected env var, present on
+    # every Render-hosted process -- when set, it's used directly and no
+    # /v1/services lookup (by name, which RENDER_SERVICE_NAME's platform-
+    # reserved collision made unreliable -- 2026-09-03) happens at all.
+    monkeypatch.setenv("RENDER_SERVICE_ID", "srv-reserved")
+    with respx.mock:
+        route = respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        assert _render.find_service_id() == "srv-reserved"
+    assert route.call_count == 0
+
+
+def test_find_service_id_falls_back_to_name_lookup_when_not_on_render(monkeypatch):
+    monkeypatch.delenv("RENDER_SERVICE_ID", raising=False)
+    monkeypatch.setattr(settings, "render_api_key", "rnd_x")
+    monkeypatch.setattr(settings, "render_service_name", "pr-review-engine")
+    with respx.mock:
+        respx.get(RENDER_SERVICES).mock(
+            return_value=httpx.Response(
+                200,
+                json=[{"service": {"id": "srv-1", "name": "pr-review-engine"}}],
+            )
+        )
+        assert _render.find_service_id() == "srv-1"
+
+
 def test_unwrap_returns_the_inner_dict_when_wrapped():
     assert _render.unwrap({"service": {"id": "srv-1"}}, "service") == {"id": "srv-1"}
 

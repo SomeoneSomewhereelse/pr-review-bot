@@ -14,6 +14,7 @@ scripts; see docs/superpowers/specs/2026-08-10-render-access-consolidation-desig
 from __future__ import annotations
 
 import logging
+import os
 
 import httpx
 
@@ -39,6 +40,33 @@ def unwrap(item: dict, key: str) -> dict:
 
 
 def find_service_id() -> str | None:
+    """Locate this deployment's own Render service.
+
+    RENDER_SERVICE_ID is one of Render's own automatically-injected,
+    platform-reserved env vars (present on every Render-hosted process,
+    alongside RENDER_SERVICE_NAME/RENDER_EXTERNAL_URL/RENDER_GIT_COMMIT/etc)
+    -- it's the service's id directly, needing no API call or name match at
+    all when running on Render (this var is always present there). This is
+    what setting a custom RENDER_SERVICE_NAME env var to try to identify the
+    service was working around, less reliably: that name collides with
+    Render's own reserved var of the identical name (which holds the
+    service's *slug*, e.g. "pr-review-bot-km8b", not its display Name), and
+    the platform's own injected value silently overrides a same-named
+    custom one in the actual running container regardless of what the
+    dashboard shows as "configured" -- confirmed live, 2026-09-03: setting
+    RENDER_SERVICE_NAME to the plain display name never took effect across
+    several redeploys, because it can't.
+
+    Only when NOT running on Render (a developer's own machine, running
+    bot/scripts/* -- where RENDER_SERVICE_ID is never auto-injected) does
+    this fall back to the name-based lookup: matching
+    `settings.render_service_name` -- an operator-typed value in that
+    context -- against the service list's `name` field, same as before.
+    """
+    reserved_id = os.environ.get("RENDER_SERVICE_ID")
+    if reserved_id:
+        return reserved_id
+
     resp = httpx.get(f"{RENDER_API}/services", headers=headers(), timeout=HTTP_TIMEOUT)
     resp.raise_for_status()
     body = resp.json()
@@ -49,10 +77,7 @@ def find_service_id() -> str | None:
         if service.get("name") == settings.render_service_name:
             return service.get("id")
     # Service names are not secret -- logging them (and the configured
-    # target) is what makes a silent "not found" diagnosable at all; this
-    # is the one log line that would have made the 2026-09-03
-    # RENDER_SERVICE_NAME incident traceable from logs instead of requiring
-    # a live API key handed over for ad hoc diagnosis.
+    # target) is what makes a silent "not found" diagnosable at all.
     logger.warning(
         "render_client.find_service_id: no service named %r among %d returned (%r)",
         settings.render_service_name, len(body), names,
