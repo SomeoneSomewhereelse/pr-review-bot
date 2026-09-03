@@ -214,6 +214,16 @@ when working under `bot/`.
   under `--package bot`) passes both checks and still crashes on deploy —
   this is exactly how the 2026-09-03 `python-multipart` deploy crash slipped
   through. A green test suite does not substitute for this.
+- **When designing or changing a web page's UI (`dashboard/static/`,
+  `onboarding/static/`), use the Playwright tool to actually look at it**
+  before calling the work done — screenshot both themes (light/dark) and at
+  a mobile viewport width, not just light-theme desktop. Reading the HTML/CSS
+  and reasoning about the layout is not a substitute: the 2026-09-03
+  Environment-tab CSS-grid blowout (a `1fr` column forced to ~1700px by one
+  unwrapped child, silently stretching every other input sharing that
+  column) and a mobile-only bug where the vars table squeezed a value input
+  to invisible near-zero width were both invisible from source alone and
+  only surfaced by rendering the page and measuring/screenshotting it.
 
 ## Substitutions from the brief (and why)
 
