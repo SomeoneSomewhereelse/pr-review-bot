@@ -65,6 +65,7 @@ operator pick a model from what it actually supports."
 | Model picker data source | Live catalog fetch (not a static/known-models list) — reflects what the credential can actually use right now, matches the onboarding precedent, and doubles as part of credential validation. |
 | Model picker scope | All three LLM providers get a model field in the config UI simultaneously (not gated behind "whichever is active"), matching that `runtime_config` already stores a model per provider independently of which is active. |
 | Key-slot picker | Included in this design (not deferred) — the operator can see and pick which credential slot is active per provider, discovered from which `slot_env_name(provider, i)` keys exist in the fetched Render var list (key names only, no values touched). |
+| Changing model on an already-set provider | A dedicated "refresh models" action per LLM provider (not routed through the credential add/replace modal) — resolves the already-stored credential server-side via the existing `bot/providers/credentials.py::resolve`/`vertex_credentials.resolve_service_account_info`, and calls the same `catalog.list_*_models`. No upload/paste needed; keeps the guided modal's meaning as strictly "add or replace a credential." |
 
 ## 3. Credential families
 
@@ -114,11 +115,16 @@ bot/config_deps.py             NEW — CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS
 bot/github_app.py              UNCHANGED — existing discover_installation_id_for_app /
                                 discover_and_verify_installation_id reused
                                 directly by the new validate endpoint.
-dashboard/environment.py       MODIFIED — two new routes (section 5), plus
-                                the existing DELETE /api/environment/render/{key}
-                                gains dependent-computation for non-protected
-                                LLM credential slots, and GET /api/environment/render
-                                response gains an available_key_slots map.
+dashboard/environment.py       MODIFIED — three new routes (section 5): the
+                                guided validate/apply pair, and a
+                                GET .../models refresh route for an
+                                already-set provider; plus the existing
+                                DELETE /api/environment/render/{key} gains
+                                dependent-computation for LLM credential
+                                slots (none of which are in
+                                PROTECTED_ENV_KEYS today), and
+                                GET /api/environment/render response gains
+                                an available_key_slots map.
 dashboard/static/dashboard.html MODIFIED — Add button gains a "guided setup"
                                 option per credential family (opens a modal:
                                 file/text credential input, live-validate,
@@ -147,6 +153,7 @@ dashboard/tests/test_environment.py MODIFIED — new tests for the two
 | `POST /api/environment/credential/{family}/apply` | session | the validated payload plus the operator's model pick and any `conflicts` keep/clear choices | `{"applied": [str], "failed": [{"key": str, "error": str}]}` |
 | `DELETE /api/environment/render/{key}` | session | `?confirm=true` optional | Unchanged shape; for an LLM provider credential slot (the only `CREDENTIAL_FAMILIES` members not in `PROTECTED_ENV_KEYS`) with dependents and no `confirm=true`, returns `409 {"dependents": [str]}` instead of deleting; with `confirm=true` (or no dependents), deletes the var and cascade-deletes the listed `runtime_config` entries |
 | `GET /api/environment/render` | session | — | Unchanged `{"vars": [...]}`, plus `"available_key_slots": {provider: [int]}` computed from which `slot_env_name` keys exist |
+| `GET /api/environment/credential/{family}/models?slot=N` | session | `slot` optional, defaults to that provider's current `key_index` override | `{"ok": bool, "models": [str] \| null, "error": str \| null}` — LLM providers only (`gemini`/`groq`/`vertex`); resolves the already-stored credential for that slot and re-runs the same live catalog call, no upload needed |
 
 `error` values on `/validate` failure are structural only —
 `unauthorized`/`forbidden`/`rate_limited`/`provider_unreachable`/`invalid_service_account_json`
@@ -199,12 +206,24 @@ for GitHub App — never a raw exception or credential value, per root
 4. Operator confirms → same request with `?confirm=true` → var deleted,
    the listed `runtime_config` entries cleared, one `applied` response.
 
-**Model/key-slot selection outside the guided flow:**
-Existing `PATCH /api/environment/config`'s `model`/`key_index` fields are
-unchanged; the runtime_config panel's new per-provider model and key-slot
-`<select>` elements just call it directly for a plain switch (no
-credential change involved) — the guided modal is only needed when the
-*credential itself* is being added or replaced.
+**Changing model on an already-set provider (no credential change):**
+1. Operator clicks "refresh models" next to a provider's model `<select>`
+   in the runtime_config panel.
+2. `GET /api/environment/credential/{provider}/models?slot=N` (slot
+   defaults to that provider's current `key_index` override) → backend
+   resolves the stored credential for that slot and calls the matching
+   `catalog.list_*_models`.
+3. Response populates the model `<select>` with live options; operator
+   picks one.
+4. Existing `PATCH /api/environment/config`'s `model` field (unchanged)
+   writes the pick — no credential involved, so this never touches the
+   guided add/replace modal.
+
+**Key-slot selection outside the guided flow:**
+The runtime_config panel's key-slot `<select>` (populated from
+`available_key_slots`) calls the existing `PATCH /api/environment/config`'s
+`key_index` field directly for a plain switch between already-configured
+slots — again no credential change, no guided modal.
 
 ## 7. Testing strategy
 
@@ -217,10 +236,12 @@ credential change involved) — the guided modal is only needed when the
 - **`dashboard/tests/test_environment.py`** (extended): validate/apply
   routes with `catalog`/`github_app` mocked out — success, each structural
   failure, the `GCP_PROJECT` conflict prompt path, the GitHub App
-  installation-mismatch path; delete route returns `409` with dependents
-  when unconfirmed and cascades correctly when confirmed; protected-key
-  delete still refused exactly as before (regression check); no secret
-  value ever asserted against in a log line.
+  installation-mismatch path; the `.../models` refresh route (resolves the
+  stored credential for the given/defaulted slot, returns live models,
+  never accepts an uploaded credential); delete route returns `409` with
+  dependents when unconfirmed and cascades correctly when confirmed;
+  protected-key delete still refused exactly as before (regression check);
+  no secret value ever asserted against in a log line.
 - **Manual pass**: guided add/replace for at least one LLM provider and
   GitHub App, and one cascade-delete confirmation, driven through the
   actual dashboard UI before calling this done — UI flows aren't caught by
