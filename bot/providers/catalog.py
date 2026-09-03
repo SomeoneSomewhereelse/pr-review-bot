@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from google import genai
+from google.auth import exceptions as google_auth_exceptions
 from google.genai import types
 from google.oauth2 import service_account
 from groq import Groq
@@ -47,10 +48,34 @@ def _classify_exception(exc: Exception) -> str:
     # Duck-typed on purpose: rather than depend on each SDK's own exception
     # class hierarchy (google-genai's and groq's differ, and either could
     # change shape across versions), read whichever HTTP-status-shaped
-    # attribute is present. Every real SDK error we've seen carries one of
-    # these two names.
-    status = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    # attribute is present. .status_code checked first: some SDK generations
+    # (Stainless-based ones, e.g. openai-python's APIError) set a STRING
+    # error code on `.code` (e.g. "invalid_api_key") that would otherwise
+    # short-circuit an `or` chain and silently misclassify a real 401/429 as
+    # provider_unreachable.
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    if not isinstance(status, int):
+        status = None
     return _classify_status(status)
+
+
+def _classify_vertex_auth_exception(exc: Exception) -> str | None:
+    """Vertex auth failures come from google.auth, not an HTTP status on the
+    genai SDK's own exception -- a revoked/disabled service-account key, a
+    project without the Vertex API enabled, or missing ADC all raise here
+    with neither `.code` nor `.status_code`, so _classify_exception alone
+    always falls through to provider_unreachable for these. Returns None
+    (defer to _classify_exception) for anything not from google.auth.
+    """
+    if isinstance(
+        exc, (google_auth_exceptions.RefreshError, google_auth_exceptions.DefaultCredentialsError)
+    ):
+        return "unauthorized"
+    if isinstance(exc, google_auth_exceptions.GoogleAuthError):
+        return "provider_unreachable"
+    return None
 
 
 def _list_generative_models(client: genai.Client) -> list[str]:
@@ -119,5 +144,6 @@ def list_vertex_models(
         )
         models = _list_generative_models(client)
     except Exception as exc:  # noqa: BLE001
-        return CatalogResult(ok=False, models=None, error=_classify_exception(exc))
+        error = _classify_vertex_auth_exception(exc) or _classify_exception(exc)
+        return CatalogResult(ok=False, models=None, error=error)
     return CatalogResult(ok=True, models=models, error=None)

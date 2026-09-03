@@ -143,3 +143,61 @@ class TestListVertexModels:
 
         assert result.ok is False
         assert result.error == "invalid_service_account_json"
+
+    @patch("bot.providers.catalog.genai.Client")
+    @patch("bot.providers.catalog.service_account.Credentials.from_service_account_info")
+    def test_refresh_error_is_unauthorized_not_provider_unreachable(
+        self, mock_from_info, mock_client_cls
+    ):
+        from google.auth.exceptions import RefreshError
+
+        mock_from_info.return_value = MagicMock()
+        client = MagicMock()
+        client.models.list.side_effect = RefreshError("invalid_grant: account disabled")
+        mock_client_cls.return_value = client
+
+        result = catalog.list_vertex_models({"project_id": "proj-a"})
+
+        assert result.ok is False
+        assert result.error == "unauthorized"
+
+    @patch("bot.providers.catalog.genai.Client")
+    def test_default_credentials_error_is_unauthorized(self, mock_client_cls):
+        from google.auth.exceptions import DefaultCredentialsError
+
+        client = MagicMock()
+        client.models.list.side_effect = DefaultCredentialsError("no ADC found")
+        mock_client_cls.return_value = client
+
+        result = catalog.list_vertex_models(None, project_override="proj-a")
+
+        assert result.ok is False
+        assert result.error == "unauthorized"
+
+    @patch("bot.providers.catalog.genai.Client")
+    def test_generic_google_auth_error_is_provider_unreachable(self, mock_client_cls):
+        from google.auth.exceptions import TransportError
+
+        client = MagicMock()
+        client.models.list.side_effect = TransportError("connection reset")
+        mock_client_cls.return_value = client
+
+        result = catalog.list_vertex_models(None, project_override="proj-a")
+
+        assert result.ok is False
+        assert result.error == "provider_unreachable"
+
+
+class TestClassifyExceptionPrecedence:
+    def test_status_code_wins_over_a_string_code_attribute(self):
+        exc = Exception()
+        exc.code = "invalid_api_key"  # a Stainless-style string code, not an HTTP status
+        exc.status_code = 401
+
+        assert catalog._classify_exception(exc) == "unauthorized"
+
+    def test_int_code_still_used_when_status_code_absent(self):
+        exc = Exception()
+        exc.code = 429
+
+        assert catalog._classify_exception(exc) == "rate_limited"
