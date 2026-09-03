@@ -95,15 +95,19 @@ def _strip_existing_footnote(body: str) -> str:
     return stripped
 
 
-def _read_private_key() -> str:
-    """Decode the base64-encoded App private key. Never logged."""
+def _decode_private_key(private_key_b64: str) -> str:
     try:
-        return base64.b64decode(settings.github_app_private_key, validate=True).decode()
+        return base64.b64decode(private_key_b64, validate=True).decode()
     except (binascii.Error, ValueError) as exc:
         raise ValueError(
             "GITHUB_APP_PRIVATE_KEY is not valid base64 -- encode the PEM with: "
             "uv run python -m bot.scripts.encode_credential github-app-private-key.pem"
         ) from exc
+
+
+def _read_private_key() -> str:
+    """Decode the base64-encoded App private key. Never logged."""
+    return _decode_private_key(settings.github_app_private_key)
 
 
 def get_installation_auth(installation_id: int | None = None) -> Auth.AppInstallationAuth:
@@ -137,6 +141,15 @@ def get_installation_client(installation_id: int | None = None) -> Github:
 def _app_jwt_client() -> Github:
     """Client authenticated as the App itself (JWT), for App-level endpoints."""
     return Github(auth=Auth.AppAuth(settings.github_app_id, _read_private_key()))
+
+
+def _app_jwt_client_for(app_id: int, private_key_b64: str) -> Github:
+    """Client authenticated as an ARBITRARY App identity (JWT) -- for
+    validating a candidate App ID + private key before it's ever written to
+    Settings/Render. Used only by the dashboard's guided credential flow;
+    every other caller in this file keeps using _app_jwt_client(), which
+    reads the currently-configured identity."""
+    return Github(auth=Auth.AppAuth(app_id, _decode_private_key(private_key_b64)))
 
 
 class AppNotInstalledError(RuntimeError):
@@ -188,7 +201,7 @@ def discover_installation_id(repo_full_name: str) -> int:
     return int(data["id"])
 
 
-def discover_installation_id_for_app() -> int:
+def discover_installation_id_for_app(client: Github | None = None) -> int:
     """Return the App's single installation id (GET /app/installations, App JWT).
 
     This project's scope (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md)
@@ -205,8 +218,12 @@ def discover_installation_id_for_app() -> int:
     RuntimeError, chained from the underlying GithubException so a caller can
     still recover the HTTP status -- mirroring discover_installation_id's own
     non-404 handling, so a genuine auth/API error is never misdiagnosed.
+
+    `client`, when given, is used instead of _app_jwt_client() -- lets the
+    dashboard's guided credential flow validate a candidate App identity that
+    was never written to Settings.
     """
-    gh = _app_jwt_client()
+    gh = client if client is not None else _app_jwt_client()
     try:
         _, data = gh.requester.requestJsonAndCheck("GET", "/app/installations")
     except GithubException as exc:

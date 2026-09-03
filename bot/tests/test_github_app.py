@@ -942,6 +942,32 @@ def test_discover_installation_id_for_app_wraps_a_non_404_github_error(fake_tran
     assert "401" in str(exc_info.value)
 
 
+def test_app_jwt_client_for_builds_a_working_client(fake_transport, _app_credentials_key_material):
+    """A client built for an ARBITRARY app id + key (never touching Settings)
+    must still work against the same mocked transport -- proves the
+    dashboard's guided credential flow can validate a candidate identity
+    that was never written to Settings/Render."""
+    fake_transport.route(
+        "GET", "/app/installations", [{"id": 777, "account": {"login": "candidate-org"}}]
+    )
+    client = github_app._app_jwt_client_for(123456, _app_credentials_key_material)
+    assert github_app.discover_installation_id_for_app(client=client) == 777
+
+
+def test_app_jwt_client_for_rejects_bad_base64():
+    with pytest.raises(ValueError, match="not valid base64"):
+        github_app._app_jwt_client_for(123456, "not-valid-base64!!!")
+
+
+def test_discover_installation_id_for_app_uses_default_client_when_none_given(fake_transport):
+    """The existing no-arg call sites (deploy.py, set_override.py, etc.) must
+    keep working unchanged after adding the optional `client` param."""
+    fake_transport.route(
+        "GET", "/app/installations", [{"id": 555, "account": {"login": "someone"}}]
+    )
+    assert github_app.discover_installation_id_for_app(client=None) == 555
+
+
 def test_list_installation_repos_returns_full_names(fake_transport):
     fake_transport.route(
         "GET",
