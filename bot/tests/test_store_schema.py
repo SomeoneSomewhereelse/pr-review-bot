@@ -1,7 +1,11 @@
 """The provisioned schema is declared, not migrated -- app/queue/store.py's
-_SCHEMA is a CREATE TABLE declaration of the final shape, with no ALTER
-statements (design spec 2026-08-18 section 6d). These tests lock the column
-set so the ALTER-folding refactor cannot silently change it."""
+_SCHEMA is a CREATE TABLE declaration of the final shape, with no
+column/type-altering ALTER statements (design spec 2026-08-18 section 6d).
+These tests lock the column set so the ALTER-folding refactor cannot
+silently change it. `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` is a
+deliberate, narrow exception to the no-ALTER rule (see _SCHEMA's own
+comment) -- it's idempotent and declarative, not a migration -- so the
+no-ALTER test below only forbids any OTHER kind of ALTER TABLE statement."""
 from __future__ import annotations
 
 from bot.queue import store
@@ -41,11 +45,28 @@ def test_schema_declares_every_expected_column(db, db_query):
         assert _columns(db_query, table) == expected, f"{table} column set changed"
 
 
-def test_schema_contains_no_alter_statements():
-    assert "ALTER TABLE" not in store._SCHEMA.upper(), (
-        "_SCHEMA must declare the final shape via CREATE TABLE only -- an ALTER "
-        "is migration code, which a fresh clone must not carry (spec section 6d)"
+def test_schema_contains_no_column_altering_statements():
+    alter_lines = [
+        line.strip() for line in store._SCHEMA.upper().splitlines()
+        if line.strip().startswith("ALTER TABLE")
+    ]
+    non_rls_alters = [
+        line for line in alter_lines if not line.endswith("ENABLE ROW LEVEL SECURITY;")
+    ]
+    assert not non_rls_alters, (
+        "_SCHEMA must declare the final column shape via CREATE TABLE only -- a "
+        "column/type ALTER is migration code, which a fresh clone must not carry "
+        "(spec section 6d). ENABLE ROW LEVEL SECURITY is the one documented "
+        "exception."
     )
+
+
+def test_schema_enables_rls_on_every_table(db, db_query):
+    for table in EXPECTED_COLUMNS:
+        rows = db_query(
+            "SELECT relrowsecurity FROM pg_class WHERE relname = %s", (table,)
+        )
+        assert rows[0][0] is True, f"{table} must have row level security enabled"
 
 
 def test_runtime_config_has_no_cost_cap_column(db, db_query):

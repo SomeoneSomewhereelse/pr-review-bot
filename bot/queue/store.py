@@ -56,9 +56,31 @@ RUNTIME_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 # Declared, not migrated: this is the final shape, provisioned in one pass on
-# first boot. No ALTER statements -- a fresh clone carries no migration code
-# (design spec 2026-08-18 section 6d), and an existing database is recreated
-# out of band rather than migrated in place (section 9).
+# first boot. No column/type ALTER statements -- a fresh clone carries no
+# migration code (design spec 2026-08-18 section 6d), and an existing
+# database is recreated out of band rather than migrated in place (section
+# 9). ENABLE ROW LEVEL SECURITY is the one ALTER TABLE exception: it's
+# idempotent (a no-op when already enabled, never an error) and declarative
+# the same way CREATE TABLE IF NOT EXISTS/CREATE INDEX IF NOT EXISTS already
+# are, not a column-shape migration.
+#
+# No policies are created alongside it. This project's own connection
+# (settings.database_url) is these tables' owner -- Postgres exempts a
+# table's owner from RLS by default (FORCE ROW LEVEL SECURITY would remove
+# that exemption, and is deliberately not used here), so the bot's own
+# queries are completely unaffected. What RLS-with-no-policies actually
+# does is deny every row to any *other* role with no BYPASSRLS attribute --
+# concretely, Supabase's PostgREST anon/authenticated roles, which this
+# project never uses (see onboarding/CLAUDE.md: no supabase-py, no REST
+# calls, DATABASE_URL is a direct Postgres connection) but which Supabase
+# still exposes publicly by default on every project regardless. Verified
+# live against Supabase's own Management API OpenAPI schema
+# (api.supabase.com/api/v1-json) that POST /v1/projects has no field for
+# this; Supabase's Studio dashboard has an "auto-enable RLS" project setting,
+# but it only fires for tables created through Studio's own Table Editor UI,
+# never for tables created via raw SQL like these -- so enabling it here,
+# in the DDL that actually creates these tables, is the only mechanism that
+# reaches them at all.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -80,11 +102,13 @@ CREATE TABLE IF NOT EXISTS tickets (
     defer_reason       TEXT,
     UNIQUE (repo_full_name, pr_number)
 );
+ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS runtime_config (
 """ + ",\n".join(
     f"    {name:<25} {sql_type}" for name, sql_type in RUNTIME_CONFIG_COLUMNS
 ) + """
 );
+ALTER TABLE runtime_config ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS reviews (
     id                 BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     repo_full_name     TEXT    NOT NULL,
@@ -100,6 +124,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     results            JSONB   NOT NULL,
     key_index          INTEGER
 );
+ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS reviews_created_at_idx ON reviews (created_at DESC);
 """
 
