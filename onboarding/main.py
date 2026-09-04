@@ -21,18 +21,6 @@ from onboarding.router import router
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not settings.supabase_oauth_client_id:
-        raise RuntimeError(
-            "SUPABASE_OAUTH_CLIENT_ID is unset — refusing to start. Frame 3's "
-            "Supabase OAuth flow needs this service's registered OAuth app id; "
-            "without it the authorize redirect cannot work."
-        )
-    if not settings.supabase_oauth_client_secret:
-        raise RuntimeError(
-            "SUPABASE_OAUTH_CLIENT_SECRET is unset — refusing to start. Frame "
-            "3's Supabase OAuth token exchange needs this service's registered "
-            "OAuth app secret; without it the exchange cannot work."
-        )
     if not settings.database_url:
         raise RuntimeError(
             "DATABASE_URL is unset — refusing to start. The wizard's "

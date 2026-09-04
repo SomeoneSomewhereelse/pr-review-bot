@@ -366,17 +366,10 @@ async def test_webhook_secret_is_generated_client_side_not_pasted_back():
     assert 'id="github-app-webhook-secret-input"' not in body
 
 
-async def test_list_organizations_leaves_the_page_exactly_once():
-    """This endpoint (and create-project, project-status, connection-info)
-    goes through the shared callSupabaseRelay helper rather than a direct
-    fetch() call, so the audit target is "the endpoint string appears
-    exactly once as a callSupabaseRelay(...) argument" — the same
-    one-exit-path property the fetch()-based version of this test checks
-    for exchange-oauth-code and refresh-access-token, adapted for the
-    indirection this shared helper introduces."""
+async def test_validate_supabase_key_leaves_the_page_exactly_once():
     client = await _client()
     body = (await client.get("/")).text
-    assert body.count('callSupabaseRelay("/api/supabase/list-organizations"') == 1
+    assert body.count('fetch("/api/supabase/validate-key"') == 1
 
 
 async def test_create_project_leaves_the_page_exactly_once():
@@ -385,18 +378,19 @@ async def test_create_project_leaves_the_page_exactly_once():
     assert body.count('callSupabaseRelay("/api/supabase/create-project"') == 1
 
 
-async def test_frame3_has_a_name_input_and_connect_button():
+async def test_frame3_has_a_key_input_and_validate_button():
     client = await _client()
     body = (await client.get("/")).text
-    assert 'id="supabase-project-name-input"' in body
-    assert 'id="supabase-connect-submit"' in body
+    assert 'id="supabase-key-input"' in body
+    assert 'id="supabase-key-submit"' in body
 
 
-async def test_frame3_has_an_org_picker():
+async def test_frame3_has_an_org_picker_and_a_name_input():
     client = await _client()
     body = (await client.get("/")).text
     assert 'id="supabase-org-select"' in body
     assert 'id="supabase-org-submit"' in body
+    assert 'id="supabase-project-name-input"' in body
 
 
 async def test_frame3_strings_present_in_both_languages():
@@ -405,14 +399,16 @@ async def test_frame3_strings_present_in_both_languages():
     for key in (
         "frame3_instructions",
         "frame3_name_placeholder",
-        "connect_supabase_button",
+        "validate_supabase_key_button",
         "frame3_org_instructions",
         "create_project_button",
         "err_supabase_name_empty",
+        "err_supabase_empty_key",
+        "err_supabase_invalid_key",
         "err_supabase_callback_invalid",
     ):
         assert f"{key}:" in body
-    assert body.count("connect_supabase_button:") == 2  # STRINGS.en + STRINGS.he
+    assert body.count("validate_supabase_key_button:") == 2  # STRINGS.en + STRINGS.he
 
 
 async def test_reactive_refresh_helper_present():
@@ -524,29 +520,18 @@ async def test_terminal_supabase_errors_reset_the_connect_section():
     assert 'no_session: "err_no_session"' in unauthorized_branch.split("const key = {")[1]
 
 
-async def test_org_picker_opens_the_frame_and_updates_its_badge():
-    """A visitor with 2+ orgs returns from Supabase's consent screen to a
-    frame restoreFromSession() already unlocked to "ready" (badge "Not
-    started") and left closed -- without opening the frame and re-badging
-    it here, there's no visible sign their authorization worked."""
+async def test_org_section_shown_after_key_validation_opens_the_frame_and_updates_its_badge():
     client = await _client()
     body = (await client.get("/")).text
-    assert "function showSupabaseOrgPicker" in body
+    assert "function showSupabaseOrgSection" in body
     show_body = body[
-        body.index("function showSupabaseOrgPicker") : body.index(
+        body.index("function showSupabaseOrgSection") : body.index(
             "async function confirmSupabaseOrg"
         )
     ]
     assert 'frameEl("supabase").open = true' in show_body
     assert 'setFrameStatus("supabase", "choosing_org")' in show_body
     assert body.count("badge_choosing_org:") == 2  # STRINGS.en + STRINGS.he
-
-    fetch_orgs_body = body[
-        body.index("async function fetchSupabaseOrganizations") : body.index(
-            "function showSupabaseOrgPicker"
-        )
-    ]
-    assert "showSupabaseOrgPicker();" in fetch_orgs_body
 
 
 async def test_connection_info_missing_local_state_shows_an_error_not_a_silent_stall():

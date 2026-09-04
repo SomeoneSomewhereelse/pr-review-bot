@@ -33,8 +33,6 @@ def _configure_everything_set(monkeypatch):
     """Every lifespan test below starts from a fully-configured baseline and
     monkeypatches away exactly the one thing it wants unset/malformed --
     keeps each test focused on the one check it's exercising."""
-    monkeypatch.setattr(settings, "supabase_oauth_client_id", "sentinel-client-id")
-    monkeypatch.setattr(settings, "supabase_oauth_client_secret", "sentinel-client-secret")
     monkeypatch.setattr(settings, "database_url", "postgresql://sentinel")
     monkeypatch.setattr(
         settings, "onboarding_session_encryption_key", Fernet.generate_key().decode()
@@ -46,20 +44,6 @@ def _configure_everything_set(monkeypatch):
 async def test_lifespan_starts_with_everything_set():
     async with lifespan(app):
         pass
-
-
-async def test_lifespan_refuses_to_start_without_supabase_client_id(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_oauth_client_id", "")
-    with pytest.raises(RuntimeError, match="SUPABASE_OAUTH_CLIENT_ID"):
-        async with lifespan(app):
-            pass
-
-
-async def test_lifespan_refuses_to_start_without_supabase_client_secret(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_oauth_client_secret", "")
-    with pytest.raises(RuntimeError, match="SUPABASE_OAUTH_CLIENT_SECRET"):
-        async with lifespan(app):
-            pass
 
 
 async def test_lifespan_refuses_to_start_without_database_url(monkeypatch):

@@ -266,66 +266,50 @@ optional:**
 
 ## What sub-project 3 (Supabase provisioning) adds to these rules
 
-- **`SUPABASE_OAUTH_CLIENT_ID`/`SUPABASE_OAUTH_CLIENT_SECRET` are this
-  service's first operator-level secrets** — every credential before this
-  sub-project was either visitor-typed or minted fresh for the visitor who
-  requested it. These two are set once by the operator (a one-time, manual
-  Supabase OAuth-app registration; Supabase has no self-registration
-  mechanism the way GitHub's App Manifest flow does) and never change per
-  visitor. Neither is templated into the served page (2026-09-02) — the
-  server builds the whole authorize URL itself now (see below), so the
-  browser never needs `client_id` at all, not even as the public half of an
-  OAuth pair.
-- **The OAuth authorize leg is a plain same-tab redirect again (2026-09-02,
-  superseding the popup + `BroadcastChannel` design below it briefly
-  replaced).** PKCE `state`/`verifier` generation moved server-side
-  (`POST /api/supabase/connect`, `router.py`), stored in the visitor's
-  session (`session_store.py`) under `supabase._pending_oauth`, keyed by
-  the `onboarding_session` cookie rather than anything tab-scoped. A cookie
-  is part of the browser's persistent cookie jar, not tied to a specific
-  browsing-context instance, so it survives the same mobile-browser
-  tab-reclamation that used to reset `sessionStorage` mid-redirect (see
-  `ISSUES.md` and the invariant section above) — this is what let the
-  popup/`BroadcastChannel` workaround be removed rather than kept as a
-  second layer of defense. `connectSupabase()` in
-  `onboarding/static/index.html` does nothing but POST `{name}` and
-  `location.href = body.authorize_url`; `GET /oauth/supabase/callback`
-  (`router.py`) completes the code exchange purely server-side and issues a
-  `302` back to `/` — **no client-side JS runs for the callback at all**.
-  Do not reintroduce a popup, `window.opener`/`postMessage`, or
-  `BroadcastChannel` for this leg; the cookie-based session is what makes
-  all of that unnecessary now.
-- **`db_pass` is generated server-side now (`create-project`,
-  `router.py`), not client-side** — this flipped in the same 2026-09-02
-  redesign. It never needs to leave the server: `create-project` mints it,
-  passes it directly to `supabase_client.create_project()`, and stores it
-  in the session for `connection-info` to assemble the final
-  `DATABASE_URL` with later. The browser never sees or generates it.
+- **The credential is a visitor-pasted Personal Access Token, not an
+  OAuth app (2026-09-04 redesign)** — see
+  `docs/superpowers/specs/2026-09-04-supabase-pat-frame-design.md`. The
+  original design used an operator-registered OAuth app, which made this
+  service's one shared credential across every visitor; a follow-up
+  brainstorm found the stated reason for that choice ("PAT can't do full
+  automation") didn't hold up against Supabase's own docs, so this
+  frame now matches every other frame's model (Render, GitHub App, LLM
+  provider, UptimeRobot): the visitor supplies their own credential, no
+  operator-level Supabase secret exists.
+- **`POST /api/supabase/validate-key` does both credential validation and
+  org listing in one call** (`supabase_client.validate_key`, one
+  `GET /v1/organizations` request) — Supabase has no separate
+  token-identity endpoint, so this doubles as both. On success the PAT is
+  persisted server-side (`session_store.py`, under the `supabase` frame's
+  `api_key` field) via `_update_frame(..., replace=True)` — a resubmitted
+  key (via "Change") must discard any previous project's `ref`/`db_pass`/
+  `database_url`, same reasoning the Render/GitHub validate-key endpoints
+  already document.
+- **The project name is captured alongside the org picker, after key
+  validation** — not before, since there's no pre-redirect step anymore
+  to have captured it earlier (the original OAuth design had the visitor
+  type it before authorizing). `create-project`'s request body carries
+  both `organization_slug` and `name` now; the session never pre-stores
+  `name` on its own.
+- **`db_pass` is still generated server-side** (`create-project`,
+  `router.py`) — this was already true before this redesign (2026-09-02)
+  and is unaffected by the credential swap. It never needs to leave the
+  server: `create-project` mints it, passes it directly to
+  `supabase_client.create_project()`, and stores it in the session for
+  `connection-info` to assemble the final `DATABASE_URL` with later.
 - **`connection-info` never returns Supabase's own `connection_string`/
   `connectionString` fields, nor `db_user`/`db_host`/`db_port`/`db_name`
-  individually (2026-09-02: tightened further — it used to return the
-  latter for the browser to assemble the URL from).** Since `db_pass`
+  individually** — unchanged from before this redesign. Since `db_pass`
   already lives server-side, the endpoint assembles the full
   `postgresql://` URL itself and stores it in the session
   (`supabase.database_url`); its response to the browser is just
-  `{"valid": true}`. Whether Supabase's own `connection_string` field
-  embeds the real password or a masked placeholder still could not be
-  verified from documentation during this sub-project's original
-  brainstorm — that's still why this endpoint never reads it, not a new
-  reason.
-- **`create-project` and `list-organizations` read `access_token` from the
-  session (via `session_store.read_frame`), never from the request body**
-  — set by the OAuth callback above. `exchange-oauth-code` and
-  `refresh-access-token` as *client-facing* endpoints are gone entirely:
-  the callback owns the exchange, and there is no client-facing refresh
-  path since `access_token` never reaches the browser to need refreshing.
-  `supabase_client.refresh_access_token()` itself still exists (untested-
-  in-production, previously tested) — wiring an automatic refresh-on-401
-  into the session-backed calls is a reasonable follow-up, not yet done.
-- **The OAuth app is a resource shared across every visitor** — unlike
-  every other credential in this service. This is a known, deliberately
-  deferred risk; see `ISSUES.md`'s Design Gaps section before changing
-  anything about how the OAuth app is used or exposed.
+  `{"valid": true}`.
+- **`create-project`, `project-status`, and `connection-info` all read
+  `api_key` from the session** (via `session_store.read_frame`), never
+  from the request body — set by `validate-key` above. There is no
+  client-facing refresh path (there never was one exposed to the
+  browser even under OAuth) and nothing to refresh: a PAT doesn't expire
+  the way an OAuth access token does.
 
 ## What sub-project 4 (LLM provider credential UI) adds to these rules
 

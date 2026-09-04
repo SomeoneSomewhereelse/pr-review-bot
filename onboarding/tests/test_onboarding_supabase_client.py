@@ -1,10 +1,8 @@
-"""Tests for onboarding/supabase_client.py — Supabase's OAuth token
-endpoint is form-encoded (application/x-www-form-urlencoded), not JSON,
-and client_id/client_secret are body fields — verified directly against
-the raw OpenAPI schema (not prose docs, which incorrectly describe HTTP
-Basic Auth) during this sub-project's brainstorm. See
-docs/superpowers/specs/2026-08-26-onboarding-supabase-provisioning-frame-design.md
-sections 3-5."""
+"""Tests for onboarding/supabase_client.py. validate_key() mirrors
+render_client.validate_key()'s shape: one cheap read call doubles as both
+credential validation and (since Supabase has no separate "who am I"
+endpoint) the org list the frame needs next. See
+docs/superpowers/specs/2026-09-04-supabase-pat-frame-design.md section 3."""
 
 from __future__ import annotations
 
@@ -12,208 +10,16 @@ import json as json_module
 import logging
 
 import httpx
-import pytest
 import respx
 
 from onboarding import supabase_client
-from onboarding.config import settings
-
-TOKEN_URL = "https://api.supabase.com/v1/oauth/token"
-
-
-@pytest.fixture(autouse=True)
-def _oauth_app_credentials(monkeypatch):
-    monkeypatch.setattr(settings, "supabase_oauth_client_id", "sentinel-client-id")
-    monkeypatch.setattr(settings, "supabase_oauth_client_secret", "sentinel-client-secret")
-
-
-async def test_valid_code_returns_tokens():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "sentinel-access",
-                    "refresh_token": "sentinel-refresh",
-                    "expires_in": 3600,
-                    "token_type": "Bearer",
-                },
-            )
-        )
-        result = await supabase_client.exchange_oauth_code(
-            "sentinel-code",
-            "sentinel-verifier",
-            "https://onboarding.example.com/?supabase_step=oauth_callback",
-        )
-    assert result == supabase_client.SupabaseTokens(
-        access_token="sentinel-access", refresh_token="sentinel-refresh", expires_in=3600
-    )
-
-
-async def test_exchange_sends_form_encoded_body_not_json():
-    with respx.mock:
-        route = respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(
-                200, json={"access_token": "a", "expires_in": 1, "token_type": "Bearer"}
-            )
-        )
-        await supabase_client.exchange_oauth_code("c", "v", "https://onboarding.example.com/cb")
-    request = route.calls.last.request
-    assert request.headers["content-type"] == "application/x-www-form-urlencoded"
-    body = request.content.decode()
-    assert "grant_type=authorization_code" in body
-    assert "client_id=sentinel-client-id" in body
-    assert "client_secret=sentinel-client-secret" in body
-    assert "code=c" in body
-    assert "code_verifier=v" in body
-
-
-async def test_response_missing_refresh_token_is_tolerated():
-    """OAuthTokenResponse's schema does not require refresh_token — some
-    grant types omit it entirely; the caller must handle None."""
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "sentinel-access",
-                    "expires_in": 3600,
-                    "token_type": "Bearer",
-                },
-            )
-        )
-        result = await supabase_client.exchange_oauth_code(
-            "c", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseTokens(
-        access_token="sentinel-access", refresh_token=None, expires_in=3600
-    )
-
-
-async def test_rejected_code_is_invalid_code():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(400, json={"error": "invalid_grant"})
-        )
-        result = await supabase_client.exchange_oauth_code(
-            "bad", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseOAuthFailed(reason="invalid_code")
-
-
-async def test_exchange_5xx_is_unreachable():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(return_value=httpx.Response(500))
-        result = await supabase_client.exchange_oauth_code(
-            "c", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
-
-
-async def test_exchange_timeout_is_unreachable():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
-        result = await supabase_client.exchange_oauth_code(
-            "c", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
-
-
-async def test_exchange_malformed_200_body_is_unreachable_not_a_crash():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(return_value=httpx.Response(200, text="not json"))
-        result = await supabase_client.exchange_oauth_code(
-            "c", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
-
-
-async def test_exchange_response_missing_access_token_is_unreachable():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(200, json={"expires_in": 1, "token_type": "Bearer"})
-        )
-        result = await supabase_client.exchange_oauth_code(
-            "c", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
-
-
-async def test_response_missing_expires_in_is_tolerated():
-    """expires_in is never read downstream (refresh is reactive, not
-    timer-based per onboarding/CLAUDE.md), so a missing/malformed value
-    must not fail the whole token exchange -- only a genuinely missing
-    access_token should."""
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(
-                200, json={"access_token": "sentinel-access", "token_type": "Bearer"}
-            )
-        )
-        result = await supabase_client.exchange_oauth_code(
-            "c", "v", "https://onboarding.example.com/cb"
-        )
-    assert result == supabase_client.SupabaseTokens(
-        access_token="sentinel-access", refresh_token=None, expires_in=0
-    )
-
-
-async def test_refresh_valid_token_returns_new_tokens():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(
-                200,
-                json={
-                    "access_token": "new-access",
-                    "refresh_token": "new-refresh",
-                    "expires_in": 3600,
-                    "token_type": "Bearer",
-                },
-            )
-        )
-        result = await supabase_client.refresh_access_token("sentinel-refresh")
-    assert result == supabase_client.SupabaseTokens(
-        access_token="new-access", refresh_token="new-refresh", expires_in=3600
-    )
-
-
-async def test_refresh_sends_refresh_token_grant():
-    with respx.mock:
-        route = respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(
-                200, json={"access_token": "a", "expires_in": 1, "token_type": "Bearer"}
-            )
-        )
-        await supabase_client.refresh_access_token("sentinel-refresh")
-    body = route.calls.last.request.content.decode()
-    assert "grant_type=refresh_token" in body
-    assert "refresh_token=sentinel-refresh" in body
-
-
-async def test_refresh_rejected_is_unauthorized():
-    """Unlike exchange_oauth_code, a rejected refresh maps to 'unauthorized'
-    (the reactive-refresh-then-retry vocabulary), not 'invalid_code' — no
-    'code' is involved in a refresh grant."""
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(
-            return_value=httpx.Response(400, json={"error": "invalid_grant"})
-        )
-        result = await supabase_client.refresh_access_token("stale-refresh")
-    assert result == supabase_client.SupabaseOAuthFailed(reason="unauthorized")
-
-
-async def test_refresh_5xx_is_unreachable():
-    with respx.mock:
-        respx.post(TOKEN_URL).mock(return_value=httpx.Response(500))
-        result = await supabase_client.refresh_access_token("sentinel-refresh")
-    assert result == supabase_client.SupabaseOAuthFailed(reason="supabase_unreachable")
-
 
 ORGS_URL = "https://api.supabase.com/v1/organizations"
 PROJECTS_URL = "https://api.supabase.com/v1/projects"
+SENTINEL_PAT = "sbp_SENTINEL_DO_NOT_LOG_9f3a"
 
 
-async def test_list_organizations_returns_orgs():
+async def test_valid_key_returns_orgs():
     with respx.mock:
         respx.get(ORGS_URL).mock(
             return_value=httpx.Response(
@@ -224,8 +30,8 @@ async def test_list_organizations_returns_orgs():
                 ],
             )
         )
-        result = await supabase_client.list_organizations("sentinel-access")
-    assert result == supabase_client.SupabaseOrgsListed(
+        result = await supabase_client.validate_key(SENTINEL_PAT)
+    assert result == supabase_client.SupabaseKeyValid(
         orgs=[
             supabase_client.SupabaseOrg(slug="org-one", name="Org One"),
             supabase_client.SupabaseOrg(slug="org-two", name="Org Two"),
@@ -233,39 +39,61 @@ async def test_list_organizations_returns_orgs():
     )
 
 
-async def test_list_organizations_sends_bearer_token():
+async def test_valid_key_with_zero_orgs_is_still_valid():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(return_value=httpx.Response(200, json=[]))
+        result = await supabase_client.validate_key(SENTINEL_PAT)
+    assert result == supabase_client.SupabaseKeyValid(orgs=[])
+
+
+async def test_validate_key_sends_bearer_token():
     with respx.mock:
         route = respx.get(ORGS_URL).mock(return_value=httpx.Response(200, json=[]))
-        await supabase_client.list_organizations("sentinel-access")
-    assert route.calls.last.request.headers["authorization"] == "Bearer sentinel-access"
+        await supabase_client.validate_key(SENTINEL_PAT)
+    assert route.calls.last.request.headers["authorization"] == f"Bearer {SENTINEL_PAT}"
 
 
-async def test_list_organizations_unauthorized():
+async def test_unauthorized_key_is_invalid():
     with respx.mock:
         respx.get(ORGS_URL).mock(return_value=httpx.Response(401))
-        result = await supabase_client.list_organizations("expired")
-    assert result == supabase_client.SupabaseApiFailed(reason="unauthorized")
+        result = await supabase_client.validate_key("bad")
+    assert result == supabase_client.SupabaseKeyInvalid(reason="invalid_key")
 
 
-async def test_list_organizations_rate_limited():
+async def test_forbidden_key_is_invalid():
     with respx.mock:
-        respx.get(ORGS_URL).mock(return_value=httpx.Response(429))
-        result = await supabase_client.list_organizations("a")
-    assert result == supabase_client.SupabaseApiFailed(reason="rate_limited")
+        respx.get(ORGS_URL).mock(return_value=httpx.Response(403))
+        result = await supabase_client.validate_key("bad")
+    assert result == supabase_client.SupabaseKeyInvalid(reason="invalid_key")
 
 
-async def test_list_organizations_unreachable_on_5xx():
+async def test_5xx_is_unreachable_not_invalid():
     with respx.mock:
         respx.get(ORGS_URL).mock(return_value=httpx.Response(500))
-        result = await supabase_client.list_organizations("a")
-    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+        result = await supabase_client.validate_key(SENTINEL_PAT)
+    assert result == supabase_client.SupabaseKeyInvalid(reason="supabase_unreachable")
 
 
-async def test_list_organizations_malformed_body_is_unreachable():
+async def test_timeout_is_unreachable():
+    with respx.mock:
+        respx.get(ORGS_URL).mock(side_effect=httpx.ConnectTimeout("timed out"))
+        result = await supabase_client.validate_key(SENTINEL_PAT)
+    assert result == supabase_client.SupabaseKeyInvalid(reason="supabase_unreachable")
+
+
+async def test_malformed_body_is_unreachable_not_a_crash():
     with respx.mock:
         respx.get(ORGS_URL).mock(return_value=httpx.Response(200, text="not json"))
-        result = await supabase_client.list_organizations("a")
-    assert result == supabase_client.SupabaseApiFailed(reason="supabase_unreachable")
+        result = await supabase_client.validate_key(SENTINEL_PAT)
+    assert result == supabase_client.SupabaseKeyInvalid(reason="supabase_unreachable")
+
+
+async def test_validate_key_never_logs_the_key(caplog):
+    with caplog.at_level(logging.DEBUG):
+        with respx.mock:
+            respx.get(ORGS_URL).mock(return_value=httpx.Response(401))
+            await supabase_client.validate_key(SENTINEL_PAT)
+    assert SENTINEL_PAT not in caplog.text
 
 
 async def test_create_project_returns_ref_and_status():
