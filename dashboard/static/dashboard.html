@@ -1068,6 +1068,15 @@
       const cat = modelCatalog[provider];
       if (cat.status === "loading") return `<div class="field-hint">${t("env_validating")}</div>`;
       if (cat.status === "error") {
+        // "no_credential_configured" for a provider with zero credential
+        // vars set anywhere isn't a failure -- it's the normal state of a
+        // provider nobody has set up yet (most deployments only use one of
+        // the three). Only flag it red+Retry when a credential DOES exist
+        // somewhere but the catalog fetch still failed (wrong key, network,
+        // an actually-misconfigured slot) -- that's a real problem worth
+        // surfacing.
+        const configuredAnywhere = (currentAvailableKeySlots[provider] || []).length > 0;
+        if (cat.error === "no_credential_configured" && !configuredAnywhere) return "";
         return `<div class="field-error">* ${t("env_model_load_failed")} (${esc(cat.error)})
           <button type="button" class="control model-retry" data-provider="${provider}">${t("env_retry")}</button>
         </div>`;
