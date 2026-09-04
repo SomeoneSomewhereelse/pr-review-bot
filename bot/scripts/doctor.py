@@ -22,9 +22,6 @@ from bot import github_app
 from bot.config import settings
 from bot.scripts import _prereqs, _probes, create_github_app, deploy
 
-TRACKS = ("local", "hosted")
-
-
 class State(NamedTuple):
     """Observable setup state. Every field is a plain bool: a step is either
     satisfied or it is not, and nothing here can carry a secret."""
@@ -46,7 +43,7 @@ class Step(NamedTuple):
     command: str  # the exact next action, verbatim
 
 
-_SHARED: tuple[Step, ...] = (
+_STEPS: tuple[Step, ...] = (
     Step(1, "Install prerequisites", "prereqs",
          "uv sync, then install anything the prereqs rows above name"),
     Step(2, "Create the GitHub App", "app_credentials",
@@ -58,25 +55,6 @@ _SHARED: tuple[Step, ...] = (
     Step(4, "Configure an LLM provider", "llm_ready",
          "set LLM_PROVIDER in .env.config and its API key via "
          "`uv run python -m bot.scripts.init_env` (run this yourself)"),
-)
-
-# Steps 5-8 diverge. 'keepalive' means something different per track: locally
-# nothing needs to stay warm, so the running uvicorn process satisfies it;
-# hosted, it is the UptimeRobot monitor that stops Render's free tier sleeping.
-_LOCAL: tuple[Step, ...] = (
-    Step(5, "Get a Postgres", "database",
-         "start one (`docker run -p 5432:5432 -e POSTGRES_PASSWORD=x postgres:16`) "
-         "and set DATABASE_URL"),
-    Step(6, "Start a tunnel", "public_url",
-         "cloudflared tunnel --url http://localhost:8000, then set PUBLIC_BASE_URL "
-         "to the printed https URL"),
-    Step(7, "Register the webhook", "webhook",
-         "uv run python -m bot.scripts.deploy"),
-    Step(8, "Run the service", "keepalive",
-         "uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000"),
-)
-
-_HOSTED: tuple[Step, ...] = (
     Step(5, "Create the Supabase project", "database",
          "create it at https://supabase.com, then set DATABASE_URL to the "
          "Session-mode pooler string (port 5432, NOT 6543)"),
@@ -89,55 +67,33 @@ _HOSTED: tuple[Step, ...] = (
          "uv run python -m bot.scripts.deploy --sync-env"),
     Step(8, "Add the keep-warm pinger", "keepalive",
          "create an UptimeRobot monitor on <your-service>/healthz at a 5-minute "
-         "interval (the URL must match exactly); set UPTIMEROBOT_API_KEY locally "
-         "if you want doctor to verify it rather than report SKIPPED"),
+         "interval (the URL must match exactly); set UPTIMEROBOT_API_KEY too, so "
+         "doctor can verify it"),
 )
 
 
-def steps_for(track: str) -> tuple[Step, ...]:
-    if track not in TRACKS:
-        raise ValueError(f"unknown track {track!r}; expected one of {TRACKS}")
-    return _SHARED + (_LOCAL if track == "local" else _HOSTED)
+def steps_for() -> tuple[Step, ...]:
+    return _STEPS
 
 
-def current_step(track: str, state: State) -> Step | None:
+def current_step(state: State) -> Step | None:
     """The EARLIEST unsatisfied step, or None when setup is complete.
 
     Earliest, not most-severe: a later gap is usually a consequence of an
     earlier one, so reporting it first would send an operator down the wrong
     path.
     """
-    for step in steps_for(track):
+    for step in steps_for():
         if not getattr(state, step.field):
             return step
     return None
 
 
-def resolve_track(explicit: str | None = None) -> str:
-    """Which track to grade against. An explicit --track always wins.
-
-    Auto-detection is a documented rule, not a guess: a RENDER_API_KEY or an
-    onrender.com base URL means hosted; anything else means local. Both tracks
-    share steps 1-4, so a wrong guess early costs nothing.
-    """
-    if explicit:
-        if explicit not in TRACKS:
-            raise ValueError(f"unknown track {explicit!r}; expected one of {TRACKS}")
-        return explicit
-    if settings.render_api_key or "onrender.com" in settings.public_base_url:
-        return "hosted"
-    return "local"
-
-
 _APP_CREDENTIALS = ("GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY", "GITHUB_WEBHOOK_SECRET")
 
 
-def check_prereqs(track: str) -> deploy.CheckResult:
-    """Python version and the tools that must be on PATH.
-
-    cloudflared is required for the local track only -- it is what makes the
-    service reachable by GitHub's webhook delivery (design spec section 4a-i).
-    """
+def check_prereqs() -> deploy.CheckResult:
+    """Python version and the tools that must be on PATH."""
     problems: list[str] = []
     if not _prereqs.python_version_ok():
         major, minor = _prereqs.MINIMUM_PYTHON
@@ -145,11 +101,9 @@ def check_prereqs(track: str) -> deploy.CheckResult:
             f"Python {major}.{minor}+ required, running "
             f"{sys.version_info.major}.{sys.version_info.minor}"
         )
-    tools = list(_prereqs.REQUIRED_TOOLS)
-    if track == "local":
-        tools.append(_prereqs.TUNNEL_TOOL)
     problems.extend(
-        _prereqs.install_hint(tool) for tool in tools if not _prereqs.is_available(tool)
+        _prereqs.install_hint(tool) for tool in _prereqs.REQUIRED_TOOLS
+        if not _prereqs.is_available(tool)
     )
     if problems:
         return deploy.CheckResult("prereqs", "FAIL", "\n".join(problems))
@@ -429,14 +383,14 @@ def check_webhook(base: str) -> deploy.CheckResult:
     )
 
 
-def build_state(track: str, base: str) -> tuple[State, list[deploy.CheckResult]]:
+def build_state(base: str) -> tuple[State, list[deploy.CheckResult]]:
     """Probe, staged: local first, then remote only for resources that exist.
 
     Ordering matters. Render not existing at step 1 is the normal state, so a
     remote probe is SKIPPED rather than failed until its precondition holds.
     """
     results = [
-        deploy._safe("prereqs", check_prereqs, track),
+        deploy._safe("prereqs", check_prereqs),
         deploy._safe("test-db", check_test_database),
         deploy._safe("local-config", check_local_config),
         deploy._safe("llm-provider", check_llm_provider),
@@ -449,25 +403,16 @@ def build_state(track: str, base: str) -> tuple[State, list[deploy.CheckResult]]
         deploy._safe("database", deploy.check_database),
         deploy._safe("provider", deploy.check_provider),
     ]
-    if track == "local":
-        results.append(
-            deploy.CheckResult(
-                "tunnel", "PASS" if base else "FAIL",
-                "" if base else "no PUBLIC_BASE_URL yet -- start a tunnel: "
-                "cloudflared tunnel --url http://localhost:8000",
-            )
-        )
     results.append(deploy._safe("health", deploy.check_health_endpoint, base) if base
                    else deploy.CheckResult("health", "SKIPPED", "no public base URL yet"))
     results.append(deploy._safe("webhook", check_webhook, base))
-    if track == "hosted":
-        results.extend([
-            deploy._safe("boot-creds-live", deploy.check_boot_credentials_live),
-            deploy._safe("provider-live", deploy.check_provider_live),
-            deploy._safe("api-key-live", deploy.check_api_key_live),
-            deploy._safe("render-service", deploy.check_render_service),
-            deploy._safe("uptime-pinger", deploy.check_uptime_pinger, base),
-        ])
+    results.extend([
+        deploy._safe("boot-creds-live", deploy.check_boot_credentials_live),
+        deploy._safe("provider-live", deploy.check_provider_live),
+        deploy._safe("api-key-live", deploy.check_api_key_live),
+        deploy._safe("render-service", deploy.check_render_service),
+        deploy._safe("uptime-pinger", deploy.check_uptime_pinger, base),
+    ])
 
     by_name = {r.name: r for r in results}
 
@@ -480,35 +425,14 @@ def build_state(track: str, base: str) -> tuple[State, list[deploy.CheckResult]]
         app_installed=ok("github-install"),
         llm_ready=ok("llm-provider"),
         database=ok("database"),
-        # public_url and keepalive must NOT share one signal for the hosted
-        # track -- they gate two different steps (6 and 8), and current_step()
-        # reports only the EARLIEST unsatisfied one, so two steps driven by
-        # the same boolean can never both be reported: the moment it flips
-        # true, both clear at once and step 8 becomes unreachable. public_url
-        # still gates on "health" for hosted (credential-free proof the
-        # Render service exists at all) -- unchanged. Hosted's keepalive now
-        # gates on the "uptime-pinger" row instead, treating SKIPPED as
-        # satisfied (not just PASS/WARN): uptime-pinger SKIPs without an
-        # operator-local UPTIMEROBOT_API_KEY, and stranding an operator who
-        # never sets that key on step 8 forever would be exactly the dead end
-        # doctor exists to prevent. Only an ACTIVE FAIL (the monitor exists
-        # but is misconfigured, e.g. wrong URL) blocks step 8. Locally there
-        # is no uptime-pinger row at all -- nothing needs to stay warm, so the
-        # running uvicorn process is what keepalive means, and "health"
-        # answering is exactly that proof, unchanged from before.
-        public_url=ok("tunnel") if track == "local" else ok("health"),
+        public_url=ok("health"),
         webhook=ok("webhook"),
-        keepalive=(
-            ok("health") if track == "local"
-            else by_name.get(
-                "uptime-pinger", deploy.CheckResult("uptime-pinger", "SKIPPED")
-            ).status != "FAIL"
-        ),
+        keepalive=ok("uptime-pinger"),
     )
     return state, results
 
 
-def render(track: str, step: Step | None, results: list[deploy.CheckResult]) -> str:
+def render(step: Step | None, results: list[deploy.CheckResult]) -> str:
     """deploy.py's table, plus the one line doctor exists to print."""
     report = deploy.render_report(results)
     if step is None:
@@ -517,17 +441,16 @@ def render(track: str, step: Step | None, results: list[deploy.CheckResult]) -> 
             f" ({len(failing)} check(s) still reporting FAIL -- see the table "
             f"above: {', '.join(failing)})" if failing else ""
         )
-        return f"{report}\n\ntrack: {track} -- setup complete, every step satisfied.{note}"
+        return f"{report}\n\nsetup complete, every step satisfied.{note}"
     return (
-        f"{report}\n\ntrack: {track} -- you are at step {step.number} of 8: "
+        f"{report}\n\nyou are at step {step.number} of 8: "
         f"{step.title}\nnext: {step.command}"
     )
 
 
-def as_json(track: str, step: Step | None, results: list[deploy.CheckResult]) -> str:
+def as_json(step: Step | None, results: list[deploy.CheckResult]) -> str:
     return json.dumps(
         {
-            "track": track,
             "step": None if step is None
             else {"number": step.number, "title": step.title, "command": step.command},
             "checks": [
@@ -542,24 +465,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Report where you are in setup and what to run next (read-only)"
     )
-    parser.add_argument("--track", choices=TRACKS, default=None,
-                        help="grade against this track (default: auto-detect)")
     parser.add_argument("--json", action="store_true", dest="as_json",
                         help="emit machine-readable output")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
-    try:
-        track = resolve_track(args.track)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
     base = deploy.resolve_base_url()
-    state, results = build_state(track, base)
-    step = current_step(track, state)
-    print(as_json(track, step, results) if args.as_json else render(track, step, results))
+    state, results = build_state(base)
+    step = current_step(state)
+    print(as_json(step, results) if args.as_json else render(step, results))
     # Exit 0 always: "you are mid-setup" is information, not failure. Only a
-    # bad invocation is an error (exit 2 above).
+    # bad invocation is an error (argparse itself exits 2 for that).
     return 0
 
 
