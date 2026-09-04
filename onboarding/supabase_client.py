@@ -1,8 +1,7 @@
-"""Thin async wrapper around Supabase's OAuth2 flow and Management API —
-authorizes as a visitor and provisions their own Supabase project, without
-persisting any credential server-side. See
-docs/superpowers/specs/2026-08-26-onboarding-supabase-provisioning-frame-design.md
-sections 3-5."""
+"""Thin async wrapper around Supabase's Management API — validates a
+visitor-pasted Personal Access Token and provisions their own Supabase
+project, without persisting any credential server-side. See
+docs/superpowers/specs/2026-09-04-supabase-pat-frame-design.md."""
 
 from __future__ import annotations
 
@@ -10,94 +9,8 @@ import dataclasses
 
 import httpx
 
-from onboarding.config import settings
-
-SUPABASE_OAUTH_BASE = "https://api.supabase.com/v1/oauth"
 SUPABASE_API_BASE = "https://api.supabase.com/v1"
 SUPABASE_REGION_CODE = "us-east-1"
-
-
-@dataclasses.dataclass(frozen=True)
-class SupabaseTokens:
-    access_token: str
-    refresh_token: str | None
-    expires_in: int
-
-
-@dataclasses.dataclass(frozen=True)
-class SupabaseOAuthFailed:
-    reason: str  # "invalid_code" | "unauthorized" | "supabase_unreachable"
-
-
-SupabaseTokenResult = SupabaseTokens | SupabaseOAuthFailed
-
-
-def _parse_token_response(response: httpx.Response, invalid_reason: str) -> SupabaseTokenResult:
-    if response.status_code >= 500:
-        return SupabaseOAuthFailed(reason="supabase_unreachable")
-    if response.status_code >= 400:
-        return SupabaseOAuthFailed(reason=invalid_reason)
-    try:
-        body = response.json()
-        access_token = str(body["access_token"])
-        # expires_in is never read downstream (refresh is reactive, not
-        # timer-based) -- a missing/malformed value shouldn't be able to
-        # fail the whole token exchange, only a genuinely missing
-        # access_token should.
-        expires_in = int(body.get("expires_in") or 0)
-    except (ValueError, KeyError, TypeError):
-        return SupabaseOAuthFailed(reason="supabase_unreachable")
-    refresh_token = body.get("refresh_token")
-    return SupabaseTokens(
-        access_token=access_token,
-        refresh_token=str(refresh_token) if refresh_token else None,
-        expires_in=expires_in,
-    )
-
-
-async def exchange_oauth_code(
-    code: str, code_verifier: str, redirect_uri: str
-) -> SupabaseTokenResult:
-    """Trade the OAuth authorization code for tokens (POST /v1/oauth/token,
-    grant_type=authorization_code). Form-encoded per Supabase's own schema
-    — NOT JSON — and client_id/client_secret are body fields, not an
-    Authorization header. Never logs the response body, which carries the
-    visitor's access/refresh tokens."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{SUPABASE_OAUTH_BASE}/token",
-                data={
-                    "grant_type": "authorization_code",
-                    "client_id": settings.supabase_oauth_client_id,
-                    "client_secret": settings.supabase_oauth_client_secret,
-                    "code": code,
-                    "code_verifier": code_verifier,
-                    "redirect_uri": redirect_uri,
-                },
-            )
-    except httpx.HTTPError:
-        return SupabaseOAuthFailed(reason="supabase_unreachable")
-    return _parse_token_response(response, invalid_reason="invalid_code")
-
-
-async def refresh_access_token(refresh_token: str) -> SupabaseTokenResult:
-    """Trade a refresh token for a new access token (grant_type=refresh_token).
-    Never logs the refresh token or the response body."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{SUPABASE_OAUTH_BASE}/token",
-                data={
-                    "grant_type": "refresh_token",
-                    "client_id": settings.supabase_oauth_client_id,
-                    "client_secret": settings.supabase_oauth_client_secret,
-                    "refresh_token": refresh_token,
-                },
-            )
-    except httpx.HTTPError:
-        return SupabaseOAuthFailed(reason="supabase_unreachable")
-    return _parse_token_response(response, invalid_reason="unauthorized")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,8 +20,44 @@ class SupabaseOrg:
 
 
 @dataclasses.dataclass(frozen=True)
-class SupabaseOrgsListed:
+class SupabaseKeyValid:
     orgs: list[SupabaseOrg]
+
+
+@dataclasses.dataclass(frozen=True)
+class SupabaseKeyInvalid:
+    reason: str  # "invalid_key" | "supabase_unreachable"
+
+
+SupabaseKeyValidation = SupabaseKeyValid | SupabaseKeyInvalid
+
+
+async def validate_key(pat: str) -> SupabaseKeyValidation:
+    """One cheap read call (GET /organizations) to confirm pat is a live
+    Supabase Personal Access Token -- doubles as both validation and the
+    org list the frame needs next (Supabase has no separate token-identity
+    endpoint). Never logs or returns the token itself. Mirrors
+    render_client.validate_key()'s shape exactly."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
+            response = await client.get(
+                "/organizations",
+                headers={"Authorization": f"Bearer {pat}"},
+            )
+    except httpx.HTTPError:
+        return SupabaseKeyInvalid(reason="supabase_unreachable")
+
+    if response.status_code in (401, 403):
+        return SupabaseKeyInvalid(reason="invalid_key")
+    if response.status_code != 200:
+        return SupabaseKeyInvalid(reason="supabase_unreachable")
+
+    try:
+        body = response.json()
+        orgs = [SupabaseOrg(slug=str(o["slug"]), name=str(o["name"])) for o in body]
+    except (ValueError, KeyError, TypeError):
+        return SupabaseKeyInvalid(reason="supabase_unreachable")
+    return SupabaseKeyValid(orgs=orgs)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -116,38 +65,6 @@ class SupabaseApiFailed:
     reason: str
     # "unauthorized" | "forbidden" | "rate_limited" | "supabase_unreachable"
     # | "pooler_config_unavailable" | "pooler_not_ready" (connection-info only)
-
-
-SupabaseOrgsResult = SupabaseOrgsListed | SupabaseApiFailed
-
-
-async def list_organizations(access_token: str) -> SupabaseOrgsResult:
-    """GET /v1/organizations — the orgs the visitor's own token can act on.
-    Never logs the access token or the response body."""
-    try:
-        async with httpx.AsyncClient(base_url=SUPABASE_API_BASE, timeout=15.0) as client:
-            response = await client.get(
-                "/organizations",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-    except httpx.HTTPError:
-        return SupabaseApiFailed(reason="supabase_unreachable")
-
-    if response.status_code == 401:
-        return SupabaseApiFailed(reason="unauthorized")
-    if response.status_code == 403:
-        return SupabaseApiFailed(reason="forbidden")
-    if response.status_code == 429:
-        return SupabaseApiFailed(reason="rate_limited")
-    if response.status_code != 200:
-        return SupabaseApiFailed(reason="supabase_unreachable")
-
-    try:
-        body = response.json()
-        orgs = [SupabaseOrg(slug=str(o["slug"]), name=str(o["name"])) for o in body]
-    except (ValueError, KeyError, TypeError):
-        return SupabaseApiFailed(reason="supabase_unreachable")
-    return SupabaseOrgsListed(orgs=orgs)
 
 
 @dataclasses.dataclass(frozen=True)
