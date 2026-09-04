@@ -9,21 +9,19 @@
 | --- | --- | --- |
 | `config` | Every setting the service needs is resolvable locally | yes |
 | `pricing` | Every provider's effective model has a rate-table entry (a warning only -- an unpriced model runs, without a cost estimate) | yes |
-| `boot-creds-live` | The vars the service reads at every boot are present on the deployed Render service under their current names -- not just locally | needs an operator key |
+| `boot-creds-live` | The vars the service reads at every boot are present on the deployed Render service under their current names -- not just locally | yes |
 | `github-app` | The App has exactly one installation, every repo in GITHUB_TARGET_REPO is covered by it, and its webhook points here (set only if wrong) | yes |
 | `health` | /healthz answers BOTH GET and HEAD -- UptimeRobot's free tier sends HEAD, so a GET-only endpoint lets the instance sleep | yes |
 | `database` | Postgres is reachable and the app has provisioned its tickets table | needs an operator key |
 | `runtime-config` | runtime_config has every column store.py's schema declares -- a column added after the table was first provisioned is never backfilled by the app's own CREATE TABLE IF NOT EXISTS boot DDL | needs an operator key |
 | `provider` | The provider that will actually run -- LLM_PROVIDER, or an active DB override -- has its credential set | needs an operator key |
-| `provider-live` | The actively-resolved provider's credential is present on the deployed Render service, not just locally | needs an operator key |
-| `api-key-live` | The actively-resolved provider's actively-resolved key slot is present on the deployed Render service | needs an operator key |
-| `render-service` | The latest Render deploy is live, and matches local HEAD when a commit is comparable | needs an operator key |
-| `uptime-pinger` | A monitor targets /healthz exactly, is active, and polls at most every 10 minutes | needs an operator key |
+| `provider-live` | The actively-resolved provider's credential is present on the deployed Render service, not just locally | yes |
+| `api-key-live` | The actively-resolved provider's actively-resolved key slot is present on the deployed Render service | yes |
+| `render-service` | The latest Render deploy is live, and matches local HEAD when a commit is comparable | yes |
+| `uptime-pinger` | A monitor targets /healthz exactly, is active, and polls at most every 10 minutes | yes |
 
 ## Unskipping the optional checks
 
-An optional check degrades to `SKIPPED` with a hint, never to a failure, when its operator-local key is unset. `RENDER_API_KEY` and `DATABASE_URL` are both operator-local AND pushed to the Render service by `--sync-env` (the service needs its own copy of `RENDER_API_KEY` too, for the dashboard's Environment tab); `UPTIMEROBOT_API_KEY` is operator-local only and never set on the Render service.
+An optional check degrades to `SKIPPED` with a hint, never to a failure, when its operator-local key is unset. `RENDER_API_KEY` and `UPTIMEROBOT_API_KEY` are both required now (see the guide's setup steps 6 and 8) -- only `DATABASE_URL` still leaves a check optional.
 
-- `RENDER_API_KEY` (Render → Account Settings → API Keys) enables `boot-creds-live`, `render-service`, `provider-live`, `api-key-live`, and `--sync-env`.
-- `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.
 - `DATABASE_URL` enables `database` and `provider` — the provider override lives in the same database.

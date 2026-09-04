@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from bot.config import OPERATIONAL_KEYS, settings
 from bot.scripts import gen_docs
 
@@ -315,29 +313,21 @@ def test_every_file_call_in_gen_docs_declares_encoding_and_newline():
 def test_write_all_output_is_utf8_not_locale_dependent(tmp_path):
     """Spec section 8k / 5a: proves the explicit encoding="utf-8" in
     write_all is load-bearing, not coincidental. The generated checks.md
-    contains characters that a missing explicit encoding= would mishandle
-    under cp1252 (the Windows default locale encoding): an arrow that cp1252
-    cannot represent at all, and an em-dash that it represents as a different
-    byte than UTF-8 does. Confirming the file is genuinely UTF-8 on disk --
-    not some other encoding that happens to decode without error -- shows
-    write_all's explicit encoding argument, and not luck, is what protects
-    determinism."""
+    contains an em-dash, which cp1252 (the Windows default locale encoding)
+    represents as a different single byte than UTF-8's multi-byte form.
+    Confirming the file is genuinely UTF-8 on disk -- not some other encoding
+    that happens to decode without error -- shows write_all's explicit
+    encoding argument, and not luck, is what protects determinism."""
     paths = gen_docs.write_all(tmp_path)
     checks = next(p for p in paths if p.name == "checks.md")
     text = checks.read_text(encoding="utf-8")
-    assert "→" in text
     assert "—" in text
 
-    # The arrow has no cp1252 representation whatsoever -- a write under that
-    # encoding would raise outright rather than silently drift.
-    with pytest.raises(UnicodeEncodeError):
-        text.encode("cp1252")
-
-    # The bytes actually on disk are UTF-8's multi-byte encoding of these
-    # characters, not cp1252's single-byte forms (0x97 for the em-dash;
-    # the arrow has no cp1252 form at all).
+    # The bytes actually on disk are UTF-8's multi-byte encoding of the
+    # em-dash, not cp1252's single-byte form (0x97).
     raw = checks.read_bytes()
-    assert "→".encode("utf-8") in raw
+    assert "—".encode("utf-8") in raw
+    assert b"\x97" not in raw
     assert "—".encode("utf-8") in raw
 
     # Round-tripping the bytes on disk through UTF-8 is lossless.

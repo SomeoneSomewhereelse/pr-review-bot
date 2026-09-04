@@ -222,16 +222,10 @@ def render_checks() -> str:
             "",
             "## Unskipping the optional checks\n",
             "An optional check degrades to `SKIPPED` with a hint, never to a "
-            "failure, when its operator-local key is unset. `RENDER_API_KEY` and "
-            "`DATABASE_URL` are both operator-local AND pushed to the Render "
-            "service by `--sync-env` (the service needs its own copy of "
-            "`RENDER_API_KEY` too, for the dashboard's Environment tab); "
-            "`UPTIMEROBOT_API_KEY` is operator-local only and never set on the "
-            "Render service.\n",
-            "- `RENDER_API_KEY` (Render → Account Settings → API Keys) enables "
-            "`boot-creds-live`, `render-service`, `provider-live`, `api-key-live`, "
-            "and `--sync-env`.",
-            "- `UPTIMEROBOT_API_KEY` (a read-only key) enables `uptime-pinger`.",
+            "failure, when its operator-local key is unset. `RENDER_API_KEY` "
+            "and `UPTIMEROBOT_API_KEY` are both required now (see the guide's "
+            "setup steps 6 and 8) -- only `DATABASE_URL` still leaves a check "
+            "optional.\n",
             "- `DATABASE_URL` enables `database` and `provider` — the provider "
             "override lives in the same database.",
         ]

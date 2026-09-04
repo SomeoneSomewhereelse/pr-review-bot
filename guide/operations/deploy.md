@@ -76,10 +76,10 @@ key are generated from the check registry itself — see [Deployment
 checks](../reference/checks.md) rather than a copy here that could drift
 from it.
 
-Three operator-local keys unskip the optional checks, and none of them is
-ever set on the Render service itself: `RENDER_API_KEY`, `UPTIMEROBOT_API_KEY`,
-and `DATABASE_URL`. Which specific checks each one unlocks is documented on
-that same [reference page](../reference/checks.md#unskipping-the-optional-checks).
+One operator-local key still unskips two checks, and is never set on the
+Render service itself: `DATABASE_URL` — it enables `database` and
+`provider`. Every other check now runs unconditionally; see [Deployment
+checks](../reference/checks.md#unskipping-the-optional-checks).
 
 ## Exit codes
 
