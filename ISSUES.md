@@ -597,6 +597,14 @@ Proactive findings, not incidents — nothing here actually happened. Format:
   the dashboard is reachable at all — `--sync-env` is what makes the very
   first deploy's env vars non-empty). If retired, update
   `guide/operations/overrides.md` and any other doc that references them.
+- **Update (2026-09-05):** deliberately not resolved as part of the
+  hosted-only-guide/mandatory-keys sweep (`docs/superpowers/specs/
+  2026-09-05-hosted-only-guide-and-mandatory-keys-design.md`) -- when the
+  bot sub-project eventually moves to its own repo, the GitHub Pages guide
+  and the operator scripts (`deploy.py`, `doctor.py`, `set_override.py`)
+  move with it, so the retire-vs-keep question for `set_override.py` (and
+  the rest of this gap) is deferred to that future move rather than
+  decided now.
 
 ---
 
