@@ -11,10 +11,13 @@ parallel, and later pushes edit that same comment in place rather than
 piling up new ones.
 
 **[Deploy your own →](https://tovtechorg.github.io/pr-review-bot/setup/)**
-— the full setup guide, from a fresh clone to a first posted review comment,
-covering both a local run and a hosted Render + Supabase deployment. The same
-pages live in [`guide/`](guide/setup/index.md) if you would rather read them
-in the repo.
+— the full setup guide, from a fresh clone to a first posted review comment.
+The same pages live in [`guide/`](guide/setup/index.md) if you would rather
+read them in the repo.
+
+**[Try the setup wizard →](https://pr-review-engine.onrender.com/)**
+— this repo's own live deployment; provision your own bot+dashboard Render
+service from your browser, no local clone needed.
 
 Full design: [`bot/SPEC.md`](bot/SPEC.md). Stack/conventions: [`CLAUDE.md`](CLAUDE.md).
 Cost model: [`bot/cost.md`](bot/cost.md).
@@ -141,8 +144,9 @@ uv run ruff check .
 uv run pytest -v
 ```
 
-856 deterministic tests, no real network calls — every GitHub, LLM-provider,
-and webhook interaction is mocked. CI runs the same checks on every push.
+The full suite is deterministic and network-free: every GitHub,
+LLM-provider, and webhook interaction is mocked. CI runs the same checks on
+every push.
 
 A handful of scripts under `bot/scripts/manual_verify_*.py` make real calls
 against real accounts instead, each proving one specific integration (GitHub
@@ -152,6 +156,9 @@ repeated end-to-end run through the actual GitHub webhook path.
 
 ## Known limitations
 
+<details>
+<summary><strong>Documented deviations from SPEC.md's defaults</strong></summary>
+
 This project deliberately deviates from `SPEC.md`'s defaults in a few
 documented ways — most notably, **Groq is the primary live provider**
 (pulled forward for a reliable live path), with Gemini and Vertex AI both
@@ -159,6 +166,7 @@ also live and verified. The review queue is single-process only (no
 horizontal scaling yet). See the guide's
 [Provider history](guide/background/providers.md) for the full narrative of
 each deviation, including what was tried and why.
+</details>
 
 ## Cost
 
