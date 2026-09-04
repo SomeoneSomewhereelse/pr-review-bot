@@ -1,7 +1,12 @@
 # Design — Supabase OAuth app abuse mitigation
 
 **Date:** 2026-09-03
-**Status:** Approved for planning
+**Status:** Superseded — see `2026-09-04-supabase-pat-frame-design.md`. A
+follow-up session re-examined the OAuth-app auth mechanism this design was
+built to mitigate the risk of, and replaced it with a visitor-pasted
+Personal Access Token instead — which removes the shared-resource risk
+outright rather than mitigating it. Left below unchanged as a record of
+the mitigation design that turned out to be unnecessary.
 **Relates to:** `onboarding/supabase_client.py`, `onboarding/router.py`,
 `onboarding/session_store.py`, `onboarding/config.py`,
 `onboarding/static/index.html`, `onboarding/CLAUDE.md`'s sub-project 3

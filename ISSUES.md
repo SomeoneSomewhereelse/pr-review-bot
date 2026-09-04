@@ -552,15 +552,15 @@ Proactive findings, not incidents — nothing here actually happened. Format:
 - **Found during:** sub-project 3 (Supabase provisioning) brainstorm, 2026-08-26
 - **What:** the planned Supabase frame authorizes every visitor through one operator-registered OAuth app (`SUPABASE_OAUTH_CLIENT_ID`/`SUPABASE_OAUTH_CLIENT_SECRET`). Unlike the Render frame (each visitor's own key) or the GitHub frame (each visitor mints their own App), this credential is a single shared identity across the whole visitor population.
 - **Why it matters:** same risk category as the documented Gemini AI-Studio Trust & Safety block (root `CLAUDE.md`'s "LLM API testing hygiene" section) — a burst of activity from one visitor, or Supabase's own abuse heuristics, could throttle or revoke the shared app's Management API access, breaking the Supabase frame for every future visitor until re-registered, not just the one who triggered it.
-- **Status:** open
-- **Follow-up:** design a countermeasure before or shortly after this frame reaches real visitors. Candidates raised during brainstorming: per-visitor rate limiting at this service's own layer, a CAPTCHA/friction step before the OAuth redirect, or active monitoring for revocation with a clear "this frame is temporarily down" fallback state. Not solved in sub-project 3's spec or plan — deliberately deferred.
+- **Status:** closed — superseded by PAT-based redesign, 2026-09-04
+- **Follow-up:** none needed. A follow-up brainstorm (2026-09-03/04) re-examined the original OAuth-vs-PAT decision and found its stated rationale ("PAT can't do full automation") didn't hold up against Supabase's own docs — a PAT reaches the identical Management API endpoints. The frame was redesigned to use a visitor-pasted Personal Access Token instead of an operator-registered OAuth app, which removes the shared-resource risk outright rather than mitigating it. A rate-limiting/detection/graceful-degradation mitigation was designed first (`docs/superpowers/specs/2026-09-03-supabase-oauth-abuse-mitigation-design.md`, now marked Superseded) before this simpler fix was found — see `docs/superpowers/specs/2026-09-04-supabase-pat-frame-design.md` for the replacement design.
 
 ### Supabase OAuth App registration's plan-tier availability is undocumented
 - **Found during:** sub-project 3 (Supabase provisioning) brainstorm, 2026-08-26
 - **What:** no Supabase documentation (pricing page, billing FAQ, the "Build a Supabase Integration" guide) states whether registering an OAuth App (organization settings → OAuth Apps tab) requires a paid org plan, or costs anything at all. Searched directly across all three; the absence is the finding — it's simply never addressed either way.
 - **Why it matters:** this project is committed to $0 demo cost (root `CLAUDE.md`'s Cost section, `cost.md`). If OAuth Apps require a paid organization tier, sub-project 3's design dependency on one would break that constraint.
-- **Status:** needs-verification
-- **Follow-up:** the operator confirms this directly when manually registering the OAuth app — a one-time, deliberate dashboard action sub-project 3's design already requires. No purchase happens automatically or by surprise, since that registration step is manual and operator-initiated, not something the wizard or any automation triggers.
+- **Status:** closed — superseded by PAT-based redesign, 2026-09-04
+- **Follow-up:** none needed. The Supabase frame no longer uses an OAuth app at all (see the entry above and `docs/superpowers/specs/2026-09-04-supabase-pat-frame-design.md`) — there is nothing left to register, so this question no longer applies.
 
 ### Dashboard "Environment" feature (fetch/modify Render env vars + config DB) parked pending dashboard authentication
 - **Found during:** brainstorming session, 2026-08-28
