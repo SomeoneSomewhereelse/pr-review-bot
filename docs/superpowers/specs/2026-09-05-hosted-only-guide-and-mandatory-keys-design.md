@@ -7,7 +7,8 @@
 `guide/setup/{02-github-app,03-install-app,04-llm-provider}.md`,
 `bot/scripts/doctor.py`, `bot/scripts/deploy.py`, `bot/config.py`,
 `bot/.env.example`, `bot/scripts/gen_docs.py`-generated
-`guide/reference/checks.md`, `guide/operations/deploy.md`, `ISSUES.md`.
+`guide/reference/checks.md`, `guide/operations/deploy.md`, `ISSUES.md`,
+`README.md`.
 
 ## 1. Problem and context
 
@@ -181,7 +182,57 @@ move rather than decided now.
   (`docker build -f bot/Dockerfile .` + boot smoke-test) must be rebuilt
   and confirmed after merging to `main`.
 
-## 9. Non-goals
+## 9. `README.md`
+
+Folded into this sweep: drop the Local/Hosted framing, add a link to this
+repo's own deployed onboarding wizard, drop the hardcoded test count (it
+changes too often to keep in sync), and generally keep the README
+introductory — pushing narrative/technical detail behind existing
+`<details>` blocks or links for readers who want to dig further, while
+keeping directions (setup links, running-locally commands) plainly visible.
+
+- **Line 13–17** ("Deploy your own"): drop "covering both a local run and a
+  hosted Render + Supabase deployment" (no more second track to describe).
+  New text: "the full setup guide, from a fresh clone to a first posted
+  review comment. The same pages live in `guide/` if you would rather read
+  them in the repo."
+- **New link directly below it**: this repo's own live deployment of the
+  onboarding wizard (its `render.yaml` deploys `onboarding/`, not `bot/` —
+  see the existing "Repo structure" section), so visitors can try
+  provisioning without cloning anything first:
+
+  ```
+  **[Try the setup wizard →](https://pr-review-engine.onrender.com/)**
+  — this repo's own live deployment; provision your own bot+dashboard
+  Render service from your browser, no local clone needed.
+  ```
+
+  (URL confirmed by the user: `https://pr-review-engine.onrender.com/` —
+  not derived from `render.yaml`'s service name, since Render's actual
+  assigned subdomain isn't statically predictable from that file; see the
+  discussion that ruled out CI-time discovery.)
+- **"Known limitations" section**: wrap in a `<details>` block, mirroring
+  the existing "Architecture" section's `<summary><strong>Implementation
+  detail</strong></summary>` pattern — one plain sentence stays visible
+  ("This project deliberately deviates from `SPEC.md`'s defaults in a few
+  documented ways — most notably running Groq as the primary live
+  provider."), with the full deviation narrative and the link to
+  `guide/background/providers.md` moved inside the collapsed block.
+- **"Testing" section**: delete the "856 deterministic tests" sentence's
+  specific count — replace with "The full suite is deterministic and
+  network-free: every GitHub, LLM-provider, and webhook interaction is
+  mocked." (same claim, no number to go stale). The CI-runs-the-same-checks
+  sentence, the `manual_verify_*.py` paragraph, and the rehearsal-history
+  link are unchanged — they're pointers, not narrative, and already
+  lightweight.
+- **Unchanged**: badges, the one-line pitch, the Architecture diagram, the
+  "What a review looks like" example, "Repo structure," "Tech stack,"
+  "Running locally" (including Docker), and "Cost" — none of these
+  reference the Local track or the test count, and all are either already
+  short directions or a visual/illustrative aid rather than narrative
+  technical detail.
+
+## 10. Non-goals
 
 - Not touching `set_override.py` or resolving the dashboard-overlap Design
   Gap (section 6/7 above documents the deferral instead).
