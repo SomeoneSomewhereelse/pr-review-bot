@@ -63,16 +63,6 @@ DOCKER = Tool(
     "https://docs.docker.com/get-docker/",
 )
 
-TUNNEL_TOOL = Tool(
-    "cloudflared", "cloudflared",
-    {
-        "Linux": "`sudo apt install cloudflared` (or download the binary)",
-        "Darwin": "`brew install cloudflared`",
-        "Windows": "`winget install Cloudflare.cloudflared`",
-    },
-    "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/",
-)
-
 GH = Tool(
     "gh", "the GitHub CLI (gh)",
     {
@@ -85,9 +75,7 @@ GH = Tool(
 )
 
 # Docker is NOT here: it is only one of the ways to satisfy the database
-# prerequisite -- see database_available(). gh IS here unconditionally, not
-# track-gated like TUNNEL_TOOL: both tracks' step 8 (bot.scripts.seed_demo_pr)
-# need it to clone/push/open the demo PR.
+# prerequisite -- see database_available().
 REQUIRED_TOOLS: tuple[Tool, ...] = (GIT, GH)
 
 

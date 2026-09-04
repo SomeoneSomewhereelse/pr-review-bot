@@ -11,7 +11,7 @@ from bot.scripts import _prereqs
 
 
 def test_every_required_tool_has_a_hint_for_all_three_platforms():
-    for tool in (*_prereqs.REQUIRED_TOOLS, _prereqs.TUNNEL_TOOL):
+    for tool in _prereqs.REQUIRED_TOOLS:
         for system in ("Linux", "Darwin", "Windows"):
             hint = _prereqs.install_hint(tool, system)
             assert hint.strip(), f"{tool.executable} has no hint for {system}"
