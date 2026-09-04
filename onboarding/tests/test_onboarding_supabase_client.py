@@ -10,7 +10,6 @@ import json as json_module
 import logging
 
 import httpx
-import pytest
 import respx
 
 from onboarding import supabase_client

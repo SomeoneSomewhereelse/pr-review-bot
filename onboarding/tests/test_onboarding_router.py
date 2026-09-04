@@ -247,184 +247,109 @@ async def test_index_derives_its_base_url_in_the_browser():
     assert "window.ONBOARDING_BASE_URL = location.origin;" in resp.text
 
 
-async def test_supabase_oauth_callback_with_no_session_redirects_to_root():
+async def test_validate_supabase_key_creates_no_session_by_itself(monkeypatch):
+    """Unlike render's validate-key (the wizard's session entry point),
+    Supabase's validate-key is frame 3 -- it requires an existing session
+    and fails closed without one, same as every other non-entry-point
+    endpoint."""
     client = await _client()
-    resp = await client.get("/oauth/supabase/callback?code=x&state=y", follow_redirects=False)
-    assert resp.status_code == 302
-    assert resp.headers["location"] == "/"
+    resp = await client.post("/api/supabase/validate-key", json={"key": "sbp_a"})
+    assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
-async def test_supabase_oauth_callback_completes_on_matching_state(monkeypatch):
+async def test_validate_supabase_key_stores_the_key_and_returns_orgs(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
-    fake.update_frame(
-        session_id, "supabase",
-        {"_pending_oauth": {"state": "abc", "verifier": "v", "name": "myproj"}},
-    )
 
-    async def fake_exchange(code, code_verifier, redirect_uri):
-        assert (code, code_verifier) == ("somecode", "v")
-        return supabase_client.SupabaseTokens(
-            access_token="tok", refresh_token="ref-tok", expires_in=3600
+    async def fake_validate(pat):
+        assert pat == "sbp_SENTINEL"
+        return supabase_client.SupabaseKeyValid(
+            orgs=[supabase_client.SupabaseOrg(slug="org-one", name="Org One")]
         )
 
-    monkeypatch.setattr(supabase_client, "exchange_oauth_code", fake_exchange)
-    client = await _client()
-    resp = await client.get(
-        "/oauth/supabase/callback?code=somecode&state=abc",
-        cookies={"onboarding_session": session_id},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 302
-    assert resp.headers["location"] == "/"
-    stored = fake.read_frame(session_id, "supabase")
-    assert stored["access_token"] == "tok"
-    assert stored["name"] == "myproj"
-    assert stored["_pending_oauth"] is None
-
-
-async def test_supabase_oauth_callback_rejects_a_mismatched_state(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    fake.update_frame(
-        session_id, "supabase",
-        {"_pending_oauth": {"state": "abc", "verifier": "v", "name": "myproj"}},
-    )
-    client = await _client()
-    resp = await client.get(
-        "/oauth/supabase/callback?code=somecode&state=WRONG",
-        cookies={"onboarding_session": session_id},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 302
-    assert fake.read_frame(session_id, "supabase").get("access_token") is None
-
-
-async def test_supabase_oauth_callback_with_no_pending_state_falls_back_gracefully(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    client = await _client()
-    resp = await client.get(
-        "/oauth/supabase/callback?code=somecode&state=abc",
-        cookies={"onboarding_session": session_id},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 302
-
-
-async def test_supabase_oauth_callback_never_completes_on_a_failed_exchange(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    fake.update_frame(
-        session_id, "supabase",
-        {"_pending_oauth": {"state": "abc", "verifier": "v", "name": "myproj"}},
-    )
-
-    async def fake_exchange(code, code_verifier, redirect_uri):
-        return supabase_client.SupabaseOAuthFailed(reason="invalid_code")
-
-    monkeypatch.setattr(supabase_client, "exchange_oauth_code", fake_exchange)
-    client = await _client()
-    resp = await client.get(
-        "/oauth/supabase/callback?code=somecode&state=abc",
-        cookies={"onboarding_session": session_id},
-        follow_redirects=False,
-    )
-    assert resp.status_code == 302
-    assert fake.read_frame(session_id, "supabase").get("access_token") is None
-
-
-async def test_connect_supabase_stores_pending_oauth_and_returns_authorize_url(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
+    monkeypatch.setattr(supabase_client, "validate_key", fake_validate)
     client = await _client()
     resp = await client.post(
-        "/api/supabase/connect", json={"name": "myproj"},
+        "/api/supabase/validate-key",
+        json={"key": "sbp_SENTINEL"},
         cookies={"onboarding_session": session_id},
     )
-    body = resp.json()
-    assert body["valid"] is True
-    assert body["authorize_url"].startswith("https://api.supabase.com/v1/oauth/authorize?")
-    pending = fake.read_frame(session_id, "supabase")["_pending_oauth"]
-    assert pending["state"] and pending["verifier"] and pending["name"] == "myproj"
+    assert resp.json() == {"valid": True, "orgs": [{"slug": "org-one", "name": "Org One"}]}
+    stored = fake.read_frame(session_id, "supabase")
+    assert stored["api_key"] == "sbp_SENTINEL"
 
 
-async def test_connect_supabase_discards_a_previous_projects_data(monkeypatch):
-    """A "Change"-triggered reconnect must not leave the OLD project's ref/
-    database_url behind: GET /api/session's completeness check keys off
-    database_url's mere presence, so a stale one would report the frame as
-    already-done for the wrong project if the visitor reloads mid-reconnect."""
+async def test_validate_supabase_key_discards_a_previous_projects_data(monkeypatch):
+    """A resubmitted key (via "Change") must not leave the OLD project's
+    ref/database_url behind -- GET /api/session's completeness check keys
+    off database_url's mere presence, so a stale one would report the
+    frame as already-done for the wrong project on reload."""
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
     fake.update_frame(
         session_id, "supabase",
         {
-            "access_token": "old-tok", "name": "old-proj", "ref": "x" * 20,
+            "api_key": "old-key", "name": "old-proj", "ref": "x" * 20,
             "db_pass": "old-pass", "database_url": "postgresql://old",
         },
     )
+
+    async def fake_validate(pat):
+        return supabase_client.SupabaseKeyValid(orgs=[])
+
+    monkeypatch.setattr(supabase_client, "validate_key", fake_validate)
     client = await _client()
     await client.post(
-        "/api/supabase/connect", json={"name": "new-proj"},
+        "/api/supabase/validate-key",
+        json={"key": "new-key"},
         cookies={"onboarding_session": session_id},
     )
     stored = fake.read_frame(session_id, "supabase")
     assert "ref" not in stored
     assert "database_url" not in stored
-    assert "access_token" not in stored
+    assert stored["api_key"] == "new-key"
 
 
-async def test_connect_supabase_with_no_session_fails_closed():
+async def test_validate_supabase_key_reports_invalid_key(monkeypatch):
+    fake = _use_fake_session_store(monkeypatch)
+    session_id = fake.create_session()
+
+    async def fake_validate(pat):
+        return supabase_client.SupabaseKeyInvalid(reason="invalid_key")
+
+    monkeypatch.setattr(supabase_client, "validate_key", fake_validate)
+    client = await _client()
+    resp = await client.post(
+        "/api/supabase/validate-key",
+        json={"key": "bad"},
+        cookies={"onboarding_session": session_id},
+    )
+    assert resp.json() == {"valid": False, "reason": "invalid_key"}
+    assert fake.read_frame(session_id, "supabase") is None
+
+
+async def test_supabase_connect_endpoint_is_gone():
     client = await _client()
     resp = await client.post("/api/supabase/connect", json={"name": "x"})
-    assert resp.json() == {"valid": False, "reason": "no_session"}
+    assert resp.status_code == 404
 
 
-async def test_list_organizations_reads_access_token_from_session(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "SENTINEL_ACCESS"})
-
-    async def fake_list(access_token):
-        assert access_token == "SENTINEL_ACCESS"
-        return supabase_client.SupabaseOrgsListed(
-            orgs=[supabase_client.SupabaseOrg(slug="org-one", name="Org One")]
-        )
-
-    monkeypatch.setattr(supabase_client, "list_organizations", fake_list)
+async def test_supabase_oauth_callback_route_is_gone():
     client = await _client()
-    resp = await client.post(
-        "/api/supabase/list-organizations", cookies={"onboarding_session": session_id}
-    )
-    assert resp.json() == {"valid": True, "orgs": [{"slug": "org-one", "name": "Org One"}]}
+    resp = await client.get("/oauth/supabase/callback?code=x&state=y")
+    assert resp.status_code == 404
 
 
-async def test_list_organizations_reports_failure_reason(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "a"})
-
-    async def fake_list(access_token):
-        return supabase_client.SupabaseApiFailed(reason="rate_limited")
-
-    monkeypatch.setattr(supabase_client, "list_organizations", fake_list)
-    client = await _client()
-    resp = await client.post(
-        "/api/supabase/list-organizations", cookies={"onboarding_session": session_id}
-    )
-    assert resp.json() == {"valid": False, "reason": "rate_limited"}
-
-
-async def test_list_organizations_with_no_session_fails_closed():
+async def test_supabase_list_organizations_endpoint_is_gone():
     client = await _client()
     resp = await client.post("/api/supabase/list-organizations")
-    assert resp.json() == {"valid": False, "reason": "no_session"}
+    assert resp.status_code == 404
 
 
 async def test_create_project_generates_db_pass_server_side(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "a", "name": "pr-review-bot"})
+    fake.update_frame(session_id, "supabase", {"api_key": "a"})
     captured = {}
 
     async def fake_create(access_token, organization_slug, name, db_pass):
@@ -435,7 +360,7 @@ async def test_create_project_generates_db_pass_server_side(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/supabase/create-project",
-        json={"organization_slug": "org-one"},
+        json={"organization_slug": "org-one", "name": "pr-review-bot"},
         cookies={"onboarding_session": session_id},
     )
     body = resp.json()
@@ -453,7 +378,7 @@ async def test_create_project_generates_db_pass_server_side(monkeypatch):
 async def test_create_project_relays_the_rejection_message(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "a", "name": "n"})
+    fake.update_frame(session_id, "supabase", {"api_key": "a"})
 
     async def fake_create(access_token, organization_slug, name, db_pass):
         return supabase_client.SupabaseProjectRejected(
@@ -464,7 +389,7 @@ async def test_create_project_relays_the_rejection_message(monkeypatch):
     client = await _client()
     resp = await client.post(
         "/api/supabase/create-project",
-        json={"organization_slug": "org-one"},
+        json={"organization_slug": "org-one", "name": "n"},
         cookies={"onboarding_session": session_id},
     )
     assert resp.json() == {
@@ -476,14 +401,16 @@ async def test_create_project_relays_the_rejection_message(monkeypatch):
 
 async def test_create_project_with_no_session_fails_closed():
     client = await _client()
-    resp = await client.post("/api/supabase/create-project", json={"organization_slug": "org-one"})
+    resp = await client.post(
+        "/api/supabase/create-project", json={"organization_slug": "org-one", "name": "n"}
+    )
     assert resp.json() == {"valid": False, "reason": "no_session"}
 
 
 async def test_project_status_reads_from_session(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "a", "ref": "x" * 20})
+    fake.update_frame(session_id, "supabase", {"api_key": "a", "ref": "x" * 20})
 
     async def fake_status(access_token, ref):
         assert (access_token, ref) == ("a", "x" * 20)
@@ -500,7 +427,7 @@ async def test_project_status_reads_from_session(monkeypatch):
 async def test_project_status_reports_failure_reason(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "a", "ref": "x" * 20})
+    fake.update_frame(session_id, "supabase", {"api_key": "a", "ref": "x" * 20})
 
     async def fake_status(access_token, ref):
         return supabase_client.SupabaseApiFailed(reason="unauthorized")
@@ -523,7 +450,7 @@ async def test_connection_info_assembles_and_stores_the_database_url(monkeypatch
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
     fake.update_frame(
-        session_id, "supabase", {"access_token": "a", "ref": "x" * 20, "db_pass": "pw123"}
+        session_id, "supabase", {"api_key": "a", "ref": "x" * 20, "db_pass": "pw123"}
     )
 
     async def fake_info(access_token, ref, session_id):
@@ -552,7 +479,7 @@ async def test_connection_info_reports_failure_reason(monkeypatch):
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
     fake.update_frame(
-        session_id, "supabase", {"access_token": "a", "ref": "x" * 20, "db_pass": "pw"}
+        session_id, "supabase", {"api_key": "a", "ref": "x" * 20, "db_pass": "pw"}
     )
 
     async def fake_info(access_token, ref, session_id):
@@ -635,17 +562,6 @@ async def test_get_session_reports_render_key_and_render_service_separately(monk
     }
 
 
-async def test_get_session_reports_supabase_authorized_but_not_yet_created(monkeypatch):
-    fake = _use_fake_session_store(monkeypatch)
-    session_id = fake.create_session()
-    fake.update_frame(session_id, "supabase", {"access_token": "tok", "name": "myproj"})
-    client = await _client()
-    resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
-    assert resp.json()["frames"]["supabase"] == {
-        "complete": False, "authorized": True, "display": {},
-    }
-
-
 async def test_get_session_reports_supabase_provisioning_once_project_created(monkeypatch):
     """ref alone (project created) is NOT complete -- database_url is what
     the final deploy step actually needs, and that's written later by
@@ -655,7 +571,7 @@ async def test_get_session_reports_supabase_provisioning_once_project_created(mo
     fake = _use_fake_session_store(monkeypatch)
     session_id = fake.create_session()
     fake.update_frame(
-        session_id, "supabase", {"access_token": "tok", "name": "myproj", "ref": "x" * 20}
+        session_id, "supabase", {"api_key": "tok", "name": "myproj", "ref": "x" * 20}
     )
     client = await _client()
     resp = await client.get("/api/session", cookies={"onboarding_session": session_id})
@@ -673,7 +589,7 @@ async def test_get_session_reports_supabase_complete_once_database_url_present(m
         session_id,
         "supabase",
         {
-            "access_token": "tok",
+            "api_key": "tok",
             "name": "myproj",
             "ref": "x" * 20,
             "database_url": "postgresql://u:p@h:5432/d",
@@ -962,9 +878,8 @@ async def test_set_webhook_url_endpoint_is_gone():
 
 
 async def test_index_never_templates_the_supabase_oauth_client_id():
-    """/api/supabase/connect builds the whole authorize URL (client_id
-    included) server-side now -- the browser never needs to know it, so
-    the page must not template it in at all anymore."""
+    """No operator-level Supabase secret exists at all anymore -- nothing
+    to template."""
     client = await _client()
     resp = await client.get("/")
     assert "SUPABASE_OAUTH_CLIENT_ID" not in resp.text
