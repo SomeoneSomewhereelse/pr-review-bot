@@ -196,6 +196,48 @@
   .frame-body .password-toggle:hover { color: var(--text); }
   .frame-body .password-toggle svg { width: 1.15rem; height: 1.15rem; display: block; }
   .frame-body .password-toggle svg[hidden] { display: none; }
+  .frame-body button.copy-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    min-height: 0;
+    margin-inline-start: 0.35rem;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    vertical-align: middle;
+  }
+  .frame-body button.copy-btn:hover { color: var(--text); background: var(--surface-2); }
+  .frame-body button.copy-btn.copied { color: var(--ok); }
+  .copy-btn svg { width: 1rem; height: 1rem; display: block; }
+  .copy-btn svg[hidden] { display: none; }
+  .copy-wrap { position: relative; display: inline-block; }
+  .copy-tooltip {
+    position: absolute;
+    bottom: calc(100% + 0.3rem);
+    inset-inline-start: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+    z-index: 1;
+  }
+  :dir(rtl) .copy-tooltip { transform: translateX(50%); }
+  .copy-tooltip.show { opacity: 1; visibility: visible; }
   .checkbox-row {
     display: flex;
     align-items: flex-start;
@@ -331,8 +373,28 @@
         <ol>
           <li data-i18n="frame2_step_create"></li>
           <li><span data-i18n="frame2_step_homepage_url"></span> <code id="github-app-homepage-url"></code></li>
-          <li><span data-i18n="frame2_step_webhook_url"></span> <code id="github-app-webhook-url"></code></li>
-          <li><span data-i18n="frame2_step_webhook_secret"></span> <code id="github-app-webhook-secret"></code></li>
+          <li><span data-i18n="frame2_step_webhook_url"></span> <code id="github-app-webhook-url"></code><span class="copy-wrap"><button id="github-app-webhook-url-copy" class="copy-btn" type="button" data-copy-target="github-app-webhook-url">
+              <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="13" height="13" rx="2"/>
+                <rect x="8" y="8" width="13" height="13" rx="2"/>
+              </svg>
+              <svg class="copy-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </button><span class="copy-tooltip" role="status" aria-hidden="true"></span></span></li>
+          <li><span data-i18n="frame2_step_webhook_secret"></span> <code id="github-app-webhook-secret"></code><span class="copy-wrap"><button id="github-app-webhook-secret-copy" class="copy-btn" type="button" data-copy-target="github-app-webhook-secret">
+              <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="13" height="13" rx="2"/>
+                <rect x="8" y="8" width="13" height="13" rx="2"/>
+              </svg>
+              <svg class="copy-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </button><span class="copy-tooltip" role="status" aria-hidden="true"></span></span></li>
           <li>
             <span data-i18n="frame2_step_permissions"></span>
             <table>
@@ -495,6 +557,8 @@
       generate_password_button: "Generate strong password",
       show_password_button: "Show",
       hide_password_button: "Hide",
+      copy_button: "Copy",
+      copy_button_copied: "Copied!",
       dashboard_auth_ack_label: "I've saved these credentials somewhere safe — they can't be recovered later.",
       save_continue_button: "Save & Continue",
       err_dashboard_auth_empty: "Fill in a username and password first.",
@@ -642,6 +706,8 @@
       generate_password_button: "צור סיסמה חזקה",
       show_password_button: "הצג",
       hide_password_button: "הסתר",
+      copy_button: "העתק",
+      copy_button_copied: "הועתק!",
       dashboard_auth_ack_label: "שמרתי את פרטי ההתחברות האלה במקום בטוח — לא ניתן לשחזר אותם.",
       save_continue_button: "שמור והמשך",
       err_dashboard_auth_empty: "מלאו שם משתמש וסיסמה קודם.",
@@ -817,6 +883,7 @@
     // Re-applies the toggle's aria-label/title in the new language; the
     // function is the single place that string is resolved.
     setDashboardAuthPasswordVisibility(dashboardAuthPasswordVisible);
+    refreshCopyButtonLabels();
     if (currentRenderDeployErrorKey) {
       document.getElementById("render-deploy-error").textContent = t(currentRenderDeployErrorKey);
     }
@@ -1645,6 +1712,47 @@
     // Eye = "reveal it", crossed-out eye = "hide it again".
     document.getElementById("dashboard-auth-eye-open").hidden = visible;
     document.getElementById("dashboard-auth-eye-closed").hidden = !visible;
+  }
+
+  // Timers per copy-button id, so a second click before the "Copied!" state
+  // reverts doesn't leave a stale timeout racing a fresh one.
+  const copyButtonRevertTimers = {};
+
+  function setCopyButtonLabel(button) {
+    button.setAttribute("aria-label", t("copy_button"));
+    button.setAttribute("title", t("copy_button"));
+  }
+
+  function refreshCopyButtonLabels() {
+    document.querySelectorAll(".copy-btn").forEach((button) => {
+      if (!button.classList.contains("copied")) setCopyButtonLabel(button);
+    });
+  }
+
+  async function copyValueToClipboard(button) {
+    const targetId = button.getAttribute("data-copy-target");
+    const value = document.getElementById(targetId).textContent;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      return;
+    }
+    if (copyButtonRevertTimers[targetId]) clearTimeout(copyButtonRevertTimers[targetId]);
+    const tooltip = button.parentElement.querySelector(".copy-tooltip");
+    button.classList.add("copied");
+    button.setAttribute("aria-label", t("copy_button_copied"));
+    button.setAttribute("title", t("copy_button_copied"));
+    button.querySelector(".copy-icon").hidden = true;
+    button.querySelector(".copy-check").hidden = false;
+    tooltip.textContent = t("copy_button_copied");
+    tooltip.classList.add("show");
+    copyButtonRevertTimers[targetId] = setTimeout(() => {
+      button.classList.remove("copied");
+      setCopyButtonLabel(button);
+      button.querySelector(".copy-icon").hidden = false;
+      button.querySelector(".copy-check").hidden = true;
+      tooltip.classList.remove("show");
+    }, 2500);
   }
 
   function toggleDashboardAuthPasswordVisibility() {
@@ -2580,6 +2688,9 @@
     document.getElementById("dashboard-auth-submit").addEventListener("click", submitDashboardAuth);
     document.getElementById("dashboard-auth-generate-submit").addEventListener("click", fillGeneratedDashboardAuthPassword);
     document.getElementById("dashboard-auth-password-toggle").addEventListener("click", toggleDashboardAuthPasswordVisibility);
+    document.querySelectorAll(".copy-btn").forEach((button) => {
+      button.addEventListener("click", () => copyValueToClipboard(button));
+    });
     document.getElementById("render-deploy-trigger-submit").addEventListener("click", triggerRenderDeploy);
     document.getElementById("render-deploy-check-again-submit").addEventListener("click", checkRenderDeployStatusOnce);
     document.getElementById("github-app-validate-submit").addEventListener("click", validateGithubApp);
