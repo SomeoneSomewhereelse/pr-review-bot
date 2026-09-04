@@ -89,19 +89,22 @@ def test_landing_page_states_the_prerequisites_up_front():
 _SETUP = _ROOT / "guide" / "setup"
 
 
-def test_shared_pages_match_doctors_step_titles():
+def test_setup_pages_match_doctors_step_titles():
     """If the guide and doctor disagree about a step's name, an operator
     following one while running the other cannot tell where they are."""
     from bot.scripts import doctor
 
-    shared = [s for s in doctor.steps_for("local") if s.number <= 4]
     pages = {
         1: "01-prerequisites.md",
         2: "02-github-app.md",
         3: "03-install-app.md",
         4: "04-llm-provider.md",
+        5: "05-supabase.md",
+        6: "06-render.md",
+        7: "07-sync.md",
+        8: "08-pinger.md",
     }
-    for step in shared:
+    for step in doctor.steps_for():
         text = (_SETUP / pages[step.number]).read_text(encoding="utf-8")
         assert step.title in text, f"step {step.number} page must carry doctor's title"
 
@@ -122,15 +125,15 @@ def test_github_app_page_encodes_the_pem_with_the_project_script():
     assert "base64 -w0" not in text
 
 
-def test_install_app_page_sets_up_the_demo_repo_both_tracks_rely_on():
-    """Regression: both tracks' Step 8 needs a repo with push access, the App
-    installed on it, and GITHUB_TARGET_REPO set -- but nothing before either
-    track's Step 8 ever told the reader to arrange any of that, so a
-    fresh-account reader hit `seed_demo_pr` failing with no repo configured.
-    Step 3 is the one step already shared by both tracks that's about
-    installing the App on repos in the first place, so the fix lives here:
-    pick/create a repo before installing, then set GITHUB_TARGET_REPO to it
-    right away -- instead of leaving both to be discovered at Step 8."""
+def test_install_app_page_sets_up_the_demo_repo_step_8_relies_on():
+    """Regression: Step 8 needs a repo with push access, the App installed
+    on it, and GITHUB_TARGET_REPO set -- but nothing before Step 8 ever told
+    the reader to arrange any of that, so a fresh-account reader hit
+    `seed_demo_pr` failing with no repo configured. Step 3 is the step
+    already about installing the App on repos in the first place, so the fix
+    lives here: pick/create a repo before installing, then set
+    GITHUB_TARGET_REPO to it right away -- instead of leaving both to be
+    discovered at Step 8."""
     text = (_SETUP / "03-install-app.md").read_text(encoding="utf-8")
     assert "gh repo create" in text
     assert "GITHUB_TARGET_REPO=" in text
@@ -148,13 +151,12 @@ def test_install_app_page_creates_the_repo_with_a_default_branch():
     assert "--add-readme" in text
 
 
-def test_step_8_pages_point_back_to_step_3_instead_of_repeating_it():
+def test_step_8_page_points_back_to_step_3_instead_of_repeating_it():
     """The repo/App-install/GITHUB_TARGET_REPO prerequisite now lives once,
-    in Step 3 -- each track's Step 8 should link back to it rather than
-    re-explain it end to end."""
-    for path in (_SETUP / "local" / "08-run.md", _SETUP / "hosted" / "08-pinger.md"):
-        text = path.read_text(encoding="utf-8")
-        assert "../03-install-app.md" in text
+    in Step 3 -- Step 8 should link back to it rather than re-explain it
+    end to end."""
+    text = (_SETUP / "08-pinger.md").read_text(encoding="utf-8")
+    assert "03-install-app.md" in text
 
 
 def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
@@ -184,77 +186,19 @@ def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env(
     assert "uv run python -m bot.scripts.doctor" in step4
 
 
-def test_setup_index_sends_the_reader_to_a_track():
+def test_setup_index_names_all_eight_steps():
     text = (_SETUP / "index.md").read_text(encoding="utf-8")
-    assert "local/05" in text and "hosted/05" in text
-
-
-def test_local_track_pages_match_doctors_titles():
-    from bot.scripts import doctor
-
-    pages = {5: "05-postgres.md", 6: "06-tunnel.md", 7: "07-webhook.md", 8: "08-run.md"}
-    for step in doctor.steps_for("local"):
-        if step.number < 5:
-            continue
-        text = (_SETUP / "local" / pages[step.number]).read_text(encoding="utf-8")
-        assert step.title in text
-
-
-def test_tunnel_page_explains_the_ephemeral_url():
-    text = (_SETUP / "local" / "06-tunnel.md").read_text(encoding="utf-8")
-    assert "cloudflared" in text
-    assert "changes" in text.lower(), "the URL changing each restart must be stated"
-
-
-def test_tunnel_page_no_longer_points_at_manual_verify_step3():
-    """Regression: this milestone told the reader to run manual_verify_step3
-    against GITHUB_TARGET_REPO + PR #1 before either exists -- Step 3 leaves
-    GITHUB_TARGET_REPO unset by design, and the demo PR isn't opened until
-    Step 8's seed_demo_pr. On a fresh account with no repo/PR yet, the
-    script silently ran against an empty repo name and crashed with a raw
-    PyGithub 404 traceback instead of a clear error. doctor's own
-    app-permissions/github-install/target-repo checks already verify the
-    App auth and privileges live, so this milestone was redundant as well
-    as broken -- unwired rather than fixed, same as bot.scripts.init_env."""
-    text = (_SETUP / "local" / "06-tunnel.md").read_text(encoding="utf-8")
-    assert "manual_verify_step3" not in text
-
-
-def test_local_verify_page_uses_the_project_health_check():
-    """spec section 5: curl on Windows PowerShell aliases Invoke-WebRequest."""
-    text = (_SETUP / "local" / "07-webhook.md").read_text(encoding="utf-8")
-    assert "--health-only" in text
-    assert "curl " not in text
-
-
-def test_webhook_page_explains_the_chicken_and_egg_it_points_at():
-    """Regression: the page used to say '...see the chicken-and-egg note
-    below' with no note actually written anywhere on the page -- a dangling
-    forward-reference since the page's very first commit. Two things are
-    genuinely confusing to a first-time reader at this exact step and both
-    need to be explained inline: the webhook getting silently rewritten from
-    Step 2's placeholder, and check_health_endpoint (deploy.py) FAILing
-    because Step 8's local service isn't running yet."""
-    text = (_SETUP / "local" / "07-webhook.md").read_text(encoding="utf-8")
-    assert "chicken-and-egg note below" not in text
-    assert "chicken-and-egg" in text
-    assert "example.invalid/webhook" in text
-    assert "FAIL" in text and "Step 8" in text
-
-
-def test_hosted_track_pages_match_doctors_titles():
-    from bot.scripts import doctor
-
-    pages = {5: "05-supabase.md", 6: "06-render.md", 7: "07-sync.md", 8: "08-pinger.md"}
-    for step in doctor.steps_for("hosted"):
-        if step.number < 5:
-            continue
-        text = (_SETUP / "hosted" / pages[step.number]).read_text(encoding="utf-8")
-        assert step.title in text
+    for title in (
+        "Install prerequisites", "Create the GitHub App",
+        "Install the App on your repo(s)", "Configure an LLM provider",
+        "Create the Supabase project", "Create the Render service",
+        "Sync config and verify", "Add the keep-warm pinger",
+    ):
+        assert title in text
 
 
 def test_supabase_page_pins_the_session_pooler_port():
-    text = (_SETUP / "hosted" / "05-supabase.md").read_text(encoding="utf-8")
+    text = (_SETUP / "05-supabase.md").read_text(encoding="utf-8")
     assert "5432" in text and "6543" in text, "both ports named, so the wrong one is unmistakable"
 
 
@@ -267,7 +211,7 @@ def test_render_page_leaves_env_vars_blank_for_sync_env_to_push():
     just already created, this page now has the reader leave every var
     blank and get RENDER_API_KEY here instead, deferring all of it to
     Step 7 in one push -- so it must no longer instruct hand-entering vars."""
-    text = (_SETUP / "hosted" / "06-render.md").read_text(encoding="utf-8")
+    text = (_SETUP / "06-render.md").read_text(encoding="utf-8")
     assert "leave all of them blank" in text.lower() or "leave them blank" in text.lower()
     assert "RENDER_API_KEY" in text, "must say it is NOT a service env var"
     assert "Set exactly four env vars" not in text
@@ -278,19 +222,19 @@ def test_render_page_offers_the_point_at_upstream_option():
     forking for Render's Blueprint flow -- confirmed by hand -- so Step 6
     should offer it alongside forking/pushing a new repo, not just the two
     options that need push access."""
-    text = (_SETUP / "hosted" / "06-render.md").read_text(encoding="utf-8")
+    text = (_SETUP / "06-render.md").read_text(encoding="utf-8")
     assert "fork" in text.lower()
     assert "upstream" in text.lower()
 
 
 def test_sync_page_is_where_the_boot_vars_actually_get_pushed():
-    text = (_SETUP / "hosted" / "07-sync.md").read_text(encoding="utf-8")
+    text = (_SETUP / "07-sync.md").read_text(encoding="utf-8")
     assert "--sync-env" in text
     assert "Application startup complete" in text
 
 
 def test_pinger_page_warns_about_the_exact_url():
-    text = (_SETUP / "hosted" / "08-pinger.md").read_text(encoding="utf-8")
+    text = (_SETUP / "08-pinger.md").read_text(encoding="utf-8")
     assert "healthz" in text
     assert "HEAD" in text, "UptimeRobot's free tier sends HEAD, not GET"
 
