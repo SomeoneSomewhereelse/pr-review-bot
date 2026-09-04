@@ -111,6 +111,7 @@
   }
   .side-nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
   .side-nav .nav-item.active { border-color: var(--accent); color: var(--accent); }
+  .nav-item svg { width: 1.05rem; height: 1.05rem; display: block; flex: none; }
   .env-section {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -126,6 +127,57 @@
   #renderVarsTable th:last-child, #renderVarsTable td:last-child { width: 5.5rem; }
   .env-value-cell { display: flex; align-items: center; gap: 0.5rem; }
   #renderVarsTable input.env-value-input { flex: 1 1 auto; min-width: 0; font-family: monospace; }
+  #renderVarsTable select.env-value-input { flex: 1 1 auto; min-width: 0; }
+  select:disabled { opacity: 0.7; }
+  .field-error { color: var(--fail); font-size: 0.8rem; margin-top: 0.2rem; }
+  .field-hint { color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; }
+  .field-error .control { margin-inline-start: 0.4rem; padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+  /* Key cell: the var name plus an optional info icon+tooltip, matching the
+     onboarding wizard's icon-button convention (ghost button, currentColor,
+     theme tokens only -- no light/dark special-casing needed). */
+  .key-cell { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .info-wrap { position: relative; display: inline-flex; }
+  .info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    min-height: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 999px;
+    color: var(--text-muted);
+    cursor: help;
+  }
+  .info-icon:hover, .info-icon:focus-visible { color: var(--text); background: var(--surface-2); }
+  .info-icon svg { width: 1rem; height: 1rem; display: block; }
+  .info-tooltip {
+    position: absolute;
+    top: calc(100% + 0.3rem);
+    inset-inline-start: 0;
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: normal;
+    line-height: 1.3;
+    width: max-content;
+    max-width: min(80vw, 320px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .info-wrap:hover .info-tooltip, .info-wrap:focus-within .info-tooltip, .info-tooltip.show {
+    opacity: 1;
+    visibility: visible;
+  }
   #addVarForm { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem; }
   #addVarForm input { flex: 1 1 160px; min-width: 0; }
   .env-controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
@@ -329,8 +381,24 @@
   <main>
     <h1 data-i18n="dashboard_title"></h1>
     <nav class="side-nav">
-      <button class="control nav-item active" type="button" data-panel="statusPanel" data-i18n="nav_status"></button>
-      <button class="control nav-item" type="button" data-panel="environmentPanel" data-i18n="nav_environment"></button>
+      <button class="control nav-item active" type="button" data-panel="statusPanel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+        </svg>
+        <span data-i18n="nav_status"></span>
+      </button>
+      <button class="control nav-item" type="button" data-panel="environmentPanel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+          <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+          <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>
+          <line x1="17" y1="16" x2="23" y2="16"/>
+        </svg>
+        <span data-i18n="nav_environment"></span>
+      </button>
     </nav>
     <section id="statusPanel">
       <section id="errorBanner" hidden></section>
@@ -466,11 +534,15 @@
         env_delete: "Delete",
         env_config_model: "Model",
         env_config_key_slot: "Key slot",
-        env_refresh_models: "Refresh models",
         env_validating: "Checking…",
         env_valid: "✓ valid",
         env_invalid: "✗ invalid",
         env_fix_before_save: "Fix invalid fields before saving.",
+        env_model_load_failed: "Could not load models",
+        env_retry: "Retry",
+        env_info_label: "More info",
+        env_credential_slot_suffix: "(key slot {n})",
+        env_field_invalid: "Invalid {key}",
         env_guided_setup: "Guided setup…",
         env_guided_gemini: "Gemini key",
         env_guided_groq: "Groq key",
@@ -536,11 +608,15 @@
         env_delete: "מחק",
         env_config_model: "מודל",
         env_config_key_slot: "חריץ מפתח",
-        env_refresh_models: "רענן מודלים",
         env_validating: "בודק…",
         env_valid: "✓ תקין",
         env_invalid: "✗ לא תקין",
         env_fix_before_save: "תקן שדות לא תקינים לפני השמירה.",
+        env_model_load_failed: "לא ניתן היה לטעון מודלים",
+        env_retry: "ניסיון חוזר",
+        env_info_label: "מידע נוסף",
+        env_credential_slot_suffix: "(חריץ מפתח {n})",
+        env_field_invalid: "{key} לא תקין",
         env_guided_setup: "התקנה מודרכת…",
         env_guided_gemini: "מפתח Gemini",
         env_guided_groq: "מפתח Groq",
@@ -557,6 +633,110 @@
         env_delete_confirm_ok: "מחק בכל זאת",
       },
     };
+
+    // One-sentence explanations for the Environment tab's info-icon tooltips.
+    // Distilled from the comments already documenting these vars in
+    // bot/config.py, bot/config_deps.py and bot/render_client.py -- not new
+    // prose. A var with no entry here (e.g. something manually added via
+    // "Add var" that this project doesn't recognize) simply gets no icon.
+    const ENV_VAR_DESCRIPTIONS = {
+      en: {
+        GITHUB_APP_ID: "Numeric ID of the GitHub App this deployment authenticates as.",
+        GITHUB_APP_INSTALLATION_ID: "Which installation of the GitHub App this deployment acts through (auto-discovered during setup).",
+        GITHUB_APP_PRIVATE_KEY: "The GitHub App's private key (base64). Required at boot.",
+        GITHUB_WEBHOOK_SECRET: "Shared secret GitHub signs webhook payloads with, used to verify incoming webhooks are genuine.",
+        GITHUB_TARGET_REPO: "Comma-separated allowlist of repos to review. Empty means every repo the App's installation can see.",
+        PUBLIC_BASE_URL: "Override for this service's own public URL. Normally derived automatically; only needed if that derivation is wrong.",
+        DASHBOARD_USERNAME: "Username required to log into this dashboard.",
+        DASHBOARD_PASSWORD: "Password required to log into this dashboard.",
+        DASHBOARD_SESSION_SECRET: "Signs the dashboard's session cookie. Rotating it immediately logs out every active session.",
+        LLM_PROVIDER: "Which LLM provider (gemini, groq, or vertex) the bot currently reviews with.",
+        LLM_MODEL: "Gemini model used for code review when LLM_PROVIDER is gemini.",
+        GEMINI_API_KEY: "API key for Google's Gemini Developer API.",
+        GROQ_API_KEY: "API key for Groq.",
+        GROQ_MODEL: "Groq model used for code review when LLM_PROVIDER is groq.",
+        VERTEX_MODEL: "Vertex AI model used for code review when LLM_PROVIDER is vertex.",
+        GCP_PROJECT: "GCP project Vertex AI calls are scoped to. Optional — defaults to the project embedded in the service-account key.",
+        GCP_LOCATION: "Vertex AI regional endpoint to call (e.g. us-central1).",
+        GCP_SERVICE_ACCOUNT_KEY: "Base64-encoded GCP service-account JSON credential used for Vertex AI.",
+        LLM_REQUEST_TIMEOUT_SECONDS: "Maximum time to wait for a single LLM response before giving up.",
+        DATABASE_URL: "Postgres connection string for the review queue. Required at boot.",
+        DISPATCHER_IDLE_SLEEP_SECONDS: "How long the dispatcher sleeps between polls when the queue is empty.",
+        DEFAULT_RETRY_AFTER_SECONDS: "Fallback delay before retrying a review when no other backoff applies.",
+        DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS: "Starting backoff delay after a review failure, doubling on each further failure up to the max below.",
+        DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS: "Upper bound on the failure backoff delay.",
+        DISPATCHER_MAX_FAILURE_ATTEMPTS: "How many times a review is retried after failing before being given up on.",
+        DISPATCHER_MAX_NOTICE_POST_ATTEMPTS: "How many times posting a PR notice comment is retried before giving up.",
+        DISPATCHER_MIN_RETRY_AFTER_SECONDS: "Smallest allowed delay before a retry, regardless of what triggered it.",
+        DISPATCHER_BACKOFF_JITTER_SECONDS: "Random jitter added to backoff delays, to avoid retries landing in lockstep.",
+        DISPATCHER_REREVIEW_COOLDOWN_SECONDS: "Minimum time between re-reviews of the same PR after new commits.",
+        DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS: "Upper bound the re-review cooldown can escalate to.",
+        DISPATCHER_REREVIEW_COOLDOWN_FACTOR: "Multiplier applied to the re-review cooldown each time it escalates.",
+        DISPATCHER_NOTICE_SWEEP_BATCH_SIZE: "How many pending notice comments are swept per batch.",
+        RENDER_SERVICE_NAME: "Name of this Render service, used to look itself up via the Render API.",
+        REVIEW_DRAFT_PRS: "Whether draft PRs get reviewed on push (marking a PR ready for review always triggers one either way).",
+        KEY_USAGE_TOKEN_CAP: "Daily per-key token usage cap. Unset disables the cap entirely.",
+        KEY_USAGE_RESET_TIME_UTC: "Wall-clock UTC time the daily per-key usage cap resets at.",
+        UPTIMEROBOT_API_KEY: "UptimeRobot key used only by operator tooling on your own machine — never read by the deployed service.",
+        RENDER_API_KEY: "Render API key this dashboard itself uses to read/write this service's own environment. Deleting it would strand this Environment tab.",
+      },
+      he: {
+        GITHUB_APP_ID: "המספר המזהה של אפליקציית ה-GitHub שדרכה שירות זה מתאמת.",
+        GITHUB_APP_INSTALLATION_ID: "מזהה ההתקנה של אפליקציית ה-GitHub שדרכה שירות זה פועל (מתגלה אוטומטית בהתקנה).",
+        GITHUB_APP_PRIVATE_KEY: "המפתח הפרטי של אפליקציית ה-GitHub (בבסיס 64). נדרש בעלייה.",
+        GITHUB_WEBHOOK_SECRET: "סוד משותף ש-GitHub חותם איתו את גופי ה-webhook, משמש לאימות שה-webhook הנכנס אכן הגיע מ-GitHub.",
+        GITHUB_TARGET_REPO: "רשימת מאגרים מופרדת בפסיקים לבדיקה. ריק פירושו כל מאגר שההתקנה של האפליקציה יכולה לראות.",
+        PUBLIC_BASE_URL: "דריסה לכתובת הציבורית של השירות עצמו. נגזרת אוטומטית כברירת מחדל; נדרשת רק אם הגזירה הזו שגויה.",
+        DASHBOARD_USERNAME: "שם המשתמש הנדרש כדי להתחבר ללוח הבקרה הזה.",
+        DASHBOARD_PASSWORD: "הסיסמה הנדרשת כדי להתחבר ללוח הבקרה הזה.",
+        DASHBOARD_SESSION_SECRET: "חותם את עוגיית ההפעלה של לוח הבקרה. סיבוב הערך הזה מתנתק מכל ההפעלות הפעילות באופן מיידי.",
+        LLM_PROVIDER: "איזה ספק LLM (gemini, groq או vertex) הבוט משתמש בו כרגע לבדיקת קוד.",
+        LLM_MODEL: "מודל Gemini המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא gemini.",
+        GEMINI_API_KEY: "מפתח API עבור Gemini Developer API של גוגל.",
+        GROQ_API_KEY: "מפתח API עבור Groq.",
+        GROQ_MODEL: "מודל Groq המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא groq.",
+        VERTEX_MODEL: "מודל Vertex AI המשמש לבדיקת קוד כאשר LLM_PROVIDER הוא vertex.",
+        GCP_PROJECT: "פרויקט ה-GCP שאליו קריאות Vertex AI מוגבלות. אופציונלי — כברירת מחדל נלקח הפרויקט המוטבע במפתח חשבון השירות.",
+        GCP_LOCATION: "האזור האזורי של Vertex AI שאליו פונים (לדוגמה us-central1).",
+        GCP_SERVICE_ACCOUNT_KEY: "אישור JSON של חשבון שירות GCP, מקודד בבסיס 64, המשמש עבור Vertex AI.",
+        LLM_REQUEST_TIMEOUT_SECONDS: "זמן ההמתנה המרבי לתשובה אחת מה-LLM לפני נטישה.",
+        DATABASE_URL: "מחרוזת החיבור ל-Postgres של תור הבדיקות. נדרש בעלייה.",
+        DISPATCHER_IDLE_SLEEP_SECONDS: "כמה זמן המפיץ נח בין בדיקות כאשר התור ריק.",
+        DEFAULT_RETRY_AFTER_SECONDS: "השהיה כברירת מחדל לפני ניסיון חזרה על בדיקה כשאין השהיה אחרת שחלה.",
+        DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS: "השהיית הנסיגה ההתחלתית לאחר כשל בבדיקה, מוכפלת בכל כשל נוסף עד למקסימום שמופיע להלן.",
+        DISPATCHER_FAILURE_MAX_BACKOFF_SECONDS: "הגבול העליון להשהיית הנסיגה לאחר כשל.",
+        DISPATCHER_MAX_FAILURE_ATTEMPTS: "כמה פעמים בדיקה תיוסה שוב לאחר כשל לפני שנוטשים אותה.",
+        DISPATCHER_MAX_NOTICE_POST_ATTEMPTS: "כמה פעמים פרסום תגובת הודעה ב-PR ינוסה שוב לפני נטישה.",
+        DISPATCHER_MIN_RETRY_AFTER_SECONDS: "ההשהיה המינימלית המותרת לפני ניסיון חזרה, ללא קשר לגורם לה.",
+        DISPATCHER_BACKOFF_JITTER_SECONDS: "רעש אקראי המתווסף להשהיות הנסיגה, כדי למנוע ניסיונות חזרה בו-זמניים.",
+        DISPATCHER_REREVIEW_COOLDOWN_SECONDS: "הזמן המינימלי בין בדיקות חוזרות לאותו PR לאחר קומיטים חדשים.",
+        DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS: "הגבול העליון שאליו צינון הבדיקה החוזרת יכול לטפס.",
+        DISPATCHER_REREVIEW_COOLDOWN_FACTOR: "המקדם המוחל על צינון הבדיקה החוזרת בכל פעם שהוא מטפס.",
+        DISPATCHER_NOTICE_SWEEP_BATCH_SIZE: "כמה תגובות הודעה ממתינות נאספות בכל אצווה.",
+        RENDER_SERVICE_NAME: "שם שירות ה-Render הזה, המשמש אותו לאתר את עצמו דרך ה-API של Render.",
+        REVIEW_DRAFT_PRS: "האם PR-ים בטיוטה נבדקים בעת push (סימון PR כמוכן לבדיקה מפעיל בדיקה בכל מקרה).",
+        KEY_USAGE_TOKEN_CAP: "תקרת שימוש יומית בטוקנים לכל מפתח. השארה ללא הגדרה מבטלת את התקרה כליל.",
+        KEY_USAGE_RESET_TIME_UTC: "שעת UTC שבה תקרת השימוש היומית לכל מפתח מתאפסת.",
+        UPTIMEROBOT_API_KEY: "מפתח UptimeRobot המשמש רק כלי הפעלה מקומיים על המחשב שלך — השירות הפרוס לעולם לא קורא אותו.",
+        RENDER_API_KEY: "מפתח ה-API של Render שבו לוח הבקרה עצמו משתמש לקריאה/כתיבה של סביבת השירות הזה. מחיקתו תשאיר את לשונית הסביבה הזו תקועה.",
+      },
+    };
+
+    const CREDENTIAL_SLOT_BASE_VARS = ["GEMINI_API_KEY", "GROQ_API_KEY", "GCP_SERVICE_ACCOUNT_KEY"];
+
+    function envVarDescription(key) {
+      let base = key;
+      let slot = 0;
+      for (const candidate of CREDENTIAL_SLOT_BASE_VARS) {
+        if (key === candidate) { base = candidate; slot = 0; break; }
+        const m = key.match(new RegExp(`^${candidate}_(\\d+)$`));
+        if (m) { base = candidate; slot = Number(m[1]); break; }
+      }
+      const table = ENV_VAR_DESCRIPTIONS[currentLang] || ENV_VAR_DESCRIPTIONS.en;
+      const text = table[base] || ENV_VAR_DESCRIPTIONS.en[base];
+      if (!text) return null;
+      return slot > 0 ? `${text} ${t("env_credential_slot_suffix").replace("{n}", String(slot))}` : text;
+    }
 
     const SPECIALIST_KEY = {
       Security: "sp_name_security",
@@ -827,13 +1007,96 @@
     const stagedEdits = new Map();   // key -> new value
     const stagedDeletes = new Set();
     const revealed = new Set();
-    let environmentLoaded = false;
-    // Mirrors dashboard/environment.py's _DIRECT_EDIT_VARS -- vars that get
-    // blur-time validation wherever they're edited, including directly in
-    // the render-vars table (not just the config panel's model inputs).
-    const DIRECT_EDIT_VARS = new Set([
-      "LLM_MODEL", "GROQ_MODEL", "VERTEX_MODEL", "GCP_PROJECT", "GCP_LOCATION",
-    ]);
+    // Mirrors dashboard/environment.py's _DIRECT_EDIT_VARS, minus the
+    // *_MODEL vars -- those are now <select>s fed by the live catalog (see
+    // MODEL_PROVIDER_FOR_VAR below) and can't hold an invalid value in the
+    // first place, so they no longer need blur-time validation here.
+    const DIRECT_EDIT_VARS = new Set(["GCP_PROJECT", "GCP_LOCATION"]);
+
+    const MODEL_PROVIDER_FOR_VAR = { LLM_MODEL: "gemini", GROQ_MODEL: "groq", VERTEX_MODEL: "vertex" };
+
+    // Per-provider live model list, fetched once whenever the Environment
+    // tab is switched into (see the nav-item click handler) and reused by
+    // both the render-vars table's model rows and the config panel's model
+    // rows -- one fetch feeds both surfaces.
+    let modelCatalog = {
+      gemini: { status: "idle", models: [], error: null },
+      groq: { status: "idle", models: [], error: null },
+      vertex: { status: "idle", models: [], error: null },
+    };
+
+    async function loadModelCatalog(provider) {
+      modelCatalog[provider] = { status: "loading", models: [], error: null };
+      renderRenderVarsTable();
+      renderProviderModelRows();
+      let data;
+      try {
+        const resp = await fetch(`/api/environment/credential/${provider}/models`);
+        data = await resp.json();
+      } catch {
+        data = { ok: false, models: null, error: "network_error" };
+      }
+      modelCatalog[provider] = data.ok
+        ? { status: "ok", models: data.models || [], error: null }
+        : { status: "error", models: [], error: data.error };
+      renderRenderVarsTable();
+      renderProviderModelRows();
+    }
+
+    function loadAllModelCatalogs() {
+      return Promise.all(Object.keys(modelCatalog).map(loadModelCatalog));
+    }
+
+    // Options for a *_MODEL <select>: the live catalog when loaded, plus the
+    // currently-set value pinned in even if the catalog doesn't (currently)
+    // contain it -- e.g. a deprecated/renamed model -- so the field is never
+    // silently forced to change out from under whatever is actually set.
+    function modelOptionsHtml(provider, currentValue) {
+      const cat = modelCatalog[provider];
+      if (cat.status === "ok") {
+        const list = !currentValue || cat.models.includes(currentValue)
+          ? cat.models
+          : [currentValue, ...cat.models];
+        return list.map((m) => `<option value="${esc(m)}" ${m === currentValue ? "selected" : ""}>${esc(m)}</option>`).join("");
+      }
+      return currentValue
+        ? `<option value="${esc(currentValue)}" selected>${esc(currentValue)}</option>`
+        : "";
+    }
+
+    function modelStatusHtml(provider) {
+      const cat = modelCatalog[provider];
+      if (cat.status === "loading") return `<div class="field-hint">${t("env_validating")}</div>`;
+      if (cat.status === "error") {
+        return `<div class="field-error">* ${t("env_model_load_failed")} (${esc(cat.error)})
+          <button type="button" class="control model-retry" data-provider="${provider}">${t("env_retry")}</button>
+        </div>`;
+      }
+      return "";
+    }
+
+    // Var name plus an optional info-icon tooltip -- a var with no entry in
+    // ENV_VAR_DESCRIPTIONS just renders as plain text, no icon.
+    function keyCellHtml(key) {
+      const desc = envVarDescription(key);
+      if (!desc) return `<span class="key-cell">${esc(key)}</span>`;
+      return `
+        <span class="key-cell">
+          ${esc(key)}
+          <span class="info-wrap">
+            <button type="button" class="info-icon" data-action="info" aria-label="${esc(t("env_info_label"))}" title="${esc(desc)}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/>
+                <line x1="12" y1="11" x2="12" y2="16"/>
+                <circle cx="12" cy="7.5" r="0.75" fill="currentColor" stroke="none"/>
+              </svg>
+            </button>
+            <span class="info-tooltip" role="tooltip">${esc(desc)}</span>
+          </span>
+        </span>
+      `;
+    }
 
     function maskedValue(value) {
       return "•".repeat(Math.min(value.length, 24)) || "—";
@@ -845,13 +1108,32 @@
         .filter((v) => !stagedDeletes.has(v.key))
         .map((v) => {
           const displayValue = stagedEdits.has(v.key) ? stagedEdits.get(v.key) : v.value;
-          const isRevealed = revealed.has(v.key);
           const deleteBtn = v.protected
             ? ""
             : `<button type="button" class="control" data-action="delete" data-key="${esc(v.key)}">${t("env_delete")}</button>`;
+          const provider = MODEL_PROVIDER_FOR_VAR[v.key];
+          if (provider) {
+            const disabled = modelCatalog[provider].status !== "ok";
+            return `
+              <tr data-key="${esc(v.key)}">
+                <td>${keyCellHtml(v.key)}</td>
+                <td>
+                  <div class="env-value-cell">
+                    <select class="env-value-input model-select" data-key="${esc(v.key)}"
+                      data-provider="${provider}" ${disabled ? "disabled" : ""}>
+                      ${modelOptionsHtml(provider, displayValue)}
+                    </select>
+                  </div>
+                  ${modelStatusHtml(provider)}
+                </td>
+                <td>${deleteBtn}</td>
+              </tr>
+            `;
+          }
+          const isRevealed = revealed.has(v.key);
           return `
             <tr data-key="${esc(v.key)}">
-              <td>${esc(v.key)}</td>
+              <td>${keyCellHtml(v.key)}</td>
               <td>
                 <div class="env-value-cell">
                   <input type="text" class="env-value-input" data-key="${esc(v.key)}"
@@ -861,6 +1143,7 @@
                     ${isRevealed ? t("env_hide") : t("env_reveal")}
                   </button>
                 </div>
+                <div class="field-error" data-error-for="${esc(v.key)}" hidden></div>
               </td>
               <td>${deleteBtn}</td>
             </tr>
@@ -892,7 +1175,24 @@
           await fetchEnvironmentConfig();
         });
       });
-      tbody.querySelectorAll(".env-value-input:not([readonly])").forEach((input) => {
+      tbody.querySelectorAll('[data-action="info"]').forEach((btn) => {
+        btn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const tooltip = btn.nextElementSibling;
+          const wasShown = tooltip.classList.contains("show");
+          document.querySelectorAll(".info-tooltip.show").forEach((el) => el.classList.remove("show"));
+          if (!wasShown) tooltip.classList.add("show");
+        });
+      });
+      tbody.querySelectorAll(".model-retry").forEach((btn) => {
+        btn.addEventListener("click", () => loadModelCatalog(btn.getAttribute("data-provider")));
+      });
+      tbody.querySelectorAll("select.model-select").forEach((select) => {
+        select.addEventListener("change", () => {
+          stagedEdits.set(select.getAttribute("data-key"), select.value);
+        });
+      });
+      tbody.querySelectorAll(".env-value-input:not([readonly]):not(.model-select)").forEach((input) => {
         input.addEventListener("input", () => {
           stagedEdits.set(input.getAttribute("data-key"), input.value);
         });
@@ -905,7 +1205,17 @@
               body: JSON.stringify({ value: input.value }),
             });
             const result = await resp.json();
-            if (result.ok) { invalidRenderFields.delete(key); } else { invalidRenderFields.add(key); }
+            const errorEl = tbody.querySelector(`[data-error-for="${key}"]`);
+            if (result.ok) {
+              invalidRenderFields.delete(key);
+              if (errorEl) errorEl.hidden = true;
+            } else {
+              invalidRenderFields.add(key);
+              if (errorEl) {
+                errorEl.hidden = false;
+                errorEl.textContent = `* ${t("env_field_invalid").replace("{key}", key)} (${result.error})`;
+              }
+            }
             updateSaveGuards();
           });
         }
@@ -1137,14 +1447,11 @@
     document.getElementById("saveRenderVarsBtn").addEventListener("click", saveRenderVars);
 
     const LLM_PROVIDERS = ["gemini", "groq", "vertex"];
-    const MODEL_VAR_FOR_PROVIDER = { gemini: "LLM_MODEL", groq: "GROQ_MODEL", vertex: "VERTEX_MODEL" };
     let currentConfig = { model: {}, key_index: {} };
     let currentAvailableKeySlots = { gemini: [], groq: [], vertex: [] };
-    // Scoped separately so an invalid GCP_PROJECT/GCP_LOCATION/model field
-    // edited directly in the render-vars table only blocks the render-vars
-    // Save button, and an invalid model field in the config panel only
-    // blocks the config Save button -- neither should block unrelated edits
-    // (e.g. a cooldown-tuning change) in the other section.
+    // Scoped separately so an invalid GCP_PROJECT/GCP_LOCATION field edited
+    // directly in the render-vars table only blocks the render-vars Save
+    // button, never the config panel's Save button (or vice versa).
     const invalidRenderFields = new Set();
     const invalidConfigFields = new Set();
 
@@ -1162,6 +1469,11 @@
         const slotOptions = slots
           .map((s) => `<option value="${s}" ${String(s) === String(currentSlot) ? "selected" : ""}>${s}</option>`)
           .join("");
+        const disabled = modelCatalog[provider].status !== "ok";
+        // A blank leading option means "no override" -- distinct from the
+        // live catalog's own entries, and always available even while the
+        // catalog is loading/unavailable so the field can still be cleared.
+        const modelOptions = `<option value=""></option>${modelOptionsHtml(provider, currentModel)}`;
         return `
           <div class="provider-model-row" data-provider="${provider}">
             <span class="provider-name">${esc(provider)}</span>
@@ -1171,65 +1483,16 @@
               ${slotOptions}
             </select>
             <label>${t("env_config_model")}</label>
-            <input type="text" class="cfg-model" data-provider="${provider}" value="${esc(currentModel)}">
-            <button type="button" class="control cfg-refresh-models" data-provider="${provider}">${t("env_refresh_models")}</button>
-            <span class="cfg-model-status" data-provider="${provider}"></span>
+            <select class="cfg-model" data-provider="${provider}" ${disabled ? "disabled" : ""}>
+              ${modelOptions}
+            </select>
+            <span class="cfg-model-status" data-provider="${provider}">${modelStatusHtml(provider)}</span>
           </div>
         `;
       }).join("");
 
-      container.querySelectorAll(".cfg-refresh-models").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          const provider = btn.getAttribute("data-provider");
-          const statusEl = container.querySelector(`.cfg-model-status[data-provider="${provider}"]`);
-          statusEl.textContent = t("env_validating");
-          const resp = await fetch(`/api/environment/credential/${provider}/models`);
-          const data = await resp.json();
-          if (!data.ok) {
-            statusEl.textContent = `${t("env_invalid")} (${data.error})`;
-            return;
-          }
-          statusEl.textContent = "";
-          const input = container.querySelector(`.cfg-model[data-provider="${provider}"]`);
-          const datalistId = `models-${provider}`;
-          let datalist = document.getElementById(datalistId);
-          if (!datalist) {
-            datalist = document.createElement("datalist");
-            datalist.id = datalistId;
-            document.body.appendChild(datalist);
-            input.setAttribute("list", datalistId);
-          }
-          datalist.innerHTML = (data.models || []).map((m) => `<option value="${esc(m)}">`).join("");
-        });
-      });
-
-      container.querySelectorAll(".cfg-model").forEach((input) => {
-        input.addEventListener("blur", async () => {
-          const provider = input.getAttribute("data-provider");
-          const varName = MODEL_VAR_FOR_PROVIDER[provider];
-          const statusEl = container.querySelector(`.cfg-model-status[data-provider="${provider}"]`);
-          if (!input.value) {
-            statusEl.textContent = "";
-            invalidConfigFields.delete(varName);
-            updateSaveGuards();
-            return;
-          }
-          statusEl.textContent = t("env_validating");
-          const resp = await fetch(`/api/environment/validate/${varName}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ value: input.value }),
-          });
-          const result = await resp.json();
-          if (result.ok) {
-            statusEl.textContent = t("env_valid");
-            invalidConfigFields.delete(varName);
-          } else {
-            statusEl.textContent = `${t("env_invalid")} (${result.error})`;
-            invalidConfigFields.add(varName);
-          }
-          updateSaveGuards();
-        });
+      container.querySelectorAll(".model-retry").forEach((btn) => {
+        btn.addEventListener("click", () => loadModelCatalog(btn.getAttribute("data-provider")));
       });
     }
 
@@ -1293,17 +1556,30 @@
 
     document.getElementById("saveConfigBtn").addEventListener("click", saveConfig);
 
+    // Closing any open info-tooltip on an outside click/tap -- the tooltips
+    // themselves are toggled open by their own info-icon click handler
+    // (see keyCellHtml/renderRenderVarsTable), never by this listener.
+    document.addEventListener("click", () => {
+      document.querySelectorAll(".info-tooltip.show").forEach((el) => el.classList.remove("show"));
+    });
+
     document.querySelectorAll(".nav-item").forEach((btn) => {
       btn.addEventListener("click", async () => {
+        const alreadyActive = btn.classList.contains("active");
         document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         const targetId = btn.getAttribute("data-panel");
         document.getElementById("statusPanel").hidden = targetId !== "statusPanel";
         document.getElementById("environmentPanel").hidden = targetId !== "environmentPanel";
-        if (targetId === "environmentPanel" && !environmentLoaded) {
-          environmentLoaded = true;
+        // Refetch every time the Environment tab is switched into (not on a
+        // repeat click while it's already active) -- Render env vars and
+        // runtime_config can change from outside this page (another
+        // operator, a script), so a stale in-memory copy from an earlier
+        // visit to this tab shouldn't linger for the rest of the session.
+        if (targetId === "environmentPanel" && !alreadyActive) {
           await fetchEnvironmentRender();
           await fetchEnvironmentConfig();
+          await loadAllModelCatalogs();
         }
       });
     });
