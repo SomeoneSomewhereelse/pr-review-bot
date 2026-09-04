@@ -180,7 +180,7 @@ this page, then run `uv run pytest`.
 `<your-fork-or-clone-url>` is whatever URL you're getting this project's
 source from — your own fork if you plan to push changes anywhere, or a
 direct clone of the upstream repo otherwise; either works equally well for
-running the bot *locally*. The Hosted track's Step 6 has one more wrinkle:
+getting the checkout running. Step 6 has one more wrinkle:
 Render needs an actual Git repo URL to build from, and the upstream one
 works too, with tradeoffs — see that step for the options.
 

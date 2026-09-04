@@ -25,10 +25,9 @@ fill in the form:
   the obvious choice (e.g. `pr-review-engine`) will likely already be
   taken. Pick your own.
 - **Homepage URL** — required by the form, but there's no real URL yet:
-  the tunnel (Local track) or Render URL (Hosted track) isn't created
-  until Step 6. Enter the obviously-fake `https://example.invalid` rather
-  than a real-looking placeholder that could be mistaken for a working
-  link.
+  the Render URL isn't created until Step 6. Enter the obviously-fake
+  `https://example.invalid` rather than a real-looking placeholder that
+  could be mistaken for a working link.
 - **Webhook → Active** — check it.
 - **Webhook → Webhook URL** — same placeholder, with the path this
   project's webhook handler expects: `https://example.invalid/webhook`.

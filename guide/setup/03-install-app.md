@@ -6,7 +6,7 @@ install itself, so there's no CLI or script for it.
 ## Pick a repo before you install
 
 Whichever repo(s) you install the App on below is also what Step 8 — the
-last step of *either* track — uses to open a real demo PR. Decide that now,
+last step — uses to open a real demo PR. Decide that now,
 rather than discovering the gap when that step's `seed_demo_pr` fails
 because no repo was ever set. If you don't already have one you're happy
 pushing throwaway commits to, create one (needs `gh` from Step 1,
@@ -90,7 +90,7 @@ in `.env.config`, to the repo you just installed on:
 GITHUB_TARGET_REPO=<you>/pr-review-bot-demo
 ```
 
-Step 8 (both tracks) needs a concrete answer to "which repo does the demo PR
+Step 8 needs a concrete answer to "which repo does the demo PR
 go on", and `doctor`'s `target-repo` row and `bot/scripts/seed_demo_pr` both read
 this exact same setting — so setting it here, once, means Step 8 needs no
 further setup, and re-running `doctor` from this point on actually exercises

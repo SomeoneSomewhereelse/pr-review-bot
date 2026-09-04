@@ -1,7 +1,7 @@
 # Step 5: Create the Supabase project
 
-The hosted track's durable queue lives in Supabase Postgres. `store.py` is
-psycopg3-only, so a real reachable Postgres is a hard requirement.
+The durable queue lives in Supabase Postgres. `store.py` is psycopg3-only,
+so a real reachable Postgres is a hard requirement.
 
 ## Create it
 

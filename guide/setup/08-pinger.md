@@ -31,15 +31,17 @@ polls the queue continuously, so pinging `/healthz` guarantees activity.
 UptimeRobot's free tier sends `HEAD` rather than `GET`, which is why
 `/healthz` answers both verbs.
 
-## Optional: let doctor verify it
+## Let doctor verify it
 
-Set `UPTIMEROBOT_API_KEY` locally if you want `doctor`/`deploy` to verify
-the monitor's existence and interval rather than report `SKIPPED`.
+`UPTIMEROBOT_API_KEY` is required (not just recommended) — without it,
+`doctor`/`deploy`'s `uptime-pinger` check reports `FAIL`, not `SKIPPED`. Set
+it locally so `doctor`/`deploy` can verify the monitor's existence and
+interval.
 
 ## Your first review
 
 This uses the repo you picked, installed the App on, and set as
-`GITHUB_TARGET_REPO` back in [Step 3](../03-install-app.md) — that setting
+`GITHUB_TARGET_REPO` back in [Step 3](03-install-app.md) — that setting
 only needs to exist on your own machine for this demo, since `seed_demo_pr`
 runs entirely locally; it doesn't need to be pushed to Render (the deployed
 service's own copy of `GITHUB_TARGET_REPO` is a separate, still-optional
@@ -79,5 +81,4 @@ clone, reviewed automatically, no manual step in between.
 ## Done
 
 All eight steps are complete. `uv run python -m bot.scripts.doctor` should now
-report every row `PASS` (or `SKIPPED` where a credential like
-`UPTIMEROBOT_API_KEY` was left unset by choice).
+report every row `PASS`.

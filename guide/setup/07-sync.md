@@ -19,7 +19,7 @@ running one, with `RENDER_API_KEY` (Step 6) already set locally:
     uv run python -m bot.scripts.deploy --sync-env
     ```
 
-See [What `--sync-env` pushes](../../reference/sync-env.md) for the exact
+See [What `--sync-env` pushes](../reference/sync-env.md) for the exact
 push set — it's provider-derived, not a fixed list, so it's documented
 there rather than restated here.
 

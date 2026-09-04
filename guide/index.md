@@ -6,9 +6,9 @@ the results as a single comment on the PR itself. Three specialists run in
 parallel, and later pushes edit that same comment in place rather than
 piling up new ones.
 
-**Needs:** Python 3.12, [uv](https://docs.astral.sh/uv/), and a Postgres you
-can reach (local or a free [Supabase](https://supabase.com) project) —
-budget about 30 minutes for a first working review.
+**Needs:** Python 3.12, [uv](https://docs.astral.sh/uv/), and a free
+[Supabase](https://supabase.com) project — budget about 30 minutes for a
+first working review.
 
 <style>
 .flow-diagram {
@@ -221,16 +221,6 @@ _3 specialists · llama-3.3-70b-versatile (groq) · 4.2s · ~$0.0021_
 
 If a specialist's own check fails outright, its section says so plainly
 instead of vanishing — partial failure is always visible, never silent.
-
-## Two tracks
-
-- **Local** — run the engine on your own machine against a webhook-forwarding
-  tool, for development and debugging.
-- **Hosted** — deploy to Render with a real GitHub webhook, for a durable,
-  always-on reviewer.
-
-Both are covered by the same [setup guide](setup/index.md), which shares its
-first four steps regardless of which track you pick.
 
 ## The one command to remember
 

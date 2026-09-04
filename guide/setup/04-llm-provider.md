@@ -53,6 +53,4 @@ project has verified rates for.
 ## Next
 
 Steps 1–4 are done. Continue to
-[local/05-postgres.md](local/05-postgres.md) (Local track) or
-[hosted/05-supabase.md](hosted/05-supabase.md) (Hosted track) — see the
-[setup overview](index.md) if you haven't chosen one yet.
+[Step 5: create the Supabase project](05-supabase.md).
