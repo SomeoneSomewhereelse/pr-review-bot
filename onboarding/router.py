@@ -137,10 +137,9 @@ class UptimeRobotCreateMonitorRequest(BaseModel):
         relative path "/healthz", which would be POSTed to UptimeRobot as a
         monitor URL. Rejecting it here turns a nonsense monitor (or an
         opaque provider-side 400 surfaced as `request_rejected`) into an
-        honest 422. Same strip-then-validate shape as onboarding/config.py's
-        public_base_url validator; no shape/regex check beyond that, since
-        this value is written by the wizard itself (sub-project 6's forward
-        contract), not typed by the visitor.
+        honest 422. No shape/regex check beyond strip-then-require-non-empty,
+        since this value is written by the wizard itself (sub-project 6's
+        forward contract), not typed by the visitor.
         """
         value = value.strip()
         if not value:

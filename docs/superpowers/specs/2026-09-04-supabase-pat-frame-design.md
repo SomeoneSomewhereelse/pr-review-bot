@@ -115,9 +115,19 @@ replacement setting — the PAT is entirely visitor-supplied.
 rename in `router.py`, not a migration).
 
 **`onboarding/.env.example`:** delete the `SUPABASE_OAUTH_CLIENT_ID=` /
-`SUPABASE_OAUTH_CLIENT_SECRET=` lines (confirmed: neither
-`.env.config.example` file references this credential — both are
-unaffected, operational-config-only templates).
+`SUPABASE_OAUTH_CLIENT_SECRET=` lines (confirmed: `bot/.env.config.example`
+doesn't reference this credential at all — unaffected, operational-
+config-only template).
+
+**`onboarding/.env.config.example`:** deleted outright, separately from
+this credential swap — a 2026-09-04 audit found its only real setting
+(`PUBLIC_BASE_URL`) was already stale before this design (the setting was
+removed from `onboarding/config.py` on 2026-08-31; the file's own comment
+still cited GitHub's Manifest flow and Supabase's OAuth authorize screen,
+both gone), and `onboarding/config.py`'s `Settings` has no `env_file`
+configured at all, unlike `bot/config.py`'s — so the file was never
+actually loaded by anything. With that block removed nothing but header
+comments remained, so the file was deleted rather than left empty.
 
 ## 4. Frontend changes (`onboarding/static/index.html`)
 
