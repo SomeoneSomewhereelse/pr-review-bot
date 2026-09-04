@@ -462,9 +462,11 @@ def test_check_config_reports_a_missing_private_key_as_missing(complete_config, 
     assert "GITHUB_APP_PRIVATE_KEY" in result.detail
 
 
-def test_boot_credentials_live_skips_without_a_render_api_key(monkeypatch):
+def test_boot_credentials_live_fails_without_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
-    assert deploy.check_boot_credentials_live().status == "SKIPPED"
+    result = deploy.check_boot_credentials_live()
+    assert result.status == "FAIL"
+    assert "RENDER_API_KEY" in result.detail
 
 
 def test_boot_credentials_live_fails_when_no_service_found(monkeypatch):
@@ -1089,10 +1091,10 @@ def _deploy_list(status):
     return [{"deploy": {"id": "dep-1", "status": status}}]
 
 
-def test_render_service_skips_with_a_hint_when_key_unset(monkeypatch):
+def test_render_service_fails_with_a_hint_when_key_unset(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
     result = deploy.check_render_service()
-    assert result.status == "SKIPPED"
+    assert result.status == "FAIL"
     assert "RENDER_API_KEY" in result.detail
 
 
@@ -1243,10 +1245,10 @@ def _monitors(*monitors):
     return {"stat": "ok", "monitors": list(monitors)}
 
 
-def test_uptime_pinger_skips_with_a_hint_when_key_unset(monkeypatch):
+def test_uptime_pinger_fails_with_a_hint_when_key_unset(monkeypatch):
     monkeypatch.setattr(settings, "uptimerobot_api_key", "")
     result = deploy.check_uptime_pinger(BASE)
-    assert result.status == "SKIPPED"
+    assert result.status == "FAIL"
     assert "UPTIMEROBOT_API_KEY" in result.detail
 
 
@@ -2445,11 +2447,12 @@ def test_operator_api_keys_are_blank_by_default():
     assert settings.uptimerobot_api_key == ""
 
 
-def test_check_render_service_skips_rather_than_calling_out(monkeypatch):
-    """With the keys quarantined, the Render check degrades to SKIPPED --
-    it can never reach api.render.com from a default test run."""
+def test_check_render_service_fails_rather_than_calling_out(monkeypatch):
+    """With the keys quarantined, the Render check now FAILs -- it can never
+    reach api.render.com from a default test run, and a missing mandatory
+    key is a failure, not a skip."""
     result = deploy.check_render_service()
-    assert result.status == "SKIPPED"
+    assert result.status == "FAIL"
 
 
 class _FakeCursor:
@@ -2581,9 +2584,11 @@ def test_resolved_provider_or_env_propagates_a_db_error(override_seam):
         deploy._resolved_provider_or_env()
 
 
-def test_provider_live_skips_without_a_render_api_key(monkeypatch):
+def test_provider_live_fails_without_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
-    assert deploy.check_provider_live().status == "SKIPPED"
+    result = deploy.check_provider_live()
+    assert result.status == "FAIL"
+    assert "RENDER_API_KEY" in result.detail
 
 
 def test_provider_live_skips_when_the_override_read_raises(override_seam, monkeypatch):
@@ -2673,9 +2678,11 @@ def test_resolved_key_index_or_env_propagates_a_db_error(override_seam):
         deploy._resolved_key_index_or_env("groq")
 
 
-def test_api_key_live_skips_without_a_render_api_key(monkeypatch):
+def test_api_key_live_fails_without_a_render_api_key(monkeypatch):
     monkeypatch.setattr(settings, "render_api_key", "")
-    assert deploy.check_api_key_live().status == "SKIPPED"
+    result = deploy.check_api_key_live()
+    assert result.status == "FAIL"
+    assert "RENDER_API_KEY" in result.detail
 
 
 def test_api_key_live_skips_when_the_provider_resolution_raises(monkeypatch):
@@ -3059,11 +3066,17 @@ def test_every_check_spec_is_documented_and_well_formed():
 
 def test_required_checks_are_the_ones_that_need_no_operator_key():
     """`required` drives the generated table's "Always runs?" column, so it has
-    to mean something precise: a check that needs no operator-local key
-    (RENDER_API_KEY, UPTIMEROBOT_API_KEY, DATABASE_URL).
+    to mean something precise: a check that needs no operator-local key.
+    RENDER_API_KEY and UPTIMEROBOT_API_KEY are now mandatory, so every check
+    they used to gate is `required` too -- only DATABASE_URL still leaves a
+    check optional (`database`, `provider`).
 
     Deliberately NOT "can fail the run" -- `pricing` always runs but only ever
     WARNs, so conflating the two would misdescribe it in the published table.
     """
     required = {spec.name for spec in deploy.CHECKS if spec.required}
-    assert required == {"config", "pricing", "github-app", "health"}
+    assert required == {
+        "config", "pricing", "github-app", "health",
+        "boot-creds-live", "provider-live", "api-key-live",
+        "render-service", "uptime-pinger",
+    }

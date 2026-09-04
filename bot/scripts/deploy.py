@@ -365,7 +365,8 @@ def check_boot_credentials_live() -> CheckResult:
     name = "boot-creds-live"
     if not settings.render_api_key:
         return CheckResult(
-            name, "SKIPPED", "set RENDER_API_KEY to verify credentials against the live service"
+            name, "FAIL", "RENDER_API_KEY is required -- set it to verify credentials "
+            "against the live service"
         )
     try:
         service_id = _render.find_service_id()
@@ -735,7 +736,8 @@ def check_provider_live() -> CheckResult:
     name = "provider-live"
     if not settings.render_api_key:
         return CheckResult(
-            name, "SKIPPED", "set RENDER_API_KEY to verify credentials against the live service"
+            name, "FAIL", "RENDER_API_KEY is required -- set it to verify credentials "
+            "against the live service"
         )
     try:
         provider, override = _resolved_provider_or_env()
@@ -779,7 +781,8 @@ def check_api_key_live() -> CheckResult:
     name = "api-key-live"
     if not settings.render_api_key:
         return CheckResult(
-            name, "SKIPPED", "set RENDER_API_KEY to verify credentials against the live service"
+            name, "FAIL", "RENDER_API_KEY is required -- set it to verify credentials "
+            "against the live service"
         )
     try:
         provider, _provider_override = _resolved_provider_or_env()
@@ -840,7 +843,9 @@ def check_render_service() -> CheckResult:
     """Why the service is or is not serving -- health already covers whether."""
     name = "render-service"
     if not settings.render_api_key:
-        return CheckResult(name, "SKIPPED", "set RENDER_API_KEY to check deploy status")
+        return CheckResult(
+            name, "FAIL", "RENDER_API_KEY is required -- set it to check deploy status"
+        )
     try:
         service_id = _render.find_service_id()
         if service_id is None:
@@ -906,7 +911,9 @@ def check_uptime_pinger(base: str) -> CheckResult:
     """
     name = "uptime-pinger"
     if not settings.uptimerobot_api_key:
-        return CheckResult(name, "SKIPPED", "set UPTIMEROBOT_API_KEY to check keep-warm")
+        return CheckResult(
+            name, "FAIL", "UPTIMEROBOT_API_KEY is required -- set it to check keep-warm"
+        )
     wanted = f"{base}/healthz"
     try:
         resp = httpx.post(
@@ -1523,7 +1530,7 @@ CHECKS: tuple[CheckSpec, ...] = (
               True),
     CheckSpec("boot-creds-live", lambda: check_boot_credentials_live(),
               "The vars the service reads at every boot are present on the deployed "
-              "Render service under their current names -- not just locally", False),
+              "Render service under their current names -- not just locally", True),
     CheckSpec("github-app",
               lambda repos, base: check_installation_and_webhook(repos, base),
               "The App has exactly one installation, every repo in GITHUB_TARGET_REPO "
@@ -1544,16 +1551,16 @@ CHECKS: tuple[CheckSpec, ...] = (
               "override -- has its credential set", False),
     CheckSpec("provider-live", lambda: check_provider_live(),
               "The actively-resolved provider's credential is present on the deployed "
-              "Render service, not just locally", False),
+              "Render service, not just locally", True),
     CheckSpec("api-key-live", lambda: check_api_key_live(),
               "The actively-resolved provider's actively-resolved key slot is present "
-              "on the deployed Render service", False),
+              "on the deployed Render service", True),
     CheckSpec("render-service", lambda: check_render_service(),
               "The latest Render deploy is live, and matches local HEAD when a commit "
-              "is comparable", False),
+              "is comparable", True),
     CheckSpec("uptime-pinger", lambda base: check_uptime_pinger(base),
               "A monitor targets /healthz exactly, is active, and polls at most every "
-              "10 minutes", False, ("base",)),
+              "10 minutes", True, ("base",)),
 )
 
 

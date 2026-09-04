@@ -174,9 +174,12 @@ class Settings(BaseSettings):
     key_usage_token_cap: int | None = Field(default=None, gt=0)
     key_usage_reset_time_utc: time = Field(default=time(4, 0))
 
-    # --- Optional operator tooling: read only by scripts/deploy.py on the
-    # operator's own machine. Never set on the deployed service, never added
-    # to render.yaml. Absence degrades a check to SKIPPED, never to an error.
+    # --- Required operator tooling: read by scripts/deploy.py on the
+    # operator's own machine, and (RENDER_API_KEY only) by the deployed
+    # service itself for the dashboard's Environment tab. Never added to
+    # render.yaml directly -- RENDER_API_KEY reaches the service via
+    # --sync-env instead. Absence now FAILs the checks that need it, never
+    # SKIPs.
     uptimerobot_api_key: str = ""
     render_api_key: str = ""
     render_service_name: str = "pr-review-engine"
