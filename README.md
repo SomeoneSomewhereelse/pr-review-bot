@@ -15,7 +15,7 @@ piling up new ones.
 The same pages live in [`guide/`](guide/setup/index.md) if you would rather
 read them in the repo.
 
-**[Try the setup wizard →](https://pr-review-engine.onrender.com/)**
+**[Try the setup wizard →](https://onboarding-wizard-mk6m.onrender.com/)**
 — this repo's own live deployment; provision your own bot+dashboard Render
 service from your browser, no local clone needed.
 
