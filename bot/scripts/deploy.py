@@ -66,9 +66,9 @@ _ALWAYS_SYNCED = (
     # The deployed service now needs its own RENDER_API_KEY at runtime for
     # dashboard/environment.py's Environment tab (docs/superpowers/specs/
     # 2026-09-02-dashboard-environment-tab-design.md) -- previously only the
-    # onboarding wizard's bulk push included it, so a service provisioned via
-    # this CLI path instead of the wizard was silently missing it, with no
-    # check catching the gap.
+    # separate onboarding-wizard project's bulk push included it, so a
+    # service provisioned via this CLI path instead of the wizard was
+    # silently missing it, with no check catching the gap.
     "RENDER_API_KEY",
 )
 # GITHUB_TARGET_REPO empty is a valid, deliberate "track all repos" config

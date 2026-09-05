@@ -71,9 +71,9 @@ RUNTIME_CONFIG_COLUMNS: tuple[tuple[str, str], ...] = (
 # queries are completely unaffected. What RLS-with-no-policies actually
 # does is deny every row to any *other* role with no BYPASSRLS attribute --
 # concretely, Supabase's PostgREST anon/authenticated roles, which this
-# project never uses (see onboarding/CLAUDE.md: no supabase-py, no REST
-# calls, DATABASE_URL is a direct Postgres connection) but which Supabase
-# still exposes publicly by default on every project regardless. Verified
+# project never uses (no supabase-py, no REST calls, DATABASE_URL is a
+# direct Postgres connection) but which Supabase still exposes publicly
+# by default on every project regardless. Verified
 # live against Supabase's own Management API OpenAPI schema
 # (api.supabase.com/api/v1-json) that POST /v1/projects has no field for
 # this; Supabase's Studio dashboard has an "auto-enable RLS" project setting,
@@ -223,12 +223,10 @@ def _seed_runtime_config_defaults(conn) -> None:
     operator or bot/scripts/deploy.py --sync-config-db already populated --
     seeding only ever fills a genuinely empty table.
 
-    This is what lets the onboarding wizard's last frame skip a separate
-    config-sync step entirely (see docs/superpowers/specs/2026-09-01-
-    onboarding-server-side-session-design.md's bulk-push discussion) --
-    the bot now populates its own defaults the moment it first boots against
-    a fresh database, rather than requiring a second service to write into
-    this database's schema from the outside.
+    This is what lets a fresh setup skip a separate config-sync step
+    entirely -- the bot now populates its own defaults the moment it first
+    boots against a fresh database, rather than requiring a second service
+    to write into this database's schema from the outside.
 
     provider/*_key_index/*_model are deliberately left out (and therefore
     NULL): those are live operator overrides (dashboard "switch active

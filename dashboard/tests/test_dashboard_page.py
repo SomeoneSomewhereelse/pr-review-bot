@@ -125,8 +125,7 @@ async def test_stored_lang_and_theme_are_parsed_defensively():
     """An unrecognized stored value (not "en"/"he", not "light"/"dark"/
     "system") must not throw inside applyLanguage (STRINGS[currentLang][key]
     would throw for an unknown currentLang), which would abort
-    DOMContentLoaded before any event listener attaches. Same defensive
-    shape as onboarding/static/index.html's readStoredLang/readStoredTheme."""
+    DOMContentLoaded before any event listener attaches."""
     client = await _client()
     body = (await client.get("/")).text
     assert "function readStoredLang" in body

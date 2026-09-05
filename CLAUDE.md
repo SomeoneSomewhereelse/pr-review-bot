@@ -214,8 +214,8 @@ when working under `bot/`.
   under `--package bot`) passes both checks and still crashes on deploy —
   this is exactly how the 2026-09-03 `python-multipart` deploy crash slipped
   through. A green test suite does not substitute for this.
-- **When designing or changing a web page's UI (`dashboard/static/`,
-  `onboarding/static/`), use the Playwright tool to actually look at it**
+- **When designing or changing a web page's UI (`dashboard/static/`), use
+  the Playwright tool to actually look at it**
   before calling the work done — screenshot both themes (light/dark) and at
   a mobile viewport width, not just light-theme desktop. Reading the HTML/CSS
   and reasoning about the layout is not a substitute: the 2026-09-03

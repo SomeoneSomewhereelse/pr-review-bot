@@ -56,10 +56,12 @@ steps *inside* a review (diff prep → fan-out → merge → comment).
 
 ## 2. Module layout
 
-The repo is a `uv` workspace of three packages (`bot/`, `dashboard/`,
-`onboarding/`) plus a top-level test suite; see the 2026-08-29
-project-restructure design for why the review engine, its ops dashboard, and
-the self-service setup wizard are separate packages rather than one `app/`.
+The repo is a `uv` workspace of two packages (`bot/`, `dashboard/`) plus a
+top-level test suite; see the 2026-08-29 project-restructure design for why
+the review engine and its ops dashboard are separate packages rather than
+one `app/`. (That design's third package, `onboarding/` — a self-service
+setup wizard for other deployments — has since split off into its own
+standalone repo; see the 2026-09-05 standalone-repo-restructure design.)
 
 ```
 bot/                         the review engine itself
@@ -122,12 +124,9 @@ dashboard/                   ops/demo dashboard, mounted in-process by bot/main.
   router.py                   GET / static page + GET /api/dashboard JSON + GET /api/environment/*
   auth.py                     session-cookie login/logout; require_session dependency
   environment.py               Render env-var + runtime_config CRUD backing the Environment tab
-onboarding/                  self-service setup wizard — provisions a visitor's own bot+dashboard
-                             deployment (Render, Supabase, GitHub App, LLM provider, UptimeRobot);
-                             deployed as its own Render service, own Dockerfile; see onboarding/CLAUDE.md
 tests/                       cross-package tests (guide/doctor consistency, the repo-tooling
-                             PreToolUse hook, ...); bot/tests, dashboard/tests, onboarding/tests
-                             hold each package's own tests
+                             PreToolUse hook, ...); bot/tests, dashboard/tests hold each
+                             package's own tests
 .github/workflows/ci.yml     ruff lint + pytest (deterministic test layers 1–6) on push/PR
 pyproject.toml                workspace root (uv), shared dev dependency group
 render.yaml                    Render Blueprint — builds onboarding/Dockerfile

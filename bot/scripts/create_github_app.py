@@ -84,12 +84,11 @@ _MANUAL_REDIRECT = "https://example.invalid/callback"
 # because a PR review comment is an issue comment on GitHub's API; contents
 # read to fetch the diff; metadata read is mandatory for any App.
 #
-# These two are the SOURCE OF TRUTH, and they are duplicated in JS in
-# onboarding/static/index.html (the self-service wizard builds the same
-# manifest from the browser; there is no shared JS/Python boundary a single
-# constant could live in). Change them here first, then mirror them there —
-# tests/test_onboarding_page.py::test_manifest_permissions_match_the_cli_script
-# imports these very objects and fails if the page drifts from them.
+# These two are the SOURCE OF TRUTH for this repo's GitHub App manifest.
+# They used to be duplicated in JS in the separate onboarding-wizard
+# project's self-service setup page (no shared JS/Python boundary a single
+# constant could live in there); that project now lives in its own repo
+# with its own copy to keep in sync if these ever change.
 MANIFEST_PERMISSIONS = {
     "pull_requests": "write",
     "contents": "read",

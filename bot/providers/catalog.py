@@ -1,9 +1,7 @@
 """Live model-catalog listing per LLM provider, for the dashboard's guided
 credential setup/replace flow and its per-provider model picker.
 
-Reimplemented independently of onboarding/llm_client.py (structurally
-similar, deliberately not imported -- bot/ may become its own repo). Each
-function makes exactly one deliberate live listing call, synchronously
+Each function makes exactly one deliberate live listing call, synchronously
 (matching bot/render_client.py's and bot/github_app.py's sync style, so
 dashboard/environment.py can wrap these in asyncio.to_thread like every
 other write path it already has).

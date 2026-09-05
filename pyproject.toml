@@ -1,9 +1,9 @@
 [tool.uv.workspace]
-members = ["bot", "dashboard", "onboarding"]
+members = ["bot", "dashboard"]
 
 [dependency-groups]
 dev = [
-    # Imported directly by tests/test_onboarding_github_client.py to build a
+    # Imported directly by bot/tests/test_github_app.py to build a
     # real RSA key; transitive via pygithub[crypto] otherwise.
     "cryptography>=44.0",
     "mkdocs-material>=9.5",
@@ -24,9 +24,9 @@ select = ["E4", "E7", "E9", "F", "E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "bot/tests", "dashboard/tests", "onboarding/tests"]
+testpaths = ["tests", "bot/tests", "dashboard/tests"]
 pythonpath = ["."]
-# None of the four test directories carries an __init__.py (matching the
+# None of the three test directories carries an __init__.py (matching the
 # pre-restructure convention), so under the default `prepend` import mode a
 # future duplicate test-file basename across two of them (e.g. a second
 # test_config.py) would hit pytest's "import file mismatch" collection
