@@ -120,6 +120,18 @@ incident history, and `docs/superpowers/{specs,plans}/*` filenames/dates
 that predate the flatten — those are historical record, not live
 references, and must not be rewritten).
 
+**Secret-handling caution for this sweep:** these greps must never be run
+unscoped against `.env` or `.env.config` — the former is covered by root
+`CLAUDE.md`'s absolute "never open `.env` with any tool" rule regardless
+of how narrow or safe a pattern looks, and the latter, while not secret
+itself, has no reason to contain a `bot.`/`bot/` reference worth sweeping
+(it's operational config, not code or prose). Exclude both explicitly,
+e.g. `grep -rn 'bot\.' --include='*.py' --exclude='.env*' .` (or scope the
+grep to known code/doc directories rather than `.` and skip the two files
+by construction). If a hit ever *does* land in either file, don't open it
+to fix — ask the user to check/edit it themselves, exactly as `CLAUDE.md`
+already requires for any `.env`-adjacent change.
+
 ### 4. Loose `docs/*.md` handling — no new subfolder
 
 All 13 files at `docs/*.md` (not under `docs/superpowers/`) are removed,
@@ -237,12 +249,19 @@ doesn't need to re-litigate them:
 6. **`pyproject.toml` becomes a 2-member workspace** (root + `dashboard`),
    following directly from decision 1.
 
+### 9. Final cleanup — `brief.md` and its `.gitignore` entry
+
+Once the verification bar in §8 is green and the restructure is reviewed:
+delete `brief.md` (per its own header — it's local-only kickoff context,
+gitignored, not meant to be committed) and remove its now-unused entry
+(`brief.md`) from `.gitignore`. Do this last, after everything else is
+confirmed done — `brief.md` is this design's own source material and
+should stay available to reference until the work it describes is fully
+verified.
+
 ## Out of scope
 
 - Any further reorganization of `docs/superpowers/specs/`/`plans/`
   themselves (their existing flat, dated-filename scheme is unchanged).
 - Renaming any bot module or restructuring its internal package layout
   beyond the mechanical `bot/` prefix removal.
-- `brief.md` itself — per its own header, gets deleted once this
-  restructure is done and reviewed, but that's a follow-up step after
-  implementation, not part of this design.
