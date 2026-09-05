@@ -15,11 +15,9 @@ RUN uv sync --frozen --no-dev --package pr-review-bot
 
 COPY __init__.py config.py config_deps.py diff_utils.py formatting.py \
      github_app.py hmac_verify.py main.py orchestrator.py render_client.py \
-     webhook.py SPEC.md cost.md ./
-COPY fixtures ./fixtures
+     webhook.py ./
 COPY providers ./providers
 COPY review_queue ./review_queue
-COPY scripts ./scripts
 COPY specialists ./specialists
 
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app

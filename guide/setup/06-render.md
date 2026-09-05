@@ -1,17 +1,5 @@
 # Step 6: Create the Render service
 
-!!! danger "This repo's own render.yaml does not yet deploy the bot"
-    This repository used to be a monorepo shared with a sibling
-    self-service setup wizard, and `render.yaml` still points its
-    `dockerfilePath` at that now-removed project's Dockerfile (the wizard
-    has since split off into its own separate repo). Following the
-    Blueprint instructions below against this repo as-is will fail to
-    build.
-
-    To deploy the bot itself, manually create a Render service with
-    `dockerfilePath: ./Dockerfile` instead of following this page's
-    Blueprint-from-this-repo instructions as written.
-
 ## Point Render at a repo
 
 Render's Blueprint flow needs a Git repository to build `render.yaml` from.

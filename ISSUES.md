@@ -308,8 +308,8 @@ accidentally exercise the refusal path instead of the real one._
   2. Fixed — `mark_failed`'s docstring now explicitly names the escalate/reset of `cooldown_level` (`bot/queue/store.py:640-648`).
   3. Fixed — `test_finalize_non_dirty_leaves_nonzero_cooldown_level` (`bot/tests/test_queue_store.py:725`) seeds level 3 and asserts it survives a non-dirty finalize.
   4. Fixed — `test_sustained_churn_escalates_then_plateaus` (`bot/tests/test_dispatcher.py:897`) walks a single ticket through the full 300→600→1200→2400→3600→3600 ramp end-to-end.
-  5. Fixed — the longest line in `bot/queue/store.py` is 100 chars as of this check; none exceed the guideline.
-  6. **Open** — `enqueue_or_update`'s docstring (`bot/queue/store.py:337-340`) still only describes the transaction/locking mechanics, with no mention of `cooldown_level` escalate/reset anywhere in its done/failed-branch behavior.
+  5. Fixed — the longest line in `review_queue/store.py` is 100 chars as of this check; none exceed the guideline.
+  6. **Open** — `enqueue_or_update`'s docstring (`review_queue/store.py:334`) still only describes the transaction/locking mechanics, with no mention of `cooldown_level` escalate/reset anywhere in its done/failed-branch behavior.
 - **Follow-up:** items 1-5 closed, no further action. Item 6: add a sentence to `enqueue_or_update`'s docstring describing the done/failed-branch's escalate-on-churn/reset-on-quiet behavior for `cooldown_level`, next time that function is touched — low urgency (the behavior itself is correct and covered by tests; this is a documentation gap only).
 
 ---

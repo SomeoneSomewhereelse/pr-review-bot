@@ -1,8 +1,8 @@
 """providers/registry.py -- the single provider -> env-var-name mapping,
-shared by bot/ (credential resolution) and scripts/ (deploy checks, CLI
-overrides). Replaces what was previously scripts/deploy.py's private
-_PROVIDERS dict -- bot-side code now needs the same mapping, and bot/ must
-not import from scripts/."""
+shared by the root-level review engine (credential resolution) and scripts/
+(deploy checks, CLI overrides). Replaces what was previously
+scripts/deploy.py's private _PROVIDERS dict -- the review engine now needs
+the same mapping, and it must not import from scripts/."""
 from __future__ import annotations
 
 from providers import registry
@@ -27,7 +27,7 @@ def test_registry_lists_a_key_index_column_per_provider():
 
 
 def test_known_providers_matches_the_registry():
-    """bot/dashboard.py builds its per-provider backoff panel from
+    """dashboard/ builds its per-provider backoff panel from
     KNOWN_PROVIDERS; a provider in one and not the other renders a panel that
     silently omits a real provider."""
     from providers.base import KNOWN_PROVIDERS

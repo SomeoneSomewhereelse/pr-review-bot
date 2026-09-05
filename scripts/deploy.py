@@ -177,7 +177,7 @@ def resolve_base_url() -> str:
 
 
 # Single source of truth for provider -> env-var-name mappings, shared with
-# bot/ -- see providers/registry.py. _PROVIDERS is kept as a
+# the root-level review engine -- see providers/registry.py. _PROVIDERS is kept as a
 # module-level alias so every existing call site in this file (and in
 # scripts/set_override.py) keeps working unchanged.
 _PROVIDERS = registry.PROVIDERS

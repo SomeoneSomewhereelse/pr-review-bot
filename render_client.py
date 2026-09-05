@@ -2,7 +2,7 @@
 - scripts/deploy.py, scripts/set_override.py (via scripts/_override.py),
   scripts/reset_queue.py -- as CLI/operator support code.
 - dashboard/environment.py -- as production runtime code (the dashboard's
-  Environment tab). This is why this module lives in bot/, not
+  Environment tab). This is why this module lives at the repo root, not
   scripts/: scripts/ is operator-CLI-only, and dashboard/environment.py
   must not import from it. See docs/superpowers/specs/
   2026-09-02-dashboard-environment-tab-design.md.
