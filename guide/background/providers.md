@@ -35,7 +35,7 @@ Cross-vendor provider-agnosticism was demonstrated via Groq instead.
 
 **Resolved, 2026-08-10:** the API key was updated (new key, same or a
 different Google account — not investigated further), and
-`bot/scripts/manual_verify_step4.py` succeeded live: real structured output,
+`scripts/manual_verify_step4.py` succeeded live: real structured output,
 non-zero token usage, no `403`. Whatever specifically tripped the flag on the
 earlier key was never reproduced, and — per the testing-hygiene rule — was
 not chased with a root-cause investigation; that would just be more burst
@@ -51,7 +51,7 @@ Gemini's resolution — that choice didn't change just because Gemini became
 usable again.
 
 One more oddity from this era, noted but not chased further: during the
-build-step-7 provider-swap demo (`bot/scripts/demo_provider_swap.py`), an
+build-step-7 provider-swap demo (`scripts/demo_provider_swap.py`), an
 isolated direct call to `GeminiProvider` consistently reproduced the
 documented `403`, but running through the full `orchestrator.run_review()`
 pipeline (real PR diff content as the prompt) once produced a different
@@ -74,10 +74,10 @@ implemented, then pulled — see `CLAUDE.md`'s "Substitutions from the
 brief"). It came back on 2026-08-14 once GCP billing/ADC access became
 available, as a real, code-complete third provider — matching `SPEC.md`'s
 stated default. Its credential is a GCP service-account identity, not an API
-key string, resolved by `bot/providers/vertex_credentials.py`.
+key string, resolved by `providers/vertex_credentials.py`.
 
 **Bug 1 — missing OAuth scope.** The first live run of
-`bot/scripts/manual_verify_vertex.py` against a real GCP service-account
+`scripts/manual_verify_vertex.py` against a real GCP service-account
 credential got past credential resolution and project-id derivation cleanly
 (a real project id was resolved, no credential material was ever printed),
 and the call reached Google's real OAuth token endpoint — a genuine network
@@ -87,7 +87,7 @@ call) was wired correctly end-to-end. The call itself then failed with
 `google.auth.exceptions.RefreshError: invalid_scope: Invalid OAuth scope or
 ID token audience provided`. Root cause: `VertexProvider` was constructing
 its service-account credentials without the required `cloud-platform` OAuth
-scope (`bot/providers/google_genai.py`) — the implicit-ADC path already had
+scope (`providers/google_genai.py`) — the implicit-ADC path already had
 the correct scope via `google-genai`'s own SDK, but the explicit
 service-account path (the hosted/Render production configuration) did not.
 Per the testing-hygiene rule, this was **not** retried with a different
@@ -124,7 +124,7 @@ structured-output response with non-zero token usage
 (`Greeting(message='Hello there!')`, 20 tokens in / 8 out), the first
 genuinely complete end-to-end live verification of this provider. A
 `("vertex", "gemini-2.5-flash")` pricing entry was added to
-`bot/providers/pricing.py` to match.
+`providers/pricing.py` to match.
 
 Vertex has since been split onto its own `VERTEX_MODEL` env var (default
 `gemini-2.5-flash`, the confirmed-working value) rather than sharing
@@ -161,7 +161,7 @@ caveat, flagged but not addressed: free-tier rate limits are modest
 (single-digit RPM / ~150 requests per day on low-access models) — fine for a
 demo, a real constraint at any sustained volume.
 
-**A real bug was caught by live testing** (`bot/providers/github_models.py`):
+**A real bug was caught by live testing** (`providers/github_models.py`):
 OpenAI's strict `json_schema` mode requires `"additionalProperties": false`
 explicitly present on **every** object schema, including nested `$defs`
 entries — Pydantic's `model_json_schema()` doesn't set this anywhere by
@@ -175,7 +175,7 @@ any nesting shape Pydantic produces is covered — and both cases are locked
 in by tests, not just fixed ad hoc.
 
 It was live-verified end-to-end: a single-schema call via
-`bot/scripts/manual_verify_github_models.py`, then the real nested
+`scripts/manual_verify_github_models.py`, then the real nested
 `SecurityFindings` schema directly, then a full 3-specialist
 `orchestrator.run_review()` run against PR #3 — 7.5 seconds, all three
 specialists succeeded with real findings, comment posted and independently

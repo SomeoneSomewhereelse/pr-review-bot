@@ -13,8 +13,8 @@ from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
-from bot.config import settings
-from bot.main import app
+from config import settings
+from main import app
 from dashboard import auth
 
 

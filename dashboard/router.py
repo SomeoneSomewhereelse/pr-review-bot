@@ -1,6 +1,6 @@
 """Ops/demo dashboard: GET /api/dashboard (JSON) backing GET /'s static
 page. Knows nothing about LLM providers or GitHub — only reads
-bot.queue.store and bot.queue.dispatcher, same separation formatting.py
+review_queue.store and review_queue.dispatcher, same separation formatting.py
 keeps from the LLM layer.
 """
 from __future__ import annotations
@@ -12,8 +12,8 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from bot.providers.base import KNOWN_PROVIDERS
-from bot.queue import dispatcher, store
+from providers.base import KNOWN_PROVIDERS
+from review_queue import dispatcher, store
 
 logger = logging.getLogger(__name__)
 

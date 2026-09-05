@@ -6,7 +6,7 @@ A free external pinger keeps both warm.
 ## Create the monitor
 
 1. Go to <https://uptimerobot.com> (free) — cron-job.org also works, but
-   UptimeRobot is what `bot/scripts/deploy.py`'s `uptime-pinger` check verifies
+   UptimeRobot is what `scripts/deploy.py`'s `uptime-pinger` check verifies
    against.
 2. Create a new monitor that pings your Render URL's `/healthz` endpoint:
 
@@ -46,17 +46,17 @@ only needs to exist on your own machine for this demo, since `seed_demo_pr`
 runs entirely locally; it doesn't need to be pushed to Render (the deployed
 service's own copy of `GITHUB_TARGET_REPO` is a separate, still-optional
 narrowing of which installed repos the bot itself acts on). If you skipped
-setting it locally, do it now — `uv run python -m bot.scripts.doctor`'s
+setting it locally, do it now — `uv run python -m scripts.doctor`'s
 `gh-auth` and `target-repo` rows will FAIL with the specific account/repo
 mismatch if there is one, rather than you finding out from `seed_demo_pr`
 failing below.
 
 ```bash
-uv run python -m bot.scripts.seed_demo_pr
+uv run python -m scripts.seed_demo_pr
 ```
 
 This clones the configured test repo, plants known-bad code from
-`bot/fixtures/bad_code/`, and opens a real PR against it — which GitHub then
+`fixtures/bad_code/`, and opens a real PR against it — which GitHub then
 delivers to your deployed Render service as a webhook event.
 
 ### What a good result looks like
@@ -80,5 +80,5 @@ clone, reviewed automatically, no manual step in between.
 
 ## Done
 
-All eight steps are complete. `uv run python -m bot.scripts.doctor` should now
+All eight steps are complete. `uv run python -m scripts.doctor` should now
 report every row `PASS`.

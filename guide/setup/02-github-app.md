@@ -31,7 +31,7 @@ fill in the form:
 - **Webhook → Active** — check it.
 - **Webhook → Webhook URL** — same placeholder, with the path this
   project's webhook handler expects: `https://example.invalid/webhook`.
-  Step 7 (`bot/scripts/deploy.py`) corrects this to your real URL once it
+  Step 7 (`scripts/deploy.py`) corrects this to your real URL once it
   exists — that's normal, not something to fix here.
 - **Webhook → Webhook secret** — GitHub does not generate this for you;
   type in your own value (any random string long enough to not guess —
@@ -60,7 +60,7 @@ fill in the form:
 Then click **Create GitHub App**.
 
 Checking boxes by hand is exactly the kind of step a typo survives —
-`uv run python -m bot.scripts.doctor`'s `app-permissions` row reads the App's
+`uv run python -m scripts.doctor`'s `app-permissions` row reads the App's
 *actual* permissions and event subscriptions back from GitHub and compares
 them against what this project's code needs, so a missed or extra checkbox
 doesn't go unnoticed. Run it once you've collected the credentials below.
@@ -101,7 +101,7 @@ vars are yours to generate any time — see below):
   script — never a raw file path:
 
     ```bash
-    uv run python -m bot.scripts.encode_credential github-app-private-key.pem
+    uv run python -m scripts.encode_credential github-app-private-key.pem
     ```
 
     Paste the output into `GITHUB_APP_PRIVATE_KEY` in `.env` (verbatim, the
@@ -136,11 +136,11 @@ now, while you're already there:
 
 ## An automated alternative exists, but isn't the documented path here
 
-`bot/scripts/create_github_app.py` drives GitHub's **App Manifest flow**
+`scripts/create_github_app.py` drives GitHub's **App Manifest flow**
 instead: a browser form POSTs a manifest to `github.com/settings/apps/new`,
 you approve it, and the script exchanges GitHub's one-time redirect code for
 the App ID, private key, and webhook secret in one round trip, writing them
-to `.env` itself. It still works (`uv run python -m bot.scripts.create_github_app
+to `.env` itself. It still works (`uv run python -m scripts.create_github_app
 --name your-app-name --help` for its options) and remains fully tested, but
 it's no longer the path this guide walks through: automating a one-time
 setup step didn't carry its weight against the manual process above, which

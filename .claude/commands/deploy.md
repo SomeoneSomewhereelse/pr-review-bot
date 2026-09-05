@@ -6,7 +6,7 @@ Run the deploy verification CLI with `--json` so you can parse the result
 programmatically:
 
 ```bash
-uv run python -m bot.scripts.deploy --json
+uv run python -m scripts.deploy --json
 ```
 
 This prints one JSON object: `checks` (a list of `{name, status, detail}`,
@@ -28,7 +28,7 @@ If the diagnosis is that the Render service's environment variables have
 drifted from the local `.env`, the follow-up is:
 
 ```bash
-uv run python -m bot.scripts.deploy --sync-env --json
+uv run python -m scripts.deploy --sync-env --json
 ```
 
 That pushes the changed variables, triggers a deploy, waits for it to go live,
@@ -43,6 +43,6 @@ non-zero before the checklist ever runs, so there is no JSON object at all for
 that failure — the plain-text refusal message on stderr is the only output to
 read in that case.
 
-This command holds no verification logic of its own — `bot/scripts/deploy.py` is the
+This command holds no verification logic of its own — `scripts/deploy.py` is the
 tool, and it works identically (including `--json`) for people who do not use
 Claude Code.

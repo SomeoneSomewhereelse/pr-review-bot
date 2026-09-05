@@ -8,7 +8,7 @@ They live only in the `runtime_config` table (the same table
 needs to be able to change them with no redeploy.
 
 ```bash
-uv run python -m bot.scripts.deploy --sync-config-db   # push .env.config's values into runtime_config
+uv run python -m scripts.deploy --sync-config-db   # push .env.config's values into runtime_config
 ```
 
 Needs only `DATABASE_URL` — no `RENDER_API_KEY`, no checklist, no redeploy.
@@ -57,7 +57,7 @@ cap reset during a demo instead of waiting for the next hour boundary.
 Three things worth knowing:
 
 - **The cap is per key slot, not global.** Swapping slots with
-  `uv run python -m bot.scripts.set_override groq --index 1` immediately grants
+  `uv run python -m scripts.set_override groq --index 1` immediately grants
   a fresh budget, exactly as key rotation already works — nothing
   auto-swaps on a breach; a human decides. That fresh budget applies to the
   next ticket claimed; a ticket already deferred by the cap still waits for

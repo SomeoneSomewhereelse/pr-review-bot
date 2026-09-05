@@ -9,7 +9,7 @@
     build.
 
     To deploy the bot itself, manually create a Render service with
-    `dockerfilePath: ./bot/Dockerfile` instead of following this page's
+    `dockerfilePath: ./Dockerfile` instead of following this page's
     Blueprint-from-this-repo instructions as written.
 
 ## Point Render at a repo
@@ -32,7 +32,7 @@ Three ways to give it one:
 
 ## Get a Render API key
 
-Get one now, before creating the service below — `bot/scripts/deploy.py
+Get one now, before creating the service below — `scripts/deploy.py
 --sync-env` (next step) and `doctor`/`deploy`'s live checks all need a
 `RENDER_API_KEY` to act on your behalf. Get one from the Render dashboard →
 **Account Settings → API Keys**, then set it as `RENDER_API_KEY` locally in
@@ -52,7 +52,7 @@ sees.
 builds and runs this project's `Dockerfile` as-is — there is no separate
 Build/Start command to configure; the container's entrypoint is the
 Dockerfile's own `CMD`
-(`uv run --no-dev uvicorn bot.main:app --host 0.0.0.0 --port 8000`).
+(`uv run --no-dev uvicorn main:app --host 0.0.0.0 --port 8000`).
 
 Every var `render.yaml` declares is marked `sync: false`, so Render's
 Blueprint form offers a box for each one — **leave all of them blank**.
@@ -69,7 +69,7 @@ that hand-copying into a web form is easiest to get wrong, like
 ## Expect this first deploy to fail — that's fine
 
 Click **Deploy**. With every var left blank, the container starts and
-immediately exits: `bot/main.py`'s startup refuses to run with no
+immediately exits: `main.py`'s startup refuses to run with no
 `LLM_PROVIDER` set, no `GITHUB_WEBHOOK_SECRET`, and so on — deliberately, so
 a missing credential fails loudly rather than silently limping along. Render
 will show this deploy as failed, and may show it retrying and failing again.

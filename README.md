@@ -19,8 +19,8 @@ read them in the repo.
 — this repo's own live deployment; provision your own bot+dashboard Render
 service from your browser, no local clone needed.
 
-Full design: [`bot/SPEC.md`](bot/SPEC.md). Stack/conventions: [`CLAUDE.md`](CLAUDE.md).
-Cost model: [`bot/cost.md`](bot/cost.md).
+Full design: [`SPEC.md`](SPEC.md). Stack/conventions: [`CLAUDE.md`](CLAUDE.md).
+Cost model: [`cost.md`](cost.md).
 
 ## Architecture
 
@@ -58,7 +58,7 @@ flowchart TD
 - Results (successes *and* failures) are merged with timing and cost data
   into one Markdown comment, edited in place on every later push.
 
-See [`SPEC.md` §12](bot/SPEC.md#12-review-queue-rpm--daily-quota-handling) for
+See [`SPEC.md` §12](SPEC.md#12-review-queue-rpm--daily-quota-handling) for
 the full queue design.
 </details>
 
@@ -66,11 +66,11 @@ the full queue design.
 
 This is a 2-member uv workspace:
 
-- **`bot/`** — the review engine described above (webhook, orchestrator,
-  specialists, providers, queue). This repo's own deploy.
+- **Repo root** — the review engine described above (webhook, orchestrator,
+  specialists, providers, review_queue). This repo's own deploy.
 - **`dashboard/`** — the ops dashboard below, deployed in the same
-  process as `bot/` (one Render service, one Dockerfile:
-  `bot/Dockerfile`), organized as its own package for a clear module
+  process as the root app (one Render service, one Dockerfile:
+  `Dockerfile`), organized as its own package for a clear module
   boundary.
 
 ## What a review looks like
@@ -114,7 +114,7 @@ FastAPI (async) · `uv` · PyGitHub (GitHub App auth) · `google-genai` +
 ```bash
 uv sync
 cp .env.example .env   # fill in real values — see the guide's setup section
-uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 - `GET /healthz` → `200`
@@ -129,7 +129,7 @@ uv run uvicorn bot.main:app --host 0.0.0.0 --port 8000
 ### Docker
 
 ```bash
-docker build -f bot/Dockerfile -t pr-review-engine .
+docker build -f Dockerfile -t pr-review-engine .
 docker run -p 8000:8000 --env-file .env pr-review-engine
 ```
 
@@ -144,7 +144,7 @@ The full suite is deterministic and network-free: every GitHub,
 LLM-provider, and webhook interaction is mocked. CI runs the same checks on
 every push.
 
-A handful of scripts under `bot/scripts/manual_verify_*.py` make real calls
+A handful of scripts under `scripts/manual_verify_*.py` make real calls
 against real accounts instead, each proving one specific integration (GitHub
 App auth, or one LLM provider's structured-output path) — see the guide's
 [Live rehearsal history](guide/background/rehearsals.md) for a real,
@@ -167,5 +167,5 @@ each deviation, including what was tried and why.
 ## Cost
 
 Demo runs at **$0** (Groq + Render + Supabase free tiers). Documented production
-cost model (~$8-10/mo at brief scale) is in [`cost.md`](bot/cost.md) — cost is
+cost model (~$8-10/mo at brief scale) is in [`cost.md`](cost.md) — cost is
 graded as that documented calculation, not actual spend.

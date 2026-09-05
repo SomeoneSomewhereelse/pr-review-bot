@@ -1,9 +1,9 @@
 # Deploying and verifying
 
-`bot/scripts/deploy.py` is the one tool for both verifying and performing a
+`scripts/deploy.py` is the one tool for both verifying and performing a
 deploy. It is a plain CLI — no editor, assistant, or Claude Code required —
 and it always runs from **your own machine**, never inside the Render
-container: `bot/scripts/` is not copied into the Docker image, and
+container: `scripts/` is not copied into the Docker image, and
 `RENDER_EXTERNAL_URL` only exists inside Render's own container, which is
 why every invocation below passes `PUBLIC_BASE_URL` explicitly.
 
@@ -31,14 +31,14 @@ separate modes, not composable.
 === "bash"
 
     ```bash
-    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m bot.scripts.deploy --health-only
+    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --health-only
     ```
 
 === "PowerShell"
 
     ```powershell
     $env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
-    uv run python -m bot.scripts.deploy --health-only
+    uv run python -m scripts.deploy --health-only
     ```
 
 For a full deploy, swap `--health-only` for `--sync-env` (needs
@@ -47,14 +47,14 @@ For a full deploy, swap `--health-only` for `--sync-env` (needs
 === "bash"
 
     ```bash
-    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m bot.scripts.deploy --sync-env
+    PUBLIC_BASE_URL=https://<your-service>.onrender.com uv run python -m scripts.deploy --sync-env
     ```
 
 === "PowerShell"
 
     ```powershell
     $env:PUBLIC_BASE_URL = "https://<your-service>.onrender.com"
-    uv run python -m bot.scripts.deploy --sync-env
+    uv run python -m scripts.deploy --sync-env
     ```
 
 Claude Code users can run `/deploy` instead, which wraps the same CLI.

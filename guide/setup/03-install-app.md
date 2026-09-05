@@ -49,10 +49,10 @@ You don't have to hunt it down by hand: with `GITHUB_APP_INSTALLATION_ID`
 still blank, run
 
 ```bash
-uv run python -m bot.scripts.doctor
+uv run python -m scripts.doctor
 ```
 
-not `bot.scripts.deploy` — this early, before a public URL exists (that's Step
+not `scripts.deploy` — this early, before a public URL exists (that's Step
 6), `deploy` refuses to run at all (`a public base URL
 (PUBLIC_BASE_URL/RENDER_EXTERNAL_URL) is required`, exit 2) before it ever
 reaches an installation-discovery check. `doctor` needs no public URL for
@@ -91,7 +91,7 @@ GITHUB_TARGET_REPO=<you>/pr-review-bot-demo
 ```
 
 Step 8 needs a concrete answer to "which repo does the demo PR
-go on", and `doctor`'s `target-repo` row and `bot/scripts/seed_demo_pr` both read
+go on", and `doctor`'s `target-repo` row and `scripts/seed_demo_pr` both read
 this exact same setting — so setting it here, once, means Step 8 needs no
 further setup, and re-running `doctor` from this point on actually exercises
 the `gh-auth`/`target-repo` checks instead of leaving them `SKIPPED`. You can

@@ -1,7 +1,7 @@
 """Exercises .claude/hooks/check_env_access.py via subprocess, mirroring the
 exact exec-form invocation Claude Code's PreToolUse hook actually uses (no
 shell, literal argv) -- see the script's own module docstring for what it
-does and why. This is a repo-tooling script, not part of the bot/scripts
+does and why. This is a repo-tooling script, not part of the scripts
 package, so it's tested by invoking it directly rather than importing it."""
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def test_allows_unrelated_command():
 
 
 def test_allows_unrelated_file_path():
-    blocked, _ = _run("Read", {"file_path": "bot/config.py"})
+    blocked, _ = _run("Read", {"file_path": "config.py"})
     assert not blocked
 
 

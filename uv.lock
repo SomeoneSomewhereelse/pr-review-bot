@@ -8,21 +8,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "bot",
     "dashboard",
-]
-
-[manifest.dependency-groups]
-dev = [
-    { name = "cryptography", specifier = ">=44.0" },
-    { name = "mkdocs-material", specifier = ">=9.5" },
-    { name = "playwright", specifier = ">=1.62.0" },
-    { name = "pytest", specifier = ">=8.3" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "pytest-xdist", specifier = ">=3.6" },
-    { name = "respx", specifier = ">=0.21" },
-    { name = "ruff", specifier = ">=0.7" },
-    { name = "testcontainers", extras = ["postgres"], specifier = ">=4.0" },
+    "pr-review-bot",
 ]
 
 [[package]]
@@ -76,47 +63,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/29/13/232505664e8e2a0c7a2eb0c505cfade9d715538f89a5d62bc4c272968f62/backrefs-8.0-py312-none-any.whl", hash = "sha256:87f0fae8c5f207fe9f4b2887efc71d42f4900ac78faa1af08d675ef303692dc5", size = 398084, upload-time = "2026-07-26T19:54:19.954Z" },
     { url = "https://files.pythonhosted.org/packages/8a/69/47a3dc20abc4fa5486655fde681bd55e63211b46c886d8c02223d6468431/backrefs-8.0-py313-none-any.whl", hash = "sha256:601ce68ca12385dbda06ce264406b4c4210cf5b79fd0fd627592365c92f29a88", size = 400040, upload-time = "2026-07-26T19:54:21.194Z" },
     { url = "https://files.pythonhosted.org/packages/1c/cf/e5f9b68a5b0e939a2fb933a66c20180d0c9241bf8927f7a47fa48c1675e9/backrefs-8.0-py314-none-any.whl", hash = "sha256:9ec96efa080938be92323e8e730e57718c9c88eb15ad70bbef4e1766df591408", size = 411903, upload-time = "2026-07-26T19:54:23.221Z" },
-]
-
-[[package]]
-name = "bot"
-version = "0.1.0"
-source = { virtual = "bot" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "google-auth" },
-    { name = "google-genai" },
-    { name = "groq" },
-    { name = "httpx" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "psycopg-pool" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pygithub" },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "python-multipart" },
-    { name = "requests" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "google-auth", specifier = ">=2.35" },
-    { name = "google-genai", specifier = ">=0.3" },
-    { name = "groq", specifier = ">=1.5.0" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "psycopg-pool", specifier = ">=3.2" },
-    { name = "pydantic", specifier = ">=2.9" },
-    { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "pygithub", specifier = ">=2.4" },
-    { name = "pyjwt", specifier = ">=2.13" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "requests", specifier = ">=2.32" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
 
 [[package]]
@@ -862,6 +808,73 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "pr-review-bot"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "fastapi" },
+    { name = "google-auth" },
+    { name = "google-genai" },
+    { name = "groq" },
+    { name = "httpx" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pygithub" },
+    { name = "pyjwt" },
+    { name = "python-dotenv" },
+    { name = "python-multipart" },
+    { name = "requests" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "cryptography" },
+    { name = "mkdocs-material" },
+    { name = "playwright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
+    { name = "respx" },
+    { name = "ruff" },
+    { name = "testcontainers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "google-auth", specifier = ">=2.35" },
+    { name = "google-genai", specifier = ">=0.3" },
+    { name = "groq", specifier = ">=1.5.0" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "psycopg-pool", specifier = ">=3.2" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pygithub", specifier = ">=2.4" },
+    { name = "pyjwt", specifier = ">=2.13" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "requests", specifier = ">=2.32" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "cryptography", specifier = ">=44.0" },
+    { name = "mkdocs-material", specifier = ">=9.5" },
+    { name = "playwright", specifier = ">=1.62.0" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "pytest-xdist", specifier = ">=3.6" },
+    { name = "respx", specifier = ">=0.21" },
+    { name = "ruff", specifier = ">=0.7" },
+    { name = "testcontainers", extras = ["postgres"], specifier = ">=4.0" },
 ]
 
 [[package]]

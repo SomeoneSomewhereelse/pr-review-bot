@@ -1,7 +1,7 @@
 # Config files: `.env` and `.env.config`
 
 Every setting this service reads comes from one of two files. `Settings`
-(`bot/config.py`) reads both, in the order `env_file=(".env", ".env.config")`
+(`config.py`) reads both, in the order `env_file=(".env", ".env.config")`
 — the **last** file wins on a key present in both, so `.env.config` is the
 designated home and always outranks a stale duplicate left behind in `.env`.
 
@@ -26,7 +26,7 @@ reason, full stop (see CLAUDE.md's "Secret handling" section).
 
 ## `OPERATIONAL_KEYS` is exhaustive, not a pattern
 
-`OPERATIONAL_KEYS` (`bot/config.py`) is the exhaustive, hand-maintained list
+`OPERATIONAL_KEYS` (`config.py`) is the exhaustive, hand-maintained list
 of which env-var names are operational (provider, model, usage caps,
 cooldown tuning, etc.) rather than credentials. It is a literal list of
 names, enumerated one by one — never a prefix or glob — because a pattern

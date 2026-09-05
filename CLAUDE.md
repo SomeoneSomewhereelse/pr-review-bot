@@ -50,8 +50,8 @@ which is why this section exists and is kept first in the file.
   including ones you weren't even asking about. Read or pass individual
   fields programmatically instead, and reduce any secret-bearing value to a
   boolean/length/hash *before* it can reach a print statement, log line, or
-  tool-result — mirroring `bot/scripts/_render.py::env_vars()`'s documented
-  contract and `bot/scripts/deploy.py::sync_env()`'s
+  tool-result — mirroring `scripts/_render.py::env_vars()`'s documented
+  contract and `scripts/deploy.py::sync_env()`'s
   `print(f"pushed {key} (len {len(value)})")` convention (name + length,
   never the value) — follow that same shape in any new ad hoc script that
   touches secrets.
@@ -105,16 +105,16 @@ which is why this section exists and is kept first in the file.
   single time it happens, not just the first.**
 - **To change state, reach for this project's CLI — never for a file that
   holds secrets.** Operational state (which provider and model are active,
-  which API-key slot) is changed through the `bot/scripts/` entry points --
+  which API-key slot) is changed through the `scripts/` entry points --
   `set_override.py` and its successors. Cooldown parameters and usage caps
   are edited in `.env.config` (not secret-bearing, safe to open directly)
-  and pushed into the database with `bot/scripts/deploy.py --sync-config-db`
+  and pushed into the database with `scripts/deploy.py --sync-config-db`
   (also runs automatically as part of `--sync-env`) -- never by hand-editing
   a secret-bearing file. Those scripts are agent-runnable *precisely because*
   of how they handle
   credentials: they read them programmatically through `Settings` and emit
-  names, lengths, and equality results only (`bot/scripts/_render.py::env_vars()`
-  and `bot/scripts/deploy.py::sync_env()` document that contract), so no value
+  names, lengths, and equality results only (`scripts/_render.py::env_vars()`
+  and `scripts/deploy.py::sync_env()` document that contract), so no value
   ever reaches a tool result. Any new state-changing script must be built to
   the same shape. The corollary is the part that binds hardest: **a CLI is a
   tool for changing state, never a route to a secret.** No script here may
@@ -156,7 +156,7 @@ which is why this section exists and is kept first in the file.
 
 `dashboard/environment.py`'s `GET /api/environment/render` is the one
 documented exception to "never display any byte of a secret value" in this
-file. It returns real Render env-var values (via `bot.render_client.env_vars()`)
+file. It returns real Render env-var values (via `render_client.env_vars()`)
 to the authenticated operator's own browser session, where
 `dashboard/static/dashboard.html` renders them masked by default with a
 per-row reveal toggle. This is deliberately narrower than it looks:
@@ -172,19 +172,43 @@ per-row reveal toggle. This is deliberately narrower than it looks:
   its response. It does not license printing a secret value anywhere else in
   this codebase or in an agent's own shell commands — every other rule in
   this section still applies at full strength everywhere else, including
-  elsewhere in `dashboard/` and `bot/`.
+  elsewhere in `dashboard/` and the rest of the root-level review engine.
 
 See `docs/superpowers/specs/2026-09-02-dashboard-environment-tab-design.md`
 for the full design and the reasoning behind this carve-out.
 
 ## Project
 
-Full design lives in `bot/SPEC.md`; cost model in `bot/cost.md`. Deployed as a Docker
+Full design lives in `SPEC.md`; cost model in `cost.md`. Deployed as a Docker
 container on Render (free tier) with the queue in Supabase Postgres, kept warm
-by a free external pinger — see `bot/cost.md` for the alternatives that were weighed.
+by a free external pinger — see `cost.md` for the alternatives that were weighed.
 
-Module boundaries and per-module contracts live in `bot/CLAUDE.md`, which loads
-when working under `bot/`.
+## Module boundaries and contracts
+
+### Layering constraints
+
+- **Orchestrator** owns: diff prep (line annotation, token cap), fan-out, merge,
+  formatting. Knows nothing about provider internals.
+- **Specialists** are uniform (`run()`), differing only by **system prompt** +
+  **Pydantic schema**. Each records its own timing + token usage. Know nothing about GitHub.
+- **Providers** are swappable via `LLM_PROVIDER`; a shared validate-repair layer
+  guarantees structured output regardless of provider.
+- **Formatting** turns a `ReviewResult` into Markdown. Knows nothing about LLMs.
+
+### Contracts
+
+- Webhook handler: verify HMAC on the **raw body** → return **202 immediately** →
+  run the review in a background task.
+- Provider adapters normalize usage metadata (`tokens_in`/`tokens_out`) so cost
+  can be computed from a single rate table (`pricing.py`).
+- Provider adapter constructors (`GeminiProvider`, `VertexProvider`,
+  `GroqProvider`) take an explicit `model: str` parameter and must never read
+  `Settings` for the model internally. `providers/active_model.py` is the
+  single resolver of "which model is active for this provider" (env default or
+  DB override); adapters only ever bake in whatever model value they were
+  constructed with. This is what keeps the model reported in the PR comment
+  guaranteed equal to the model actually sent to the provider -- a regression
+  back to an internal `Settings` read would silently break that guarantee.
 
 ## Conventions
 
@@ -205,13 +229,13 @@ when working under `bot/`.
   with a red suite or an unresolved lint error, and never skip either check
   because a change "looks" too small to affect them.
 - **After merging to `main` locally, always build the deploy image**
-  (`docker build -f bot/Dockerfile .` from the repo root) and confirm it
-  builds and boots (`docker run --rm <image> python -c "import bot.main"`
+  (`docker build -f Dockerfile .` from the repo root) and confirm it
+  builds and boots (`docker run --rm <image> python -c "import main"`
   or equivalent) before pushing/deploying. `pytest`/`ruff` run against the
-  full workspace venv, not the `--package bot`-only sync the image actually
-  uses, so a workspace-boundary dependency gap (e.g. a dep declared in
-  `dashboard/pyproject.toml` but needed at `bot` import time, only synced
-  under `--package bot`) passes both checks and still crashes on deploy —
+  full workspace venv, not the `--package pr-review-bot`-only sync the image
+  actually uses, so a workspace-boundary dependency gap (e.g. a dep declared
+  in `dashboard/pyproject.toml` but needed at root import time, only synced
+  under `--package pr-review-bot`) passes both checks and still crashes on deploy —
   this is exactly how the 2026-09-03 `python-multipart` deploy crash slipped
   through. A green test suite does not substitute for this.
 - **When designing or changing a web page's UI (`dashboard/static/`), use
@@ -236,19 +260,19 @@ when working under `bot/`.
   payment-card requirement collided with this project's no-card constraint (see
   `guide/background/providers.md`), leaving it live-unrunnable and mock-only.
   GCP billing/ADC access later became available, so `vertex` is back as a
-  real, live-runnable third provider, matching `bot/SPEC.md`'s stated default.
+  real, live-runnable third provider, matching `SPEC.md`'s stated default.
   Its credential is a GCP
   service-account identity rather than an API-key string:
   `GCP_SERVICE_ACCOUNT_KEY` (hosted, numbered slots, base64, verbatim only —
   see the 2026-08-16 credential-convention design) → implicit ADC, resolved
-  in `bot/providers/vertex_credentials.py`. No secret reaches Postgres — only
+  in `providers/vertex_credentials.py`. No secret reaches Postgres — only
   the slot index, exactly as for gemini/groq.
 
 ## Cost
 
 Documented production total ≈ **$8–10/mo** at brief scale (20 PRs/day). The demo
 runs at **$0** on free tiers + the $300 GCP trial credit. Cost is graded as a
-documented calculation, not as actual spend — see `bot/cost.md`.
+documented calculation, not as actual spend — see `cost.md`.
 
 ## LLM API testing hygiene (avoid Trust & Safety flags)
 
@@ -271,7 +295,7 @@ something to rely on being reversible.)
   sticks." One deliberate, single live call per real verification need.
 - **Prefer mocked/cassette tests for exploration.** Reserve real network calls
   for the one live-verification step a build step actually requires (per
-  `bot/SPEC.md` section 8's testing strategy) — not for debugging or model-shopping.
+  `SPEC.md` section 8's testing strategy) — not for debugging or model-shopping.
 - **If a provider starts returning 403/429, stop calling it immediately** and
   investigate via docs/support channels rather than retrying with different
   models/keys in quick succession — retrying does not help and each attempt

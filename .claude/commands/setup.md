@@ -5,7 +5,7 @@ description: Walk through setting up this project from a fresh clone to a first 
 Run the setup doctor and report where things stand:
 
 ```bash
-uv run python -m bot.scripts.doctor --json
+uv run python -m scripts.doctor --json
 ```
 
 Read the JSON. It carries `track` (`local` or `hosted`), `step` (the current
@@ -42,22 +42,22 @@ the two places real credentials reach it, and they work differently:
   read, or write to it, full stop, and a `PreToolUse` hook enforces this
   independently of your own judgment.
 - **Step 4** writes credentials via a script: `uv run python -m
-  bot.scripts.init_env`. **Never run this yourself.** Ask the user to run it in
+  scripts.init_env`. **Never run this yourself.** Ask the user to run it in
   this session with the `!` prefix, so its output lands in the conversation
   without you invoking it:
 
-  > Run this yourself: `! uv run python -m bot.scripts.init_env`
+  > Run this yourself: `! uv run python -m scripts.init_env`
 
   It prints names and lengths only, never values, so its output is safe to
   read and reason about afterwards. The doctor is safe for you to run as
   often as you like — it is read-only, and reports names, lengths, and
   booleans only.
 
-`bot.scripts.create_github_app` also still exists — an optional, still-tested
+`scripts.create_github_app` also still exists — an optional, still-tested
 automated alternative to Step 2's by-hand process, not the documented
 default. If the user chooses to use it anyway, it writes credentials the
 same way `init_env` does and must never be run by you either; hand it off
-the same way: `! uv run python -m bot.scripts.create_github_app`.
+the same way: `! uv run python -m scripts.create_github_app`.
 
 If the user asks you to check or fix a value inside `.env`, decline and ask
 them to do it themselves. That is the rule working, not an obstacle to route
@@ -65,6 +65,6 @@ around.
 
 ## For reference
 
-Full explanations of each row live in the setup guide; `bot/scripts/deploy.py`
+Full explanations of each row live in the setup guide; `scripts/deploy.py`
 covers the deployment-verification rows specifically. This command holds no
-setup logic of its own — `bot/scripts/doctor.py` is the tool, and it works identically for people who do not use Claude Code.
+setup logic of its own — `scripts/doctor.py` is the tool, and it works identically for people who do not use Claude Code.

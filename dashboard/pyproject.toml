@@ -1,7 +1,7 @@
 [project]
 name = "dashboard"
 version = "0.1.0"
-description = "Ops/demo dashboard for the bot — deployed in-process with bot/, not standalone"
+description = "Ops/demo dashboard for the bot — deployed in-process with the root app, not standalone"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",

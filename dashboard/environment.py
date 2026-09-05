@@ -17,12 +17,14 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from bot import config_deps, github_app, render_client
-from bot.config import settings
-from bot.config_deps import CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS, credential_slot_vars
-from bot.providers import catalog, credentials, registry, vertex_credentials
-from bot.providers.registry import slot_env_name
-from bot.queue import store
+import config_deps
+import github_app
+import render_client
+from config import settings
+from config_deps import CREDENTIAL_FAMILIES, MAX_CREDENTIAL_SLOTS, credential_slot_vars
+from providers import catalog, credentials, registry, vertex_credentials
+from providers.registry import slot_env_name
+from review_queue import store
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +83,7 @@ def _safe_resolve_vertex_info(slot: int) -> tuple[dict | None, str | None]:
     Returns (info, error). A non-None `error` is a structural code and
     `info` is always None in that case. `info is None` with no error means
     "no explicit key -- fall through to implicit ADC", mirroring
-    bot/providers/factory.py's own definition of "configured": a missing key
+    providers/factory.py's own definition of "configured": a missing key
     is only a problem when GCP_PROJECT isn't set either, since without
     either there is nothing for ADC to resolve against.
     """

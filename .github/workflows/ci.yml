@@ -55,7 +55,7 @@ jobs:
       # No Postgres service: gen_docs reads class metadata and module
       # constants only, never the database and never a configured value.
       - name: Regenerate reference docs
-        run: uv run python -m bot.scripts.gen_docs
+        run: uv run python -m scripts.gen_docs
 
       - name: Fail if the generated docs are stale
         run: |

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from httpx import ASGITransport, AsyncClient
 
-from bot.main import app
+from main import app
 
 
 async def _client() -> AsyncClient:

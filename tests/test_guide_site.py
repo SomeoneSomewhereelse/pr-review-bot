@@ -92,7 +92,7 @@ _SETUP = _ROOT / "guide" / "setup"
 def test_setup_pages_match_doctors_step_titles():
     """If the guide and doctor disagree about a step's name, an operator
     following one while running the other cannot tell where they are."""
-    from bot.scripts import doctor
+    from scripts import doctor
 
     pages = {
         1: "01-prerequisites.md",
@@ -121,7 +121,7 @@ def test_prerequisites_page_uses_portable_commands_only():
 
 def test_github_app_page_encodes_the_pem_with_the_project_script():
     text = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
-    assert "bot.scripts.encode_credential" in text
+    assert "scripts.encode_credential" in text
     assert "base64 -w0" not in text
 
 
@@ -160,15 +160,15 @@ def test_step_8_page_points_back_to_step_3_instead_of_repeating_it():
 
 
 def test_install_app_page_uses_doctor_not_bare_deploy_for_installation_id():
-    """Regression: bot.scripts.deploy's main() exits 2 immediately ("a public
+    """Regression: scripts.deploy's main() exits 2 immediately ("a public
     base URL ... is required") before it ever reaches the installation-id
     discovery check -- and Step 3 is before Step 6, so no PUBLIC_BASE_URL or
-    RENDER_EXTERNAL_URL exists yet at this point in the guide. bot.scripts.doctor
+    RENDER_EXTERNAL_URL exists yet at this point in the guide. scripts.doctor
     needs no base URL and discovers the same installation id via its
     github-install check, so that's what this page must point at instead."""
     text = (_SETUP / "03-install-app.md").read_text(encoding="utf-8")
-    assert "uv run python -m bot.scripts.doctor" in text
-    assert "```bash\nuv run python -m bot.scripts.deploy\n```" not in text
+    assert "uv run python -m scripts.doctor" in text
+    assert "```bash\nuv run python -m scripts.deploy\n```" not in text
 
 
 def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env():
@@ -176,14 +176,14 @@ def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env(
     config files are already `cp`'d into existence by Step 2, so Step 4
     just has the operator edit LLM_PROVIDER/the credential by hand and
     verify with doctor -- one fewer script in the documented path, and one
-    fewer place a malformed answer can reach bot/config.py before doctor
+    fewer place a malformed answer can reach config.py before doctor
     ever gets a chance to report it structurally."""
     step2 = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
     assert "cp .env.config.example .env.config" in step2
 
     step4 = (_SETUP / "04-llm-provider.md").read_text(encoding="utf-8")
-    assert "bot.scripts.init_env" not in step4
-    assert "uv run python -m bot.scripts.doctor" in step4
+    assert "scripts.init_env" not in step4
+    assert "uv run python -m scripts.doctor" in step4
 
 
 def test_setup_index_names_all_eight_steps():
@@ -205,7 +205,7 @@ def test_supabase_page_pins_the_session_pooler_port():
 def test_render_page_leaves_env_vars_blank_for_sync_env_to_push():
     """Regression: this page used to tell the reader to hand-type exactly
     four env vars into Render's dashboard to get the service booting -- but
-    bot/main.py's lifespan also requires GITHUB_APP_INSTALLATION_ID and a
+    main.py's lifespan also requires GITHUB_APP_INSTALLATION_ID and a
     valid LLM_PROVIDER, so that first deploy always crash-looped. Since
     --sync-env (Step 7) doesn't actually need the service already booted,
     just already created, this page now has the reader leave every var
@@ -333,7 +333,7 @@ _EXPECTED_GUIDE_BASE = "https://tovtechorg.github.io/pr-review-bot/"
 def test_deploy_points_at_a_guide_page_that_exists():
     """spec section 3d: the CLI prints this to a terminal user, so it must
     resolve to a real page -- on the right host, under the right repo."""
-    from bot.scripts import deploy
+    from scripts import deploy
 
     assert deploy._GUIDE_URL.startswith(_EXPECTED_GUIDE_BASE), (
         f"_GUIDE_URL must point at this repo's Pages site "
@@ -345,7 +345,7 @@ def test_deploy_points_at_a_guide_page_that_exists():
 
 
 def test_no_script_still_points_at_setup_md():
-    """Scans bot/scripts/*.py, root-level tracked *.md files (except ISSUES.md
+    """Scans scripts/*.py, root-level tracked *.md files (except ISSUES.md
     and SPEC.md, which legitimately reference SETUP.md as historical/
     design-record content), .env*.example files, and .claude/commands/*.md.
 
@@ -356,7 +356,7 @@ def test_no_script_still_points_at_setup_md():
     docstring, and Stage 3a's ast-vs-grep note). Any test that scans source
     for a forbidden string must exclude the file asserting it.
     """
-    scanned: list[Path] = list(_ROOT.glob("bot/scripts/*.py"))
+    scanned: list[Path] = list(_ROOT.glob("scripts/*.py"))
     scanned += [
         p for p in _tracked_root_markdown_files() if p.name not in {"ISSUES.md", "SPEC.md"}
     ]

@@ -25,7 +25,7 @@ def test_a_docs_job_exists_alongside_lint_and_test():
 def test_the_docs_job_regenerates_and_fails_on_drift():
     steps = _workflow()["jobs"]["docs"]["steps"]
     commands = " ".join(step.get("run", "") for step in steps)
-    assert "bot.scripts.gen_docs" in commands
+    assert "scripts.gen_docs" in commands
     assert "git add -A" in commands
     assert "git diff --cached --exit-code" in commands
     assert "guide/reference" in commands
@@ -37,7 +37,7 @@ def test_the_docs_job_regenerates_before_diffing():
     commands (as above) can't tell the two orderings apart."""
     steps = _workflow()["jobs"]["docs"]["steps"]
     regenerate_index = next(
-        i for i, step in enumerate(steps) if "bot.scripts.gen_docs" in step.get("run", "")
+        i for i, step in enumerate(steps) if "scripts.gen_docs" in step.get("run", "")
     )
     diff_index = next(
         i for i, step in enumerate(steps) if "git diff --cached --exit-code" in step.get("run", "")

@@ -4,9 +4,9 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from bot.main import app
-from bot.queue import dispatcher, store
-from bot.specialists.schemas import ReviewResult, SpecialistResult
+from main import app
+from review_queue import dispatcher, store
+from specialists.schemas import ReviewResult, SpecialistResult
 from dashboard import auth
 from dashboard import router as dashboard
 

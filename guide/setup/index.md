@@ -17,13 +17,13 @@ Getting from a fresh clone to a first posted review comment is eight steps.
 8. **Add the keep-warm pinger** — a free external monitor that keeps both
    Render and Supabase's free tiers from spinning down.
 
-Run `uv run python -m bot.scripts.doctor` at any point — it tells you which
+Run `uv run python -m scripts.doctor` at any point — it tells you which
 of these are still outstanding.
 
 ## The one command to remember
 
 ```bash
-uv run python -m bot.scripts.doctor
+uv run python -m scripts.doctor
 ```
 
 Run it any time, from a fresh clone or mid-setup. It answers three

@@ -1,9 +1,41 @@
+[project]
+name = "pr-review-bot"
+version = "0.1.0"
+description = "Autonomous code-review engine — GitHub PR webhook -> LLM specialists -> PR comment"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pygithub>=2.4",
+    "google-genai>=0.3",
+    "httpx>=0.27",
+    "groq>=1.5.0",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "python-dotenv>=1.0",
+    "google-auth>=2.35",
+    # Neither is imported directly by application code at root -- both are
+    # transitive via pygithub. Declared explicitly anyway because
+    # tests/test_github_app.py imports `requests` directly (to patch
+    # PyGithub's own HTTP transport, per that file's own module docstring),
+    # and pyjwt is kept pinned alongside it for the same reason PyGithub
+    # needs it.
+    "pyjwt>=2.13",
+    "requests>=2.32",
+    "python-multipart>=0.0.20",
+]
+
+[tool.uv]
+package = false
+
 [tool.uv.workspace]
-members = ["bot", "dashboard"]
+members = ["dashboard"]
 
 [dependency-groups]
 dev = [
-    # Imported directly by bot/tests/test_github_app.py to build a
+    # Imported directly by tests/test_github_app.py to build a
     # real RSA key; transitive via pygithub[crypto] otherwise.
     "cryptography>=44.0",
     "mkdocs-material>=9.5",
@@ -24,11 +56,11 @@ select = ["E4", "E7", "E9", "F", "E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "bot/tests", "dashboard/tests"]
+testpaths = ["tests", "dashboard/tests"]
 pythonpath = ["."]
-# None of the three test directories carries an __init__.py (matching the
+# Neither test directory carries an __init__.py (matching the
 # pre-restructure convention), so under the default `prepend` import mode a
-# future duplicate test-file basename across two of them (e.g. a second
+# future duplicate test-file basename across the two (e.g. a second
 # test_config.py) would hit pytest's "import file mismatch" collection
 # error. `importlib` mode imports each test file by its fully qualified
 # path instead of inserting bare names onto sys.path, which sidesteps that

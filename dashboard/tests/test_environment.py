@@ -8,11 +8,12 @@ import io
 import jwt
 from httpx import ASGITransport, AsyncClient
 
-from bot import github_app, render_client
-from bot.config import settings
-from bot.main import app
-from bot.providers import catalog, credentials, vertex_credentials
-from bot.queue import store
+import github_app
+import render_client
+from config import settings
+from main import app
+from providers import catalog, credentials, vertex_credentials
+from review_queue import store
 from dashboard import auth
 
 
