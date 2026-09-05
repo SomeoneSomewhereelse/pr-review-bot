@@ -30,8 +30,8 @@ memory.md
 auth-link.txt
 
 # Zoom-demo-only scaffolding (not part of the graded/documented feature set)
-bot/fixtures/demo_bulk_bad_code/
-bot/scripts/seed_bulk_demo_pr.py
+fixtures/demo_bulk_bad_code/
+scripts/seed_bulk_demo_pr.py
 
 # Durable queue database
 queue.db
