@@ -1,4 +1,4 @@
-"""Manual live verification for Step 3 (app/github_app.py).
+"""Manual live verification for Step 3 (bot/github_app.py).
 
 Not part of the pytest suite (CI never runs this) — it depends on live
 external GitHub state: a real installation of the configured GitHub App, and a

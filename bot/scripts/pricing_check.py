@@ -1,4 +1,4 @@
-"""Compare app/providers/pricing.py's groq rates against Groq's live catalog.
+"""Compare bot/providers/pricing.py's groq rates against Groq's live catalog.
 
     uv run python -m bot.scripts.pricing_check
 
@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     """Exit 1 ONLY on drift. A model the table does not carry is normal and
     exits 0 -- see Comparison's docstring for why the two are not equivalent."""
     parser = argparse.ArgumentParser(
-        description="Compare app/providers/pricing.py's groq rates against Groq's catalog"
+        description="Compare bot/providers/pricing.py's groq rates against Groq's catalog"
     )
     parser.add_argument(
         "--show-missing",

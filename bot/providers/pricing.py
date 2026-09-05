@@ -12,7 +12,7 @@ from typing import NamedTuple
 class Rate(NamedTuple):
     """One (provider, model) price, with the provenance needed to tell whether
     it is still true. ``verified`` is an ISO date; ``source_url`` is where the
-    number came from and where to re-check it. scripts/pricing_check.py reads
+    number came from and where to re-check it. bot/scripts/pricing_check.py reads
     both."""
 
     rate_in: float   # USD per 1M input tokens
@@ -58,10 +58,10 @@ def estimate_cost_usd(
     """Estimated USD cost, or None when (provider, model) has no rate entry.
 
     Returning None rather than raising is deliberate. This is called from
-    app/orchestrator.py AFTER all three specialists have already made real,
+    bot/orchestrator.py AFTER all three specialists have already made real,
     paid calls, so a KeyError here threw away completed, paid work. Pricing is
     a nice-to-have on the comment, not a gate on which models may run --
-    scripts/deploy.py reports an unpriced model as a WARN row instead
+    bot/scripts/deploy.py reports an unpriced model as a WARN row instead
     (design spec 2026-08-18 sections 6a and 6b).
     """
     rates = _RATES.get((provider, model))
@@ -75,8 +75,8 @@ def is_known(provider: str, model: str) -> bool:
     """Whether (provider, model) has a rate entry -- i.e. whether
     estimate_cost_usd would return a real number instead of None for it.
 
-    Backs the advisory pricing warnings -- scripts/set_override.py's
-    --model and scripts/deploy.py's check_pricing()/sync_env(). None of them
+    Backs the advisory pricing warnings -- bot/scripts/set_override.py's
+    --model and bot/scripts/deploy.py's check_pricing()/sync_env(). None of them
     blocks on the answer: an unpriced model runs fine and simply produces no
     cost estimate on the PR comment (design spec 2026-08-18 sections 6a/6b).
     It exists so those warnings can be specific about WHICH model is

@@ -1,0 +1,29 @@
+# Test suite, operator tooling, and fixtures aren't needed by the running
+# service in either bot/Dockerfile or onboarding/Dockerfile -- both only
+# ever `uv sync`/run the package itself. See ISSUES.md's now-closed "Docker
+# images ship the test suite, scripts, and fixtures with no .dockerignore"
+# Parked Issue.
+**/tests/
+**/__pycache__/
+*.pyc
+
+# bot/-specific: operator CLI tooling and demo/test fixtures never used at
+# runtime by the deployed service.
+bot/scripts/
+bot/fixtures/
+bot/SPEC.md
+bot/cost.md
+
+# Never let a build context pick up local secrets or machine-specific config
+# even though .dockerignore is a second, redundant safety net alongside
+# .gitignore and the git-tracked-files-only build context most CI setups use.
+.env
+**/.env
+.env.config
+**/.env.config
+*.pem
+gcp-service-account-key*.json
+
+.git/
+.venv/
+docs/superpowers/

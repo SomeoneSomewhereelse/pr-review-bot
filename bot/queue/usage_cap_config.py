@@ -2,7 +2,7 @@
 reset time) when set and valid, else the env-configured defaults.
 
 Every read of the effective cap goes through effective_caps(). Mirrors
-app/queue/cooldown_config.py exactly, including the reason for the split: the
+bot/queue/cooldown_config.py exactly, including the reason for the split: the
 DB read lives in the dispatcher (where the asyncio.to_thread convention
 applies) and is pushed in via set_override_cache, keeping this module
 import-light and non-blocking.

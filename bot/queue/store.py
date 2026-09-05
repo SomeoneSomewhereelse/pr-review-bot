@@ -10,7 +10,7 @@ the event loop.
 Also owns the ``reviews`` table — an insert-only history of completed reviews
 (provider, model, timing, tokens, cost, findings) that has no bearing on queue
 lifecycle but backs the ``GET /`` / ``GET /api/dashboard`` ops/demo
-page (``app/dashboard.py``) via the ``dashboard_*`` read helpers below.
+page (``dashboard/router.py``) via the ``dashboard_*`` read helpers below.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from bot.specialists.schemas import ReviewResult
 
 # (name, SQL type + constraints) for every runtime_config column, in DDL
 # order. The single source of truth for that table's shape: _SCHEMA below
-# builds its CREATE TABLE from this, and scripts/deploy.py's
+# builds its CREATE TABLE from this, and bot/scripts/deploy.py's
 # check_runtime_config_schema() reads the same names to verify the live
 # database actually has them all. CREATE TABLE IF NOT EXISTS is a no-op
 # against a table that already exists, so a column added here after first
@@ -187,7 +187,7 @@ def init_pool() -> None:
     the likely causes: the bare PoolTimeout reads like a hang, and the driver's
     real error is tens of lines further up the log. Startup still fails loudly
     (design spec section 11) -- RuntimeError matches _require_pool()'s convention
-    and app/main.py's lifespan already documents it as the fail-loudly path. The
+    and bot/main.py's lifespan already documents it as the fail-loudly path. The
     message never includes settings.database_url, which carries the password.
     """
     global _pool
@@ -220,7 +220,7 @@ def _seed_runtime_config_defaults(conn) -> None:
 
     ON CONFLICT (id) DO NOTHING, not a SELECT-then-INSERT: atomic (no race
     with a concurrent seed) and, more importantly, never overwrites a row an
-    operator or scripts/deploy.py --sync-config-db already populated --
+    operator or bot/scripts/deploy.py --sync-config-db already populated --
     seeding only ever fills a genuinely empty table.
 
     This is what lets the onboarding wizard's last frame skip a separate
@@ -899,7 +899,7 @@ def set_cooldown_override(
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
     set_provider_override. Writes exactly the three values it's given; the
-    only caller, scripts/deploy.py::sync_config_db(), always writes the full
+    only caller, bot/scripts/deploy.py::sync_config_db(), always writes the full
     triple straight from .env.config's resolved Settings values -- there is
     no partial-field write to merge with a current value for.
     """
@@ -1019,7 +1019,7 @@ def get_usage_cap_overrides() -> tuple[int | None, str | None]:
 
     The reset time comes back as the raw "HH:MM"/"HH:MM:SS" TEXT it was stored
     as; parsing (and rejecting garbage) belongs to
-    app/queue/usage_cap_config.py, which is where the fail-safe policy lives.
+    bot/queue/usage_cap_config.py, which is where the fail-safe policy lives.
     """
     with _require_pool().connection() as conn:
         row = conn.execute(
@@ -1040,7 +1040,7 @@ def set_usage_cap_override(tokens: int | None, reset: str | None, now: str) -> N
 
     Upserts the singleton row -- same CHECK (id = 1) guarantee as
     set_provider_override. Writes exactly the two values it's given; the
-    only caller, scripts/deploy.py::sync_config_db(), always writes the full
+    only caller, bot/scripts/deploy.py::sync_config_db(), always writes the full
     pair straight from .env.config's resolved Settings values -- there is no
     partial-field write to merge with a current value for.
     """

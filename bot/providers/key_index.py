@@ -2,7 +2,7 @@
 set, else index 0 (the base, unsuffixed env var).
 
 Every read of the active index goes through active_key_index(). Mirrors
-app/providers/active.py's provider-override cache exactly, generalized from
+bot/providers/active.py's provider-override cache exactly, generalized from
 one provider to a per-provider dict: each provider tracks its own slot
 independently, so switching *which provider* is active never disturbs the
 key slot chosen for the other two.

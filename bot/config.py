@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     public_base_url: str = ""  # set from RENDER_EXTERNAL_URL on Render; PUBLIC_BASE_URL override
 
     # --- Dashboard authentication. A single shared operator credential (no
-    # per-user accounts) gates app/dashboard.py's router -- see
+    # per-user accounts) gates dashboard/router.py's router -- see
     # docs/superpowers/specs/2026-08-28-dashboard-authentication-design.md.
     # dashboard_session_secret signs the session-cookie JWT and is
     # independent of the password: rotating it invalidates every active
@@ -92,10 +92,10 @@ class Settings(BaseSettings):
 
     # No implicit default: guessing a provider means silently running (and
     # billing) against one the operator never chose. Validated in
-    # app/main.py's lifespan rather than as a pydantic required field -- a
+    # bot/main.py's lifespan rather than as a pydantic required field -- a
     # required field would raise the moment anything first reads `settings`
     # (see the lazy `__getattr__` below), breaking pytest and
-    # scripts/doctor.py before either could report the problem (design spec
+    # bot/scripts/doctor.py before either could report the problem (design spec
     # 2026-08-18 section 6e).
     llm_provider: str = ""
     # ``llm_model`` is consumed by the gemini provider only. Groq is a
@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     # --- Vertex AI (LLM_PROVIDER=vertex). Unlike gemini/groq, the credential
     # is a GCP service-account identity rather than an API-key string:
     # GCP_SERVICE_ACCOUNT_KEY (hosted, always base64) -> implicit ADC. See
-    # app/providers/vertex_credentials.py for the resolution order.
+    # bot/providers/vertex_credentials.py for the resolution order.
     # An OPTIONAL override: unset means "use the project_id embedded in the
     # resolved service-account key", so an operator handed nothing but a JSON
     # key needs no separate project lookup.
@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     gcp_location: str = "us-central1"
     gcp_service_account_key: str = ""
     # Ceiling on a single LLM request, in seconds. The dispatcher is a single
-    # serial consumer of the whole queue (app/queue/dispatcher.py) -- a hung
+    # serial consumer of the whole queue (bot/queue/dispatcher.py) -- a hung
     # call with no timeout would stall every pending PR's review, not just
     # one, for however long the SDK's own default timeout is (several
     # minutes). 45s is well under that while still tolerating a genuinely
@@ -157,7 +157,7 @@ class Settings(BaseSettings):
     # above -- never a Render env var, so an operator can flip it with no
     # redeploy (uv run python -m bot.scripts.deploy --sync-config-db). False
     # (the default) skips a review while a PR is a draft; ready_for_review
-    # still triggers one even with zero new commits (see app/webhook.py).
+    # still triggers one even with zero new commits (see bot/webhook.py).
     review_draft_prs: bool = False
 
     # --- Proactive per-key daily usage cap. Defaults to None (feature off): a
@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     key_usage_token_cap: int | None = Field(default=None, gt=0)
     key_usage_reset_time_utc: time = Field(default=time(4, 0))
 
-    # --- Required operator tooling: read by scripts/deploy.py on the
+    # --- Required operator tooling: read by bot/scripts/deploy.py on the
     # operator's own machine, and (RENDER_API_KEY only) by the deployed
     # service itself for the dashboard's Environment tab. Never added to
     # render.yaml directly -- RENDER_API_KEY reaches the service via
@@ -215,7 +215,7 @@ class Settings(BaseSettings):
 # _blank_values_fall_back_to_defaults above for that case). Building it
 # eagerly at import time meant merely IMPORTING this module -- even just for
 # the Settings class itself, never touching this singleton -- forced that
-# validation immediately. scripts/init_env.py hit exactly this: it imports
+# validation immediately. bot/scripts/init_env.py hit exactly this: it imports
 # Settings only to validate one answer at a time via Settings.model_validate,
 # but a single already-malformed value left over in .env/.env.config (e.g.
 # from before this file's own blank-value fix existed) crashed the import
@@ -224,7 +224,7 @@ class Settings(BaseSettings):
 # This __getattr__ defers construction to first access instead, so importing
 # this module no longer forces validation of whatever is currently on disk.
 # It does NOT change whether a genuinely invalid value raises -- only when:
-# the app's own boot path (app/main.py) still reads `settings` immediately on
+# the app's own boot path (bot/main.py) still reads `settings` immediately on
 # startup, so a real misconfiguration still fails loudly there, exactly as
 # before and as the existing tests for this (e.g.
 # test_key_usage_reset_time_rejects_garbage) already pin.

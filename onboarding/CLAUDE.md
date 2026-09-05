@@ -495,14 +495,14 @@ optional:**
   *when* it's called moved from per-frame to this one call site.
 - **The bulk push also always includes `_GENERIC_OPERATIONAL_ENV_DEFAULTS`**
   (2026-09-02) — `bot/config.py`'s tuning-knob `OPERATIONAL_KEYS` that
-  `scripts/deploy.py --sync-env` pushes but no wizard frame has a field for
+  `bot/scripts/deploy.py --sync-env` pushes but no wizard frame has a field for
   (dispatcher backoff/retry/sweep settings, `GCP_LOCATION`,
   `LLM_REQUEST_TIMEOUT_SECONDS`). Unconditional, not gated on any frame:
   these are hardcoded copies of `bot/config.py`'s own field defaults, not
   visitor-submitted data. `GITHUB_TARGET_REPO` and `GCP_PROJECT` are
   deliberately excluded rather than pushed as `""` — Render's API rejects an
   empty env-var value outright, and both default genuinely blank — same
-  reasoning `scripts/deploy.py`'s `_OPTIONAL_EMPTY_ENV_KEYS` already
+  reasoning `bot/scripts/deploy.py`'s `_OPTIONAL_EMPTY_ENV_KEYS` already
   encodes. Keep this dict in sync with `bot/config.py` by hand; nothing
   automated ties the two together (onboarding/ never imports bot/).
 - **The final `render-deploy` frame stays open (doesn't collapse) once

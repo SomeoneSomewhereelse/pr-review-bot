@@ -1,8 +1,8 @@
-"""app/providers/registry.py -- the single provider -> env-var-name mapping,
-shared by app/ (credential resolution) and scripts/ (deploy checks, CLI
-overrides). Replaces what was previously scripts/deploy.py's private
-_PROVIDERS dict -- app-side code now needs the same mapping, and app/ must
-not import from scripts/."""
+"""bot/providers/registry.py -- the single provider -> env-var-name mapping,
+shared by bot/ (credential resolution) and bot/scripts/ (deploy checks, CLI
+overrides). Replaces what was previously bot/scripts/deploy.py's private
+_PROVIDERS dict -- bot-side code now needs the same mapping, and bot/ must
+not import from bot/scripts/."""
 from __future__ import annotations
 
 from bot.providers import registry
@@ -27,7 +27,7 @@ def test_registry_lists_a_key_index_column_per_provider():
 
 
 def test_known_providers_matches_the_registry():
-    """app/dashboard.py builds its per-provider backoff panel from
+    """bot/dashboard.py builds its per-provider backoff panel from
     KNOWN_PROVIDERS; a provider in one and not the other renders a panel that
     silently omits a real provider."""
     from bot.providers.base import KNOWN_PROVIDERS
@@ -36,7 +36,7 @@ def test_known_providers_matches_the_registry():
 
 
 def test_deploy_script_imports_the_shared_registry():
-    """scripts/deploy.py must not keep its own copy of this mapping -- a
+    """bot/scripts/deploy.py must not keep its own copy of this mapping -- a
     provider added to one and not the other is exactly the drift this
     registry exists to prevent (see _PROVIDERS's own prior docstring, which
     already called it 'the single source of truth')."""

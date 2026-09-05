@@ -2,7 +2,7 @@
 (base/cap/factor) when set and valid, else the env-configured defaults.
 
 Every read of the effective cooldown config goes through effective_config().
-Mirrors app/providers/active.py's provider-override cache exactly, including
+Mirrors bot/providers/active.py's provider-override cache exactly, including
 the reason for the split: the DB read lives in the dispatcher (where the
 asyncio.to_thread convention applies) and is pushed in via set_override_cache,
 keeping this module import-light and non-blocking.

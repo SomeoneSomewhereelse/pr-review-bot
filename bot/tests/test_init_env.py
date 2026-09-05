@@ -179,11 +179,11 @@ def test_running_init_env_with_an_already_malformed_value_does_not_crash(tmp_pat
     """The exact reported bug: a value already written to .env/.env.config
     (e.g. from before this file's own answer-validation existed) that fails
     Settings' own validation used to crash init_env's own module import --
-    app/config.py built its `settings` singleton unconditionally at import
+    bot/config.py built its `settings` singleton unconditionally at import
     time, and init_env imports Settings/OPERATIONAL_KEYS from that same
     module, which is enough to trigger it regardless of whether init_env
     ever touches the singleton itself. Fixed by making that singleton lazy
-    (see app/config.py's module-level __getattr__).
+    (see bot/config.py's module-level __getattr__).
 
     Runs the real script end-to-end in a subprocess against an isolated
     tmp_path, with empty example files so it has nothing left to prompt

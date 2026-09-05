@@ -1,4 +1,4 @@
-"""scripts/encode_credential.py -- prints a local file's base64 form.
+"""bot/scripts/encode_credential.py -- prints a local file's base64 form.
 
 Human-run only: never invoke this against a real credential file from an
 agent session. Printing secret-derived bytes into a tool result is exactly

@@ -1,4 +1,4 @@
-"""The provisioned schema is declared, not migrated -- app/queue/store.py's
+"""The provisioned schema is declared, not migrated -- bot/queue/store.py's
 _SCHEMA is a CREATE TABLE declaration of the final shape, with no
 column/type-altering ALTER statements (design spec 2026-08-18 section 6d).
 These tests lock the column set so the ALTER-folding refactor cannot

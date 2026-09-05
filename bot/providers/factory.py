@@ -5,7 +5,7 @@ Narrow on purpose: this module knows which class to instantiate and which
 credential to hand it -- nothing about provider internals beyond that. The
 one asymmetry is vertex, whose credential is a service-account identity
 rather than an API-key string and whose absence means "use implicit ADC"
-rather than "misconfigured"; app/providers/vertex_credentials.py owns that
+rather than "misconfigured"; bot/providers/vertex_credentials.py owns that
 resolution, this module only branches on it.
 
 One instance per (provider name, key index, model) is cached for the process
@@ -59,7 +59,7 @@ def _build(provider: str, index: int, model: str) -> LLMProvider:
             )
         # Deferred: google.genai is a large SDK (~4.2s import cost, measured
         # via -X importtime) that every test/request path through
-        # app/specialists/base.py's factory import used to pay eagerly, even
+        # bot/specialists/base.py's factory import used to pay eagerly, even
         # when never touching Gemini/Vertex. Only import it once a vertex
         # provider is actually being constructed.
         from bot.providers.google_genai import VertexProvider

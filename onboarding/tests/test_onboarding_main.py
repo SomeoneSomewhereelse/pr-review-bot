@@ -1,5 +1,5 @@
 """Tests for onboarding/main.py — GET/HEAD /healthz on the standalone
-onboarding service (a separate FastAPI app from app/main.py)."""
+onboarding service (a separate FastAPI app from bot/main.py)."""
 from __future__ import annotations
 
 import pytest

@@ -9,7 +9,7 @@ field's DECLARED DEFAULT; the settings instance carries this machine's real
 DATABASE_URL, API keys, and service-account material. Everything written here
 is committed and published, so reading the instance would publish those
 values. Import the Settings CLASS only; the module-level instance in
-app/config.py must never be imported here. tests/test_gen_docs.py pins this
+bot/config.py must never be imported here. tests/test_gen_docs.py pins this
 both behaviourally and by parsing this module's own import statements.
 
 Output must be DETERMINISTIC -- no timestamps, no unordered iteration, no
@@ -71,7 +71,7 @@ def _default_text(field) -> str:
 def render_config() -> str:
     """Every Settings field, and which of the two config files it belongs in.
 
-    Secret-by-default, exactly as app/config.py's OPERATIONAL_KEYS defines it:
+    Secret-by-default, exactly as bot/config.py's OPERATIONAL_KEYS defines it:
     a name on that list is operational and lives in .env.config; everything
     else is a credential and lives in .env.
     """

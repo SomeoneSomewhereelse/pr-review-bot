@@ -1,8 +1,8 @@
-"""Deterministic tests for the provider layer (app/providers/*).
+"""Deterministic tests for the provider layer (bot/providers/*).
 
 Mocks the actual `google.genai.Client` boundary (`client.aio.models.generate_content`)
 so nothing here ever makes a real network call. Live verification against the
-real Gemini API happens separately in scripts/manual_verify_step4.py.
+real Gemini API happens separately in bot/scripts/manual_verify_step4.py.
 """
 
 from __future__ import annotations

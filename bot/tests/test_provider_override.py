@@ -72,7 +72,7 @@ def test_an_empty_provider_string_reads_as_no_override(db_exec):
 
 def test_resolved_provider_matches_the_store_across_row_states(db_exec):
     """There are two implementations of "what is the override": the store's
-    pooled, dict_row read (used by the dispatcher) and scripts/deploy.py's
+    pooled, dict_row read (used by the dispatcher) and bot/scripts/deploy.py's
     raw-connection read (used by the CLI's `provider` check and the
     --sync-env masking guard). Their equivalence was previously asserted only
     in a docstring -- if the two ever disagreed, the CLI could report a

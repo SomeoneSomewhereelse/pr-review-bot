@@ -25,7 +25,7 @@ from bot.config import settings
 from bot.providers import registry
 
 # Every secret-bearing env var doctor reports on. Enumerated literally rather
-# than derived from a prefix, for the same reason app/config.py's
+# than derived from a prefix, for the same reason bot/config.py's
 # OPERATIONAL_KEYS is: a pattern would silently pick up future names.
 PROBED_SECRETS: tuple[str, ...] = (
     "GITHUB_APP_ID",  # not itself a secret, but doctor.py needs to know if it's configured

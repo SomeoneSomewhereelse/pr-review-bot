@@ -1,4 +1,4 @@
-"""Tests for app/diff_utils.py — annotation + token-budget truncation."""
+"""Tests for bot/diff_utils.py — annotation + token-budget truncation."""
 
 from __future__ import annotations
 

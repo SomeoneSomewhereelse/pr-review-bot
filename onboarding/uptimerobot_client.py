@@ -4,7 +4,7 @@ docs/superpowers/specs/2026-08-27-onboarding-uptimerobot-frame-design.md
 sections 2-3.
 
 Uses v3 (Bearer auth, JSON), not the legacy v2 form-API
-scripts/deploy.py's existing read-only check_uptime_pinger already uses:
+bot/scripts/deploy.py's existing read-only check_uptime_pinger already uses:
 v2's POST /newMonitor was verified live to reject monitor creation on a
 free-plan account (403 "not allowed to use some settings with your
 current plan"); v3 was verified live to accept it on the same account

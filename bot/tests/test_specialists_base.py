@@ -1,4 +1,4 @@
-"""Tests for app/specialists/base.py — the shared Specialist.run() shape."""
+"""Tests for bot/specialists/base.py — the shared Specialist.run() shape."""
 
 from __future__ import annotations
 

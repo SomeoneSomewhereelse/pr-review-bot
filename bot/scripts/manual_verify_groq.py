@@ -1,4 +1,4 @@
-"""Manual live verification for the Groq provider (app/providers/groq.py).
+"""Manual live verification for the Groq provider (bot/providers/groq.py).
 
 Not part of the pytest suite (CI never runs this) — it depends on a real,
 live call to the Groq API using the real GROQ_API_KEY from `.env`. Groq is

@@ -50,7 +50,7 @@ class GroqProvider:
         # with backoff before this adapter's except clause ever sees it --
         # confirmed live (a 43.1s call, vs. ~5s normal, that never surfaced
         # as RateLimited despite exceeding the account's TPM budget). The
-        # durable queue (app/queue/dispatcher.py) already owns retry/backoff
+        # durable queue (bot/queue/dispatcher.py) already owns retry/backoff
         # for a rate-limited review -- durable across a process restart,
         # visible via a placeholder/schedule-note comment -- so a second,
         # hidden retry layer underneath it is redundant at best and actively
@@ -60,7 +60,7 @@ class GroqProvider:
             max_retries=0,
             timeout=settings.llm_request_timeout_seconds,
         )
-        # Passed in, never read from Settings here: app/providers/active_model.py
+        # Passed in, never read from Settings here: bot/providers/active_model.py
         # is the single resolver, so a DB model override and the model reported
         # in the PR comment can never disagree with what actually runs.
         self._model = model

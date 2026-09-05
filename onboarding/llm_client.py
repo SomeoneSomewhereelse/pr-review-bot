@@ -60,7 +60,7 @@ class LlmApiFailed:
 def _strip_model_prefix(name: str) -> str:
     """"models/gemini-flash-latest" -> "gemini-flash-latest";
     "publishers/google/models/gemini-2.5-flash" -> "gemini-2.5-flash" — both
-    are resource-name formats google-genai returns; app/config.py's
+    are resource-name formats google-genai returns; bot/config.py's
     llm_model/vertex_model fields expect the bare id."""
     return name.rsplit("/", 1)[-1]
 
@@ -182,7 +182,7 @@ async def list_groq_models(api_key: str) -> LlmModelsListed | LlmApiFailed:
     doubles as credential validation. Deliberately unfiltered (spec
     section 2): Groq's Model type carries no capability field to
     distinguish chat-completion models from Whisper/TTS/moderation ones.
-    max_retries=0 matches app/providers/groq.py's documented "no hidden
+    max_retries=0 matches bot/providers/groq.py's documented "no hidden
     retry layer" convention — root CLAUDE.md counsels stopping on a
     403/429 rather than silently retrying, which the SDK's default
     max_retries=2 would otherwise do behind this function's back. Never

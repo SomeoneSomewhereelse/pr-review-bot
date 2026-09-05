@@ -2,7 +2,7 @@
 env-configured Settings.review_draft_prs.
 
 Every read of the effective flag goes through effective_review_draft_prs().
-Mirrors app/queue/cooldown_config.py / usage_cap_config.py exactly, including
+Mirrors bot/queue/cooldown_config.py / usage_cap_config.py exactly, including
 the reason for the split: the DB read lives in the dispatcher (where the
 asyncio.to_thread convention applies) and is pushed in via set_override_cache,
 keeping this module import-light and non-blocking.

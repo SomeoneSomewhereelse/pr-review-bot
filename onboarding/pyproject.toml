@@ -13,6 +13,11 @@ dependencies = [
     "httpx>=0.27",
     "groq>=1.5.0",
     "google-auth>=2.35",
+    # Imported directly by onboarding/github_client.py (JWT-signing the App
+    # manifest exchange, and PyGithub's own requests-based transport for the
+    # sync google-auth credential refresh path -- see onboarding/CLAUDE.md's
+    # sub-project 4 section). See bot/pyproject.toml for why bot/ pins the
+    # same two packages despite not importing either directly.
     "pyjwt>=2.13",
     "requests>=2.32",
     "psycopg[binary]>=3.2",

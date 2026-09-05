@@ -1,4 +1,4 @@
-"""Golden-ish tests for app/formatting.py — ReviewResult -> Markdown comment."""
+"""Golden-ish tests for bot/formatting.py — ReviewResult -> Markdown comment."""
 
 from __future__ import annotations
 

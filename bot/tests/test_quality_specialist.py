@@ -1,4 +1,4 @@
-"""Tests for app/specialists/quality.py."""
+"""Tests for bot/specialists/quality.py."""
 
 from __future__ import annotations
 

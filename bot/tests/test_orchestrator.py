@@ -1,4 +1,4 @@
-"""Tests for app/orchestrator.py — asyncio.gather fan-out across all three
+"""Tests for bot/orchestrator.py — asyncio.gather fan-out across all three
 specialists (step 6), including partial-failure resilience.
 """
 

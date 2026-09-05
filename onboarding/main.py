@@ -1,5 +1,5 @@
 """onboarding/ — self-service setup wizard: a separate service from the
-review engine in app/. Wizard progress lives in a server-side session (a
+review engine in bot/. Wizard progress lives in a server-side session (a
 dedicated Postgres, see session_store.py) — replaces this service's earlier
 stateless-relay design, found fragile against mobile browsers destroying
 sessionStorage mid-flow. See

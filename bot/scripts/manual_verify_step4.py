@@ -1,4 +1,4 @@
-"""Manual live verification for Step 4 (app/providers/*).
+"""Manual live verification for Step 4 (bot/providers/*).
 
 Not part of the pytest suite (CI never runs this) — it depends on a real,
 live call to the Gemini AI-Studio API using the real GEMINI_API_KEY from

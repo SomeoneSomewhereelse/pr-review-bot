@@ -543,7 +543,7 @@ async def test_list_groq_models_never_logs_the_api_key(caplog):
 async def test_list_groq_models_does_not_retry_behind_our_back():
     """The groq SDK defaults to max_retries=2 and retries 429/5xx, which
     would turn one visitor-facing validation into three live calls --
-    counter to app/providers/groq.py's documented max_retries=0 decision
+    counter to bot/providers/groq.py's documented max_retries=0 decision
     and to root CLAUDE.md's "stop calling on a 403/429" discipline."""
     with respx.mock:
         route = respx.get(MODELS_URL).mock(

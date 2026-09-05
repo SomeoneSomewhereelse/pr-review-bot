@@ -18,10 +18,10 @@ exist on Render, the active index, and the active model -- and never a
 credential value, so it is safe to run and to paste anywhere (including into
 an agent's own transcript).
 
---model warns, rather than refuses, a value with no app/providers/pricing.py
+--model warns, rather than refuses, a value with no bot/providers/pricing.py
 rate-table entry for this provider -- naming the models that ARE known -- and
 still sets the override: an unpriced model runs fine, it simply produces no
-cost estimate on the review comment (app/providers/pricing.py::
+cost estimate on the review comment (bot/providers/pricing.py::
 estimate_cost_usd returns None; design spec 2026-08-18 section 6b).
 
 The model override is per-provider, not global: setting one only changes the
@@ -163,7 +163,7 @@ def _print_inventory() -> int:
     Partial picture for vertex specifically: "local slots" here only reflects
     GCP_SERVICE_ACCOUNT_KEY (and its numbered siblings) being set -- it says
     nothing about implicit ADC (`gcloud auth application-default login`),
-    which app/providers/vertex_credentials.py also accepts as a valid way to
+    which bot/providers/vertex_credentials.py also accepts as a valid way to
     authenticate. So vertex can print "local slots -" here even when a
     working ADC setup exists. This is deliberately not fixed by adding
     ADC-detection logic -- see the printed caveat on vertex's own line below.
@@ -299,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         # Warn on an unpriced model rather than refuse it (design spec
         # 2026-08-18 section 6b): an unpriced model runs fine, it simply
         # produces no cost estimate on the review comment
-        # (app/providers/pricing.py::estimate_cost_usd returns None) -- there
+        # (bot/providers/pricing.py::estimate_cost_usd returns None) -- there
         # is nothing here worth blocking an operator's explicit, one-shot
         # command over. --force still governs the separate live-credential
         # check below, unrelated to pricing.

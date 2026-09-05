@@ -1,4 +1,4 @@
-"""app/providers/vertex_credentials.py -- Vertex's two-layer credential
+"""bot/providers/vertex_credentials.py -- Vertex's two-layer credential
 chain: GCP_SERVICE_ACCOUNT_KEY (index-aware) -> None, meaning "let
 google-auth discover implicit ADC".
 

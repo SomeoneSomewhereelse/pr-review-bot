@@ -1,4 +1,4 @@
-"""Deterministic, CI-safe tests for app/github_app.py.
+"""Deterministic, CI-safe tests for bot/github_app.py.
 
 PyGithub makes its HTTP calls via the `requests` library (not `httpx`), so
 `respx` — which only intercepts `httpx` traffic — cannot see them. To still
@@ -94,7 +94,7 @@ def _no_pygithub_rate_limit_sleep(monkeypatch):
     call in this file goes through the fully-mocked fake_transport, so the
     throttle protects nothing here and only wastes wall-clock: profiled at
     46 real time.sleep calls totaling 11.5s across this file's 33 tests.
-    Patching stdlib time.sleep (not app/github_app.py, which this leaves
+    Patching stdlib time.sleep (not bot/github_app.py, which this leaves
     untouched) is the narrowest fix -- PyGithub's own pacing math still
     runs, it just no longer blocks.
     """
@@ -375,7 +375,7 @@ def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_tran
     edited = {}
     existing_body = (
         f"{github_app.COMMENT_MARKER}\n## Review\n"
-        f"Finding: the string `{github_app.FAIL_NOTE_START}` appears in app/github_app.py "
+        f"Finding: the string `{github_app.FAIL_NOTE_START}` appears in bot/github_app.py "
         f"and should be reviewed for clarity.\n\n"
         f"Other real finding: consider renaming this variable.\n\n"
         f"{github_app.FAIL_NOTE_START}\n> old failure note\n{github_app.FAIL_NOTE_END}"
@@ -408,7 +408,7 @@ def test_append_review_footnote_preserves_stray_marker_in_real_content(fake_tran
     github_app.append_review_footnote(REPO_FULL_NAME, PR_NUMBER, footnote)
 
     # The stray marker's surrounding real content must survive.
-    assert "appears in app/github_app.py" in edited["body"]
+    assert "appears in bot/github_app.py" in edited["body"]
     assert "consider renaming this variable" in edited["body"]
     # Only the real trailing footnote was replaced.
     assert "new failure note" in edited["body"]
@@ -933,7 +933,7 @@ def test_discover_and_verify_installation_id_propagates_app_not_installed(fake_t
 def test_discover_installation_id_for_app_wraps_a_non_404_github_error(fake_transport):
     """Mirrors discover_installation_id's own non-404 handling: a 401/5xx must
     become an actionable RuntimeError, not propagate as a raw PyGithub
-    exception (which scripts/deploy.py's github-app check would otherwise
+    exception (which bot/scripts/deploy.py's github-app check would otherwise
     only be able to report as an opaque 'unexpected <ExceptionType>')."""
     fake_transport.route("GET", "/app/installations", {"message": "Bad credentials"}, 401)
     with pytest.raises(RuntimeError) as exc_info:
@@ -1002,7 +1002,7 @@ def test_list_installation_repos_uses_the_given_installation_id_not_settings(
     fake_transport, monkeypatch
 ):
     """Regression test: list_installation_repos() must use the installation_id
-    it was given, not settings.github_app_installation_id -- scripts/deploy.py
+    it was given, not settings.github_app_installation_id -- bot/scripts/deploy.py
     calls this immediately after discovering a fresh id via
     discover_installation_id_for_app(), before that setting is ever assigned.
     Reading the setting instead 404s on every unpinned first deploy."""

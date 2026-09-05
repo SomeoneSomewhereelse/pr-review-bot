@@ -56,49 +56,81 @@ steps *inside* a review (diff prep → fan-out → merge → comment).
 
 ## 2. Module layout
 
+The repo is a `uv` workspace of three packages (`bot/`, `dashboard/`,
+`onboarding/`) plus a top-level test suite; see the 2026-08-29
+project-restructure design for why the review engine, its ops dashboard, and
+the self-service setup wizard are separate packages rather than one `app/`.
+
 ```
-app/
-  main.py              FastAPI app + lifespan (provider factory, dedup cache); GET /healthz
-  config.py            pydantic-settings — all env vars in one typed place
-  webhook.py           /webhook route; HMAC dependency; delivery dedup; 202 + BackgroundTask
-  hmac_verify.py       verify_signature(raw, header, secret) — hmac.compare_digest
-  github_app.py        JWT (RS256) → installation token; fetch diff; find/create/edit comment
-  orchestrator.py      prepare diff → fan out → merge into ReviewResult
-  diff_utils.py        annotate diff with file:line; token cap + truncation
-  formatting.py        ReviewResult → Markdown comment (with bot marker)
-  dashboard.py         ops/demo dashboard: GET / static page + GET /api/dashboard JSON
+bot/                         the review engine itself
+  main.py                    FastAPI app + lifespan (provider factory, dedup cache,
+                             boot-time credential checks); GET /healthz; mounts
+                             dashboard/'s router
+  config.py                  pydantic-settings — all env vars in one typed place
+  config_deps.py             FastAPI Depends() wrappers over Settings
+  webhook.py                 /webhook route; HMAC dependency; delivery dedup; 202 + BackgroundTask
+  hmac_verify.py              verify_signature(raw, header, secret) — hmac.compare_digest
+  github_app.py               JWT (RS256) → installation token; fetch diff; find/create/edit comment
+  render_client.py            Render API client — find_service_id, env-var CRUD (shared by
+                             bot/scripts/deploy.py and dashboard/environment.py)
+  orchestrator.py             prepare diff → fan out → merge into ReviewResult
+  diff_utils.py               annotate diff with file:line; token cap + truncation
+  formatting.py               ReviewResult → Markdown comment (with bot marker)
   specialists/
-    base.py            Specialist protocol + shared run() (calls provider + validate-repair)
-    schemas.py         Pydantic finding models + envelopes
-    security.py        system prompt + SecurityFinding schema
-    performance.py     system prompt + PerformanceFinding schema
-    quality.py         system prompt + QualityFinding schema
+    base.py                  Specialist protocol + shared run() (calls provider + validate-repair)
+    schemas.py                Pydantic finding models + envelopes
+    security.py               system prompt + SecurityFinding schema
+    performance.py             system prompt + PerformanceFinding schema
+    quality.py                 system prompt + QualityFinding schema
   providers/
-    base.py            LLMProvider protocol: async complete(system, user, schema) -> BaseModel;
-                       RateLimited(retry_after) — raised on a 429 (section 12)
-    google_genai.py    Vertex (vertexai=True) + Gemini (api_key) — one SDK, two clients
-    groq.py            OpenAI-compatible client, constrained-decoding structured output
-    github_models.py   OpenAI-compatible client via the user's GitHub PAT
-    factory.py         select provider by LLM_PROVIDER env
-    validate.py        validate-and-repair (one repair retry → typed empty-with-error)
-    pricing.py         per-provider/model rate table → est_cost_usd
+    base.py                  LLMProvider protocol: async complete(system, user, schema) -> BaseModel;
+                             RateLimited(retry_after) — raised on a 429 (section 12)
+    google_genai.py           Vertex (vertexai=True) + Gemini (api_key) — one SDK, two clients
+    groq.py                   OpenAI-compatible client, constrained-decoding structured output
+    vertex_credentials.py      resolves Vertex's GCP service-account credential (numbered slots,
+                             base64, implicit ADC)
+    factory.py                select provider by LLM_PROVIDER env; caches clients by (provider, key slot)
+    active.py / active_model.py  DB-backed provider/model override, with an in-memory fail-safe cache
+    key_index.py               which numbered API-key slot is active per provider
+    credentials.py             resolves the actual env var backing a provider's active credential
+    registry.py                single provider -> env-var-name mapping, shared by bot/ and bot/scripts/
+    validate.py                validate-and-repair (one repair retry → typed empty-with-error)
+    pricing.py                 per-provider/model rate table → est_cost_usd
   queue/
-    store.py           durable Postgres ticket store: enqueue_or_update, claim_next_due,
-                       defer, mark_done, recover_on_startup, get_ticket (section 12);
-                       also owns the `reviews` history table read by app/dashboard.py
-    dispatcher.py      single serial consumer: process_next_due, run_forever,
-                       in-memory blocked_until gate (section 12)
-tests/                 (section 8)
-fixtures/
-  bad_code/            planted issues: hardcoded credential, N+1 query, magic number
-  webhook_payloads/    signed request fixtures (valid / invalid / replay)
-  llm_cassettes/       recorded provider responses for deterministic E2E
-scripts/
-  seed_demo_pr.py      push fixtures/bad_code branch + open a real PR (the demo)
-Dockerfile
-pyproject.toml         (uv-managed)
-.github/workflows/ci.yml   ruff lint + pytest (deterministic test layers 1–6) on push/PR
-SETUP.md                   prerequisites checklist produced by Step 0 (guided setup)
+    store.py                  durable Postgres ticket store: enqueue_or_update, claim_next_due,
+                             defer, mark_done, recover_on_startup, get_ticket (section 12);
+                             also owns the `reviews` history table read by dashboard/router.py
+    dispatcher.py              single serial consumer: process_next_due, run_forever,
+                             in-memory blocked_until gate (section 12)
+    cooldown_config.py / usage_cap_config.py / review_draft_config.py
+                               DB-backed operational settings (re-review cooldown, per-key usage
+                             cap, draft-PR review toggle), each with the same fail-safe-cache pattern
+  scripts/                   operator CLI tooling — see bot/scripts/*.py; representative entries:
+    deploy.py                 pre-deploy checklist (credentials, provider health, pricing drift, ...)
+    set_override.py            change active provider/model/key-slot from the CLI, no redeploy
+    doctor.py                  read-only guided-setup status check (see guide/)
+    seed_demo_pr.py             push fixtures/bad_code branch + open a real PR (the demo)
+  tests/                      (section 8)
+  fixtures/
+    bad_code/                 planted issues: hardcoded credential, N+1 query, magic number
+    webhook_payloads/          signed request fixtures (valid / invalid / replay)
+    llm_cassettes/             recorded provider responses for deterministic E2E
+  Dockerfile
+  pyproject.toml               (uv workspace member)
+dashboard/                   ops/demo dashboard, mounted in-process by bot/main.py — never
+                             deployed standalone
+  router.py                   GET / static page + GET /api/dashboard JSON + GET /api/environment/*
+  auth.py                     session-cookie login/logout; require_session dependency
+  environment.py               Render env-var + runtime_config CRUD backing the Environment tab
+onboarding/                  self-service setup wizard — provisions a visitor's own bot+dashboard
+                             deployment (Render, Supabase, GitHub App, LLM provider, UptimeRobot);
+                             deployed as its own Render service, own Dockerfile; see onboarding/CLAUDE.md
+tests/                       cross-package tests (guide/doctor consistency, the repo-tooling
+                             PreToolUse hook, ...); bot/tests, dashboard/tests, onboarding/tests
+                             hold each package's own tests
+.github/workflows/ci.yml     ruff lint + pytest (deterministic test layers 1–6) on push/PR
+pyproject.toml                workspace root (uv), shared dev dependency group
+render.yaml                    Render Blueprint — builds onboarding/Dockerfile
 ```
 
 **Rule:** each module has one purpose and a narrow interface — the orchestrator
@@ -111,7 +143,7 @@ Field names match the brief exactly, plus a `file` field so the comment can rend
 `file:line` without a second round trip.
 
 ```python
-# specialists/schemas.py
+# bot/specialists/schemas.py
 Severity = Literal["critical", "high", "medium"]
 
 class SecurityFinding(BaseModel):
@@ -161,7 +193,7 @@ the comment (section 6) renders fully with no extra GitHub/LLM calls.
 ## 4. Provider abstraction
 
 ```python
-# providers/base.py
+# bot/providers/base.py
 class LLMProvider(Protocol):
     async def complete(self, system: str, user: str, schema: type[BaseModel]) -> BaseModel: ...
 ```
@@ -235,7 +267,7 @@ metadata (Vertex/Gemini/Groq all expose it); `pricing.py` maps tokens × active-
 rate → `est_cost_usd`. Pricing is **optional**: a model with no entry in the rate
 table yields `est_cost_usd = None`, and the comment simply omits its cost fragments
 rather than failing — the rate table prices reviews, it does not gate which models
-may run. `scripts/deploy.py`'s `pricing` check reports an unpriced model as a
+may run. `bot/scripts/deploy.py`'s `pricing` check reports an unpriced model as a
 non-blocking `WARN`.
 
 ## 7. HMAC webhook validation
@@ -265,7 +297,7 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
    exact Markdown.
 6. **E2E — offline/CI**: signed payload fixture + mocked GitHub + LLM cassettes →
    deterministic; asserts the comment body contains the seeded issues.
-7. **E2E — live dry-run**: `scripts/seed_demo_pr.py` opens a real PR from
+7. **E2E — live dry-run**: `bot/scripts/seed_demo_pr.py` opens a real PR from
    `fixtures/bad_code/` (planted hardcoded credential + N+1 query + magic number);
    assert comment appears within 15s with expected findings. **This is the
    rehearsable demo.**
@@ -278,10 +310,10 @@ Stack: `pytest`, `pytest-asyncio`, `httpx.AsyncClient` + `ASGITransport`, `respx
   after ~7 days inactivity). A free cron pinger (cron-job.org / UptimeRobot,
   ~10 min interval) keeps both services warm.
 - **Public URL**: Render assigns a stable public hostname (persists across restarts)
-  → set once as the GitHub App webhook URL via the `scripts/deploy.py` registration
+  → set once as the GitHub App webhook URL via the `bot/scripts/deploy.py` registration
   script (one-time, no manual edits on restart).
 - **Secrets/env**: `DATABASE_URL` (Supabase pooler connection string),
-  `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY_B64` (base64-encoded PEM),
+  `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (base64-encoded PEM, verbatim only),
   `GITHUB_TARGET_REPO` (optional, comma-separated allowlist — unset tracks every
   repo the App installation covers), `LLM_PROVIDER`, plus provider creds
   (`GROQ_API_KEY`, etc.).
@@ -346,9 +378,9 @@ per-request `BackgroundTask` with zero coordination across PRs.
 **Producer/consumer split.** `webhook.py` no longer runs any LLM work: it
 verifies HMAC, dedups the delivery, and calls
 `store.enqueue_or_update(...)` to upsert a durable Postgres ticket, then returns `202`
-immediately. A single serial dispatcher (`app/queue/dispatcher.py`,
+immediately. A single serial dispatcher (`bot/queue/dispatcher.py`,
 `run_forever`) is started as an `asyncio` task from the app lifespan
-(`app/main.py`) and is the **only** caller of the review pipeline — this
+(`bot/main.py`) and is the **only** caller of the review pipeline — this
 serializes every pacing/quota decision, and serial dispatch is anti-burst by
 construction.
 
@@ -359,12 +391,12 @@ dispatch design were both reviewed during the full-project audit and
 confirmed correct as deliberate tradeoffs at free-tier scale and per the
 Trust & Safety pacing discipline in CLAUDE.md — no change made.
 
-**Durable Postgres ticket, one per PR.** `app/queue/store.py` keeps one row per
+**Durable Postgres ticket, one per PR.** `bot/queue/store.py` keeps one row per
 `(repo_full_name, pr_number)` (`repo_full_name` from the incoming webhook payload,
 optionally narrowed by `GITHUB_TARGET_REPO`'s allowlist) with a `UNIQUE` constraint.
 The same module also owns a `reviews` table (one insert-only row per completed
 review — provider, model, timing, tokens, cost, and findings) that backs the
-`GET /` / `GET /api/dashboard` ops/demo page (`app/dashboard.py`); it
+`GET /` / `GET /api/dashboard` ops/demo page (`dashboard/router.py`); it
 is separate from `tickets`'s queue-lifecycle bookkeeping and from the
 single-row `runtime_config` provider-override table.
 `enqueue_or_update` applies a single per-state re-review policy (full design rationale:
@@ -400,27 +432,27 @@ escalation sites are: (1) `enqueue_or_update` done/failed re-arm, and
 `DISPATCHER_REREVIEW_COOLDOWN_MAX_SECONDS` default 3600s,
 `DISPATCHER_REREVIEW_COOLDOWN_FACTOR` default 2.0, must be `>= 1.0`) that live
 in the same `runtime_config` singleton row the LLM-provider override already
-uses (`scripts/set_override.py`), not a Render env var — the dispatcher reads
+uses (`bot/scripts/set_override.py`), not a Render env var — the dispatcher reads
 them from the database only, never from `Settings`, so there is exactly one
 live value at all times (see the 2026-08-17 "two sources of truth" design
-note). `scripts/deploy.py --sync-config-db` pushes `.env.config`'s current
+note). `bot/scripts/deploy.py --sync-config-db` pushes `.env.config`'s current
 values into that row with no redeploy (also runs automatically as part of
 `--sync-env`); it takes effect on the next claimed ticket. A row that comes
 back invalid (`factor < 1.0`, or `base > cap`) is discarded as a whole triple
-and falls back to `app/queue/cooldown_config.py`'s built-in defaults —
-mirroring `app/providers/active.py`'s fail-safe cache pattern.
+and falls back to `bot/queue/cooldown_config.py`'s built-in defaults —
+mirroring `bot/providers/active.py`'s fail-safe cache pattern.
 
 **Swapping API-key slots.** Each provider's credential env var can have
 numbered siblings (`GROQ_API_KEY`, `GROQ_API_KEY_1`, `GROQ_API_KEY_2`, ...),
 provisioned like any other env var (one redeploy to add a slot). A separate
 `runtime_config` override per provider (`gemini_key_index`, `groq_key_index`,
 `vertex_key_index`) records which slot is active; `NULL` means index
-0, the base env var. `scripts/set_override.py` writes it — the same
+0, the base env var. `bot/scripts/set_override.py` writes it — the same
 no-redeploy, next-claimed-ticket mechanics as the provider/cooldown
 overrides — and no secret ever reaches Postgres: only the integer index
-does. `app/providers/factory.py` keys its client cache by `(provider,
+does. `bot/providers/factory.py` keys its client cache by `(provider,
 index)`, so a swap invalidates exactly the right cached SDK client rather
-than the whole cache. `scripts/deploy.py`'s `api-key-live` check is the
+than the whole cache. `bot/scripts/deploy.py`'s `api-key-live` check is the
 read-only counterpart, mirroring `provider-live`: it confirms the actively-
 resolved index's env var is genuinely present on the live Render service.
 
@@ -441,12 +473,12 @@ straight from the provider's usage response and are exact. Express a dollar
 budget by dividing by the rate once, at config time, and setting a token
 cap. Like the cooldown settings above, these two live only in the
 `runtime_config` row
-(`scripts/deploy.py --sync-config-db` pushes `.env.config` into it) — never a
+(`bot/scripts/deploy.py --sync-config-db` pushes `.env.config` into it) — never a
 Render env var. Usage is *derived*
 from the persisted `reviews` history rather than counted in memory, so a
 restart or redeploy never resets or loses it; a new `reviews.key_index`
 column records which slot paid for each review, so swapping slots with
-`scripts/set_override.py` immediately grants a fresh budget with no
+`bot/scripts/set_override.py` immediately grants a fresh budget with no
 special-case code — for the next ticket claimed; a ticket already deferred
 by the cap still waits for its scheduled reset (raising or clearing the cap
 doesn't retroactively release it). The check is deliberately check-before, not
@@ -508,7 +540,7 @@ Compared to SQLite's `BEGIN IMMEDIATE`, this is simpler (no manual begin/commit/
 no busy-timeout handling) and scales: read-only replicas can serve `claim_next_due`
 queries in the future without code change.
 
-**Reactive detection, no caps.** Adapters (`app/providers/base.py` +
+**Reactive detection, no caps.** Adapters (`bot/providers/base.py` +
 `google_genai.py`/`groq.py`/`github_models.py`) raise `RateLimited(retry_after)`
 only on an actual `429`, parsing `Retry-After` (seconds or HTTP-date) via
 `parse_retry_after`, falling back to `DEFAULT_RETRY_AFTER_SECONDS` (default
@@ -604,7 +636,7 @@ fail. It is a soft optimization only — it is not persisted, and after a
 restart it starts empty. What actually prevents an early run, restart or
 not, is each deferred ticket's own durable `not_before`.
 
-**Restart recovery.** At lifespan startup (`app/main.py`), before the
+**Restart recovery.** At lifespan startup (`bot/main.py`), before the
 dispatcher starts: `store.recover_on_startup()` resets any `running` ticket
 (interrupted mid-review by a crash) back to `pending`, also clearing a
 `rereview_requested` flag if one was set (the fresh `pending` review already
@@ -612,7 +644,7 @@ covers the latest commit, so the flag is moot); `deferred`/`retrying` tickets
 are left as-is, gated by their persisted `not_before`. The dispatcher then simply
 drains whatever is due.
 
-**Config** (`app/config.py`): `DATABASE_URL`
+**Config** (`bot/config.py`): `DATABASE_URL`
 (Postgres/Supabase connection string, required for production),
 `DEFAULT_RETRY_AFTER_SECONDS` (default `60`), `DISPATCHER_IDLE_SLEEP_SECONDS`
 (default `1`), `DISPATCHER_FAILURE_BASE_BACKOFF_SECONDS` (default `2.0`),

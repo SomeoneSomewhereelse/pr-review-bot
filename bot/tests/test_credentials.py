@@ -1,4 +1,4 @@
-"""app/providers/credentials.py -- resolving which env var backs a
+"""bot/providers/credentials.py -- resolving which env var backs a
 provider's currently-active API-key slot."""
 from __future__ import annotations
 

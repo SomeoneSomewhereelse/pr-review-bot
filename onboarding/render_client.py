@@ -54,10 +54,10 @@ async def validate_key(api_key: str) -> RenderValidation:
     return RenderKeyValid(owner_name=owner_name)
 
 
-# Mirrors scripts/deploy.py's own status-bucket sets VERBATIM -- onboarding/
-# never imports from scripts/ or app/ (onboarding/CLAUDE.md's no-shared-
+# Mirrors bot/scripts/deploy.py's own status-bucket sets VERBATIM -- onboarding/
+# never imports from bot/scripts/ or bot/ (onboarding/CLAUDE.md's no-shared-
 # credential-path rule), so this is a deliberate, paired-comment copy, not
-# a shared import. Keep in sync with scripts/deploy.py's
+# a shared import. Keep in sync with bot/scripts/deploy.py's
 # _DEPLOY_IN_FLIGHT_STATUSES / _DEPLOY_FAILED_STATUSES if either changes.
 _DEPLOY_IN_FLIGHT_STATUSES = {
     "created",
@@ -190,7 +190,7 @@ RenderEnvVarsPush = RenderEnvVarsPushed | RenderEnvVarsPushFailed
 async def push_env_vars(api_key: str, service_id: str, values: dict[str, str]) -> RenderEnvVarsPush:
     """Push every (key, value) in `values`, one PUT per key -- never the
     bulk PUT /env-vars endpoint, which replaces the service's whole env-var
-    list (same reasoning scripts/deploy.py::sync_env() already documents).
+    list (same reasoning bot/scripts/deploy.py::sync_env() already documents).
     Stops at the first failure and reports which keys succeeded before it;
     dict iteration order controls push order.
     """
@@ -235,7 +235,7 @@ RenderDeployTrigger = RenderDeployTriggered | RenderDeployTriggerFailed
 
 async def trigger_deploy(api_key: str, service_id: str) -> RenderDeployTrigger:
     """POST an empty-body deploy trigger. Pushing env vars does not
-    auto-deploy (scripts/deploy.py::_trigger_and_wait's own docstring), so
+    auto-deploy (bot/scripts/deploy.py::_trigger_and_wait's own docstring), so
     this is what actually makes the pushed values take effect."""
     try:
         async with httpx.AsyncClient(base_url=RENDER_API_BASE, timeout=15.0) as client:

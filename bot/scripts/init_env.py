@@ -15,7 +15,7 @@ read, verbatim and unexamined -- see merge_env(). Only keys the operator typed
 a fresh value for this run are changed. No existing secret is ever held in
 memory by this script beyond that opaque line-level copy.
 
-Which file a key belongs in comes from app/config.py's OPERATIONAL_KEYS:
+Which file a key belongs in comes from bot/config.py's OPERATIONAL_KEYS:
 listed = operational (.env.config), everything else = secret (.env). That is
 the same split tests/test_config.py enforces, so this cannot drift from it.
 """

@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
         # papered over (ISSUES.md 2026-08-21).
         raise RuntimeError(
             "GITHUB_APP_INSTALLATION_ID is unset -- refusing to start. This project "
-            "requires it to be configured explicitly; run scripts/deploy.py's "
+            "requires it to be configured explicitly; run bot/scripts/deploy.py's "
             "github-app check (or check the GitHub UI) to find the App's current "
             "installation id."
         )

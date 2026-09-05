@@ -75,11 +75,11 @@ _ALWAYS_SYNCED = (
 # (docs/superpowers/specs/2026-08-17-multi-repo-support-design.md), not a
 # missing required value -- exempt from sync_env()'s "refuse to push empty
 # values" guard below. GCP_PROJECT is the same shape: unset means "use the
-# project_id embedded in the service-account key" (see app/config.py), not a
+# project_id embedded in the service-account key" (see bot/config.py), not a
 # missing one.
 _OPTIONAL_EMPTY_ENV_KEYS = frozenset({"GITHUB_TARGET_REPO", "GCP_PROJECT"})
 
-# OPERATIONAL_KEYS (app/config.py) names, mapped to the Settings attribute
+# OPERATIONAL_KEYS (bot/config.py) names, mapped to the Settings attribute
 # holding their local value, for every one that has NO other sync path here:
 # not LLM_PROVIDER/GITHUB_TARGET_REPO (handled directly in _wanted_env()
 # below), not a provider credential/model var (handled via _PROVIDERS), not a
@@ -122,7 +122,7 @@ _DB_SYNCED_OPERATIONAL_KEYS = frozenset(
 )
 
 # Operator-machine-only settings: which Render service to check/deploy, and
-# what public URL to hit. app/config.py's own field comments say these must
+# what public URL to hit. bot/config.py's own field comments say these must
 # NEVER be set on the deployed service itself -- pushing them would just
 # create dead env vars, not fix anything.
 _NEVER_SYNCED_OPERATIONAL_KEYS = frozenset({"RENDER_SERVICE_NAME", "PUBLIC_BASE_URL"})
@@ -177,9 +177,9 @@ def resolve_base_url() -> str:
 
 
 # Single source of truth for provider -> env-var-name mappings, shared with
-# app/ -- see app/providers/registry.py. _PROVIDERS is kept as a
+# bot/ -- see bot/providers/registry.py. _PROVIDERS is kept as a
 # module-level alias so every existing call site in this file (and in
-# scripts/set_override.py) keeps working unchanged.
+# bot/scripts/set_override.py) keeps working unchanged.
 _PROVIDERS = registry.PROVIDERS
 
 
@@ -285,7 +285,7 @@ def check_pricing() -> CheckResult:
     """Whether every provider's effective model has a rate-table entry.
 
     WARN, never FAIL: an unpriced model runs fine, it simply produces no cost
-    estimate on the comment (app/providers/pricing.py::estimate_cost_usd
+    estimate on the comment (bot/providers/pricing.py::estimate_cost_usd
     returns None). This used to be folded into check_config as a FAIL, back
     when an unpriced model crashed the review after three paid calls
     (design spec 2026-08-18 section 6b).
@@ -326,16 +326,16 @@ def check_pricing() -> CheckResult:
     return CheckResult("pricing", "PASS", "")
 
 
-# The vars app/main.py's lifespan touches unconditionally at every boot --
+# The vars bot/main.py's lifespan touches unconditionally at every boot --
 # LLM_PROVIDER (must be a supported provider) and GITHUB_WEBHOOK_SECRET
 # (must be non-empty) checked directly; GITHUB_APP_INSTALLATION_ID (must be
 # non-empty) then re-verified against GitHub via discover_and_verify_
 # installation_id(), which itself needs GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY
 # to make that call; DATABASE_URL via init_pool(). Unlike an earlier version
 # of this list, GITHUB_APP_INSTALLATION_ID's discovery is never skipped
-# because it's "already set" -- app/main.py refuses to start at all if it's
+# because it's "already set" -- bot/main.py refuses to start at all if it's
 # unset (ISSUES.md 2026-08-21), so it's just as boot-critical as the other
-# eight (the three DASHBOARD_* vars included -- app/main.py's lifespan
+# eight (the three DASHBOARD_* vars included -- bot/main.py's lifespan
 # refuses to start with any of them empty or too short too). A rename/drop
 # of any of these nine that never reached Render crashes the whole ASGI app
 # at startup, not just one feature.
@@ -409,7 +409,7 @@ def check_installation_and_webhook(repos: frozenset[str], base: str) -> CheckRes
     never installed on this repo) and a config-hygiene nit (it was installed
     and later removed via GitHub's own UI -- zero runtime risk, since GitHub
     simply stops delivering webhooks for a repo the App isn't installed on;
-    see app/webhook.py's target_repos() filter and CLAUDE.md's process notes
+    see bot/webhook.py's target_repos() filter and CLAUDE.md's process notes
     for the 2026-08-17 analysis). `list_installation_repos()` has no notion of
     "was covered, now isn't" versus "never was" -- GitHub's API cannot
     distinguish them server-side -- so a severity split here could only ever
@@ -648,7 +648,7 @@ def _resolved_provider() -> tuple[str, str | None]:
 def _resolved_model_overrides() -> dict[str, str | None]:
     """{provider: DB model override or None} for every provider in
     registry.PROVIDERS, in ONE connection -- mirrors
-    app/queue/store.py::get_all_model_overrides()'s single-query shape, via
+    bot/queue/store.py::get_all_model_overrides()'s single-query shape, via
     this file's raw short-timeout connection rather than the pool, for the
     same reason _resolved_provider does. Used by sync_env()'s model-override
     guard, which used to call a per-provider version of this (one connection
@@ -1180,8 +1180,8 @@ def sync_config_db() -> int:
     runtime_config, unconditionally -- these 6 keys are never a Render env var (see
     render.yaml and _DB_SYNCED_OPERATIONAL_KEYS above), so this is their only
     sync path. .env.config is the source of truth; the DB is only a mirror of
-    it that the dispatcher actually reads (app/queue/cooldown_config.py,
-    app/queue/usage_cap_config.py) -- see ISSUES.md's 2026-08-17 "two sources
+    it that the dispatcher actually reads (bot/queue/cooldown_config.py,
+    bot/queue/usage_cap_config.py) -- see ISSUES.md's 2026-08-17 "two sources
     of truth" entry for why a Render env var was the wrong mirror target.
 
     Uses a raw, short-timeout connection rather than store.init_pool() /
@@ -1376,7 +1376,7 @@ def sync_env() -> int:
     # is a pure local pricing-table lookup, so it must run whether or not a
     # database is configured. A warning, not a refusal (design spec 2026-08-18
     # section 6b): an unpriced model runs fine, it simply produces no cost
-    # estimate on the review comment (app/providers/pricing.py::
+    # estimate on the review comment (bot/providers/pricing.py::
     # estimate_cost_usd returns None), so there is nothing here worth blocking
     # the push over.
     for provider, model_var, model, known in _unpriced_models():

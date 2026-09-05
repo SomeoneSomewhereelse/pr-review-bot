@@ -1,8 +1,8 @@
-"""Deterministic tests for app/providers/groq.py.
+"""Deterministic tests for bot/providers/groq.py.
 
 Mocks the actual `groq.AsyncGroq` client boundary (`client.chat.completions.create`)
 so nothing here ever makes a real network call. Live verification against the
-real Groq API happens separately in scripts/manual_verify_groq.py.
+real Groq API happens separately in bot/scripts/manual_verify_groq.py.
 """
 
 from __future__ import annotations

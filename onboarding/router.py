@@ -161,8 +161,8 @@ class DashboardAuthConfirmRequest(BaseModel):
     session_secret: str = Field(min_length=32, max_length=256)
 
 
-# Paired comment with app/providers/registry.py::PROVIDERS -- onboarding/
-# never imports from app/ (onboarding/CLAUDE.md's no-shared-credential-
+# Paired comment with bot/providers/registry.py::PROVIDERS -- onboarding/
+# never imports from bot/ (onboarding/CLAUDE.md's no-shared-credential-
 # path rule), so this 3-entry mapping is a deliberate copy, not a shared
 # import. Keep in sync if a provider's env var names ever change there.
 _LLM_ENV_VAR_NAMES = {
@@ -171,7 +171,7 @@ _LLM_ENV_VAR_NAMES = {
     "vertex": ("GCP_SERVICE_ACCOUNT_KEY", "VERTEX_MODEL"),
 }
 
-# bot/config.py's OPERATIONAL_KEYS tuning knobs that scripts/deploy.py's
+# bot/config.py's OPERATIONAL_KEYS tuning knobs that bot/scripts/deploy.py's
 # --sync-env pushes as Render env vars (its _GENERIC_OPERATIONAL_ENV_ATTRS),
 # with their bot/config.py Settings field defaults hardcoded here -- same
 # duplication-not-import pattern as _LLM_ENV_VAR_NAMES above (onboarding/
@@ -180,7 +180,7 @@ _LLM_ENV_VAR_NAMES = {
 # GITHUB_TARGET_REPO -- the two of these twelve keys whose Settings default
 # is genuinely blank -- are deliberately excluded rather than pushed as "":
 # an operator who wants either set can still do so after the fact (Render
-# dashboard, or scripts/deploy.py --sync-env once .env.config names a repo).
+# dashboard, or bot/scripts/deploy.py --sync-env once .env.config names a repo).
 # Keep these in sync with bot/config.py's actual field defaults by hand --
 # there is no automated check tying the two together.
 _GENERIC_OPERATIONAL_ENV_DEFAULTS = {

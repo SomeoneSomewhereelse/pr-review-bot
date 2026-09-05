@@ -42,7 +42,7 @@ _SPECIALIST_NAMES = ("Security", "Performance", "Code Quality")
 def _active_model() -> str:
     """The model name for whichever provider is actually active.
 
-    Delegates to app/providers/active_model.py, the single resolver shared with
+    Delegates to bot/providers/active_model.py, the single resolver shared with
     factory.get_provider() -- so the model reported in the PR comment is
     always the model the call actually used.
     """
@@ -191,7 +191,7 @@ async def attempt_review(
 
 
 async def run_review(repo_full_name: str, pr_number: int) -> ReviewResult:
-    """Back-compat entry point for scripts/tests: returns the ``ReviewResult``
+    """Back-compat entry point for bot/scripts/tests: returns the ``ReviewResult``
     on completion, raises ``RateLimited`` if the review was rate-limited.
     """
     outcome = await attempt_review(repo_full_name, pr_number)

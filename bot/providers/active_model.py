@@ -2,7 +2,7 @@
 the env-configured value named by registry.PROVIDERS.
 
 Every read of the active model goes through active_model(). Mirrors
-app/providers/key_index.py exactly, including the reason for the split: the DB
+bot/providers/key_index.py exactly, including the reason for the split: the DB
 read lives in the dispatcher (where the asyncio.to_thread convention applies)
 and is pushed in via set_override_cache, keeping this module import-light and
 non-blocking.

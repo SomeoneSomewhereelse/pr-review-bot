@@ -99,6 +99,28 @@ async def test_render_key_never_persists_client_side_at_all():
     assert 'STORAGE_KEYS["render-key"]' not in body
 
 
+async def test_validate_render_key_rejects_an_empty_key_client_side():
+    """An empty submission must not reach the network -- it shows
+    err_empty_key and returns before fetch() is ever called."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function validateRenderKey()")
+    fn_body = body[fn_start : fn_start + 600]
+    assert 'currentRenderKeyErrorKey = "err_empty_key"' in fn_body
+    assert fn_body.index('"err_empty_key"') < fn_body.index("fetch(")
+
+
+async def test_render_key_input_submits_on_enter():
+    """A mobile on-screen keyboard's "Go"/Enter key must submit the key --
+    only a click on the button used to work."""
+    client = await _client()
+    body = (await client.get("/")).text
+    assert (
+        'document.getElementById("render-key-input").addEventListener("keydown"'
+        in body
+    )
+
+
 async def test_completing_a_frame_unlocks_the_next_one():
     client = await _client()
     body = (await client.get("/")).text
@@ -280,7 +302,7 @@ async def test_locked_frames_are_visually_dimmed():
 
 async def test_required_permissions_match_the_cli_script():
     """The page's JS REQUIRED_PERMISSIONS/REQUIRED_EVENTS must mirror
-    scripts/create_github_app.py's, which is the single source of truth (a
+    bot/scripts/create_github_app.py's, which is the single source of truth (a
     paired comment in each file points at the other; there is no shared
     JS/Python boundary a real shared constant could live in).
 
@@ -1147,6 +1169,17 @@ async def test_check_again_button_disables_itself_while_in_flight():
     body = (await client.get("/")).text
     fn_start = body.index("async function checkRenderDeployStatusOnce")
     fn_body = body[fn_start : body.index("\n  async function triggerRenderDeploy", fn_start)]
+    assert "checkAgainBtn.disabled = true;" in fn_body
+    assert "checkAgainBtn.disabled = false;" in fn_body
+
+
+async def test_supabase_check_again_button_disables_itself_while_in_flight():
+    """Matches the render-deploy check-again button's own guard above -- a
+    double-click must not issue two concurrent status checks."""
+    client = await _client()
+    body = (await client.get("/")).text
+    fn_start = body.index("async function checkSupabaseStatusOnce")
+    fn_body = body[fn_start : body.index("\n\n  let currentRenderDeployErrorKey", fn_start)]
     assert "checkAgainBtn.disabled = true;" in fn_body
     assert "checkAgainBtn.disabled = false;" in fn_body
 

@@ -1,5 +1,5 @@
 """Regression guard for the hook-ordering bug that silently defeated
-`tests/conftest.py`'s `xdist_group(name="db")` tagging.
+`conftest.py`'s `xdist_group(name="db")` tagging.
 
 `--dist=loadgroup` never reads the `xdist_group` marker at scheduling time.
 pytest-xdist's *worker-side* `WorkerInteractor.pytest_collection_modifyitems`
@@ -7,13 +7,13 @@ pytest-xdist's *worker-side* `WorkerInteractor.pytest_collection_modifyitems`
 `LoadGroupScheduling._split_scope` then derives the group by splitting that
 **nodeid string** on the last `@`. That nodeid-stamping hookimpl is
 undecorated, so pluggy orders it by plain LIFO registration -- and an
-*initial* conftest (which `tests/conftest.py` is, thanks to
-`testpaths = ["tests"]`) is registered *before* `WorkerInteractor`, so LIFO
+*initial* conftest (which the repo-root `conftest.py` is, ahead of every
+directory in `testpaths`) is registered *before* `WorkerInteractor`, so LIFO
 runs xdist's stamper *first*, while no item carries the marker yet. Result:
 every nodeid stays unsuffixed, every test becomes its own singleton group,
-and the 234 db tests load-balance across all workers -- each spinning its own
+and the db tests load-balance across all workers -- each spinning its own
 testcontainers Postgres. The fix is `@pytest.hookimpl(tryfirst=True)` on
-`tests/conftest.py`'s hook, which pluggy runs ahead of all normal-priority
+`conftest.py`'s hook, which pluggy runs ahead of all normal-priority
 hookimpls regardless of registration order.
 
 This failure mode is *silent*: all workers produce the same unsuffixed
@@ -54,7 +54,7 @@ markers = [
 ]
 """
 
-# Mirrors tests/conftest.py: an initial conftest whose
+# Mirrors this repo's own conftest.py: an initial conftest whose
 # pytest_collection_modifyitems adds xdist_group to every item whose fixture
 # closure includes a shared session-scoped resource.
 _CONFTEST = f"""
@@ -164,9 +164,9 @@ def test_this_projects_conftest_hook_declares_tryfirst(request):
         for impl in hookimpls
         if getattr(impl.plugin, "__file__", "").replace("\\", "/").endswith("conftest.py")
     ]
-    assert len(ours) == 1, f"expected exactly one tests/conftest.py hookimpl, got {ours}"
+    assert len(ours) == 1, f"expected exactly one conftest.py hookimpl, got {ours}"
     assert ours[0].tryfirst is True, (
-        "tests/conftest.py's pytest_collection_modifyitems must be tryfirst=True, or its "
+        "conftest.py's pytest_collection_modifyitems must be tryfirst=True, or its "
         "xdist_group markers land after pytest-xdist has already stamped worker-side nodeids "
         "and --dist=loadgroup silently stops grouping the db tests"
     )

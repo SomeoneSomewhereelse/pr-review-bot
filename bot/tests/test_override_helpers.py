@@ -1,6 +1,6 @@
-"""Direct unit coverage for scripts/_override.py -- the shared local-value
-discovery and Render-verification logic behind scripts/set_override.py and
-scripts/deploy.py's numbered-slot sync-env fix. See
+"""Direct unit coverage for bot/scripts/_override.py -- the shared local-value
+discovery and Render-verification logic behind bot/scripts/set_override.py and
+bot/scripts/deploy.py's numbered-slot sync-env fix. See
 docs/superpowers/specs/2026-08-12-override-cli-unification-design.md."""
 from __future__ import annotations
 

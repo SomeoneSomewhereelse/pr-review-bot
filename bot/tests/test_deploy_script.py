@@ -1,4 +1,4 @@
-"""Deterministic tests for scripts/deploy.py.
+"""Deterministic tests for bot/scripts/deploy.py.
 
 Two mocking harnesses are in play and they are not interchangeable:
 `respx` intercepts `httpx` (Render, UptimeRobot, /healthz), while GitHub calls
@@ -205,7 +205,7 @@ def test_check_config_names_every_missing_key_at_once(complete_config, monkeypat
 
 def test_check_config_requires_dashboard_credentials(complete_config, monkeypatch):
     """check_config()'s own purpose is 'every setting the service needs is
-    resolvable locally' -- app/main.py's lifespan now refuses to boot without
+    resolvable locally' -- bot/main.py's lifespan now refuses to boot without
     these three, so this doctor check must name them too, or an operator
     would see a clean preflight report right before a crash-on-boot deploy."""
     monkeypatch.setattr(settings, "dashboard_username", "")
@@ -222,7 +222,7 @@ def test_check_config_rejects_a_dashboard_session_secret_shorter_than_32_chars(
     complete_config, monkeypatch
 ):
     """A short-but-non-empty secret passes the plain "is it set" check but is
-    brute-forceable offline once a session cookie is captured -- app/main.py's
+    brute-forceable offline once a session cookie is captured -- bot/main.py's
     lifespan enforces the same 32-char floor, and this doctor check must
     report it too, or an operator would see a clean preflight report right
     before a deploy that boots fine but signs weak session tokens."""
@@ -538,7 +538,7 @@ def test_boot_credentials_live_fails_naming_exactly_the_missing_ones(monkeypatch
 
 def test_boot_credentials_live_also_requires_installation_id_and_llm_provider(monkeypatch):
     """Regression: this check used to list only four vars, even though
-    app/main.py's lifespan also refuses to boot without GITHUB_APP_
+    bot/main.py's lifespan also refuses to boot without GITHUB_APP_
     INSTALLATION_ID (ISSUES.md 2026-08-21 made that unconditional, not just
     a discovery fallback) and without a valid LLM_PROVIDER (checked first,
     before anything else). A live Render service missing either one would
@@ -568,7 +568,7 @@ def test_boot_credentials_live_also_requires_installation_id_and_llm_provider(mo
 
 def test_boot_credentials_live_also_requires_dashboard_credentials(monkeypatch):
     """Same regression shape as the installation-id/llm-provider case above:
-    app/main.py's lifespan also refuses to boot without the three DASHBOARD_*
+    bot/main.py's lifespan also refuses to boot without the three DASHBOARD_*
     vars now, so a live Render service missing any of them would crash-loop
     while this check still reported PASS if it didn't know about them."""
     monkeypatch.setattr(settings, "render_api_key", "rnd_x")
@@ -849,7 +849,7 @@ def test_installation_and_webhook_passes_the_discovered_id_to_list_installation_
 ):
     """Regression guard: list_installation_repos must be called with the id
     discover_installation_id_for_app() just returned, not read internally
-    from settings (that was the bug -- see app/github_app.py's
+    from settings (that was the bug -- see bot/github_app.py's
     list_installation_repos docstring)."""
     github_seam["installation_id"] = 777777
     monkeypatch.setattr(settings, "github_app_installation_id", 777777)
@@ -1020,7 +1020,7 @@ def _runtime_config_missing_review_draft_prs(db, db_exec):
 def test_runtime_config_schema_fails_naming_a_missing_column_and_the_fix(
     _runtime_config_missing_review_draft_prs, db_url, monkeypatch
 ):
-    """review_draft_prs shipped in app/queue/store.py's _SCHEMA after the live
+    """review_draft_prs shipped in bot/queue/store.py's _SCHEMA after the live
     database's runtime_config table already existed -- CREATE TABLE IF NOT
     EXISTS is a no-op against it, so this reproduces exactly the gap that
     left review_draft_prs missing on the real Render database (the bug this
@@ -1578,7 +1578,7 @@ def test_wanted_env_pushes_every_generic_operational_setting(gemini_only_config,
 
 def test_wanted_env_never_includes_the_never_synced_operational_keys(gemini_only_config):
     """RENDER_SERVICE_NAME/PUBLIC_BASE_URL are operator-machine-only settings
-    (app/config.py's own field comments) -- they must never reach Render."""
+    (bot/config.py's own field comments) -- they must never reach Render."""
     wanted = deploy._wanted_env()
     for key in deploy._NEVER_SYNCED_OPERATIONAL_KEYS:
         assert key not in wanted
@@ -1680,7 +1680,7 @@ def test_sync_env_requires_a_render_api_key(monkeypatch):
 @pytest.mark.parametrize(
     "local_url",
     [
-        # exactly what scripts/test_db.py exports:
+        # exactly what bot/scripts/test_db.py exports:
         "postgresql://postgres:x@localhost:5433/postgres",
         "postgresql://postgres:x@127.0.0.1:5432/postgres",
         "postgresql://u:p@db.internal:5432/postgres",
@@ -1741,7 +1741,7 @@ def test_sync_env_still_accepts_a_real_remote_database_url(sync_ready, capsys):
 
 def test_sync_env_local_db_guard_consumes_the_shared_prereqs_predicate():
     """The guard must never grow its own private notion of 'local' -- it reads
-    scripts/_prereqs.py's predicate, the same one scripts/test_db.py uses."""
+    bot/scripts/_prereqs.py's predicate, the same one bot/scripts/test_db.py uses."""
     assert deploy._looks_like_local_test_db is _prereqs._looks_like_local_test_db
 
 

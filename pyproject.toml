@@ -26,6 +26,16 @@ select = ["E4", "E7", "E9", "F", "E501"]
 asyncio_mode = "auto"
 testpaths = ["tests", "bot/tests", "dashboard/tests", "onboarding/tests"]
 pythonpath = ["."]
+# None of the four test directories carries an __init__.py (matching the
+# pre-restructure convention), so under the default `prepend` import mode a
+# future duplicate test-file basename across two of them (e.g. a second
+# test_config.py) would hit pytest's "import file mismatch" collection
+# error. `importlib` mode imports each test file by its fully qualified
+# path instead of inserting bare names onto sys.path, which sidesteps that
+# collision without requiring every test directory to become a real
+# package. See ISSUES.md's now-closed "No __init__.py in the four test
+# directories" Parked Issue. (`--import-mode` has no dedicated ini_options
+# key -- it's an addopts-only flag, folded into the addopts line below.)
 # -n is a PINNED 4, deliberately not `auto`. Each xdist worker pays a full
 # app-import startup cost (~1.25s here), which only pays for itself if the
 # worker then has enough tests to run. On a 24-core machine `auto` spins 24
@@ -36,7 +46,7 @@ pythonpath = ["."]
 # 2026-08-19 test-suite-performance design doc's section 8 for the full table.
 # Revisit the number if the suite grows by a large multiple; do not "restore"
 # it to auto.
-addopts = "-n 4 --dist=loadgroup"
+addopts = "-n 4 --dist=loadgroup --import-mode=importlib"
 markers = [
     "db: transitively touches the shared Postgres via the db_url fixture (auto-applied by tests/conftest.py's pytest_collection_modifyitems hook, not meant to be added by hand)",
     "xdist_meta: exercises real xdist worker subprocess scheduling via pytester -- slow, excluded from the fast-iteration `-m` filter",

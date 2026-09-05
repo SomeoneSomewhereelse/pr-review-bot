@@ -1,11 +1,11 @@
 """Single source of truth for provider -> env-var-name mappings.
 
-Both app/ (runtime credential resolution: credentials.py, factory.py) and
-scripts/ (deploy verification, the set_provider/set_api_key CLIs) read this.
-Previously duplicated as scripts/deploy.py's private _PROVIDERS dict; moved
-here because app/ now needs the same mapping and must not import from
-scripts/ (the dependency direction runs the other way everywhere else in
-this codebase).
+Both bot/ (runtime credential resolution: credentials.py, factory.py) and
+bot/scripts/ (deploy verification, the set_provider/set_api_key CLIs) read
+this. Previously duplicated as bot/scripts/deploy.py's private _PROVIDERS
+dict; moved here because bot/ now needs the same mapping and must not import
+from bot/scripts/ (the dependency direction runs the other way everywhere
+else in this codebase).
 """
 
 from __future__ import annotations
@@ -17,14 +17,14 @@ PROVIDERS = {
     # vertex's credential is a base64-encoded service-account JSON key, not an
     # API-key string -- but it is resolved through the same numbered-slot
     # mechanism (credentials.resolve), so it belongs in the same table.
-    # app/providers/vertex_credentials.py layers the implicit-ADC fallback on
+    # bot/providers/vertex_credentials.py layers the implicit-ADC fallback on
     # top of what this entry resolves.
     #
     # VERTEX_MODEL, not LLM_MODEL: vertex and gemini are the same SDK but
     # different model catalogs -- gemini-flash-latest does not exist as a
     # Vertex publisher model (404). Sharing one var made a DB provider flip
     # between them guaranteed-broken. Completes the split whose reasoning
-    # app/config.py already records for GROQ_MODEL.
+    # bot/config.py already records for GROQ_MODEL.
     "vertex": ("GCP_SERVICE_ACCOUNT_KEY", "VERTEX_MODEL"),
 }
 
@@ -55,8 +55,8 @@ def slot_env_name(provider: str, index: int) -> str:
     """The env-var name for `provider`'s API-key slot `index`.
 
     THE single place the `{base}` / `{base}_{n}` naming scheme is written down.
-    It was previously reconstructed independently in app/providers/credentials.py
-    and scripts/_override.py, which meant the scheme had no seam to change --
+    It was previously reconstructed independently in bot/providers/credentials.py
+    and bot/scripts/_override.py, which meant the scheme had no seam to change --
     and a future credential store (one secret per file, say) would have been a
     sweep instead of a one-module edit.
 

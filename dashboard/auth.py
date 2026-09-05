@@ -29,7 +29,7 @@ _LOGIN_HTML = (_STATIC_DIR / "login.html").read_text(encoding="utf-8")
 
 class SessionRequired(Exception):
     """Raised by require_session when no valid session cookie is present.
-    Caught by app/main.py's exception handler, which turns it into a 401
+    Caught by bot/main.py's exception handler, which turns it into a 401
     JSON response (API routes) or a redirect to /login (page routes)."""
 
 
@@ -115,7 +115,7 @@ class LoginRequest(BaseModel):
 async def _delay_after_login_failure() -> None:
     """Isolated so tests can patch out the real wait without touching every
     other asyncio.sleep call in the process. Deliberately asyncio.sleep, not
-    time.sleep: app/queue/dispatcher.py's serial loop runs in this same
+    time.sleep: bot/queue/dispatcher.py's serial loop runs in this same
     process's single event loop, and a blocking time.sleep(1) here would
     stall it (and every other in-flight request) for the duration of every
     single failed login attempt."""

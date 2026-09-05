@@ -5,9 +5,9 @@ services:
     dockerfilePath: ./onboarding/Dockerfile
     plan: free
     healthCheckPath: /healthz
-    # Docs-only changes (README, SETUP, SPEC, CLAUDE.md, ISSUES.md, docs/**)
-    # never affect what's actually deployed -- the Dockerfile only ever COPYs
-    # pyproject.toml, uv.lock, and app/. An ignore-list (not an include-list)
+    # Docs-only changes (README, SPEC, CLAUDE.md, ISSUES.md, docs/**)
+    # never affect what's actually deployed -- onboarding/Dockerfile only ever
+    # COPYs pyproject.toml, uv.lock, and onboarding/. An ignore-list (not an include-list)
     # is deliberate: anything NOT explicitly excluded here still triggers a
     # deploy by default, so a forgotten update here costs one avoidable
     # redeploy, never a real change silently failing to deploy.

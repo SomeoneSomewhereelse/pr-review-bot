@@ -1,8 +1,8 @@
-"""Manual live verification for the vertex provider (app/providers/*).
+"""Manual live verification for the vertex provider (bot/providers/*).
 
 Not part of the pytest suite (CI never runs this) -- it depends on a real,
 live call to Vertex AI using whatever credential
-app/providers/vertex_credentials.py resolves: GCP_SERVICE_ACCOUNT_KEY, then
+bot/providers/vertex_credentials.py resolves: GCP_SERVICE_ACCOUNT_KEY, then
 implicit ADC (`gcloud auth application-default login`).
 
 Run it directly:

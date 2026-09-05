@@ -129,7 +129,7 @@ def _installation_confirmed_invalid(exc: Exception) -> bool:
     failing to complete (a transient GitHub-side error -- plausibly the same
     outage that caused the review attempt this is diagnosing to fail in the
     first place, which must never be mistaken for a dead installation).
-    Mirrors scripts/deploy.py's check_installation_and_webhook, which
+    Mirrors bot/scripts/deploy.py's check_installation_and_webhook, which
     distinguishes the same two cases the same way: a RuntimeError chained
     from a GithubException (via `raise ... from exc`) is the ambiguous case;
     one raised directly is a real, checked determination."""
@@ -144,7 +144,7 @@ def _check_installation_still_valid_or_die() -> None:
     one resource? GITHUB_APP_INSTALLATION_ID is required and never guessed
     on the operator's behalf (ISSUES.md 2026-08-21) -- a long-running process
     must never silently patch its own installation id and keep going under a
-    different identity, the same reason app/main.py's lifespan treats a bad
+    different identity, the same reason bot/main.py's lifespan treats a bad
     installation as a hard startup failure rather than something to work
     around. Confirmed bad -> log loudly and terminate the process (os._exit,
     not a raised exception -- an unhandled exception in a background asyncio

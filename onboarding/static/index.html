@@ -2297,13 +2297,16 @@
     if (!stored || !stored.ref) return;
     document.getElementById("supabase-error").textContent = "";
     currentSupabaseErrorKey = null;
+    const checkAgainBtn = document.getElementById("supabase-check-status-submit");
+    checkAgainBtn.disabled = true;
     const generation = supabasePollGeneration;
     const body = await fetchProjectStatus();
     if (generation !== supabasePollGeneration) return;
     const outcome = await handleProjectStatusResult(body);
     if (outcome === "pending") {
       supabaseError("err_supabase_provisioning_timeout");
-      document.getElementById("supabase-check-status-submit").style.display = "inline-block";
+      checkAgainBtn.style.display = "inline-block";
+      checkAgainBtn.disabled = false;
     }
   }
 
@@ -2684,6 +2687,9 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("render-key-submit").addEventListener("click", validateRenderKey);
+    document.getElementById("render-key-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") validateRenderKey();
+    });
     document.getElementById("render-service-submit").addEventListener("click", createRenderService);
     document.getElementById("dashboard-auth-submit").addEventListener("click", submitDashboardAuth);
     document.getElementById("dashboard-auth-generate-submit").addEventListener("click", fillGeneratedDashboardAuthPassword);

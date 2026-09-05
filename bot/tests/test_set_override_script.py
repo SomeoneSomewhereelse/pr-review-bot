@@ -1,5 +1,5 @@
-"""The unified operator CLI replacing both scripts/set_provider.py and
-scripts/set_api_key.py. Uses the shared Postgres test harness -- it writes
+"""The unified operator CLI replacing both bot/scripts/set_provider.py and
+bot/scripts/set_api_key.py. Uses the shared Postgres test harness -- it writes
 to the same table the service reads. See
 docs/superpowers/specs/2026-08-12-override-cli-unification-design.md
 section 5 for the full grammar and its mapping to the two scripts this

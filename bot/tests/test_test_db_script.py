@@ -1,4 +1,4 @@
-"""Tests for scripts/test_db.py. All docker/subprocess calls are mocked --
+"""Tests for bot/scripts/test_db.py. All docker/subprocess calls are mocked --
 no real Docker required to run this file."""
 
 import subprocess

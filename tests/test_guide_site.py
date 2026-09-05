@@ -176,7 +176,7 @@ def test_llm_provider_page_edits_the_files_directly_instead_of_running_init_env(
     config files are already `cp`'d into existence by Step 2, so Step 4
     just has the operator edit LLM_PROVIDER/the credential by hand and
     verify with doctor -- one fewer script in the documented path, and one
-    fewer place a malformed answer can reach app/config.py before doctor
+    fewer place a malformed answer can reach bot/config.py before doctor
     ever gets a chance to report it structurally."""
     step2 = (_SETUP / "02-github-app.md").read_text(encoding="utf-8")
     assert "cp .env.config.example .env.config" in step2
@@ -205,7 +205,7 @@ def test_supabase_page_pins_the_session_pooler_port():
 def test_render_page_leaves_env_vars_blank_for_sync_env_to_push():
     """Regression: this page used to tell the reader to hand-type exactly
     four env vars into Render's dashboard to get the service booting -- but
-    app/main.py's lifespan also requires GITHUB_APP_INSTALLATION_ID and a
+    bot/main.py's lifespan also requires GITHUB_APP_INSTALLATION_ID and a
     valid LLM_PROVIDER, so that first deploy always crash-looped. Since
     --sync-env (Step 7) doesn't actually need the service already booted,
     just already created, this page now has the reader leave every var

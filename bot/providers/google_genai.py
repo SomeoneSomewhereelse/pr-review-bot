@@ -73,7 +73,7 @@ class GeminiProvider:
                 timeout=int(settings.llm_request_timeout_seconds * 1000)
             ),
         )
-        # Passed in, never read from Settings here: app/providers/active_model.py
+        # Passed in, never read from Settings here: bot/providers/active_model.py
         # is the single resolver, so a DB model override and the model reported
         # in the PR comment can never disagree with what actually runs.
         self._model = model
@@ -116,7 +116,7 @@ class VertexProvider:
                 timeout=int(settings.llm_request_timeout_seconds * 1000)
             ),
         )
-        # Passed in, never read from Settings here: app/providers/active_model.py
+        # Passed in, never read from Settings here: bot/providers/active_model.py
         # is the single resolver, so a DB model override and the model reported
         # in the PR comment can never disagree with what actually runs.
         self._model = model

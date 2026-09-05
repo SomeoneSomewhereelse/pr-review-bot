@@ -269,7 +269,7 @@ def test_no_legacy_credential_var_lives_in_the_secrets_file():
         f"retired credential var(s) still in .env, no longer read: {sorted(legacy)} -- "
         "rename GITHUB_APP_PRIVATE_KEY_B64 to GITHUB_APP_PRIVATE_KEY, "
         "GCP_SERVICE_ACCOUNT_KEY_B64[_n] to GCP_SERVICE_ACCOUNT_KEY[_n] (base64-encode any "
-        "local key file first with scripts/encode_credential.py), and remove the _PATH "
+        "local key file first with bot/scripts/encode_credential.py), and remove the _PATH "
         "variants entirely"
     )
 
@@ -363,7 +363,7 @@ def test_importing_config_with_llm_provider_unset_does_not_raise(tmp_path):
 
 
 def test_importing_config_with_a_malformed_value_does_not_raise(tmp_path):
-    """Regression: scripts/init_env.py imports Settings (the class) and
+    """Regression: bot/scripts/init_env.py imports Settings (the class) and
     OPERATIONAL_KEYS, never touching the `settings` singleton itself -- but
     bot/config.py used to build that singleton unconditionally at import
     time regardless of what any caller actually needed, so a single

@@ -1,6 +1,6 @@
 # cost.md — Operating Cost
 
-> All rates are **representative** and pinned in `app/providers/pricing.py`; verify
+> All rates are **representative** and pinned in `bot/providers/pricing.py`; verify
 > against current provider pricing at build time. `gemini-flash-latest` = Gemini 3.5
 > Flash. Cost is graded as this documented calculation, not as actual spend — the
 > demo runs at **$0** on free tiers + the $300 GCP trial credit.
@@ -52,7 +52,7 @@ Representative flash-class rates: **~$0.30 / 1M input, ~$2.50 / 1M output**.
   `gemini-2.5-flash`) — see `guide/background/providers.md` for the full
   history. Confirmed live with `LLM_MODEL=gemini-2.5-flash`: a real
   structured-output response with non-zero token usage. Billed at the same
-  per-token rate as the Gemini entry below (`app/providers/pricing.py`); the
+  per-token rate as the Gemini entry below (`bot/providers/pricing.py`); the
   two differ in the auth path, not in price.
 - **Gemini** AI-Studio free tier: ~1,500 req/day, no card — permanent $0
   fallback in principle (account-blocked in this environment, see

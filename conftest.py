@@ -156,7 +156,7 @@ def db_query(db_url):
     return _query
 
 
-# Operator-tooling credentials are read only by scripts/deploy.py, and they
+# Operator-tooling credentials are read only by bot/scripts/deploy.py, and they
 # point at REAL infrastructure. A test that forgets to monkeypatch them runs
 # against production: during this plan's Task 2 exactly that happened, and a
 # live Render service had GITHUB_TARGET_REPO overwritten with a dummy value.
@@ -188,12 +188,12 @@ def _quarantine_operator_apis(request, monkeypatch):
     # instead of raising on a str-vs-int mismatch.
     monkeypatch.setattr(settings, "github_app_id", 0)
     # settings.database_url defaults to whatever this working copy's real
-    # .env points at (a Supabase pooler host in this repo). scripts/deploy.py
+    # .env points at (a Supabase pooler host in this repo). bot/scripts/deploy.py
     # now opens raw psycopg connections against it (check_database,
-    # check_provider, --sync-env's masking guard) and scripts/set_override.py
+    # check_provider, --sync-env's masking guard) and bot/scripts/set_override.py
     # WRITES to it -- a test that forgets to request the `db` fixture must
     # not be able to reach that real database by accident. The `db` fixture
-    # (tests/conftest.py) sets settings.database_url explicitly and runs
+    # (this file) sets settings.database_url explicitly and runs
     # after this autouse fixture within the same test, so it always wins;
     # verified by running the full suite after this change.
     monkeypatch.setattr(settings, "database_url", "")
@@ -209,8 +209,8 @@ def live_operator_apis_allowed():
 
 @pytest.fixture(autouse=True)
 def _dashboard_credentials(monkeypatch):
-    """A fixed, known-good operator credential for every test. app/main.py's
-    lifespan refuses to boot with any of these empty, and app/auth.py's
+    """A fixed, known-good operator credential for every test. bot/main.py's
+    lifespan refuses to boot with any of these empty, and dashboard/auth.py's
     session-token functions need a real value to sign against -- fixed
     literal strings (not e.g. a random token) so tests that assert exact
     credential-check behavior have a known value to check against."""
@@ -223,7 +223,7 @@ def _dashboard_credentials(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _quarantine_local_slot_discovery(request, monkeypatch):
-    """scripts/deploy.py's _wanted_env() reads local .env directly via
+    """bot/scripts/deploy.py's _wanted_env() reads local .env directly via
     bot.scripts._override.local_slot_values(), bypassing Settings entirely --
     unlike every other value _wanted_env() produces, this one isn't
     automatically hermetic against a contributor's real .env (which may have
@@ -277,7 +277,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     suffix onto `item._nodeid`, and that nodeid *string* is the only thing the
     scheduler groups on. That stamping hookimpl is undecorated, so pluggy
     orders it by registration LIFO -- and this file is an *initial* conftest
-    (`testpaths = ["tests"]`), registered before `WorkerInteractor`, so
+    (the repo root, ahead of every directory in `testpaths`), registered
+    before `WorkerInteractor`, so
     without `tryfirst` xdist stamps first, while no item carries the marker
     yet, and every db test ends up its own singleton group spread across every
     worker (each spinning its own testcontainers Postgres). The failure is

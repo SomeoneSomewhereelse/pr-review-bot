@@ -65,7 +65,7 @@ def local_slot_values(base: str, env_path: str = ".env") -> dict[str, str]:
 
     Reads the file directly (python-dotenv, not os.environ or Settings) because
     Settings can't declare an unbounded family of numbered fields -- mirrors
-    app/providers/credentials.py's identical reasoning for the runtime side.
+    bot/providers/credentials.py's identical reasoning for the runtime side.
     """
     pattern = _SLOT_RE_CACHE.setdefault(base, re.compile(rf"^{re.escape(base)}_(\d+)$"))
     values = dotenv_values(env_path)

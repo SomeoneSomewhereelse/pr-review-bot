@@ -1,4 +1,4 @@
-"""Schema-shape tests for app/specialists/schemas.py (SPEC.md section 3)."""
+"""Schema-shape tests for bot/specialists/schemas.py (SPEC.md section 3)."""
 
 from __future__ import annotations
 

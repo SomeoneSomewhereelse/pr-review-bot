@@ -278,16 +278,16 @@ def list_installation_repos(installation_id: int) -> list[str]:
     full pagination implementation).
 
     Takes `installation_id` explicitly rather than reading
-    `settings.github_app_installation_id` -- scripts/deploy.py's
+    `settings.github_app_installation_id` -- bot/scripts/deploy.py's
     check_installation_and_webhook calls this immediately after discovering a
     fresh id via discover_installation_id_for_app(), before that setting is
-    ever assigned (only app/main.py's boot path assigns it). Reading the
+    ever assigned (only bot/main.py's boot path assigns it). Reading the
     setting here would 404 on every unpinned first deploy.
 
-    Used by scripts/deploy.py's github-app check for display/verification of a
+    Used by bot/scripts/deploy.py's github-app check for display/verification of a
     configured GITHUB_TARGET_REPO allowlist -- not a security boundary. The
     webhook's legitimacy guarantee comes from HMAC verification
-    (app/webhook.py), not from this list.
+    (bot/webhook.py), not from this list.
     """
     gh = get_installation_client(installation_id)
     _, data = gh.requester.requestJsonAndCheck(
@@ -302,8 +302,8 @@ def repos_not_covered(covered: list[str], repos: frozenset[str]) -> list[str]:
     allowlist entry need not match `covered`'s reported casing exactly).
     Empty if `repos` is empty -- nothing configured means nothing to verify.
 
-    Shared by scripts/deploy.py's github-app check (which also fixes the
-    webhook afterward) and scripts/doctor.py's read-only equivalent, so this
+    Shared by bot/scripts/deploy.py's github-app check (which also fixes the
+    webhook afterward) and bot/scripts/doctor.py's read-only equivalent, so this
     comparison itself can never have two implementations to drift apart --
     doctor.py's module docstring calls that out as the thing most worth
     avoiding. Takes `covered` already-fetched rather than an installation_id,
@@ -325,7 +325,7 @@ def get_app_permissions() -> tuple[dict[str, str], list[str]]:
     originally requested at creation time. An operator can edit an App's
     permissions or event subscriptions by hand in GitHub's UI at any point
     after creation, whether the App itself was created by the manifest flow
-    or entirely by hand; this is what lets scripts/doctor.py's
+    or entirely by hand; this is what lets bot/scripts/doctor.py's
     app-permissions check catch that drift either way.
     """
     gh = _app_jwt_client()
@@ -347,7 +347,7 @@ def diff_app_permissions(
     without `issues: write`). over-permissioned entries are a
     least-privilege nit -- the App can do more than this project's code ever
     uses, which is a real (if smaller) risk of its own, but not something
-    that breaks the bot. scripts/doctor.py's app-permissions check reports
+    that breaks the bot. bot/scripts/doctor.py's app-permissions check reports
     the first as FAIL and the second as WARN.
     """
     under: list[str] = []
