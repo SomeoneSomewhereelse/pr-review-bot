@@ -2,15 +2,15 @@ services:
   - type: web
     name: pr-review-engine
     runtime: docker
-    dockerfilePath: ./onboarding/Dockerfile
+    dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /healthz
     # Docs-only changes (README, SPEC, CLAUDE.md, ISSUES.md, docs/**)
-    # never affect what's actually deployed -- onboarding/Dockerfile only ever
-    # COPYs pyproject.toml, uv.lock, and onboarding/. An ignore-list (not an include-list)
-    # is deliberate: anything NOT explicitly excluded here still triggers a
-    # deploy by default, so a forgotten update here costs one avoidable
-    # redeploy, never a real change silently failing to deploy.
+    # never affect what's actually deployed. An ignore-list (not an
+    # include-list) is deliberate: anything NOT explicitly excluded here
+    # still triggers a deploy by default, so a forgotten update here costs
+    # one avoidable redeploy, never a real change silently failing to
+    # deploy.
     buildFilter:
       ignoredPaths:
         - "**/*.md"
