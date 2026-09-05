@@ -293,22 +293,24 @@ accidentally exercise the refusal path instead of the real one._
 - **Follow-up:** If a future test addition ever hits this collision, the fix is either adding `__init__.py` to each test directory (making them regular packages) or switching to `importmode=importlib` in `pyproject.toml`'s `[tool.pytest.ini_options]`.
 - **Update (2026-09-05):** closed via the less invasive option -- `--import-mode=importlib` added to `pyproject.toml`'s `addopts` (there's no separate `importmode` ini_options key; it's addopts-only, learned the hard way when a first attempt using one produced pytest's "Unknown config option" warning). Full suite (1596 tests) reruns clean under the new mode with no collection changes.
 
-### Escalating-cooldown final review — 5 parked minor findings (2026-07-31, backfilled 2026-09-05)
+### Escalating-cooldown final review — 6 parked minor findings (2026-07-31, backfilled 2026-09-05)
 - **Found during:** final whole-branch review of the escalating re-review cooldown feature (commit range `ae732bb..0598b83`, fixes landed in `e5ec149`; `docs/superpowers/plans/2026-07-31-escalating-cooldown.md`).
-- **What:** five non-blocking Minor findings, none correctness bugs on any reachable default-config path, never previously logged here (only in a since-deleted handoff doc, `docs/2026-07-31-escalating-cooldown-final-review-fixes.md`):
+- **What:** six non-blocking Minor findings, none correctness bugs on any reachable default-config path, never previously logged here (only in a since-deleted handoff doc, `docs/2026-07-31-escalating-cooldown-final-review-fixes.md`):
   1. `effective_cooldown`'s docstring first line didn't show the `min(level, _MAX_COOLDOWN_LEVEL)` clamping inline (`bot/queue/store.py`) — cosmetic; the brief's own docstring template omitted it too.
   2. `mark_failed`'s docstring may still have narrated the old flat-cooldown re-arm behavior without mentioning the level escalate/reset (`bot/queue/store.py`) — pre-existing, not introduced by this work.
   3. The Site-B non-dirty ("latent level") branch was tested only at level `0 -> 0`; a nonzero seeded level (e.g. level 3 surviving a non-dirty finalize) wasn't directly exercised.
   4. Design's explicit "sustained churn 300→600→1200→2400→3600→3600, end-to-end through the store" sequence had no single composed test — the plateau and each step were covered piecewise, but nothing walked a ticket through the full ramp as one scenario.
   5. `bot/queue/store.py`'s `_due_after_cooldown` docstring line was 108 chars, over the plan's stated 100-char guideline (ruff's default `select` doesn't flag `E501` at that column).
+  6. `enqueue_or_update`'s docstring doesn't mention the level escalate/reset behavior in its done/failed-branch description — the line most likely to be read by the next person touching Site A.
 - **Why parked:** graded as optional polish by the final review, not merge-blocking; this entry itself was missed at the time (pre-dating this file's own creation) and is being backfilled now, per `CLAUDE.md`'s Plan-execution rule that every parked Minor finding must be logged here before a branch is considered done, as part of the 2026-09-05 standalone-repo restructure's documentation cleanup.
-- **Status:** decided-non-issue — re-verified against current `bot/queue/store.py`/`bot/tests/` while backfilling this entry (2026-09-05); all five no longer hold as described:
+- **Status:** mixed — re-verified against current `bot/queue/store.py`/`bot/tests/` while backfilling this entry (2026-09-05). Items 1-5 are **decided-non-issue** (all fixed since 2026-07-31, unrelated to this backfill); item 6 is **still open**:
   1. Fixed — the docstring's first line now reads `min(base * factor^min(level, _MAX_COOLDOWN_LEVEL), cap)` (`bot/queue/store.py:277`).
   2. Fixed — `mark_failed`'s docstring now explicitly names the escalate/reset of `cooldown_level` (`bot/queue/store.py:640-648`).
   3. Fixed — `test_finalize_non_dirty_leaves_nonzero_cooldown_level` (`bot/tests/test_queue_store.py:725`) seeds level 3 and asserts it survives a non-dirty finalize.
   4. Fixed — `test_sustained_churn_escalates_then_plateaus` (`bot/tests/test_dispatcher.py:897`) walks a single ticket through the full 300→600→1200→2400→3600→3600 ramp end-to-end.
   5. Fixed — the longest line in `bot/queue/store.py` is 100 chars as of this check; none exceed the guideline.
-- **Follow-up:** none — all five closed; no code change needed as part of this backfill.
+  6. **Open** — `enqueue_or_update`'s docstring (`bot/queue/store.py:337-340`) still only describes the transaction/locking mechanics, with no mention of `cooldown_level` escalate/reset anywhere in its done/failed-branch behavior.
+- **Follow-up:** items 1-5 closed, no further action. Item 6: add a sentence to `enqueue_or_update`'s docstring describing the done/failed-branch's escalate-on-churn/reset-on-quiet behavior for `cooldown_level`, next time that function is touched — low urgency (the behavior itself is correct and covered by tests; this is a documentation gap only).
 
 ---
 
