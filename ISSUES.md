@@ -102,6 +102,12 @@ whose "Suggested CLAUDE.md change" explicitly says it wasn't made yet; and
 - **Cost:** None — no secret value reached the transcript. But it's still a real instance of the exact prohibited action ("never run any tool against `.env`, full stop, regardless of how safe the pattern looks") — this time via a *directory* argument rather than naming `.env` directly, which is a new variant of the mistake the two prior `.env`-pattern incidents (see "Controller ran the 'safe' `.env` presence-check pattern against `.env` itself — twice" above) didn't cover.
 - **Suggested CLAUDE.md/hook change:** Not yet made — flagged to the user as a gap in `.claude/settings.json`'s `PreToolUse` hook, which blocks tool calls whose *arguments* reference `.env` by name. A recursive `grep`/`Read`-style call over a directory that merely *contains* `.env` (without ever typing `.env` in the command) has no argument for that hook to match, so it currently sails through. User's response: log here now, revisit hardening the hook once the current fix/cleanup wave is done. Until then, this session's own mitigation is to scope every subsequent grep in this cleanup to explicit file lists or `--exclude=.env*`/`--include=` rather than bare directories.
 
+## Working-tree CRLF drift (2026-07-31, closed)
+- **When:** 2026-07-31, while staging a task commit during the escalating-cooldown implementation.
+- **What happened:** `git add <exact-task-files>` swept in a large, pre-existing, **uncommitted** CRLF conversion of those same files — the repo's committed history was already pure LF; the working tree on a WSL/Windows mount had drifted to CRLF before that session started. Fixed per-task by normalizing back to LF before each commit landed. After the branch merged, a full project-wide audit (`git ls-files` + `file`, plus an untracked-file check) found the same drift on 59 tracked files, matching the original `git status` dirty-file list from the start of that work. Normalizing all 59 back to LF produced a byte-exact match with the already-LF committed `HEAD`, confirming the CRLF was purely a working-tree/checkout artifact, never actually committed to git history.
+- **Cost:** None net-negative — caught and fixed before any CRLF content reached a commit; the fix was purely a working-tree normalization, no content commit needed.
+- **Suggested CLAUDE.md change:** None needed beyond the fix already made — closed by adding `.gitattributes` (`* text=auto eol=lf`, commit `802a9b8`) so this can't silently recur on future checkouts. Recorded here (backfilled 2026-09-05) since it previously had no home outside a since-deleted handoff doc (`docs/2026-07-31-escalating-cooldown-final-review-fixes.md`).
+
 ## Parked Issues
 
 Deliberately deferred quality nits from task and final-review passes — not
@@ -287,6 +293,23 @@ accidentally exercise the refusal path instead of the real one._
 - **Follow-up:** If a future test addition ever hits this collision, the fix is either adding `__init__.py` to each test directory (making them regular packages) or switching to `importmode=importlib` in `pyproject.toml`'s `[tool.pytest.ini_options]`.
 - **Update (2026-09-05):** closed via the less invasive option -- `--import-mode=importlib` added to `pyproject.toml`'s `addopts` (there's no separate `importmode` ini_options key; it's addopts-only, learned the hard way when a first attempt using one produced pytest's "Unknown config option" warning). Full suite (1596 tests) reruns clean under the new mode with no collection changes.
 
+### Escalating-cooldown final review — 5 parked minor findings (2026-07-31, backfilled 2026-09-05)
+- **Found during:** final whole-branch review of the escalating re-review cooldown feature (commit range `ae732bb..0598b83`, fixes landed in `e5ec149`; `docs/superpowers/plans/2026-07-31-escalating-cooldown.md`).
+- **What:** five non-blocking Minor findings, none correctness bugs on any reachable default-config path, never previously logged here (only in a since-deleted handoff doc, `docs/2026-07-31-escalating-cooldown-final-review-fixes.md`):
+  1. `effective_cooldown`'s docstring first line didn't show the `min(level, _MAX_COOLDOWN_LEVEL)` clamping inline (`bot/queue/store.py`) — cosmetic; the brief's own docstring template omitted it too.
+  2. `mark_failed`'s docstring may still have narrated the old flat-cooldown re-arm behavior without mentioning the level escalate/reset (`bot/queue/store.py`) — pre-existing, not introduced by this work.
+  3. The Site-B non-dirty ("latent level") branch was tested only at level `0 -> 0`; a nonzero seeded level (e.g. level 3 surviving a non-dirty finalize) wasn't directly exercised.
+  4. Design's explicit "sustained churn 300→600→1200→2400→3600→3600, end-to-end through the store" sequence had no single composed test — the plateau and each step were covered piecewise, but nothing walked a ticket through the full ramp as one scenario.
+  5. `bot/queue/store.py`'s `_due_after_cooldown` docstring line was 108 chars, over the plan's stated 100-char guideline (ruff's default `select` doesn't flag `E501` at that column).
+- **Why parked:** graded as optional polish by the final review, not merge-blocking; this entry itself was missed at the time (pre-dating this file's own creation) and is being backfilled now, per `CLAUDE.md`'s Plan-execution rule that every parked Minor finding must be logged here before a branch is considered done, as part of the 2026-09-05 standalone-repo restructure's documentation cleanup.
+- **Status:** decided-non-issue — re-verified against current `bot/queue/store.py`/`bot/tests/` while backfilling this entry (2026-09-05); all five no longer hold as described:
+  1. Fixed — the docstring's first line now reads `min(base * factor^min(level, _MAX_COOLDOWN_LEVEL), cap)` (`bot/queue/store.py:277`).
+  2. Fixed — `mark_failed`'s docstring now explicitly names the escalate/reset of `cooldown_level` (`bot/queue/store.py:640-648`).
+  3. Fixed — `test_finalize_non_dirty_leaves_nonzero_cooldown_level` (`bot/tests/test_queue_store.py:725`) seeds level 3 and asserts it survives a non-dirty finalize.
+  4. Fixed — `test_sustained_churn_escalates_then_plateaus` (`bot/tests/test_dispatcher.py:897`) walks a single ticket through the full 300→600→1200→2400→3600→3600 ramp end-to-end.
+  5. Fixed — the longest line in `bot/queue/store.py` is 100 chars as of this check; none exceed the guideline.
+- **Follow-up:** none — all five closed; no code change needed as part of this backfill.
+
 ---
 
 ## Design Gaps
@@ -329,6 +352,13 @@ Proactive findings, not incidents — nothing here actually happened. Format:
   move with it, so the retire-vs-keep question for `set_override.py` (and
   the rest of this gap) is deferred to that future move rather than
   decided now.
+- **Update (2026-09-05), standalone-repo restructure:** resolved — kept as
+  a CLI bootstrap fallback. `--sync-env` is what makes a fresh deploy's
+  env vars non-empty before the dashboard is reachable at all; the
+  dashboard Environment tab is the normal day-to-day path once it's up.
+  No script changes needed, no doc changes needed beyond the path-prefix
+  sweep in task 3 of `docs/superpowers/plans/
+  2026-09-05-standalone-repo-restructure.md`.
 
 ---
 
